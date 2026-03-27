@@ -5,6 +5,10 @@ import {
   Zap, Brain, BarChart3, Calendar, Bell, Settings,
   ArrowUpRight, CheckCircle2, Quote,
 } from "lucide-react";
+import {
+  FadeIn, StaggerContainer, StaggerItem, ScaleIn, SlideIn,
+  FloatingElement, GlowPulse,
+} from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
   title: "Features — TheywrK | 12 Integrated Business Modules",
@@ -17,25 +21,13 @@ export const metadata: Metadata = {
   },
 };
 
-/* ── testimonials inserted after every 4th module ── */
+/* ── testimonial inserted after the 6th module ── */
 const testimonials = [
   {
     quote: "We replaced 6 different tools with TheywrK. Our managers finally have a single place to see the full picture of every team member.",
     name: "Sarah Chen",
     role: "VP of People",
     company: "Nexora Technologies",
-  },
-  {
-    quote: "The composite scoring changed how we do promotions. It went from subjective debates to data-driven decisions in one quarter.",
-    name: "Marcus Rivera",
-    role: "COO",
-    company: "BuildRight Co.",
-  },
-  {
-    quote: "Our SOP compliance went from 40% to 92% in three months. The AI layer surfaces issues before they become problems.",
-    name: "Priya Sharma",
-    role: "Head of Operations",
-    company: "Velora Health",
   },
 ];
 
@@ -571,21 +563,6 @@ const demoMap: Record<string, () => React.JSX.Element> = {
   integrations: DemoIntegrations,
 };
 
-/* ── Hub diagram module labels ── */
-const hubModules = [
-  { label: "People", color: "#6C5CE7" },
-  { label: "KRA/KPI", color: "#00D68F" },
-  { label: "Tasks", color: "#FF9F43" },
-  { label: "Reviews", color: "#A29BFE" },
-  { label: "SOPs", color: "#00D68F" },
-  { label: "Scores", color: "#6C5CE7" },
-  { label: "Kudos", color: "#FF6B6B" },
-  { label: "AI", color: "#A29BFE" },
-  { label: "Analytics", color: "#00D68F" },
-  { label: "Meetings", color: "#FF9F43" },
-  { label: "Alerts", color: "#6C5CE7" },
-  { label: "Integrations", color: "#8888A0" },
-];
 
 export default function FeaturesPage() {
   return (
@@ -593,155 +570,38 @@ export default function FeaturesPage() {
       {/* ═══ Hero ═══ */}
       <section className="pb-20 pt-36">
         <div className="mx-auto max-w-[1200px] px-6">
-          <p className="mkt-label">Platform</p>
-          <h1 className="mkt-title mb-4 text-[clamp(2.2rem,5vw,3.5rem)]">
-            12 integrated modules.<br />
-            <span className="text-gradient">One operating system.</span>
-          </h1>
-          <p className="mb-8 max-w-[560px] text-lg text-[#8888A0]">
-            Every module works together. Data flows between them.
-            Your entire business — visible, measurable, and manageable.
-          </p>
-          <Link href="/register" className="btn-primary">
-            Start Free Trial <ArrowUpRight size={16} />
-          </Link>
-
-          {/* ── Trusted-by stats bar ── */}
-          <div className="mt-16 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {[
-              { value: "500+", label: "Businesses" },
-              { value: "12", label: "Integrated Modules" },
-              { value: "50,000+", label: "Reviews Processed" },
-              { value: "99.9%", label: "Uptime SLA" },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-xl border border-[#2A2A3A] bg-[#12121A] px-5 py-4 text-center"
-              >
-                <div className="text-gradient text-2xl font-bold" style={{ fontFamily: "var(--font-syne)" }}>
-                  {stat.value}
-                </div>
-                <div className="mt-1 text-xs text-[#8888A0]" style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: 2 }}>
-                  {stat.label}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ═══ How It All Connects ═══ */}
-      <section className="pb-24">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="text-center">
-            <p className="mkt-label">Architecture</p>
-            <h2 className="mkt-title mb-4 text-[clamp(1.6rem,3vw,2.4rem)]">
-              How It All <span className="text-gradient">Connects</span>
-            </h2>
-            <p className="mx-auto mb-12 max-w-[480px] text-sm text-[#8888A0]">
-              Every module feeds data into a central Composite Score. No silos, no manual syncing — everything is connected.
+          <FadeIn delay={0.1}>
+            <p className="mkt-label">Platform</p>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <h1 className="mkt-title mb-4 text-[clamp(2.2rem,5vw,3.5rem)]">
+              12 integrated modules.<br />
+              <span className="text-gradient">One operating system.</span>
+            </h1>
+          </FadeIn>
+          <FadeIn delay={0.35}>
+            <p className="mb-8 max-w-[560px] text-lg text-[#8888A0]">
+              Every module works together. Data flows between them.
+              Your entire business — visible, measurable, and manageable.
             </p>
-          </div>
+          </FadeIn>
+          <FadeIn delay={0.45}>
+            <Link href="/register" className="btn-primary">
+              Start Free Trial <ArrowUpRight size={16} />
+            </Link>
+          </FadeIn>
 
-          {/* Hub-and-spoke diagram */}
-          <div className="mx-auto" style={{ maxWidth: 600 }}>
-            <div style={{ position: "relative", width: "100%", paddingBottom: "100%" }}>
-              <div style={{ position: "absolute", inset: 0 }}>
-                {/* SVG lines from each node to center */}
-                <svg viewBox="0 0 400 400" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
-                  {hubModules.map((m, idx) => {
-                    const angle = (idx / 12) * 2 * Math.PI - Math.PI / 2;
-                    const cx = 200 + Math.cos(angle) * 155;
-                    const cy = 200 + Math.sin(angle) * 155;
-                    return (
-                      <line
-                        key={m.label}
-                        x1={200}
-                        y1={200}
-                        x2={cx}
-                        y2={cy}
-                        stroke={m.color}
-                        strokeOpacity={0.25}
-                        strokeWidth={1.5}
-                        strokeDasharray="4 4"
-                      />
-                    );
-                  })}
-                </svg>
-
-                {/* Center hub */}
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "50%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    width: 100,
-                    height: 100,
-                    borderRadius: "50%",
-                    background: "linear-gradient(135deg, #6C5CE720, #00D68F20)",
-                    border: "2px solid #6C5CE750",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexDirection: "column",
-                    zIndex: 2,
-                  }}
-                >
-                  <Zap size={20} style={{ color: "#6C5CE7", marginBottom: 2 }} />
-                  <span style={{ fontSize: 10, color: "#E8E8F0", fontWeight: 700, fontFamily: "var(--font-syne)", textAlign: "center", lineHeight: 1.1 }}>
-                    Composite<br />Score
-                  </span>
-                </div>
-
-                {/* Outer module dots */}
-                {hubModules.map((m, idx) => {
-                  const angle = (idx / 12) * 2 * Math.PI - Math.PI / 2;
-                  const pctX = 50 + Math.cos(angle) * 38.75;
-                  const pctY = 50 + Math.sin(angle) * 38.75;
-                  return (
-                    <div
-                      key={m.label}
-                      style={{
-                        position: "absolute",
-                        top: `${pctY}%`,
-                        left: `${pctX}%`,
-                        transform: "translate(-50%, -50%)",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: 4,
-                        zIndex: 2,
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 14,
-                          height: 14,
-                          borderRadius: "50%",
-                          background: m.color,
-                          boxShadow: `0 0 12px ${m.color}60`,
-                        }}
-                      />
-                      <span style={{ fontSize: 9, color: "#E8E8F0", fontFamily: "var(--font-mono)", whiteSpace: "nowrap", fontWeight: 500 }}>
-                        {m.label}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 
       {/* ═══ Module list ═══ */}
-      <section className="pb-28">
+      <section className="pb-32">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="flex flex-col gap-20">
+          <div className="flex flex-col gap-28 lg:gap-36">
             {modules.map((mod, i) => {
               const DemoComponent = demoMap[mod.id];
-              const showTestimonial = (i + 1) % 4 === 0 && testimonials[Math.floor(i / 4)];
+              const isEven = i % 2 === 1;
+              const showTestimonial = i === 5 && testimonials[0];
 
               return (
                 <article
@@ -749,111 +609,88 @@ export default function FeaturesPage() {
                   id={mod.id}
                   className="scroll-mt-24"
                 >
-                  {/* Module card */}
-                  <div
-                    className="overflow-hidden rounded-3xl border bg-[#12121A]"
-                    style={{ borderColor: `${mod.color}20` }}
-                  >
-                    {/* Header bar */}
-                    <div
-                      className="flex items-center gap-4 border-b px-6 py-4 sm:px-8"
-                      style={{ borderColor: "#2A2A3A", background: "#0E0E16" }}
-                    >
-                      <div
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg"
-                        style={{
-                          background: `${mod.color}15`,
-                          border: `1px solid ${mod.color}30`,
-                          color: mod.color,
-                        }}
-                      >
-                        {mod.icon}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3">
-                          <h2 className="text-lg font-bold text-[#E8E8F0]" style={{ fontFamily: "var(--font-syne)" }}>{mod.title}</h2>
-                          <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-                            style={{ background: `${mod.color}15`, color: mod.color, fontFamily: "var(--font-mono)" }}>
-                            {String(i + 1).padStart(2, "0")}
-                          </span>
-                        </div>
-                        <p className="text-sm text-[#A29BFE]">{mod.subtitle}</p>
-                      </div>
-                    </div>
-
-                    {/* Content area */}
-                    <div className="grid gap-0 lg:grid-cols-5">
-                      {/* Left: description + features (3 cols) */}
-                      <div className="border-b p-6 sm:p-8 lg:col-span-3 lg:border-b-0 lg:border-r" style={{ borderColor: "#2A2A3A" }}>
-                        <p className="mb-6 text-sm leading-relaxed text-[#8888A0]">
+                  {/* Top row: title + demo side by side */}
+                  <div className="grid grid-cols-1 items-center gap-8 md:grid-cols-2 md:gap-16">
+                    {/* Title & description */}
+                    <FadeIn direction="left" delay={0.1}>
+                      <div>
+                        <p className="mb-3 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.2em]"
+                          style={{ color: mod.color }}>
+                          Module {String(i + 1).padStart(2, "0")}
+                        </p>
+                        <h2 className="mb-3 text-3xl font-bold tracking-tight text-[#E8E8F0]"
+                          style={{ fontFamily: "var(--font-syne)" }}>
+                          {mod.title}
+                        </h2>
+                        <p className="mb-4 text-base font-medium text-[#A29BFE]">
+                          {mod.subtitle}
+                        </p>
+                        <p className="text-[15px] leading-relaxed text-[#8888A0]">
                           {mod.desc}
                         </p>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          {mod.features.map((f) => (
-                            <div
-                              key={f}
-                              className="flex items-start gap-2.5 text-sm text-[#8888A0]"
-                            >
-                              <CheckCircle2
-                                size={14}
-                                className="mt-0.5 flex-shrink-0"
-                                style={{ color: mod.color }}
-                              />
-                              <span className="leading-snug">{f}</span>
-                            </div>
-                          ))}
-                        </div>
                       </div>
+                    </FadeIn>
 
-                      {/* Right: demo panel (2 cols) */}
-                      <div className="flex items-center justify-center bg-[#0A0A0F] p-6 lg:col-span-2">
-                        <div className="w-full overflow-hidden rounded-xl border" style={{ borderColor: `${mod.color}20`, background: "#12121A" }}>
-                          {/* Mini window chrome */}
-                          <div
-                            className="flex items-center gap-2 border-b px-3 py-2"
-                            style={{ borderColor: "#2A2A3A", background: "#0E0E16" }}
-                          >
-                            <div className="flex gap-1">
-                              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#FF6B6B" }} />
-                              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#FF9F43" }} />
-                              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#00D68F" }} />
-                            </div>
-                            <span style={{ fontSize: 9, color: "#8888A0", fontFamily: "var(--font-mono)", marginLeft: 4 }}>
-                              theywrk.com/{mod.id}
-                            </span>
+                    {/* Demo panel */}
+                    <FadeIn direction="right" delay={0.25}>
+                      <div className="overflow-hidden rounded-2xl bg-[#12121A] shadow-2xl shadow-black/40 transition-transform duration-500 hover:scale-[1.02]">
+                        <div className="flex items-center gap-2 bg-[#0A0A12] px-4 py-3">
+                          <div className="flex gap-1.5">
+                            <div className="h-2.5 w-2.5 rounded-full bg-[#FF5F57]" />
+                            <div className="h-2.5 w-2.5 rounded-full bg-[#FEBC2E]" />
+                            <div className="h-2.5 w-2.5 rounded-full bg-[#28C840]" />
                           </div>
-                          {DemoComponent && <DemoComponent />}
+                          <span className="ml-2 font-[family-name:var(--font-mono)] text-[10px] text-[#555566]">
+                            theywrk.com/{mod.id}
+                          </span>
                         </div>
+                        {DemoComponent && <DemoComponent />}
                       </div>
-                    </div>
+                    </FadeIn>
                   </div>
 
-                  {/* Testimonial after every 4th module */}
+                  {/* Bottom row: 3 features left, 3 features right */}
+                  <StaggerContainer className="mt-10 grid gap-x-16 gap-y-4 sm:grid-cols-2" delay={0.3} stagger={0.08}>
+                    {mod.features.map((f) => (
+                      <StaggerItem key={f}>
+                        <div className="flex items-center gap-3 text-[14px] text-[#C0C0D0]">
+                          <CheckCircle2
+                            size={16}
+                            className="flex-shrink-0"
+                            style={{ color: mod.color }}
+                          />
+                          {f}
+                        </div>
+                      </StaggerItem>
+                    ))}
+                  </StaggerContainer>
+
+                  {/* Testimonial after the 6th module */}
                   {showTestimonial && (
-                    <div className="mt-10 rounded-2xl border border-[#2A2A3A] bg-[#12121A] p-8" style={{ position: "relative" }}>
-                      <Quote size={32} style={{ color: "#6C5CE730", position: "absolute", top: 24, left: 24 }} />
-                      <div className="ml-10">
-                        <p className="mb-4 text-base italic leading-relaxed text-[#E8E8F0]">
-                          &ldquo;{(showTestimonial as typeof testimonials[0]).quote}&rdquo;
-                        </p>
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white"
-                            style={{ background: "linear-gradient(135deg, #6C5CE7, #A29BFE)" }}
-                          >
-                            {(showTestimonial as typeof testimonials[0]).name.split(" ").map((n) => n[0]).join("")}
+                    <FadeIn delay={0.2}>
+                    <div className="mx-auto mt-20 max-w-2xl text-center">
+                      <Quote size={28} className="mx-auto mb-4" style={{ color: "#6C5CE740" }} />
+                      <p className="mb-5 text-lg italic leading-relaxed text-[#E8E8F0]">
+                        &ldquo;{(showTestimonial as typeof testimonials[0]).quote}&rdquo;
+                      </p>
+                      <div className="flex items-center justify-center gap-3">
+                        <div
+                          className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white"
+                          style={{ background: "linear-gradient(135deg, #6C5CE7, #A29BFE)" }}
+                        >
+                          {(showTestimonial as typeof testimonials[0]).name.split(" ").map((n) => n[0]).join("")}
+                        </div>
+                        <div className="text-left">
+                          <div className="text-sm font-semibold text-[#E8E8F0]">
+                            {(showTestimonial as typeof testimonials[0]).name}
                           </div>
-                          <div>
-                            <div className="text-sm font-semibold text-[#E8E8F0]">
-                              {(showTestimonial as typeof testimonials[0]).name}
-                            </div>
-                            <div className="text-xs text-[#8888A0]">
-                              {(showTestimonial as typeof testimonials[0]).role}, {(showTestimonial as typeof testimonials[0]).company}
-                            </div>
+                          <div className="text-xs text-[#8888A0]">
+                            {(showTestimonial as typeof testimonials[0]).role}, {(showTestimonial as typeof testimonials[0]).company}
                           </div>
                         </div>
                       </div>
                     </div>
+                    </FadeIn>
                   )}
                 </article>
               );
@@ -865,7 +702,7 @@ export default function FeaturesPage() {
       {/* ═══ The Platform Effect ═══ */}
       <section className="pb-24">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="text-center">
+          <FadeIn className="text-center">
             <p className="mkt-label">Impact</p>
             <h2 className="mkt-title mb-4 text-[clamp(1.6rem,3vw,2.4rem)]">
               The Platform <span className="text-gradient">Effect</span>
@@ -873,8 +710,8 @@ export default function FeaturesPage() {
             <p className="mx-auto mb-12 max-w-[480px] text-sm text-[#8888A0]">
               When every module works together, the results compound. Here is what our customers report.
             </p>
-          </div>
-          <div className="grid gap-6 sm:grid-cols-3">
+          </FadeIn>
+          <StaggerContainer className="grid gap-6 sm:grid-cols-3" stagger={0.15}>
             {[
               {
                 value: "40%",
@@ -895,51 +732,56 @@ export default function FeaturesPage() {
                 color: "#FF9F43",
               },
             ].map((stat) => (
-              <div
-                key={stat.label}
-                className="mkt-card"
-                style={{ borderTop: `3px solid ${stat.color}` }}
-              >
+              <StaggerItem key={stat.label}>
                 <div
-                  className="mb-2 text-4xl font-bold"
-                  style={{ fontFamily: "var(--font-syne)", color: stat.color }}
+                  className="mkt-card"
+                  style={{ borderTop: `3px solid ${stat.color}` }}
                 >
-                  {stat.value}
+                  <div
+                    className="mb-2 text-4xl font-bold"
+                    style={{ fontFamily: "var(--font-syne)", color: stat.color }}
+                  >
+                    {stat.value}
+                  </div>
+                  <div
+                    className="mb-2 text-sm font-semibold text-[#E8E8F0]"
+                    style={{ fontFamily: "var(--font-outfit)" }}
+                  >
+                    {stat.label}
+                  </div>
+                  <p className="text-xs leading-relaxed text-[#8888A0]">
+                    {stat.desc}
+                  </p>
                 </div>
-                <div
-                  className="mb-2 text-sm font-semibold text-[#E8E8F0]"
-                  style={{ fontFamily: "var(--font-outfit)" }}
-                >
-                  {stat.label}
-                </div>
-                <p className="text-xs leading-relaxed text-[#8888A0]">
-                  {stat.desc}
-                </p>
-              </div>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* ═══ CTA ═══ */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mkt-highlight text-center">
-            <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
-              Ready to see it in action?
-            </h2>
-            <p className="mx-auto mb-8 max-w-[440px] text-base text-[#8888A0]">
-              Start your free trial and experience all 12 modules working together.
-            </p>
-            <div className="flex items-center justify-center gap-4">
-              <Link href="/register" className="btn-primary px-8 py-3.5">
-                Start Free Trial
-              </Link>
-              <Link href="/pricing" className="btn-outline px-8 py-3.5">
-                View Pricing
-              </Link>
+          <ScaleIn>
+            <div className="mkt-highlight text-center">
+              <FadeIn delay={0.2}>
+                <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
+                  Ready to see it in action?
+                </h2>
+                <p className="mx-auto mb-8 max-w-[440px] text-base text-[#8888A0]">
+                  Start your free trial and experience all 12 modules working together.
+                </p>
+                <div className="flex items-center justify-center gap-4">
+                  <Link href="/register" className="btn-primary px-8 py-3.5">
+                    Start Free Trial
+                  </Link>
+                  <Link href="/pricing" className="btn-outline px-8 py-3.5">
+                    View Pricing
+                  </Link>
+                </div>
+              </FadeIn>
             </div>
-          </div>
+          </ScaleIn>
         </div>
       </section>
     </>

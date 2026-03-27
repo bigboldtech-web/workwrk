@@ -18,14 +18,8 @@ import {
   Globe,
   MapPin,
   Quote,
-  Settings2,
-  FileCheck2,
-  BarChart3,
-  TrendingUp,
-  Users,
-  Target,
-  Zap,
 } from "lucide-react";
+import { FadeIn, StaggerContainer, StaggerItem, ScaleIn } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
   title: "Industries — TheywrK | Business OS for Every Industry",
@@ -248,63 +242,8 @@ const testimonials = [
     color: "#6C5CE7",
     industry: "Professional Services",
   },
-  {
-    quote:
-      "Our manufacturing plant reduced quality defects by 40% after implementing TheywrK's SOP compliance tracking.",
-    name: "Vikram Singh",
-    title: "Operations Head, Precision Manufacturing",
-    color: "#00D68F",
-    industry: "Manufacturing",
-  },
 ];
 
-const processSteps = [
-  {
-    step: "01",
-    icon: <Settings2 size={28} />,
-    title: "Configure your industry KPIs",
-    description:
-      "Choose from pre-built KPI templates for your sector or define custom metrics. Set targets, weights, and scoring logic tailored to how your industry measures success.",
-    color: "#6C5CE7",
-  },
-  {
-    step: "02",
-    icon: <FileCheck2 size={28} />,
-    title: "Set up department-specific SOPs",
-    description:
-      "Build step-by-step standard operating procedures for every department. Assign checklists, attach training materials, and enforce compliance automatically.",
-    color: "#00D68F",
-  },
-  {
-    step: "03",
-    icon: <BarChart3 size={28} />,
-    title: "Get performance insights in real-time",
-    description:
-      "Watch dashboards light up with live data. Compare locations, departments, and individuals — with alerts when metrics deviate from your benchmarks.",
-    color: "#FF9F43",
-  },
-];
-
-const spotlightMetrics = [
-  {
-    value: "35%",
-    label: "increase in SOP compliance",
-    color: "#6C5CE7",
-    icon: <TrendingUp size={22} />,
-  },
-  {
-    value: "2x",
-    label: "faster onboarding",
-    color: "#00D68F",
-    icon: <Zap size={22} />,
-  },
-  {
-    value: "60%",
-    label: "reduction in store-level performance gaps",
-    color: "#FF9F43",
-    icon: <Target size={22} />,
-  },
-];
 
 export default function IndustriesPage() {
   return (
@@ -312,30 +251,38 @@ export default function IndustriesPage() {
       {/* Hero */}
       <section className="pb-20 pt-36">
         <div className="mx-auto max-w-[1200px] px-6">
-          <p className="mkt-label">Industries</p>
-          <h1 className="mkt-title mb-4 text-[clamp(2.2rem,5vw,3.5rem)]">
-            Built for how <em>your</em> industry works.<br />
-            <span className="text-gradient">Not the other way around.</span>
-          </h1>
-          <p className="mb-8 max-w-[600px] text-lg text-[#8888A0]">
-            TheywrK adapts to the workflows, KPIs, and compliance needs of your
-            sector. One platform — configured for professional services,
-            manufacturing, healthcare, SaaS, and everything in between.
-          </p>
-          <Link href="/register" className="btn-primary">
-            Start Free Trial <ArrowUpRight size={16} />
-          </Link>
+          <FadeIn>
+            <p className="mkt-label">Industries</p>
+          </FadeIn>
+          <FadeIn delay={0.1}>
+            <h1 className="mkt-title mb-4 text-[clamp(2.2rem,5vw,3.5rem)]">
+              Built for how <em>your</em> industry works.<br />
+              <span className="text-gradient">Not the other way around.</span>
+            </h1>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <p className="mb-8 max-w-[600px] text-lg text-[#8888A0]">
+              TheywrK adapts to the workflows, KPIs, and compliance needs of your
+              sector. One platform — configured for professional services,
+              manufacturing, healthcare, SaaS, and everything in between.
+            </p>
+          </FadeIn>
+          <FadeIn delay={0.3}>
+            <Link href="/register" className="btn-primary">
+              Start Free Trial <ArrowUpRight size={16} />
+            </Link>
+          </FadeIn>
         </div>
       </section>
 
       {/* Stats bar */}
       <section className="pb-20">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div
+          <StaggerContainer
             className="grid grid-cols-2 gap-4 sm:grid-cols-4 rounded-2xl border border-[#2A2A3A] bg-[#12121A] p-6 sm:p-8"
           >
             {stats.map((stat) => (
-              <div key={stat.label} className="text-center">
+              <StaggerItem key={stat.label} className="text-center">
                 <p
                   className="text-[clamp(1.8rem,4vw,2.8rem)] font-bold"
                   style={{
@@ -351,18 +298,19 @@ export default function IndustriesPage() {
                 >
                   {stat.label}
                 </p>
-              </div>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* Industry grid */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <StaggerContainer className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {industries.map((ind) => (
-              <article key={ind.title} className="mkt-card flex flex-col p-6">
+              <StaggerItem key={ind.title}>
+              <article className="mkt-card flex flex-col p-6 h-full">
                 <div
                   className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl"
                   style={{
@@ -401,15 +349,16 @@ export default function IndustriesPage() {
                   ))}
                 </ul>
               </article>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* Testimonials */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="text-center">
+          <FadeIn className="text-center">
             <p className="mkt-label">Testimonials</p>
             <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
               Trusted by leaders across{" "}
@@ -419,13 +368,13 @@ export default function IndustriesPage() {
               Hear from founders, partners, and operations heads who transformed
               their businesses with TheywrK.
             </p>
-          </div>
+          </FadeIn>
 
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <StaggerContainer className="grid gap-6 sm:grid-cols-2">
             {testimonials.map((t) => (
+              <StaggerItem key={t.name}>
               <div
-                key={t.name}
-                className="mkt-card relative flex flex-col p-6"
+                className="mkt-card relative flex flex-col p-6 h-full"
               >
                 <div
                   className="absolute right-6 top-6 opacity-15"
@@ -460,228 +409,16 @@ export default function IndustriesPage() {
                   <p className="text-xs text-[#8888A0]">{t.title}</p>
                 </div>
               </div>
+              </StaggerItem>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works for Your Industry */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="text-center">
-            <p className="mkt-label">How It Works</p>
-            <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
-              Three steps to{" "}
-              <span className="text-gradient">industry-ready operations.</span>
-            </h2>
-            <p className="mx-auto mb-12 max-w-[520px] text-base text-[#8888A0]">
-              TheywrK configures to your industry in minutes. No custom
-              development. No consultants. Just results.
-            </p>
-          </div>
-
-          <div className="grid gap-6 sm:grid-cols-3">
-            {processSteps.map((step, idx) => (
-              <div key={step.step} className="mkt-card relative p-6">
-                {/* Connector line between cards */}
-                {idx < processSteps.length - 1 && (
-                  <div className="absolute -right-3 top-1/2 hidden h-px w-6 bg-[#2A2A3A] sm:block" />
-                )}
-
-                <span
-                  className="mb-4 block text-xs font-bold tracking-[4px]"
-                  style={{
-                    fontFamily: "var(--font-mono), monospace",
-                    color: step.color,
-                  }}
-                >
-                  STEP {step.step}
-                </span>
-
-                <div
-                  className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl"
-                  style={{
-                    background: `${step.color}15`,
-                    border: `1px solid ${step.color}30`,
-                    color: step.color,
-                  }}
-                >
-                  {step.icon}
-                </div>
-
-                <h3
-                  className="mb-2 text-lg font-semibold text-[#E8E8F0]"
-                  style={{ fontFamily: "var(--font-syne), sans-serif" }}
-                >
-                  {step.title}
-                </h3>
-
-                <p className="text-sm leading-relaxed text-[#8888A0]">
-                  {step.description}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Industry Spotlight: Retail & D2C */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="text-center">
-            <p className="mkt-label">Industry Spotlight</p>
-            <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
-              How Retail & D2C brands{" "}
-              <span className="text-gradient">win with TheywrK.</span>
-            </h2>
-            <p className="mx-auto mb-12 max-w-[520px] text-base text-[#8888A0]">
-              A look at how multi-store retail operations transform with
-              standardized SOPs and real-time performance tracking.
-            </p>
-          </div>
-
-          <div className="mkt-highlight p-8 sm:p-12">
-            <div className="grid gap-8 lg:grid-cols-2">
-              {/* Left: Challenge, Solution, Results */}
-              <div className="flex flex-col gap-8">
-                {/* Challenge */}
-                <div>
-                  <div className="mb-3 flex items-center gap-2">
-                    <span
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold"
-                      style={{
-                        background: "#FF6B6B15",
-                        border: "1px solid #FF6B6B30",
-                        color: "#FF6B6B",
-                        fontFamily: "var(--font-mono), monospace",
-                      }}
-                    >
-                      !
-                    </span>
-                    <h3
-                      className="text-base font-semibold text-[#FF6B6B]"
-                      style={{ fontFamily: "var(--font-syne), sans-serif" }}
-                    >
-                      The Challenge
-                    </h3>
-                  </div>
-                  <p className="text-sm leading-relaxed text-[#8888A0]">
-                    A 15-store D2C brand struggled with inconsistent customer
-                    experiences across locations. Store managers followed
-                    different processes, new hires took 3+ weeks to onboard, and
-                    HQ had zero visibility into per-store performance metrics.
-                  </p>
-                </div>
-
-                {/* Solution */}
-                <div>
-                  <div className="mb-3 flex items-center gap-2">
-                    <span
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold"
-                      style={{
-                        background: "#6C5CE715",
-                        border: "1px solid #6C5CE730",
-                        color: "#6C5CE7",
-                        fontFamily: "var(--font-mono), monospace",
-                      }}
-                    >
-                      *
-                    </span>
-                    <h3
-                      className="text-base font-semibold text-[#6C5CE7]"
-                      style={{ fontFamily: "var(--font-syne), sans-serif" }}
-                    >
-                      The Solution
-                    </h3>
-                  </div>
-                  <p className="text-sm leading-relaxed text-[#8888A0]">
-                    TheywrK deployed industry-specific SOP templates for visual
-                    merchandising, daily store opening/closing, and customer
-                    interaction scripts. Each store manager received a KPI
-                    dashboard with conversion rate, average basket size, and
-                    mystery shopper scores. Onboarding was digitized with
-                    step-by-step checklists.
-                  </p>
-                </div>
-
-                {/* Results */}
-                <div>
-                  <div className="mb-3 flex items-center gap-2">
-                    <span
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold"
-                      style={{
-                        background: "#00D68F15",
-                        border: "1px solid #00D68F30",
-                        color: "#00D68F",
-                        fontFamily: "var(--font-mono), monospace",
-                      }}
-                    >
-                      ^
-                    </span>
-                    <h3
-                      className="text-base font-semibold text-[#00D68F]"
-                      style={{ fontFamily: "var(--font-syne), sans-serif" }}
-                    >
-                      The Results
-                    </h3>
-                  </div>
-                  <p className="text-sm leading-relaxed text-[#8888A0]">
-                    Within 90 days, the brand achieved measurable improvements
-                    across every location — from compliance rates to new hire
-                    ramp-up time to closing the gap between best and
-                    worst-performing stores.
-                  </p>
-                </div>
-              </div>
-
-              {/* Right: Metric cards */}
-              <div className="flex flex-col gap-4">
-                {spotlightMetrics.map((m) => (
-                  <div
-                    key={m.label}
-                    className="flex items-center gap-5 rounded-2xl border border-[#2A2A3A] bg-[#0A0A0F] p-6"
-                  >
-                    <div
-                      className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl"
-                      style={{
-                        background: `${m.color}15`,
-                        border: `1px solid ${m.color}30`,
-                        color: m.color,
-                      }}
-                    >
-                      {m.icon}
-                    </div>
-                    <div>
-                      <p
-                        className="text-2xl font-bold"
-                        style={{
-                          fontFamily: "var(--font-syne), sans-serif",
-                          color: m.color,
-                        }}
-                      >
-                        {m.value}
-                      </p>
-                      <p className="text-sm text-[#8888A0]">{m.label}</p>
-                    </div>
-                  </div>
-                ))}
-
-                <Link
-                  href="/register"
-                  className="btn-primary mt-2 w-fit self-start px-6 py-3"
-                >
-                  Get Similar Results <ArrowUpRight size={16} />
-                </Link>
-              </div>
-            </div>
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* Enhanced GEO reach */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="text-center">
+          <FadeIn className="text-center">
             <p className="mkt-label">Global Reach</p>
             <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
               Powering businesses across{" "}
@@ -691,7 +428,7 @@ export default function IndustriesPage() {
               From Mumbai to Dubai, Singapore to San Francisco — TheywrK runs
               wherever your teams operate.
             </p>
-          </div>
+          </FadeIn>
 
           {/* Globe visual */}
           <div className="mx-auto mb-12 flex items-center justify-center">
@@ -787,10 +524,10 @@ export default function IndustriesPage() {
             </div>
           </div>
 
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <StaggerContainer className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {geoRegions.map((geo) => (
+              <StaggerItem key={geo.region}>
               <div
-                key={geo.region}
                 className="mkt-card p-6 text-center"
               >
                 <div
@@ -836,14 +573,16 @@ export default function IndustriesPage() {
                   ))}
                 </div>
               </div>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* CTA */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
+          <ScaleIn>
           <div className="mkt-highlight text-center">
             <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
               Your industry. Your workflows.{" "}
@@ -862,6 +601,7 @@ export default function IndustriesPage() {
               </Link>
             </div>
           </div>
+          </ScaleIn>
         </div>
       </section>
     </>

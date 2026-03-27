@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { MarketingNav } from "@/components/marketing/nav";
 import { MarketingFooter } from "@/components/marketing/footer";
+import { FadeIn, StaggerContainer, StaggerItem, ScaleIn, SlideIn } from "@/components/marketing/motion";
 import "../../app/(marketing)/marketing.css";
 import {
   ArrowUpRight,
@@ -48,27 +49,6 @@ const testimonials = [
     avatar: "RK",
     text: "With 12 warehouse locations, we couldn't replicate what worked in one branch. TheywrK's SOP playbook fixed that. Now every location follows the same process, compliance is tracked, and AI flags problems before they escalate.",
     metric: "12 locations standardized",
-  },
-  {
-    name: "Neha Gupta",
-    role: "Founder, BrightPath Academy",
-    avatar: "NG",
-    text: "The kudos system was a surprise hit. Teachers started recognizing each other publicly, morale went up, and the leaderboard created healthy competition. It's the small things that change culture — TheywrK understands that.",
-    metric: "3x employee engagement",
-  },
-  {
-    name: "Vikram Desai",
-    role: "MD, Apex Realty",
-    avatar: "VD",
-    text: "I used to be the bottleneck for every decision. Now my managers look at the dashboard, see the composite scores, and make calls independently. I finally have time to focus on strategy instead of firefighting.",
-    metric: "70% less founder dependency",
-  },
-  {
-    name: "Anita Reddy",
-    role: "VP Ops, MedCare Diagnostics",
-    avatar: "AR",
-    text: "SOP compliance in healthcare is non-negotiable. TheywrK tracks it per-step, per-person, and flags deviations instantly. We passed our last audit with zero findings for the first time in 5 years.",
-    metric: "Zero audit findings",
   },
 ];
 
@@ -204,11 +184,8 @@ const featureTabs = [
 /* ── FAQ Data ── */
 const homeFaqs = [
   { q: "What is TheywrK?", a: "TheywrK is an all-in-one business operating system that replaces 15+ disconnected tools. It unifies people management, KPI tracking, performance reviews, SOPs, task management, employee recognition, and AI intelligence into one platform." },
-  { q: "How does the composite performance score work?", a: "It auto-calculates a 0–100 score from 6 data sources: KPI achievement (30%), manager ratings (25%), task completion (15%), peer feedback (10%), self-assessment (10%), and SOP compliance (10%). Weights are configurable. Scores recalculate in real-time." },
-  { q: "How long does setup take?", a: "Most teams are fully set up in under 30 minutes. Create your organization, add your team (or bulk import), set up KRAs/KPIs, and assign SOPs. No implementation consultants required." },
   { q: "Do you offer a free trial?", a: "Yes — every plan includes a 14-day free trial with full access to all features. No credit card required." },
-  { q: "Is TheywrK suitable for businesses in India and UAE?", a: "Absolutely. TheywrK is built for growing businesses across India, UAE, Southeast Asia, and globally. We offer INR pricing, multi-location support, and workflows designed for how business actually works in these regions." },
-  { q: "How is TheywrK different from an HRMS?", a: "Traditional HRMS tools handle HR admin (payroll, leave, attendance). TheywrK is a business operating system focused on operational excellence — KPIs, SOPs, performance scoring, tasks, recognition, and AI intelligence. Think of it as the operating layer on top of your HRMS." },
+  { q: "How long does setup take?", a: "Most teams are fully set up in under 30 minutes. Create your organization, add your team (or bulk import), set up KRAs/KPIs, and assign SOPs. No implementation consultants required." },
 ];
 
 /* ── FAQ Accordion ── */
@@ -279,64 +256,78 @@ export function LandingPage() {
         <div className="hero-grid" />
         <div className="hero-glow" />
         <div className="relative z-[1] mx-auto max-w-[1200px] px-6 text-center">
-          <div className="animate-fade-in mb-8 inline-flex items-center gap-2 rounded-full border border-[#2A2A3A] bg-[#12121A] px-4 py-1.5 text-xs text-[#8888A0]">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D68F]" />
-            Trusted by 200+ growing businesses
-          </div>
-          <h1 className="animate-fade-in-1 mx-auto mb-6 max-w-[800px] font-[family-name:var(--font-syne)] text-[clamp(2.8rem,6vw,5rem)] font-extrabold leading-[1.05] tracking-[-3px] text-[#E8E8F0]">
-            One Platform to Run<br /><span className="text-gradient">Your Entire Business</span>
-          </h1>
-          <p className="animate-fade-in-2 mx-auto mb-10 max-w-[560px] text-lg leading-relaxed text-[#8888A0]">
-            Replace 15 disconnected tools with one intelligent system. People, KPIs, SOPs, reviews, tasks, recognition, and AI — unified.
-          </p>
-          <div className="animate-fade-in-3 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-            <Link href="/register" className="btn-primary px-8 py-3.5 text-base">Start Free Trial <ArrowUpRight size={16} /></Link>
-            <Link href="/features" className="btn-outline px-8 py-3.5 text-base"><Play size={14} /> Watch Demo</Link>
-          </div>
-          <p className="mt-5 animate-fade-in-3 text-xs text-[#8888A0]">Free 14-day trial. No credit card required. Setup in 10 minutes.</p>
+          <FadeIn delay={0}>
+            <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#2A2A3A] bg-[#12121A] px-4 py-1.5 text-xs text-[#8888A0]">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D68F]" />
+              Trusted by 500+ growing businesses
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.15}>
+            <h1 className="mx-auto mb-6 max-w-[800px] font-[family-name:var(--font-syne)] text-[clamp(2.8rem,6vw,5rem)] font-extrabold leading-[1.05] tracking-[-3px] text-[#E8E8F0]">
+              One Platform to Run<br /><span className="text-gradient">Your Entire Business</span>
+            </h1>
+          </FadeIn>
+          <FadeIn delay={0.3}>
+            <p className="mx-auto mb-10 max-w-[560px] text-lg leading-relaxed text-[#8888A0]">
+              Replace 15 disconnected tools with one intelligent system. People, KPIs, SOPs, reviews, tasks, recognition, and AI — unified.
+            </p>
+          </FadeIn>
+          <FadeIn delay={0.45}>
+            <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+              <Link href="/register" className="btn-primary px-8 py-3.5 text-base">Start Free Trial <ArrowUpRight size={16} /></Link>
+              <Link href="/features" className="btn-outline px-8 py-3.5 text-base"><Play size={14} /> Watch Demo</Link>
+            </div>
+            <p className="mt-5 text-xs text-[#8888A0]">Free 14-day trial. No credit card required. Setup in 10 minutes.</p>
+          </FadeIn>
         </div>
       </header>
 
       {/* ═══ TRUSTED BY ═══ */}
       <section className="border-y border-[#2A2A3A] py-10">
         <div className="mx-auto max-w-[1200px] px-6">
-          <p className="mb-6 text-center text-xs uppercase tracking-[3px] text-[#8888A0]">Trusted by teams at</p>
-          <div className="flex flex-wrap items-center justify-center gap-10 opacity-40">
+          <FadeIn>
+            <p className="mb-6 text-center text-xs uppercase tracking-[3px] text-[#8888A0]">Trusted by teams at</p>
+          </FadeIn>
+          <StaggerContainer className="flex flex-wrap items-center justify-center gap-10 opacity-40">
             {["ScaleOps", "FinEdge", "LogiFleet", "BrightPath", "Apex Realty", "MedCare", "NovaTech", "UrbanGrid"].map((co) => (
-              <span key={co} className="font-[family-name:var(--font-syne)] text-lg font-bold tracking-tight text-[#8888A0]">{co}</span>
+              <StaggerItem key={co}>
+                <span className="font-[family-name:var(--font-syne)] text-lg font-bold tracking-tight text-[#8888A0]">{co}</span>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* ═══ STATS ═══ */}
       <section className="py-16">
-        <div className="mx-auto grid max-w-[1200px] grid-cols-2 gap-5 px-6 md:grid-cols-4">
+        <StaggerContainer className="mx-auto grid max-w-[1200px] grid-cols-2 gap-5 px-6 md:grid-cols-4">
           {[
             { number: "12+", label: "Integrated Modules", icon: <BarChart3 size={18} /> },
             { number: "6", label: "Performance Data Sources", icon: <Target size={18} /> },
             { number: "10x", label: "Faster Reviews", icon: <Clock size={18} /> },
             { number: "100%", label: "Process Visibility", icon: <Shield size={18} /> },
           ].map((m) => (
-            <div key={m.label} className="flex items-center gap-4 rounded-xl border border-[#2A2A3A] bg-[#12121A] p-5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#6C5CE7]/10 text-[#A29BFE]">{m.icon}</div>
-              <div>
-                <div className="text-gradient-purple font-[family-name:var(--font-syne)] text-2xl font-extrabold">{m.number}</div>
-                <div className="text-xs text-[#8888A0]">{m.label}</div>
+            <StaggerItem key={m.label}>
+              <div className="flex items-center gap-4 rounded-xl border border-[#2A2A3A] bg-[#12121A] p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#6C5CE7]/10 text-[#A29BFE]">{m.icon}</div>
+                <div>
+                  <div className="text-gradient-purple font-[family-name:var(--font-syne)] text-2xl font-extrabold">{m.number}</div>
+                  <div className="text-xs text-[#8888A0]">{m.label}</div>
+                </div>
               </div>
-            </div>
+            </StaggerItem>
           ))}
-        </div>
+        </StaggerContainer>
       </section>
 
       {/* ═══ PROBLEM ═══ */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-12 max-w-[600px]">
-            <p className="mkt-label reveal">The Problem</p>
-            <h2 className="mkt-title reveal text-[clamp(2rem,4vw,3rem)]">Your business is held together<br />by WhatsApp and hope.</h2>
-          </div>
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <FadeIn className="mb-12 max-w-[600px]">
+            <p className="mkt-label">The Problem</p>
+            <h2 className="mkt-title text-[clamp(2rem,4vw,3rem)]">Your business is held together<br />by WhatsApp and hope.</h2>
+          </FadeIn>
+          <StaggerContainer className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {[
               { title: "Invisible Performance", desc: "No idea who's performing until it's too late. Gut-based decisions. Top performers leave unnoticed." },
               { title: "Process in People's Heads", desc: "When someone leaves, their process goes with them. Nothing documented. Nothing repeatable." },
@@ -345,34 +336,36 @@ export function LandingPage() {
               { title: "Founder is the Bottleneck", desc: "Every decision flows through you. You can't scale because the business can't function without you." },
               { title: "Recognition Doesn't Exist", desc: "Great work goes unnoticed. No culture of appreciation. Top performers feel invisible and leave." },
             ].map((card) => (
-              <div key={card.title} className="mkt-card reveal">
-                <h3 className="mb-2 font-[family-name:var(--font-syne)] text-lg font-bold text-[#E8E8F0]">{card.title}</h3>
-                <p className="text-sm leading-relaxed text-[#8888A0]">{card.desc}</p>
-              </div>
+              <StaggerItem key={card.title}>
+                <div className="mkt-card transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+                  <h3 className="mb-2 font-[family-name:var(--font-syne)] text-lg font-bold text-[#E8E8F0]">{card.title}</h3>
+                  <p className="text-sm leading-relaxed text-[#8888A0]">{card.desc}</p>
+                </div>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* ═══ INTERACTIVE FEATURE TABS ═══ */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-12 max-w-[600px]">
-            <p className="mkt-label reveal">See It In Action</p>
-            <h2 className="mkt-title reveal mb-4 text-[clamp(2rem,4vw,3rem)]">Not another dashboard.<br />A <span className="text-gradient">business operating system.</span></h2>
-          </div>
-          <div className="reveal"><FeatureTabs /></div>
+          <FadeIn className="mb-12 max-w-[600px]">
+            <p className="mkt-label">See It In Action</p>
+            <h2 className="mkt-title mb-4 text-[clamp(2rem,4vw,3rem)]">Not another dashboard.<br />A <span className="text-gradient">business operating system.</span></h2>
+          </FadeIn>
+          <ScaleIn><FeatureTabs /></ScaleIn>
         </div>
       </section>
 
       {/* ═══ ALL 12 MODULES ═══ */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-12 text-center">
-            <p className="mkt-label reveal">12 Modules</p>
-            <h2 className="mkt-title reveal text-[clamp(2rem,4vw,3rem)]">Everything works together.</h2>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <FadeIn className="mb-12 text-center">
+            <p className="mkt-label">12 Modules</p>
+            <h2 className="mkt-title text-[clamp(2rem,4vw,3rem)]">Everything works together.</h2>
+          </FadeIn>
+          <StaggerContainer className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[
               { icon: <Users size={20} />, title: "People", color: "#6C5CE7" },
               { icon: <Target size={20} />, title: "KRA & KPIs", color: "#00D68F" },
@@ -387,65 +380,45 @@ export function LandingPage() {
               { icon: <Shield size={20} />, title: "Notifications", color: "#6C5CE7" },
               { icon: <CheckCircle2 size={20} />, title: "Integrations", color: "#8888A0" },
             ].map((m) => (
-              <div key={m.title} className="reveal flex items-center gap-3 rounded-xl border border-[#2A2A3A] bg-[#12121A] p-4 transition-all hover:border-[rgba(108,92,231,0.4)]">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${m.color}15`, color: m.color }}>{m.icon}</div>
-                <span className="text-sm font-medium text-[#E8E8F0]">{m.title}</span>
-              </div>
+              <StaggerItem key={m.title}>
+                <div className="flex items-center gap-3 rounded-xl border border-[#2A2A3A] bg-[#12121A] p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-[rgba(108,92,231,0.4)]">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${m.color}15`, color: m.color }}>{m.icon}</div>
+                  <span className="text-sm font-medium text-[#E8E8F0]">{m.title}</span>
+                </div>
+              </StaggerItem>
             ))}
-          </div>
-          <div className="reveal mt-8 text-center">
+          </StaggerContainer>
+          <FadeIn className="mt-8 text-center" delay={0.3}>
             <Link href="/features" className="inline-flex items-center gap-2 text-sm font-semibold text-[#A29BFE] transition-colors hover:text-[#E8E8F0]">Explore all features <ArrowRight size={16} /></Link>
-          </div>
+          </FadeIn>
         </div>
       </section>
 
       {/* ═══ TESTIMONIALS ═══ */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-12 text-center">
-            <p className="mkt-label reveal">Customer Stories</p>
-            <h2 className="mkt-title reveal text-[clamp(2rem,4vw,3rem)]">Loved by teams who<br />refuse to stay small.</h2>
-          </div>
+          <FadeIn className="mb-12 text-center">
+            <p className="mkt-label">Customer Stories</p>
+            <h2 className="mkt-title text-[clamp(2rem,4vw,3rem)]">Loved by teams who<br />refuse to stay small.</h2>
+          </FadeIn>
           <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-            {testimonials.map((t) => (
-              <div key={t.name} className="reveal flex flex-col rounded-2xl border border-[#2A2A3A] bg-[#12121A] p-6">
-                <Quote size={24} className="mb-4 text-[#6C5CE7]/30" />
-                <p className="mb-6 flex-1 text-sm leading-relaxed text-[#8888A0]">&ldquo;{t.text}&rdquo;</p>
-                <div className="flex items-center justify-between border-t border-[#2A2A3A] pt-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#6C5CE7]/20 text-xs font-bold text-[#A29BFE]">{t.avatar}</div>
-                    <div>
-                      <div className="text-sm font-medium text-[#E8E8F0]">{t.name}</div>
-                      <div className="text-xs text-[#8888A0]">{t.role}</div>
+            {testimonials.map((t, i) => (
+              <SlideIn key={t.name} from={i % 2 === 0 ? "left" : "right"} delay={i * 0.1}>
+                <div className="flex flex-col rounded-2xl border border-[#2A2A3A] bg-[#12121A] p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+                  <Quote size={24} className="mb-4 text-[#6C5CE7]/30" />
+                  <p className="mb-6 flex-1 text-sm leading-relaxed text-[#8888A0]">&ldquo;{t.text}&rdquo;</p>
+                  <div className="flex items-center justify-between border-t border-[#2A2A3A] pt-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#6C5CE7]/20 text-xs font-bold text-[#A29BFE]">{t.avatar}</div>
+                      <div>
+                        <div className="text-sm font-medium text-[#E8E8F0]">{t.name}</div>
+                        <div className="text-xs text-[#8888A0]">{t.role}</div>
+                      </div>
                     </div>
+                    <span className="rounded-full bg-[#00D68F]/10 px-2.5 py-1 text-[0.6rem] font-semibold text-[#00D68F]">{t.metric}</span>
                   </div>
-                  <span className="rounded-full bg-[#00D68F]/10 px-2.5 py-1 text-[0.6rem] font-semibold text-[#00D68F]">{t.metric}</span>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ═══ HOW IT WORKS ═══ */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-12 text-center">
-            <p className="mkt-label reveal">How It Works</p>
-            <h2 className="mkt-title reveal text-[clamp(2rem,4vw,3rem)]">From signup to seamless in 4 steps.</h2>
-          </div>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              { num: "01", title: "Define Structure", desc: "Org chart, departments, roles, and hierarchy. Import your team in minutes.", color: "#6C5CE7" },
-              { num: "02", title: "Assign KRAs & SOPs", desc: "Templates or custom KPIs and SOPs for every role. Set targets and deadlines.", color: "#00D68F" },
-              { num: "03", title: "Track & Execute", desc: "Your team uses TheywrK daily. Tasks, check-ins, kudos — all tracked automatically.", color: "#A29BFE" },
-              { num: "04", title: "Review & Decide", desc: "Composite scores auto-generated. Promotions, hikes, PIPs — all data-driven.", color: "#FF9F43" },
-            ].map((s) => (
-              <div key={s.num} className="reveal rounded-xl border border-[#2A2A3A] bg-[#12121A] p-6 text-center">
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl font-[family-name:var(--font-syne)] text-lg font-extrabold" style={{ background: `${s.color}15`, color: s.color }}>{s.num}</div>
-                <h4 className="mb-2 font-[family-name:var(--font-syne)] text-base font-bold text-[#E8E8F0]">{s.title}</h4>
-                <p className="text-sm text-[#8888A0]">{s.desc}</p>
-              </div>
+              </SlideIn>
             ))}
           </div>
         </div>
@@ -454,82 +427,59 @@ export function LandingPage() {
       {/* ═══ RESULTS ═══ */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mkt-highlight reveal">
-            <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
-              <div>
-                <p className="mkt-label">Results</p>
-                <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.4rem)]">Real impact.<br />Measurable outcomes.</h2>
-                <p className="mb-8 text-sm leading-relaxed text-[#8888A0]">Companies using TheywrK report dramatic improvements in visibility, efficiency, and team culture within the first 90 days.</p>
-                <div className="flex flex-col gap-4">
-                  {[
-                    { metric: "80%", label: "faster performance review cycles" },
-                    { metric: "3x", label: "increase in employee recognition" },
-                    { metric: "70%", label: "reduction in founder dependency" },
-                    { metric: "95%", label: "SOP compliance across locations" },
-                  ].map((r) => (
-                    <div key={r.label} className="flex items-center gap-4">
-                      <span className="text-gradient-purple w-14 flex-shrink-0 font-[family-name:var(--font-syne)] text-2xl font-extrabold">{r.metric}</span>
-                      <span className="text-sm text-[#8888A0]">{r.label}</span>
+          <FadeIn>
+            <div className="mkt-highlight">
+              <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
+                <div>
+                  <FadeIn>
+                    <p className="mkt-label">Results</p>
+                    <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.4rem)]">Real impact.<br />Measurable outcomes.</h2>
+                    <p className="mb-8 text-sm leading-relaxed text-[#8888A0]">Companies using TheywrK report dramatic improvements in visibility, efficiency, and team culture within the first 90 days.</p>
+                  </FadeIn>
+                  <StaggerContainer className="flex flex-col gap-4">
+                    {[
+                      { metric: "80%", label: "faster performance review cycles" },
+                      { metric: "3x", label: "increase in employee recognition" },
+                      { metric: "70%", label: "reduction in founder dependency" },
+                      { metric: "95%", label: "SOP compliance across locations" },
+                    ].map((r) => (
+                      <StaggerItem key={r.label}>
+                        <div className="flex items-center gap-4">
+                          <span className="text-gradient-purple w-14 flex-shrink-0 font-[family-name:var(--font-syne)] text-2xl font-extrabold">{r.metric}</span>
+                          <span className="text-sm text-[#8888A0]">{r.label}</span>
+                        </div>
+                      </StaggerItem>
+                    ))}
+                  </StaggerContainer>
+                </div>
+                <FadeIn delay={0.2}>
+                  <div className="flex flex-col gap-4">
+                    <div className="rounded-xl border border-[#2A2A3A] bg-[#1A1A26] p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+                      <Quote size={20} className="mb-3 text-[#6C5CE7]/30" />
+                      <p className="mb-4 text-sm leading-relaxed text-[#8888A0]">&ldquo;We went from managing 80 people across 4 spreadsheets to one dashboard. Performance reviews that took 2 weeks now take 2 days.&rdquo;</p>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#6C5CE7]/20 text-xs font-bold text-[#A29BFE]">AM</div>
+                        <div>
+                          <div className="text-sm font-medium text-[#E8E8F0]">Arjun Mehta</div>
+                          <div className="text-xs text-[#8888A0]">CEO, ScaleOps India</div>
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex flex-col gap-4">
-                <div className="rounded-xl border border-[#2A2A3A] bg-[#1A1A26] p-5">
-                  <Quote size={20} className="mb-3 text-[#6C5CE7]/30" />
-                  <p className="mb-4 text-sm leading-relaxed text-[#8888A0]">&ldquo;We went from managing 80 people across 4 spreadsheets to one dashboard. Performance reviews that took 2 weeks now take 2 days.&rdquo;</p>
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#6C5CE7]/20 text-xs font-bold text-[#A29BFE]">AM</div>
-                    <div>
-                      <div className="text-sm font-medium text-[#E8E8F0]">Arjun Mehta</div>
-                      <div className="text-xs text-[#8888A0]">CEO, ScaleOps India</div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="rounded-xl border border-[#2A2A3A] bg-[#1A1A26] p-4 text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+                        <div className="text-gradient-purple font-[family-name:var(--font-syne)] text-3xl font-extrabold">500+</div>
+                        <div className="text-xs text-[#8888A0]">Businesses</div>
+                      </div>
+                      <div className="rounded-xl border border-[#2A2A3A] bg-[#1A1A26] p-4 text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+                        <div className="text-gradient-purple font-[family-name:var(--font-syne)] text-3xl font-extrabold">15k+</div>
+                        <div className="text-xs text-[#8888A0]">Employees managed</div>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-xl border border-[#2A2A3A] bg-[#1A1A26] p-4 text-center">
-                    <div className="text-gradient-purple font-[family-name:var(--font-syne)] text-3xl font-extrabold">200+</div>
-                    <div className="text-xs text-[#8888A0]">Businesses</div>
-                  </div>
-                  <div className="rounded-xl border border-[#2A2A3A] bg-[#1A1A26] p-4 text-center">
-                    <div className="text-gradient-purple font-[family-name:var(--font-syne)] text-3xl font-extrabold">15k+</div>
-                    <div className="text-xs text-[#8888A0]">Employees managed</div>
-                  </div>
-                </div>
+                </FadeIn>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ═══ PRICING PREVIEW ═══ */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-12 text-center">
-            <p className="mkt-label reveal">Pricing</p>
-            <h2 className="mkt-title reveal text-[clamp(2rem,4vw,3rem)]">Simple pricing. Serious results.</h2>
-          </div>
-          <div className="reveal grid gap-5 md:grid-cols-3">
-            {[
-              { tier: "Starter", price: "₹4,999", period: "/mo", desc: "Up to 25 users. Core modules.", popular: false },
-              { tier: "Growth", price: "₹14,999", period: "/mo", desc: "Up to 100 users. Full suite + AI.", popular: true },
-              { tier: "Scale", price: "₹29,999", period: "/mo", desc: "Up to 500 users. Unlimited AI.", popular: false },
-            ].map((plan) => (
-              <div key={plan.tier} className={`rounded-2xl border p-6 transition-all ${plan.popular ? "border-[#6C5CE7] bg-[#12121A] shadow-[0_0_40px_rgba(108,92,231,0.15)]" : "border-[#2A2A3A] bg-[#12121A]"}`}>
-                {plan.popular && <span className="mb-4 inline-block rounded-full bg-[#6C5CE7] px-3 py-1 font-[family-name:var(--font-mono)] text-[0.6rem] font-bold uppercase tracking-wider text-white">Most Popular</span>}
-                <div className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-widest text-[#A29BFE]">{plan.tier}</div>
-                <div className="my-3 flex items-baseline gap-1">
-                  <span className="font-[family-name:var(--font-syne)] text-3xl font-bold text-[#E8E8F0]">{plan.price}</span>
-                  <span className="text-sm text-[#8888A0]">{plan.period}</span>
-                </div>
-                <p className="mb-5 text-sm text-[#8888A0]">{plan.desc}</p>
-                <Link href="/register" className={`w-full justify-center py-2.5 ${plan.popular ? "btn-primary" : "btn-outline"}`}>Start Trial</Link>
-              </div>
-            ))}
-          </div>
-          <div className="reveal mt-6 text-center">
-            <Link href="/pricing" className="inline-flex items-center gap-2 text-sm font-semibold text-[#A29BFE] transition-colors hover:text-[#E8E8F0]">See full pricing & comparison <ArrowRight size={16} /></Link>
-          </div>
+          </FadeIn>
         </div>
       </section>
 
@@ -537,15 +487,22 @@ export function LandingPage() {
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
           <div className="grid gap-12 lg:grid-cols-[1fr_2fr] lg:items-start">
-            <div>
-              <p className="mkt-label reveal">FAQ</p>
-              <h2 className="mkt-title reveal mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">Common questions.</h2>
-              <p className="reveal text-sm text-[#8888A0]">Can&apos;t find what you&apos;re looking for?</p>
-              <Link href="/faq" className="reveal mt-3 inline-flex items-center gap-2 text-sm font-semibold text-[#A29BFE] transition-colors hover:text-[#E8E8F0]">See all FAQs <ArrowRight size={14} /></Link>
-            </div>
-            <div className="reveal rounded-2xl border border-[#2A2A3A] bg-[#12121A] px-6">
-              {homeFaqs.map((faq) => <HomeFaq key={faq.q} q={faq.q} a={faq.a} />)}
-            </div>
+            <FadeIn>
+              <div>
+                <p className="mkt-label">FAQ</p>
+                <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">Common questions.</h2>
+                <p className="text-sm text-[#8888A0]">Can&apos;t find what you&apos;re looking for?</p>
+                <Link href="/faq" className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-[#A29BFE] transition-colors hover:text-[#E8E8F0]">See all FAQs <ArrowRight size={14} /></Link>
+              </div>
+            </FadeIn>
+            <FadeIn delay={0.2}>
+              <div className="rounded-2xl border border-[#2A2A3A] bg-[#12121A] px-6">
+                {homeFaqs.map((faq) => <HomeFaq key={faq.q} q={faq.q} a={faq.a} />)}
+              </div>
+              <div className="mt-4 text-right">
+                <Link href="/faq" className="inline-flex items-center gap-2 text-sm font-semibold text-[#A29BFE] transition-colors hover:text-[#E8E8F0]">See all FAQs <ArrowRight size={14} /></Link>
+              </div>
+            </FadeIn>
           </div>
         </div>
       </section>
@@ -553,15 +510,23 @@ export function LandingPage() {
       {/* ═══ FINAL CTA ═══ */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mkt-highlight reveal text-center">
-            <h2 className="mkt-title mb-4 text-[clamp(2rem,4vw,3rem)]">Stop managing chaos.<br />Start <span className="text-gradient">operating</span> your business.</h2>
-            <p className="mx-auto mb-8 max-w-[460px] text-base text-[#8888A0]">Join 200+ businesses that replaced spreadsheets, WhatsApp groups, and guesswork with one intelligent platform.</p>
-            <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-              <Link href="/register" className="btn-primary px-8 py-3.5 text-base">Start Free Trial <ArrowUpRight size={16} /></Link>
-              <Link href="/pricing" className="btn-outline px-8 py-3.5 text-base">View Pricing</Link>
+          <ScaleIn>
+            <div className="mkt-highlight text-center">
+              <FadeIn delay={0.15}>
+                <h2 className="mkt-title mb-4 text-[clamp(2rem,4vw,3rem)]">Stop managing chaos.<br />Start <span className="text-gradient">operating</span> your business.</h2>
+              </FadeIn>
+              <FadeIn delay={0.3}>
+                <p className="mx-auto mb-8 max-w-[460px] text-base text-[#8888A0]">Join 500+ businesses that replaced spreadsheets, WhatsApp groups, and guesswork with one intelligent platform.</p>
+              </FadeIn>
+              <FadeIn delay={0.45}>
+                <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+                  <Link href="/register" className="btn-primary px-8 py-3.5 text-base">Start Free Trial <ArrowUpRight size={16} /></Link>
+                  <Link href="/pricing" className="btn-outline px-8 py-3.5 text-base">View Pricing</Link>
+                </div>
+                <p className="relative mt-4 text-xs text-[#8888A0]">Free 14-day trial. No credit card. Setup in 10 minutes.</p>
+              </FadeIn>
             </div>
-            <p className="relative mt-4 text-xs text-[#8888A0]">Free 14-day trial. No credit card. Setup in 10 minutes.</p>
-          </div>
+          </ScaleIn>
         </div>
       </section>
 

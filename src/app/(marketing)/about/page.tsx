@@ -6,12 +6,9 @@ import {
   BarChart3,
   Users,
   Rocket,
-  Layers,
-  Database,
-  Brain,
-  MapPin,
   Quote,
 } from "lucide-react";
+import { FadeIn, StaggerContainer, StaggerItem, ScaleIn } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
   title: "About — TheywrK | The Business Operating System",
@@ -51,33 +48,6 @@ const values = [
     color: "#FF9F43",
     title: "Built for Builders",
     desc: "Designed for growing businesses that refuse to stay small. From a 10-person agency to a 500-person enterprise, TheywrK scales with your ambition.",
-  },
-];
-
-const stats = [
-  {
-    icon: <Layers size={24} />,
-    value: "12+",
-    label: "Integrated Modules",
-    desc: "People, KPIs, SOPs, reviews, tasks, kudos, AI, analytics, and more — all connected.",
-  },
-  {
-    icon: <Database size={24} />,
-    value: "6",
-    label: "Performance Data Sources",
-    desc: "KPI scores, manager reviews, peer feedback, self-assessments, SOP compliance, and task completion.",
-  },
-  {
-    icon: <Brain size={24} />,
-    value: "Real-time",
-    label: "AI Intelligence",
-    desc: "Ask your business anything in plain English. Get instant, data-backed answers — not generic suggestions.",
-  },
-  {
-    icon: <MapPin size={24} />,
-    value: "Multi-location",
-    label: "Support",
-    desc: "Branch comparisons, department hierarchies, and cross-location analytics built in from day one.",
   },
 ];
 
@@ -140,13 +110,6 @@ const team = [
   },
 ];
 
-const press = [
-  "TechCrunch",
-  "YourStory",
-  "Inc42",
-  "Nasscom",
-  "ProductHunt #1",
-];
 
 const testimonials = [
   {
@@ -167,18 +130,12 @@ const testimonials = [
   },
   {
     quote:
-      "The composite scoring changed everything. Promotions are now based on data, not politics.",
+      "Our managers finally make promotion decisions backed by real data instead of gut feelings.",
     name: "Deepak Rao",
-    role: "VP HR",
+    role: "VP of HR",
     company: "TalentEdge",
     color: "#FF9F43",
   },
-];
-
-const investors = [
-  { name: "Kunal Shah", note: "Founder, CRED" },
-  { name: "Sanjeev Bikhchandani", note: "Founder, Info Edge" },
-  { name: "Vani Kola", note: "MD, Kalaari Capital" },
 ];
 
 export default function AboutPage() {
@@ -189,41 +146,51 @@ export default function AboutPage() {
         <div className="hero-glow" />
         <div className="hero-grid" />
         <div className="relative z-10 mx-auto max-w-[1200px] px-6 text-center">
-          <p className="mkt-label animate-fade-in">About TheywrK</p>
-          <h1 className="mkt-title mx-auto mb-6 max-w-[800px] text-[clamp(2.2rem,5vw,3.5rem)] animate-fade-in-1">
-            We&apos;re building the operating system every growing business{" "}
-            <span className="text-gradient">deserves.</span>
-          </h1>
-          <p className="mx-auto mb-8 max-w-[560px] text-lg text-[#8888A0] animate-fade-in-2">
-            One platform to replace chaos with clarity, guesswork with data,
-            and disconnected tools with unified intelligence.
-          </p>
-          <div className="flex items-center justify-center gap-4 animate-fade-in-3">
-            <Link href="/register" className="btn-primary px-8 py-3.5">
-              Start Free Trial <ArrowUpRight size={16} />
-            </Link>
-            <Link href="/features" className="btn-outline px-8 py-3.5">
-              Explore Features
-            </Link>
-          </div>
+          <FadeIn>
+            <p className="mkt-label">About TheywrK</p>
+          </FadeIn>
+          <FadeIn delay={0.1}>
+            <h1 className="mkt-title mx-auto mb-6 max-w-[800px] text-[clamp(2.2rem,5vw,3.5rem)]">
+              We&apos;re building the operating system every growing business{" "}
+              <span className="text-gradient">deserves.</span>
+            </h1>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <p className="mx-auto mb-8 max-w-[560px] text-lg text-[#8888A0]">
+              One platform to replace chaos with clarity, guesswork with data,
+              and disconnected tools with unified intelligence.
+            </p>
+          </FadeIn>
+          <FadeIn delay={0.3}>
+            <div className="flex items-center justify-center gap-4">
+              <Link href="/register" className="btn-primary px-8 py-3.5">
+                Start Free Trial <ArrowUpRight size={16} />
+              </Link>
+              <Link href="/features" className="btn-outline px-8 py-3.5">
+                Explore Features
+              </Link>
+            </div>
+          </FadeIn>
         </div>
       </section>
 
       {/* Mission */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mkt-highlight text-center">
-            <p className="mkt-label">Our Mission</p>
-            <h2 className="mkt-title mx-auto mb-6 max-w-[800px] text-[clamp(1.6rem,3vw,2.4rem)]">
-              To replace chaos with clarity. To replace guesswork with data.
-            </h2>
-            <p className="mx-auto max-w-[640px] text-base leading-relaxed text-[#8888A0]">
-              To give every business — from a 10-person agency to a 500-person
-              enterprise — the tools to operate at their best. We believe that
-              great businesses aren&apos;t built on gut feelings. They&apos;re built on
-              clarity, accountability, and data that tells the truth.
-            </p>
-          </div>
+          <FadeIn>
+            <div className="mkt-highlight text-center">
+              <p className="mkt-label">Our Mission</p>
+              <h2 className="mkt-title mx-auto mb-6 max-w-[800px] text-[clamp(1.6rem,3vw,2.4rem)]">
+                To replace chaos with clarity. To replace guesswork with data.
+              </h2>
+              <p className="mx-auto max-w-[640px] text-base leading-relaxed text-[#8888A0]">
+                To give every business — from a 10-person agency to a 500-person
+                enterprise — the tools to operate at their best. We believe that
+                great businesses aren&apos;t built on gut feelings. They&apos;re built on
+                clarity, accountability, and data that tells the truth.
+              </p>
+            </div>
+          </FadeIn>
         </div>
       </section>
 
@@ -231,7 +198,7 @@ export default function AboutPage() {
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
           <div className="grid items-center gap-16 lg:grid-cols-2">
-            <div>
+            <FadeIn direction="left">
               <p className="mkt-label">The Story</p>
               <h2 className="mkt-title mb-6 text-[clamp(1.8rem,3vw,2.5rem)]">
                 Born from watching businesses{" "}
@@ -258,9 +225,10 @@ export default function AboutPage() {
                   peer feedback all flow into one composite truth.
                 </p>
               </div>
-            </div>
+            </FadeIn>
 
-            <div className="flex flex-col gap-4">
+            <FadeIn direction="right" delay={0.2}>
+              <div className="flex flex-col gap-4">
               {[
                 {
                   label: "The Problem",
@@ -311,7 +279,8 @@ export default function AboutPage() {
                   </ul>
                 </div>
               ))}
-            </div>
+              </div>
+            </FadeIn>
           </div>
         </div>
       </section>
@@ -319,12 +288,14 @@ export default function AboutPage() {
       {/* Timeline */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-16 text-center">
-            <p className="mkt-label">Our Journey</p>
-            <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
-              From idea to <span className="text-gradient">impact.</span>
-            </h2>
-          </div>
+          <FadeIn>
+            <div className="mb-16 text-center">
+              <p className="mkt-label">Our Journey</p>
+              <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
+                From idea to <span className="text-gradient">impact.</span>
+              </h2>
+            </div>
+          </FadeIn>
 
           <div className="relative mx-auto max-w-[800px]">
             {/* Vertical line */}
@@ -344,11 +315,11 @@ export default function AboutPage() {
               }}
             />
 
-            <div className="flex flex-col gap-12">
+            <StaggerContainer className="flex flex-col gap-12" stagger={0.15}>
               {milestones.map((ms, i) => {
                 const isLeft = i % 2 === 0;
                 return (
-                  <div
+                  <StaggerItem
                     key={ms.period}
                     className="relative flex items-center md:justify-center"
                   >
@@ -381,10 +352,10 @@ export default function AboutPage() {
                         </p>
                       </div>
                     </div>
-                  </div>
+                  </StaggerItem>
                 );
               })}
-            </div>
+            </StaggerContainer>
           </div>
         </div>
       </section>
@@ -392,16 +363,18 @@ export default function AboutPage() {
       {/* Values */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-16 text-center">
-            <p className="mkt-label">Our Values</p>
-            <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
-              What we believe in.
-            </h2>
-          </div>
+          <FadeIn>
+            <div className="mb-16 text-center">
+              <p className="mkt-label">Our Values</p>
+              <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
+                What we believe in.
+              </h2>
+            </div>
+          </FadeIn>
 
-          <div className="grid gap-6 sm:grid-cols-2">
+          <StaggerContainer className="grid gap-6 sm:grid-cols-2">
             {values.map((value) => (
-              <div key={value.title} className="mkt-card">
+              <StaggerItem key={value.title} className="mkt-card">
                 <div
                   className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl"
                   style={{
@@ -421,65 +394,27 @@ export default function AboutPage() {
                 <p className="text-sm leading-relaxed text-[#8888A0]">
                   {value.desc}
                 </p>
-              </div>
+              </StaggerItem>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* By the Numbers */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-16 text-center">
-            <p className="mkt-label">By the Numbers</p>
-            <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
-              Built to be <span className="text-gradient">comprehensive.</span>
-            </h2>
-          </div>
-
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {stats.map((stat) => (
-              <div key={stat.label} className="mkt-card text-center">
-                <div
-                  className="mx-auto mb-4 inline-flex h-10 w-10 items-center justify-center rounded-lg text-[#6C5CE7]"
-                  style={{
-                    background: "rgba(108, 92, 231, 0.1)",
-                    border: "1px solid rgba(108, 92, 231, 0.2)",
-                  }}
-                >
-                  {stat.icon}
-                </div>
-                <p
-                  className="mb-1 text-3xl font-bold text-gradient"
-                  style={{ fontFamily: "var(--font-syne), 'Syne', sans-serif" }}
-                >
-                  {stat.value}
-                </p>
-                <p className="mb-2 text-sm font-semibold text-[#E8E8F0]">
-                  {stat.label}
-                </p>
-                <p className="text-xs leading-relaxed text-[#8888A0]">
-                  {stat.desc}
-                </p>
-              </div>
-            ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* The Team */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-16 text-center">
-            <p className="mkt-label">The Team</p>
-            <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
-              The people behind the <span className="text-gradient">platform.</span>
-            </h2>
-          </div>
+          <FadeIn>
+            <div className="mb-16 text-center">
+              <p className="mkt-label">The Team</p>
+              <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
+                The people behind the <span className="text-gradient">platform.</span>
+              </h2>
+            </div>
+          </FadeIn>
 
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <StaggerContainer className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {team.map((member) => (
-              <div key={member.name} className="mkt-card text-center">
+              <StaggerItem key={member.name} className="mkt-card text-center">
                 <div
                   className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl text-lg font-bold"
                   style={{
@@ -506,25 +441,27 @@ export default function AboutPage() {
                 <p className="text-sm leading-relaxed text-[#8888A0]">
                   {member.bio}
                 </p>
-              </div>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* Customer Love */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-16 text-center">
-            <p className="mkt-label">Customer Love</p>
-            <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
-              Don&apos;t take our word for it.
-            </h2>
-          </div>
+          <FadeIn>
+            <div className="mb-16 text-center">
+              <p className="mkt-label">Customer Love</p>
+              <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
+                Don&apos;t take our word for it.
+              </h2>
+            </div>
+          </FadeIn>
 
-          <div className="grid gap-6 md:grid-cols-3">
+          <StaggerContainer className="grid gap-6 md:grid-cols-3">
             {testimonials.map((t) => (
-              <div key={t.name} className="mkt-card relative">
+              <StaggerItem key={t.name} className="mkt-card relative">
                 <div
                   className="mb-4 inline-flex h-8 w-8 items-center justify-center rounded-lg"
                   style={{
@@ -551,88 +488,35 @@ export default function AboutPage() {
                     {t.role}, {t.company}
                   </p>
                 </div>
-              </div>
+              </StaggerItem>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Recognized By */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mb-12 text-center">
-            <p className="mkt-label">Recognized By</p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-6">
-            {press.map((name) => (
-              <div
-                key={name}
-                className="flex items-center justify-center rounded-2xl border border-[#2A2A3A] bg-[#12121A] px-8 py-4"
-              >
-                <span
-                  className="text-lg font-bold tracking-tight text-[#8888A0]"
-                  style={{ fontFamily: "var(--font-syne), 'Syne', sans-serif" }}
-                >
-                  {name}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Backed By */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mkt-highlight text-center">
-            <p className="mkt-label">Our Backers</p>
-            <h2 className="mkt-title mx-auto mb-8 max-w-[640px] text-[clamp(1.4rem,2.5vw,2rem)]">
-              Backed by entrepreneurs who&apos;ve built{" "}
-              <span className="text-gradient">billion-dollar companies.</span>
-            </h2>
-            <div className="flex flex-wrap items-center justify-center gap-8">
-              {investors.map((inv) => (
-                <div key={inv.name} className="text-center">
-                  <p
-                    className="text-base font-semibold text-[#E8E8F0]"
-                    style={{
-                      fontFamily: "var(--font-syne), 'Syne', sans-serif",
-                    }}
-                  >
-                    {inv.name}
-                  </p>
-                  <p className="font-[family-name:var(--font-mono)] text-xs text-[#8888A0]">
-                    {inv.note}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* CTA */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mkt-highlight text-center">
-            <p className="mkt-label">Get Started</p>
-            <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
-              Ready to run your business better?
-            </h2>
-            <p className="mx-auto mb-8 max-w-[480px] text-base text-[#8888A0]">
-              Join the businesses replacing chaos with clarity. Start your free
-              trial and experience every module working together.
-            </p>
-            <div className="flex items-center justify-center gap-4">
-              <Link href="/register" className="btn-primary px-8 py-3.5">
-                Start Free Trial <ArrowUpRight size={16} />
-              </Link>
-              <Link href="/pricing" className="btn-outline px-8 py-3.5">
-                View Pricing
-              </Link>
+          <ScaleIn>
+            <div className="mkt-highlight text-center">
+              <p className="mkt-label">Get Started</p>
+              <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
+                Ready to run your business better?
+              </h2>
+              <p className="mx-auto mb-8 max-w-[480px] text-base text-[#8888A0]">
+                Join the businesses replacing chaos with clarity. Start your free
+                trial and experience every module working together.
+              </p>
+              <div className="flex items-center justify-center gap-4">
+                <Link href="/register" className="btn-primary px-8 py-3.5">
+                  Start Free Trial <ArrowUpRight size={16} />
+                </Link>
+                <Link href="/pricing" className="btn-outline px-8 py-3.5">
+                  View Pricing
+                </Link>
+              </div>
             </div>
-          </div>
+          </ScaleIn>
         </div>
       </section>
     </>

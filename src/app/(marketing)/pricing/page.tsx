@@ -12,11 +12,9 @@ import {
   CreditCard,
   RefreshCw,
   ShieldCheck,
-  Shield,
-  Star,
-  Quote,
   Zap,
 } from "lucide-react";
+import { FadeIn, StaggerContainer, StaggerItem, ScaleIn } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
   title: "Pricing — TheywrK | Plans for Every Business Size",
@@ -304,12 +302,7 @@ const faqItems = [
     answer:
       "We offer both monthly and annual billing. Annual billing saves you 20% compared to monthly payments. You can switch between billing cycles at any time from your account settings.",
   },
-  {
-    question: "What is your refund policy?",
-    answer:
-      "We offer a 30-day money-back guarantee on all plans. If you're not satisfied within the first 30 days, contact our support team for a full refund — no questions asked. For annual plans, prorated refunds are available after the 30-day window.",
-  },
-  {
+{
     question: "Can I upgrade or downgrade my plan?",
     answer:
       "Yes, you can change your plan at any time. When upgrading, you'll be charged the prorated difference for the remainder of your billing cycle. When downgrading, the new rate takes effect at the start of your next billing cycle. No data is lost when switching plans.",
@@ -323,11 +316,6 @@ const faqItems = [
     question: "What happens when my free trial ends?",
     answer:
       "At the end of your 14-day trial, you'll be prompted to choose a plan. Your data and configurations are preserved for 30 days after trial expiration, so you won't lose any work. No charges are applied until you actively select a paid plan.",
-  },
-  {
-    question: "Do you offer volume discounts?",
-    answer:
-      "Yes, we offer volume discounts for teams with 200+ users. Contact our sales team for a custom quote tailored to your organization's size and needs. Non-profits and educational institutions are eligible for additional discounts.",
   },
 ];
 
@@ -349,34 +337,41 @@ export default function PricingPage() {
         <div className="hero-glow" />
         <div className="hero-grid" />
         <div className="relative mx-auto max-w-[1200px] px-6 text-center">
-          <p className="mkt-label animate-fade-in">Pricing</p>
-          <h1 className="mkt-title mx-auto mb-4 max-w-[700px] text-[clamp(2.2rem,5vw,3.5rem)] animate-fade-in-1">
-            Simple pricing.{" "}
-            <span className="text-gradient">No surprises.</span>
-          </h1>
-          <p className="mx-auto mb-2 max-w-[560px] text-lg text-[#8888A0] animate-fade-in-2">
-            Start free for 14 days. Pick the plan that fits your team size and
-            upgrade as you grow.
-          </p>
+          <FadeIn delay={0}>
+            <p className="mkt-label animate-fade-in">Pricing</p>
+          </FadeIn>
+          <FadeIn delay={0.1}>
+            <h1 className="mkt-title mx-auto mb-4 max-w-[700px] text-[clamp(2.2rem,5vw,3.5rem)] animate-fade-in-1">
+              Simple pricing.{" "}
+              <span className="text-gradient">No surprises.</span>
+            </h1>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <p className="mx-auto mb-2 max-w-[560px] text-lg text-[#8888A0] animate-fade-in-2">
+              Start free for 14 days. Pick the plan that fits your team size and
+              upgrade as you grow.
+            </p>
+          </FadeIn>
         </div>
       </section>
 
       {/* Trust badges */}
       <section className="pb-16">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="flex flex-wrap items-center justify-center gap-6 md:gap-10">
+          <StaggerContainer className="flex flex-wrap items-center justify-center gap-6 md:gap-10">
             {trustBadges.map((badge) => (
-              <div
-                key={badge.label}
-                className="flex items-center gap-2.5 rounded-full border border-[#2A2A3A] bg-[#12121A] px-5 py-2.5"
-              >
-                <span className="text-[#00D68F]">{badge.icon}</span>
-                <span className="font-[family-name:var(--font-mono)] text-xs tracking-wide text-[#E8E8F0]">
-                  {badge.label}
-                </span>
-              </div>
+              <StaggerItem key={badge.label}>
+                <div
+                  className="flex items-center gap-2.5 rounded-full border border-[#2A2A3A] bg-[#12121A] px-5 py-2.5"
+                >
+                  <span className="text-[#00D68F]">{badge.icon}</span>
+                  <span className="font-[family-name:var(--font-mono)] text-xs tracking-wide text-[#E8E8F0]">
+                    {badge.label}
+                  </span>
+                </div>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
@@ -393,11 +388,11 @@ export default function PricingPage() {
             </div>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <StaggerContainer className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {tiers.map((tier) => (
+              <StaggerItem key={tier.name}>
               <div
-                key={tier.name}
-                className={`price-card flex flex-col ${tier.popular ? "popular" : ""}`}
+                className={`price-card flex flex-col transition-all duration-300 hover:-translate-y-1 ${tier.popular ? "popular" : ""}`}
               >
                 {tier.popular && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
@@ -480,39 +475,9 @@ export default function PricingPage() {
                   </ul>
                 </div>
               </div>
+              </StaggerItem>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Customer testimonial */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="relative overflow-hidden rounded-2xl border border-[#2A2A3A] bg-[#12121A] px-8 py-14 text-center md:px-16">
-            <div
-              className="absolute inset-0 opacity-[0.03]"
-              style={{
-                background:
-                  "radial-gradient(circle at 50% 50%, #6C5CE7, transparent 70%)",
-              }}
-            />
-            <div className="relative">
-              <Quote size={40} className="mx-auto mb-6 text-[#6C5CE7]/40" />
-              <blockquote className="mx-auto mb-8 max-w-[720px] font-[family-name:var(--font-syne)] text-[clamp(1.1rem,2.5vw,1.5rem)] font-medium leading-relaxed text-[#E8E8F0]">
-                &ldquo;We replaced 6 different tools with TheywrK. The ROI was
-                obvious within the first month — our team leads finally have
-                real data instead of opinions.&rdquo;
-              </blockquote>
-              <div className="flex flex-col items-center gap-1">
-                <p className="font-[family-name:var(--font-syne)] text-base font-bold text-[#E8E8F0]">
-                  Priya Sharma
-                </p>
-                <p className="font-[family-name:var(--font-mono)] text-xs tracking-wide text-[#8888A0]">
-                  Head of Operations, TechScale Solutions
-                </p>
-              </div>
-            </div>
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
@@ -526,6 +491,7 @@ export default function PricingPage() {
             </h2>
           </div>
 
+          <FadeIn>
           <div className="overflow-x-auto rounded-2xl border border-[#2A2A3A] bg-[#12121A]">
             <table className="w-full min-w-[700px] text-left">
               <thead>
@@ -585,115 +551,81 @@ export default function PricingPage() {
               </tbody>
             </table>
           </div>
+          </FadeIn>
         </div>
       </section>
 
       {/* Pricing FAQ */}
       <section className="pb-28">
         <div className="mx-auto max-w-[800px] px-6">
-          <div className="mb-12 text-center">
-            <p className="mkt-label">FAQ</p>
-            <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
-              Pricing questions, answered
-            </h2>
-          </div>
+          <FadeIn>
+            <div className="mb-12 text-center">
+              <p className="mkt-label">FAQ</p>
+              <h2 className="mkt-title text-[clamp(1.8rem,3vw,2.5rem)]">
+                Pricing questions, answered
+              </h2>
+            </div>
+          </FadeIn>
 
-          <div className="flex flex-col gap-4">
+          <StaggerContainer className="flex flex-col gap-4">
             {faqItems.map((item) => (
-              <details
-                key={item.question}
-                className="group rounded-xl border border-[#2A2A3A] bg-[#12121A] transition-colors open:border-[#6C5CE7]/30"
-              >
-                <summary className="flex cursor-pointer items-center justify-between px-6 py-5 font-[family-name:var(--font-syne)] text-base font-semibold text-[#E8E8F0] marker:[font-size:0] [&::-webkit-details-marker]:hidden">
-                  <span>{item.question}</span>
-                  <span className="ml-4 flex-shrink-0 text-[#8888A0] transition-transform group-open:rotate-45">
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 20 20"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        d="M10 4V16M4 10H16"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </span>
-                </summary>
-                <div className="px-6 pb-5 text-sm leading-relaxed text-[#8888A0]">
-                  {item.answer}
-                </div>
-              </details>
+              <StaggerItem key={item.question}>
+                <details
+                  className="group rounded-xl border border-[#2A2A3A] bg-[#12121A] transition-colors open:border-[#6C5CE7]/30"
+                >
+                  <summary className="flex cursor-pointer items-center justify-between px-6 py-5 font-[family-name:var(--font-syne)] text-base font-semibold text-[#E8E8F0] marker:[font-size:0] [&::-webkit-details-marker]:hidden">
+                    <span>{item.question}</span>
+                    <span className="ml-4 flex-shrink-0 text-[#8888A0] transition-transform group-open:rotate-45">
+                      <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="M10 4V16M4 10H16"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </span>
+                  </summary>
+                  <div className="px-6 pb-5 text-sm leading-relaxed text-[#8888A0]">
+                    {item.answer}
+                  </div>
+                </details>
+              </StaggerItem>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Money-back guarantee */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="flex flex-col items-center rounded-2xl border border-[#2A2A3A] bg-[#12121A] px-8 py-14 text-center">
-            <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#00D68F]/10">
-              <Shield size={32} className="text-[#00D68F]" />
-            </div>
-            <h3 className="mb-3 font-[family-name:var(--font-syne)] text-2xl font-bold text-[#E8E8F0]">
-              30-Day Money-Back Guarantee
-            </h3>
-            <p className="mx-auto max-w-[520px] text-base leading-relaxed text-[#8888A0]">
-              Try any paid plan risk-free. If TheywrK doesn&apos;t meet your
-              expectations within the first 30 days, we&apos;ll refund your
-              payment in full — no questions asked, no hoops to jump through.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Social proof bar */}
-      <section className="pb-16">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <div className="flex flex-col items-center gap-4 text-center">
-            <div className="flex items-center gap-1">
-              {[...Array(5)].map((_, i) => (
-                <Star
-                  key={i}
-                  size={20}
-                  className="fill-[#FF9F43] text-[#FF9F43]"
-                />
-              ))}
-            </div>
-            <p className="font-[family-name:var(--font-syne)] text-lg font-semibold text-[#E8E8F0]">
-              Trusted by 500+ businesses across 12 industries
-            </p>
-            <p className="font-[family-name:var(--font-mono)] text-xs tracking-wide text-[#8888A0]">
-              4.8/5 average rating from verified customers
-            </p>
-          </div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* CTA */}
       <section className="pb-28">
         <div className="mx-auto max-w-[1200px] px-6">
-          <div className="mkt-highlight text-center">
-            <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
-              Not sure which plan is right?
-            </h2>
-            <p className="mx-auto mb-8 max-w-[480px] text-base text-[#8888A0]">
-              Start with a 14-day free trial on any plan. No credit card
-              required. Upgrade, downgrade, or cancel anytime.
-            </p>
-            <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link href="/register" className="btn-primary px-8 py-3.5">
-                Start Free Trial <ArrowUpRight size={16} />
-              </Link>
-              <Link href="/contact" className="btn-outline px-8 py-3.5">
-                Talk to Sales
-              </Link>
+          <ScaleIn>
+            <div className="mkt-highlight text-center">
+              <FadeIn delay={0.15}>
+                <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
+                  Not sure which plan is right?
+                </h2>
+                <p className="mx-auto mb-8 max-w-[480px] text-base text-[#8888A0]">
+                  Start with a 14-day free trial on any plan. No credit card
+                  required. Upgrade, downgrade, or cancel anytime.
+                </p>
+                <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
+                  <Link href="/register" className="btn-primary px-8 py-3.5">
+                    Start Free Trial <ArrowUpRight size={16} />
+                  </Link>
+                  <Link href="/contact" className="btn-outline px-8 py-3.5">
+                    Talk to Sales
+                  </Link>
+                </div>
+              </FadeIn>
             </div>
-          </div>
+          </ScaleIn>
         </div>
       </section>
     </>

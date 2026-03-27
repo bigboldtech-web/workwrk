@@ -345,6 +345,115 @@
   color: #e8e8f0;
 }
 
+/* ═══ ENHANCED ANIMATIONS ═══ */
+
+/* Shimmer effect for gradient text */
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.text-gradient {
+  background-size: 200% auto;
+  animation: shimmer 6s linear infinite;
+}
+
+.text-gradient-purple {
+  background-size: 200% auto;
+  animation: shimmer 6s linear infinite;
+}
+
+/* Subtle glow pulse for hero section */
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.15; transform: translateX(-50%) scale(1); }
+  50% { opacity: 0.25; transform: translateX(-50%) scale(1.05); }
+}
+
+.hero-glow {
+  animation: glowPulse 5s ease-in-out infinite;
+}
+
+/* Smooth border glow on hover for cards */
+.mkt-card {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.mkt-card:hover {
+  border-color: rgba(108, 92, 231, 0.4);
+  transform: translateY(-4px);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.3),
+    0 0 30px rgba(108, 92, 231, 0.08);
+}
+
+/* Price card enhanced hover */
+.price-card {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.price-card:hover {
+  transform: translateY(-6px);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.3),
+    0 0 40px rgba(108, 92, 231, 0.1);
+}
+
+/* Blog card enhanced hover */
+.blog-card {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.blog-card:hover {
+  border-color: rgba(108, 92, 231, 0.4);
+  transform: translateY(-4px);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.3),
+    0 0 20px rgba(108, 92, 231, 0.06);
+}
+
+/* Button press effect */
+.btn-primary:active {
+  transform: translateY(0) scale(0.98);
+}
+.btn-outline:active {
+  transform: scale(0.98);
+}
+
+/* Smooth link underline on hover */
+.mkt-link {
+  position: relative;
+  text-decoration: none;
+}
+.mkt-link::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: #6c5ce7;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.mkt-link:hover::after {
+  width: 100%;
+}
+
+/* Highlight box enhanced glow */
+.mkt-highlight {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.mkt-highlight:hover {
+  box-shadow: 0 0 60px rgba(108, 92, 231, 0.08);
+}
+
+/* Smooth scroll behavior */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(108, 92, 231, 0.3);
+  color: #e8e8f0;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .mkt-highlight {
