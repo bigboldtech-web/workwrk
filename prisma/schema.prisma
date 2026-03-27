@@ -1,0 +1,997 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// MULTI-TENANCY & AUTH
+// ==========================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  logo      String?
+  domain    String?
+  plan      Plan     @default(STARTER)
+  status    OrgStatus @default(ACTIVE)
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  departments  Department[]
+  roles        Role[]
+  kras         KRA[]
+  kpis         KPI[]
+  tasks        Task[]
+  sops         SOP[]
+  reviewCycles ReviewCycle[]
+  meetings     Meeting[]
+  aiQueries    AIQuery[]
+  invitations  Invitation[]
+  onboardingTemplates OnboardingTemplate[]
+  trainingCourses     TrainingCourse[]
+  integrations        Integration[]
+
+  @@index([slug])
+}
+
+enum Plan {
+  STARTER
+  GROWTH
+  SCALE
+  ENTERPRISE
+}
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String
+  passwordHash   String
+  firstName      String
+  lastName       String
+  avatar         String?
+  phone          String?
+  status         UserStatus @default(ACTIVE)
+  joinDate       DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roleId         String?
+  role           Role?        @relation(fields: [roleId], references: [id])
+  departmentId   String?
+  department     Department?  @relation("DepartmentMembers", fields: [departmentId], references: [id])
+  accessLevel    AccessLevel  @default(EMPLOYEE)
+
+  managerId      String?
+  manager        User?    @relation("ManagerReports", fields: [managerId], references: [id])
+  directReports  User[]   @relation("ManagerReports")
+
+  skills         UserSkill[]
+  certifications Certification[]
+  kraAssignments KRAAssignment[]
+  kpiRecords     KPIRecord[]
+  assignedTasks  Task[]   @relation("TaskAssignee")
+  createdTasks   Task[]   @relation("TaskCreator")
+  taskComments   TaskComment[]
+  sopComplianceRecords SOPCompliance[]
+  sopAssignments       SOPAssignment[]
+  reviewsAsSubject   Review[]       @relation("ReviewSubject")
+  reviewsAsReviewer  Review[]       @relation("ReviewReviewer")
+  feedbackGiven      PeerFeedback[] @relation("FeedbackGiver")
+  feedbackReceived   PeerFeedback[] @relation("FeedbackReceiver")
+  meetingAttendances MeetingAttendee[]
+  actionItems        ActionItem[]
+  checkIns           CheckIn[]
+  aiQueries          AIQuery[]
+  notifications      Notification[]
+  headOfDepartments  Department[] @relation("DepartmentHead")
+  onboardingInstances OnboardingInstance[]
+  buddyForOnboarding  OnboardingInstance[] @relation("OnboardingBuddy")
+  courseEnrollments   CourseEnrollment[]
+  externalData        ExternalData[]
+  activityLogs        ActivityLog[]
+  performanceScores   PerformanceScore[]
+  kudosGiven          Kudos[] @relation("KudosGiver")
+  kudosReceived       Kudos[] @relation("KudosReceiver")
+
+  @@unique([email, organizationId])
+  @@index([organizationId])
+  @@index([departmentId])
+  @@index([managerId])
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+  PROBATION
+  PIP
+  NOTICE_PERIOD
+}
+
+enum AccessLevel {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+  C_LEVEL
+  VP
+  DIRECTOR
+  MANAGER
+  TEAM_LEAD
+  EMPLOYEE
+  AGENT
+  HR
+}
+
+model Invitation {
+  id             String   @id @default(cuid())
+  email          String
+  accessLevel    AccessLevel @default(EMPLOYEE)
+  token          String   @unique
+  expiresAt      DateTime
+  accepted       Boolean  @default(false)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  departmentId   String?
+  roleId         String?
+  createdAt      DateTime @default(now())
+
+  @@index([token])
+  @@index([organizationId])
+}
+
+// ==========================================
+// MODULE 1: ORGANIZATION STRUCTURE
+// ==========================================
+
+model Department {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  color           String?
+  parentId        String?
+  parent          Department?  @relation("SubDepartments", fields: [parentId], references: [id])
+  subDepartments  Department[] @relation("SubDepartments")
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  headId          String?
+  head            User?        @relation("DepartmentHead", fields: [headId], references: [id])
+  members         User[]       @relation("DepartmentMembers")
+  roles           Role[]
+  goals           DepartmentGoal[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([name, organizationId])
+  @@index([organizationId])
+}
+
+model DepartmentGoal {
+  id           String     @id @default(cuid())
+  title        String
+  description  String?
+  targetValue  Float?
+  currentValue Float?     @default(0)
+  unit         String?
+  deadline     DateTime?
+  status       GoalStatus @default(ON_TRACK)
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+enum GoalStatus {
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+  COMPLETED
+}
+
+model Role {
+  id             String   @id @default(cuid())
+  title          String
+  description    String?
+  level          AccessLevel @default(EMPLOYEE)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  departmentId   String?
+  department     Department?  @relation(fields: [departmentId], references: [id])
+  users          User[]
+  kraTemplates   KRA[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([title, organizationId])
+  @@index([organizationId])
+}
+
+// ==========================================
+// MODULE 2: PEOPLE PROFILES
+// ==========================================
+
+model UserSkill {
+  id            String @id @default(cuid())
+  name          String
+  selfRating    Int    @default(0)
+  managerRating Int?
+  userId        String
+  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([name, userId])
+}
+
+model Certification {
+  id          String    @id @default(cuid())
+  name        String
+  issuer      String?
+  issuedAt    DateTime?
+  expiresAt   DateTime?
+  documentUrl String?
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+}
+
+// ==========================================
+// MODULE 3: KRA & KPI ENGINE
+// ==========================================
+
+model KRA {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  category       String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roleId         String?
+  role           Role?    @relation(fields: [roleId], references: [id])
+  assignments    KRAAssignment[]
+  kpis           KPI[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+model KRAAssignment {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kraId      String
+  kra        KRA      @relation(fields: [kraId], references: [id], onDelete: Cascade)
+  weightage  Float    @default(0)
+  period     String
+  status     KRAStatus @default(ACTIVE)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, kraId, period])
+  @@index([userId])
+}
+
+enum KRAStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+model KPI {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  type           KPIType  @default(QUANTITATIVE)
+  unit           String?
+  frequency      Frequency @default(MONTHLY)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  kraId          String?
+  kra            KRA?     @relation(fields: [kraId], references: [id])
+  records        KPIRecord[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([kraId])
+}
+
+enum KPIType {
+  QUANTITATIVE
+  QUALITATIVE
+}
+
+enum Frequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUALLY
+}
+
+model KPIRecord {
+  id          String   @id @default(cuid())
+  kpiId       String
+  kpi         KPI      @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period      String
+  targetValue Float
+  actualValue Float?
+  score       Float?
+  notes       String?
+  evidence    String?
+  status      KPIRecordStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([kpiId, userId, period])
+  @@index([userId])
+  @@index([kpiId])
+}
+
+enum KPIRecordStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+// ==========================================
+// MODULE 4: TASK MANAGEMENT
+// ==========================================
+
+model Task {
+  id             String     @id @default(cuid())
+  title          String
+  description    String?
+  priority       Priority   @default(P2)
+  status         TaskStatus @default(NOT_STARTED)
+  progress       Int        @default(0)
+  deadline       DateTime?
+  completedAt    DateTime?
+  isRecurring    Boolean    @default(false)
+  recurPattern   String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assigneeId     String?
+  assignee       User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  creatorId      String
+  creator        User       @relation("TaskCreator", fields: [creatorId], references: [id])
+  parentId       String?
+  parent         Task?      @relation("SubTasks", fields: [parentId], references: [id])
+  subTasks       Task[]     @relation("SubTasks")
+  dependsOnId    String?
+  dependsOn      Task?      @relation("TaskDependency", fields: [dependsOnId], references: [id])
+  dependents     Task[]     @relation("TaskDependency")
+  tags           String[]
+  comments       TaskComment[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([organizationId])
+  @@index([assigneeId])
+  @@index([status])
+}
+
+enum Priority {
+  P0
+  P1
+  P2
+  P3
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  IN_REVIEW
+  COMPLETED
+  BLOCKED
+  CANCELLED
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  content   String
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// ==========================================
+// MODULE 5: SOP MANAGEMENT
+// ==========================================
+
+model SOP {
+  id             String    @id @default(cuid())
+  title          String
+  description    String?
+  category       String?
+  content        Json
+  version        Int       @default(1)
+  status         SOPStatus @default(DRAFT)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  compliance     SOPCompliance[]
+  assignments    SOPAssignment[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  publishedAt    DateTime?
+
+  @@index([organizationId])
+  @@index([category])
+}
+
+enum SOPStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+model SOPCompliance {
+  id             String   @id @default(cuid())
+  sopId          String
+  sop            SOP      @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period         String
+  stepsTotal     Int
+  stepsCompleted Int      @default(0)
+  score          Float?
+  notes          String?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([sopId])
+  @@index([userId])
+}
+
+model SOPAssignment {
+  id             String            @id @default(cuid())
+  sopId          String
+  sop            SOP               @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status         SOPAssignmentStatus @default(ASSIGNED)
+  mandatory      Boolean           @default(true)
+  dueDate        DateTime?
+  progress       Json?             // {completedSteps: [0, 2, 5], quizScore: 80}
+  stepsTotal     Int               @default(0)
+  stepsCompleted Int               @default(0)
+  score          Float?
+  completedAt    DateTime?
+  assignedBy     String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([sopId, userId])
+  @@index([sopId])
+  @@index([userId])
+  @@index([status])
+}
+
+enum SOPAssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+}
+
+// ==========================================
+// MODULE 6: PERFORMANCE REVIEWS
+// ==========================================
+
+model ReviewCycle {
+  id             String      @id @default(cuid())
+  name           String
+  type           ReviewType
+  startDate      DateTime
+  endDate        DateTime
+  status         CycleStatus @default(DRAFT)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reviews        Review[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([organizationId])
+}
+
+enum ReviewType {
+  MONTHLY_PULSE
+  QUARTERLY
+  ANNUAL
+  PROBATION
+  PIP_REVIEW
+}
+
+enum CycleStatus {
+  DRAFT
+  ACTIVE
+  IN_CALIBRATION
+  COMPLETED
+  CANCELLED
+}
+
+model Review {
+  id              String      @id @default(cuid())
+  cycleId         String
+  cycle           ReviewCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  subjectId       String
+  subject         User        @relation("ReviewSubject", fields: [subjectId], references: [id])
+  reviewerId      String
+  reviewer        User        @relation("ReviewReviewer", fields: [reviewerId], references: [id])
+  kpiScore        Float?
+  managerRating   Float?
+  overallScore    Float?
+  strengths       String?
+  improvements    String?
+  managerComments String?
+  selfAssessment  String?
+  outcome         ReviewOutcome?
+  status          ReviewStatus @default(PENDING)
+  submittedAt     DateTime?
+
+  // Structured self-assessment data
+  selfRatings     Json?       // {kraRatings: [{kraId, kraName, rating, achievements}], reflection: {wentWell, couldImprove, goals}}
+  // Structured manager review data
+  managerAssessment Json?     // {kraRatings: [{kraId, kraName, rating, comments}], behavioral: {quality, reliability, collaboration, initiative, growth}, overallComments, recommendation}
+  // Auto-calculated metrics
+  taskCompletionRate Float?
+  sopComplianceScore Float?
+  peerRating      Float?
+  compositeScore  Float?
+  // Calibration
+  calibratedScore Float?
+  calibrationNotes String?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  peerFeedback    PeerFeedback[]
+
+  @@unique([cycleId, subjectId, reviewerId])
+  @@index([subjectId])
+  @@index([cycleId])
+}
+
+enum ReviewOutcome {
+  PROMOTION_ELIGIBLE
+  HIKE_ELIGIBLE
+  STATUS_QUO
+  PIP_REQUIRED
+  EXIT_RECOMMENDATION
+}
+
+enum ReviewStatus {
+  PENDING
+  SELF_ASSESSMENT
+  MANAGER_REVIEW
+  CALIBRATION
+  COMPLETED
+}
+
+model PeerFeedback {
+  id         String   @id @default(cuid())
+  reviewId   String
+  review     Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  giverId    String
+  giver      User     @relation("FeedbackGiver", fields: [giverId], references: [id])
+  receiverId String
+  receiver   User     @relation("FeedbackReceiver", fields: [receiverId], references: [id])
+  rating     Float?
+  comments   String?
+  strengths  String?
+  improvements String?
+  collaborationRating Float?
+  anonymous  Boolean  @default(true)
+  status     String   @default("PENDING") // PENDING, SUBMITTED
+  createdAt  DateTime @default(now())
+}
+
+// ==========================================
+// MODULE 8: MEETINGS & CHECK-INS
+// ==========================================
+
+model Meeting {
+  id             String      @id @default(cuid())
+  title          String
+  type           MeetingType
+  scheduledAt    DateTime
+  duration       Int         @default(30)
+  agenda         String?
+  notes          String?
+  decisions      String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  attendees      MeetingAttendee[]
+  actionItems    ActionItem[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([organizationId])
+  @@index([scheduledAt])
+}
+
+enum MeetingType {
+  DAILY_STANDUP
+  WEEKLY_REVIEW
+  ONE_ON_ONE
+  QUARTERLY_REVIEW
+  ANNUAL_PLANNING
+  ADHOC
+}
+
+model MeetingAttendee {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  attended  Boolean @default(false)
+
+  @@unique([meetingId, userId])
+}
+
+model ActionItem {
+  id          String     @id @default(cuid())
+  title       String
+  meetingId   String
+  meeting     Meeting    @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  assigneeId  String
+  assignee    User       @relation(fields: [assigneeId], references: [id])
+  deadline    DateTime?
+  status      TaskStatus @default(NOT_STARTED)
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model CheckIn {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       DateTime  @default(now())
+  mood       Int?
+  wentWell   String?
+  challenges String?
+  tomorrow   String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([date])
+}
+
+// ==========================================
+// MODULE 7: AI INTELLIGENCE
+// ==========================================
+
+model AIQuery {
+  id             String   @id @default(cuid())
+  query          String
+  response       String?
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// ==========================================
+// NOTIFICATIONS
+// ==========================================
+
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String
+  read      Boolean  @default(false)
+  link      String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
+
+// ==========================================
+// MODULE 9: ONBOARDING & TRAINING
+// ==========================================
+
+model OnboardingTemplate {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  roleId         String?
+  departmentId   String?
+  steps          Json     @default("[]")
+  durationDays   Int      @default(30)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  instances      OnboardingInstance[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+model OnboardingInstance {
+  id             String   @id @default(cuid())
+  templateId     String
+  template       OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  buddyId        String?
+  buddy          User?    @relation("OnboardingBuddy", fields: [buddyId], references: [id])
+  startDate      DateTime @default(now())
+  targetDate     DateTime?
+  completedAt    DateTime?
+  progress       Json     @default("[]")
+  status         OnboardingStatus @default(IN_PROGRESS)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId])
+}
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+}
+
+model TrainingCourse {
+  id             String   @id @default(cuid())
+  title          String
+  description    String?
+  category       String?
+  content        Json     @default("{}")
+  duration       Int?
+  mandatory      Boolean  @default(false)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enrollments    CourseEnrollment[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+model CourseEnrollment {
+  id          String   @id @default(cuid())
+  courseId    String
+  course      TrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  progress    Int      @default(0)
+  score       Float?
+  completedAt DateTime?
+  startedAt   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([courseId, userId])
+  @@index([userId])
+}
+
+// ==========================================
+// MODULE 10: INTEGRATIONS (HRMS, etc.)
+// ==========================================
+
+model Integration {
+  id             String            @id @default(cuid())
+  name           String            // e.g. "GreytHR", "BambooHR", "Zoho People", "Keka"
+  type           IntegrationType
+  status         IntegrationStatus @default(INACTIVE)
+  config         Json              @default("{}")  // API keys, endpoints, mapping config
+  lastSyncAt     DateTime?
+  syncFrequency  String?           @default("daily") // daily, hourly, manual
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  syncLogs       IntegrationSync[]
+  webhookLogs    WebhookLog[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([type, organizationId])
+  @@index([organizationId])
+}
+
+enum IntegrationType {
+  HRMS
+  SLACK
+  GOOGLE_WORKSPACE
+  MICROSOFT_365
+  JIRA
+  CUSTOM_WEBHOOK
+}
+
+enum IntegrationStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+  SYNCING
+}
+
+model IntegrationSync {
+  id            String    @id @default(cuid())
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  type          String    // "attendance", "compensation", "employees"
+  status        String    @default("pending") // pending, success, failed
+  recordssynced Int       @default(0)
+  errors        Json?
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([integrationId])
+}
+
+// Imported data from external HRMS (read-only, used for performance scoring)
+model ExternalData {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source         String   // "greythr", "bamboohr", etc.
+  dataType       String   // "attendance_summary", "compensation", "leave_summary"
+  period         String   // "2026-03", "2026-Q1"
+  data           Json     // flexible data structure from external system
+  organizationId String
+  importedAt     DateTime @default(now())
+
+  @@unique([userId, source, dataType, period])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+// ==========================================
+// WEBHOOK SYSTEM
+// ==========================================
+
+model WebhookLog {
+  id             String      @id @default(cuid())
+  integrationId  String
+  integration    Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  direction      String      @default("outgoing") // "incoming" | "outgoing"
+  event          String?     // e.g. "task_completed", "review_done", "test"
+  payload        Json        @default("{}")
+  status         String      @default("received") // received, processed, failed, sent
+  error          String?
+  responseCode   Int?
+  createdAt      DateTime    @default(now())
+
+  @@index([integrationId])
+  @@index([createdAt])
+}
+
+// ==========================================
+// EMAIL SYSTEM
+// ==========================================
+
+model EmailLog {
+  id             String      @id @default(cuid())
+  to             String
+  subject        String
+  template       String
+  variables      Json        @default("{}")
+  status         EmailStatus @default(QUEUED)
+  error          String?
+  attempts       Int         @default(0)
+  organizationId String?
+  createdAt      DateTime    @default(now())
+  sentAt         DateTime?
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum EmailStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+}
+
+model EmailPreference {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  taskNotifications   Boolean  @default(true)
+  reviewNotifications Boolean  @default(true)
+  sopNotifications    Boolean  @default(true)
+  kudosNotifications  Boolean  @default(true)
+  dailyDigest         Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ==========================================
+// PERFORMANCE SCORES (Auto-calculated)
+// ==========================================
+
+model PerformanceScore {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period         String   // "2026-03", "2026-Q1", etc.
+  score          Float    // Composite score 0-100
+  breakdown      Json     // {kpiScore, managerRating, peerRating, selfRating, sopCompliance, taskCompletion, weights}
+  calculatedAt   DateTime @default(now())
+  organizationId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, period])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([period])
+}
+
+// ==========================================
+// KUDOS / RECOGNITION
+// ==========================================
+
+model Kudos {
+  id             String   @id @default(cuid())
+  message        String
+  companyValue   String?  // e.g. "Customer First", "Ownership", "Teamwork"
+  giverId        String
+  giver          User     @relation("KudosGiver", fields: [giverId], references: [id], onDelete: Cascade)
+  receiverId     String
+  receiver       User     @relation("KudosReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  organizationId String
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([receiverId])
+  @@index([giverId])
+  @@index([createdAt])
+}
+
+// ==========================================
+// ACTIVITY LOG
+// ==========================================
+
+model ActivityLog {
+  id             String   @id @default(cuid())
+  type           String   // task_completed, review_submitted, kra_assigned, sop_completed, meeting_created, person_added, checkin_submitted, etc.
+  actorId        String
+  actor          User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  targetId       String?  // ID of the affected entity
+  targetType     String?  // "task", "review", "sop", "meeting", "user", etc.
+  description    String   // Human-readable: "Priya completed task 'Submit Q3 report'"
+  metadata       Json?    // Extra context
+  organizationId String
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([actorId])
+  @@index([type])
+  @@index([createdAt])
+}

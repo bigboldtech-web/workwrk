@@ -1,0 +1,132 @@
+import { NextRequest } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+
+export async function GET(req: NextRequest) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get("userId");
+  const managerId = searchParams.get("managerId");
+  const period = searchParams.get("period");
+
+  const orgId = getOrgId(session);
+
+  // If managerId is provided, get assignments for all direct reports
+  if (managerId) {
+    const directReports = await prisma.user.findMany({
+      where: { managerId, organizationId: orgId },
+      select: { id: true },
+    });
+    const reportIds = directReports.map((r) => r.id);
+
+    const assignments = await prisma.kRAAssignment.findMany({
+      where: {
+        userId: { in: reportIds },
+        kra: { organizationId: orgId },
+        ...(period ? { period } : {}),
+      },
+      include: {
+        kra: { select: { id: true, name: true, category: true } },
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return jsonSuccess(assignments);
+  }
+
+  // Get assignments for a specific user or current user
+  const targetUserId = userId || getUserId(session);
+
+  const assignments = await prisma.kRAAssignment.findMany({
+    where: {
+      userId: targetUserId,
+      kra: { organizationId: orgId },
+      ...(period ? { period } : {}),
+    },
+    include: {
+      kra: {
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          kpis: {
+            select: {
+              id: true,
+              name: true,
+              unit: true,
+              records: {
+                where: { userId: targetUserId },
+                orderBy: { createdAt: "desc" },
+                take: 1,
+              },
+            },
+          },
+        },
+      },
+      user: { select: { id: true, firstName: true, lastName: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return jsonSuccess(assignments);
+}
+
+export async function POST(req: NextRequest) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+  if (!isManager(session)) return jsonError("Forbidden", 403);
+
+  const body = await req.json();
+  const { userId, kraId, weightage, period, status } = body;
+
+  if (!userId || !kraId || !period) {
+    return jsonError("userId, kraId, and period are required");
+  }
+  if (weightage == null || weightage <= 0 || weightage > 100) {
+    return jsonError("Weightage must be between 1 and 100");
+  }
+
+  const orgId = getOrgId(session);
+
+  // Verify KRA belongs to this org
+  const kra = await prisma.kRA.findFirst({
+    where: { id: kraId, organizationId: orgId },
+  });
+  if (!kra) return jsonError("KRA not found", 404);
+
+  // Verify user belongs to this org
+  const user = await prisma.user.findFirst({
+    where: { id: userId, organizationId: orgId },
+  });
+  if (!user) return jsonError("User not found", 404);
+
+  // Check total weightage for this user/period won't exceed 100%
+  const existingAssignments = await prisma.kRAAssignment.findMany({
+    where: { userId, period, status: { not: "ARCHIVED" } },
+  });
+  const currentTotal = existingAssignments.reduce((sum, a) => sum + a.weightage, 0);
+  if (currentTotal + weightage > 100) {
+    return jsonError(
+      `Total weightage would be ${currentTotal + weightage}%. Current: ${currentTotal}%, adding: ${weightage}%. Must not exceed 100%.`
+    );
+  }
+
+  const assignment = await prisma.kRAAssignment.create({
+    data: {
+      userId,
+      kraId,
+      weightage,
+      period,
+      status: status || "ACTIVE",
+    },
+    include: {
+      kra: { select: { id: true, name: true, category: true } },
+      user: { select: { id: true, firstName: true, lastName: true } },
+    },
+  });
+
+  return jsonSuccess(assignment, 201);
+}
