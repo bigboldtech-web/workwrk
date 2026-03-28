@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Building2, BarChart3, Settings, Shield } from "lucide-react";
+import { LayoutDashboard, Building2, BarChart3, Shield, ArrowLeft, RefreshCw } from "lucide-react";
+import { ToastProvider } from "@/components/ui/toast";
 
 const adminNav = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
@@ -13,9 +17,34 @@ const adminNav = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (status === "loading") return;
+    if (!session) {
+      router.push("/login");
+      return;
+    }
+    if ((session.user as any)?.accessLevel !== "SUPER_ADMIN") {
+      router.push("/dashboard");
+    }
+  }, [session, status, router]);
+
+  if (status === "loading") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#0A0A0F]">
+        <RefreshCw className="h-6 w-6 animate-spin text-[#8888A0]" />
+      </div>
+    );
+  }
+
+  if (!session || (session.user as any)?.accessLevel !== "SUPER_ADMIN") {
+    return null;
+  }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-[#0A0A0F] text-[#E8E8F0]">
       {/* Sidebar */}
       <aside className="w-[240px] border-r border-[#2A2A3A] bg-[#0A0A0F] flex flex-col">
         <div className="h-16 flex items-center px-4 border-b border-[#2A2A3A]">
@@ -44,14 +73,29 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             );
           })}
         </nav>
+        <div className="px-3 py-4 border-t border-[#2A2A3A]">
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0] transition-all"
+          >
+            <ArrowLeft size={16} />
+            <span>Back to Dashboard</span>
+          </Link>
+        </div>
       </aside>
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 border-b border-[#2A2A3A] flex items-center px-6 bg-[#0A0A0F]/80 backdrop-blur">
-          <h1 className="text-sm font-medium text-[#8888A0]">Subscriber Admin Panel</h1>
+        <header className="h-16 border-b border-[#2A2A3A] flex items-center justify-between px-6 bg-[#0A0A0F]/80 backdrop-blur">
+          <h1 className="text-sm font-medium text-[#8888A0]">Super Admin Panel</h1>
+          <div className="flex items-center gap-2 text-xs text-[#8888A0]">
+            <Shield size={12} className="text-red-400" />
+            {(session.user as any)?.email}
+          </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6">
+          <ToastProvider>{children}</ToastProvider>
+        </main>
       </div>
     </div>
   );

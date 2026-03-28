@@ -87,7 +87,7 @@ export default function RegisterPage() {
             <Label htmlFor="orgName">Organization Name</Label>
             <Input
               id="orgName"
-              placeholder="Acme Corp"
+              placeholder="Your Company Name"
               value={formData.organizationName}
               onChange={(e) => updateField("organizationName", e.target.value)}
               required
@@ -120,7 +120,7 @@ export default function RegisterPage() {
             <Input
               id="email"
               type="email"
-              placeholder="john@acmecorp.com"
+              placeholder="you@company.com"
               value={formData.email}
               onChange={(e) => updateField("email", e.target.value)}
               required

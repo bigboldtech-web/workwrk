@@ -519,7 +519,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Domain</Label>
-                  <Input value={orgDomain} onChange={(e) => setOrgDomain(e.target.value)} placeholder="acmecorp.com" />
+                  <Input value={orgDomain} onChange={(e) => setOrgDomain(e.target.value)} placeholder="yourcompany.com" />
                 </div>
                 <div className="space-y-2">
                   <Label>Plan</Label>

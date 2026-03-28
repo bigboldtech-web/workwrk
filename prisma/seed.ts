@@ -65,15 +65,16 @@ async function main() {
 
   const roleMap = Object.fromEntries(roles.map((r) => [r.title, r.id]));
   const passwordHash = await bcrypt.hash("password123", 12);
+  const adminPasswordHash = await bcrypt.hash("TheyWrk@1212@TW", 12);
 
   // Create admin user
   const admin = await prisma.user.create({
     data: {
-      email: "admin@acmecorp.com",
-      passwordHash,
+      email: "admin@theywrk.com",
+      passwordHash: adminPasswordHash,
       firstName: "Admin",
       lastName: "User",
-      accessLevel: "COMPANY_ADMIN",
+      accessLevel: "SUPER_ADMIN",
       organizationId: org.id,
     },
   });
@@ -161,7 +162,7 @@ async function main() {
 
   console.log("Seed complete!");
   console.log(`\nLogin credentials:`);
-  console.log(`  Email: admin@acmecorp.com`);
+  console.log(`  Email: admin@theywrk.com`);
   console.log(`  Password: password123`);
 }
 

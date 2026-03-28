@@ -209,7 +209,7 @@ export default function KraKpiPage() {
   const fetchKpiRecords = useCallback(async () => {
     try {
       setLoadingRecords(true);
-      const res = await fetch("/api/kpi-records");
+      const res = await fetch("/api/kpi-records?limit=200");
       if (res.ok) {
         const data = await res.json();
         setKpiRecords(Array.isArray(data) ? data : data.records ?? data.data ?? []);

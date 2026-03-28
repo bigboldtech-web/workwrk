@@ -11,22 +11,31 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const userId = url.searchParams.get("userId");
   const kpiId = url.searchParams.get("kpiId");
+  const page = parseInt(url.searchParams.get("page") || "1", 10);
+  const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+  const skip = (page - 1) * limit;
 
-  const records = await prisma.kPIRecord.findMany({
-    where: {
-      kpi: { organizationId: orgId },
-      ...(userId ? { userId } : {}),
-      ...(kpiId ? { kpiId } : {}),
-    },
-    include: {
-      user: { select: { firstName: true, lastName: true } },
-      kpi: { select: { name: true, unit: true, type: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
+  const where = {
+    kpi: { organizationId: orgId },
+    ...(userId ? { userId } : {}),
+    ...(kpiId ? { kpiId } : {}),
+  };
 
-  return jsonSuccess(records);
+  const [records, total] = await Promise.all([
+    prisma.kPIRecord.findMany({
+      where,
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        kpi: { select: { name: true, unit: true, type: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      skip,
+    }),
+    prisma.kPIRecord.count({ where }),
+  ]);
+
+  return jsonSuccess({ records, total, page, limit, totalPages: Math.ceil(total / limit) });
 }
 
 export async function POST(req: NextRequest) {
