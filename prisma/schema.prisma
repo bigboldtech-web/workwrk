@@ -154,6 +154,18 @@ model Invitation {
   @@index([organizationId])
 }
 
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  email     String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([email])
+}
+
 // ==========================================
 // MODULE 1: ORGANIZATION STRUCTURE
 // ==========================================

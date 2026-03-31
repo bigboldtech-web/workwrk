@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
+import { sendEmail } from "@/lib/email";
+import { kudosTemplate } from "@/lib/email-templates";
 
 // GET: Kudos feed (company-wide, paginated) or per-user
 export async function GET(req: NextRequest) {
@@ -69,7 +71,7 @@ export async function POST(req: NextRequest) {
   // Verify receiver belongs to same org
   const receiver = await prisma.user.findFirst({
     where: { id: receiverId, organizationId: orgId, deletedAt: null },
-    select: { id: true, firstName: true, lastName: true },
+    select: { id: true, firstName: true, lastName: true, email: true },
   });
   if (!receiver) return jsonError("User not found", 404);
 
@@ -96,6 +98,25 @@ export async function POST(req: NextRequest) {
       link: "/dashboard",
       userId: receiverId,
     },
+  });
+
+  // Send kudos email
+  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+  const { subject, html } = kudosTemplate({
+    senderName: `${kudos.giver.firstName} ${kudos.giver.lastName}`,
+    message: message.trim(),
+    dashboardLink: `${baseUrl}/dashboard`,
+  });
+
+  sendEmail({
+    to: receiver.email || "",
+    subject,
+    html,
+    template: "kudos",
+    variables: { senderName: `${kudos.giver.firstName} ${kudos.giver.lastName}`, message: message.trim() },
+    organizationId: orgId,
+    userId: receiverId,
+    category: "kudos",
   });
 
   logActivity({
