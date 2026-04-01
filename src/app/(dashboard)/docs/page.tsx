@@ -6,25 +6,17 @@ import {
   Rocket,
   Users,
   Target,
-  CheckSquare,
   BookOpen,
   Star,
   BarChart3,
   Brain,
   Settings,
   Link2,
-  Bell,
-  Shield,
-  Mail,
   ChevronRight,
   Search,
-  Building2,
-  UserPlus,
   LayoutDashboard,
-  Calendar,
+  CalendarDays,
   Award,
-  FileText,
-  Zap,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
@@ -55,9 +47,9 @@ const docs: DocSection[] = [
 1. Go to [theywrk.com/register](/register) and fill in your organization name, your name, work email, and password (min. 8 characters).
 2. After submitting, you'll be automatically logged in and taken to the **Setup Wizard**.
 3. The setup wizard walks you through 6 steps:
-   - **Business Profile** — Company name and basic info
+   - **Business Profile** — Company type (SMB, Enterprise, etc.)
    - **Industry & Use Case** — Select your industry and how you plan to use TheywrK
-   - **Module Priorities** — Choose which modules to enable (Tasks, Reviews, SOPs, etc.)
+   - **Module Priorities** — Choose which modules to enable
    - **Team Size** — Select your team size range
    - **Departments** — Enable/disable default departments or add custom ones
    - **Invite Team** — Add team members by email with their access level
@@ -65,22 +57,39 @@ const docs: DocSection[] = [
 **Note:** You can skip the Invite Team step and add members later from Settings > Team.`,
       },
       {
-        title: "Setting up your organization",
-        content: `**After completing the setup wizard, configure your organization in Settings > General:**
+        title: "How TheywrK works",
+        content: `**TheywrK is a KRA-centric business operating system.**
 
-- **Company Name & Details** — Update your organization name and info
-- **Timezone** — Set your company timezone (used for reminders and deadlines)
-- **Currency** — Set default currency for any financial data
-- **Fiscal Year Start** — Configure when your fiscal year begins
-- **Review Frequency** — Set how often performance reviews happen (Quarterly, Semi-Annual, Annual)
-- **Scoring Weights** — Configure how composite performance scores are calculated:
-  - KPI Weight (default 40%)
-  - Task Weight (default 25%)
-  - Review Weight (default 25%)
-  - SOP Weight (default 10%)
-- **Score Bands** — Define performance bands (Exceptional, Exceeds Expectations, Meets Expectations, etc.)
+The core idea is simple: every employee has **Key Responsible Areas (KRAs)** that define what they're accountable for. Under each KRA, you define **KPIs (Key Performance Indicators)** that measure success.
 
-**Modules:** Go to Settings > Modules to enable/disable features. Disabled modules are hidden from the sidebar.`,
+**The hierarchy:**
+
+- **KRA** — What someone is responsible for (e.g., "Website Management")
+- **KPI** — How you measure success (e.g., "99% uptime", "< 2s load time")
+- **SOP** — How to do the work (linked to a KRA, e.g., "Server Monitoring Procedure")
+
+**Example:**
+- A Tech Engineer's KRA: **"Website Management"**
+  - KPI: 99% uptime (measured monthly)
+  - KPI: Page load time under 2 seconds
+  - SOP: Server Monitoring Procedure
+  - SOP: Incident Response Guide
+
+- A Social Media Manager's KRA: **"Community Engagement"**
+  - KPI: All comments replied within 24 hours
+  - KPI: 10% engagement rate on posts
+  - SOP: Social Media Response Guidelines
+
+**Performance Scoring:**
+TheywrK automatically calculates a composite performance score for each employee based on:
+- **KPI Achievement** — 40% (how well they hit their KPI targets)
+- **Manager Rating** — 25% (from performance reviews)
+- **SOP Compliance** — 20% (are they following procedures?)
+- **Peer Rating** — 10% (feedback from colleagues)
+- **Self Rating** — 5% (self-assessment in reviews)
+
+**Work Calendar:**
+Employees use the Work Calendar to log what they're working on each day. Managers can view their team's calendar to see daily activities. Calendar tasks can be linked to KRAs.`,
       },
       {
         title: "Adding team members",
@@ -91,19 +100,17 @@ const docs: DocSection[] = [
 2. Enter the team member's email address
 3. Select their access level (Employee, Manager, HR, etc.)
 4. Click **Send Invite**
-5. They'll receive an email with a link to join your organization
+5. They'll receive an email with a link to join
 6. They click the link, set their name and password, and they're in!
 
-**Method 2: Add from People page**
-1. Go to **People** in the sidebar
-2. Click **Add Person**
-3. Fill in their details manually
+**Method 2: During Setup**
+- In the setup wizard (Step 6), add emails and roles
+- Invitations are sent automatically when you complete setup
 
 **Managing Invitations:**
 - Pending invitations are shown under Settings > Team
 - You can **Cancel** a pending invitation and resend a new one
 - Invitations expire after 7 days
-- If an invitation expires, simply send a new one
 
 **Access Levels:**
 | Level | Permissions |
@@ -112,31 +119,22 @@ const docs: DocSection[] = [
 | **C-Level** | View all data, manage teams, limited settings |
 | **VP / Director** | Manage their department and below |
 | **Manager** | Manage their direct reports |
-| **Team Lead** | Lead tasks and coordinate within team |
-| **Employee** | Access own tasks, reviews, and assigned SOPs |
+| **Team Lead** | Lead and coordinate within team |
+| **Employee** | Access own KRAs, reviews, and assigned SOPs |
 | **HR** | Manage people, reviews, and organizational data |`,
       },
       {
-        title: "Configuring departments & roles",
-        content: `**Departments** help you organize your team and filter data.
+        title: "Password reset",
+        content: `**If you forget your password:**
 
-**Managing Departments:**
-1. Go to **Organization** in the sidebar
-2. View all departments with member counts
-3. Click a department to see its members and details
-4. Add new departments or edit existing ones
+1. Go to the [login page](/login)
+2. Click **"Forgot password?"** below the password field
+3. Enter your email address
+4. Check your inbox for a reset link (also check spam)
+5. Click the link and set a new password
+6. The link expires after 1 hour
 
-**Default Departments** (created during setup):
-- Engineering, Sales, Marketing, Operations, HR, Finance
-
-**Roles** define job titles within departments:
-- Each role has a title and access level
-- Assign roles to team members from their profile
-- Roles help with reporting and hierarchy
-
-**Department Heads:**
-- Assign a department head from the department settings
-- Department heads can manage their team members`,
+**For admins:** You cannot reset other people's passwords through the UI. Contact support if needed.`,
       },
     ],
   },
@@ -152,16 +150,19 @@ const docs: DocSection[] = [
         content: `**The Dashboard is your daily command center.**
 
 **What you'll see:**
-- **Welcome banner** with your name and today's date
-- **Quick stats** — Total tasks, pending reviews, active SOPs, team size
-- **My Tasks** — Your assigned tasks with status and priority
+- **Total People** — Your team size
+- **Avg Performance** — Average composite score across top performers
+- **Active SOPs** — Number of published SOPs
+- **SOP Compliance** — Overall compliance percentage
+- **Top Performers** — Employees with the highest composite scores
+- **KPI Updates** — Recent KPI score recordings
+- **Alerts** — Important notifications (PIP status, compliance warnings)
 - **Recent Activity** — Latest actions across your organization
-- **Upcoming Deadlines** — Tasks and SOPs due soon
-- **Team Performance** — Quick performance snapshot (if you're a manager)
+- **Kudos Feed** — Recent recognition given
 
 **Quick Actions:**
-- Use the **+ Quick Add** button in the top bar to quickly create tasks, SOPs, or send kudos
-- Use **Cmd+K** (Mac) or **Ctrl+K** (Windows) to open the global search
+- Use the **+ Quick Add** button in the top bar
+- Use **Cmd+K** (Mac) or **Ctrl+K** (Windows) to open global search
 - Click the **bell icon** to view notifications`,
       },
     ],
@@ -181,15 +182,14 @@ const docs: DocSection[] = [
 - **Basic Info** — Name, email, phone, avatar, department, role
 - **Skills** — Self-rated and manager-rated skills
 - **Certifications** — Professional certifications with expiry tracking
-- **KRAs & KPIs** — Assigned key result areas and performance indicators
-- **Tasks** — Active and completed tasks
+- **KRAs & KPIs** — Assigned key result areas and their KPIs
 - **Reviews** — Performance review history
 - **SOPs** — Assigned SOPs and compliance status
-- **Activity** — Recent actions and contributions
+- **Check-ins** — Recent mood and progress check-ins
 - **Kudos** — Recognition received from peers
+- **Performance Score** — Composite score with breakdown
 
 **Editing Profiles:**
-- Click on a person's name from the People list
 - Admins and HR can edit any profile
 - Managers can edit their direct reports
 - Employees can update their own basic info`,
@@ -207,7 +207,7 @@ const docs: DocSection[] = [
 2. Find the person in the list
 3. Click **Restore** to reactivate their account
 
-**Note:** Removed people can't log in but their data (tasks, reviews, etc.) is preserved.`,
+**Note:** Removed people can't log in but their data (KRAs, reviews, etc.) is preserved.`,
       },
     ],
   },
@@ -216,95 +216,134 @@ const docs: DocSection[] = [
     icon: <Target size={22} />,
     color: "#FF6B6B",
     title: "KRAs & KPIs",
-    description: "Set and track key result areas and performance indicators",
+    description: "The core of TheywrK — define responsibilities and measure success",
     articles: [
       {
-        title: "Setting up KRAs",
-        content: `**KRAs (Key Result Areas) define what an employee is responsible for.**
+        title: "Understanding KRAs",
+        content: `**KRAs (Key Result Areas) are the foundation of TheywrK.**
+
+A KRA defines what an employee is responsible for. It's not a task — it's an ongoing area of accountability.
+
+**Good KRA examples:**
+- "Website Uptime & Performance" (for a tech engineer)
+- "Community Engagement" (for a social media manager)
+- "Client Retention" (for an account manager)
+- "Order Fulfillment" (for an operations lead)
+- "Talent Acquisition" (for an HR recruiter)
+
+**Bad KRA examples (too specific, these are tasks):**
+- "Fix the login bug" — This is a task, not a KRA
+- "Send weekly report" — This is a task, not a KRA
 
 **Creating a KRA:**
 1. Go to **KRA & KPIs** in the sidebar
 2. Click **Create KRA**
 3. Fill in:
-   - **Title** — e.g., "Revenue Growth", "Customer Satisfaction"
+   - **Title** — The responsibility area
    - **Description** — What this KRA covers
-   - **Weight** — How much this KRA contributes to overall performance (all weights should add to 100%)
-4. Save the KRA
+   - **Category** — Group related KRAs (e.g., "Technical", "Business")
+   - **Role** — Optionally link to a specific role
 
 **Assigning KRAs:**
-- Assign KRAs to individual employees or entire departments
-- Each assignment can have custom targets and deadlines
-- Employees can see their assigned KRAs on their profile`,
+- Go to the KRA and click **Assign**
+- Select employees
+- Set the **weight** (how much this KRA contributes to their overall score — all weights should total 100%)
+- Set the **period** (e.g., "Q1 2026")`,
       },
       {
-        title: "Creating KPIs & tracking scores",
-        content: `**KPIs (Key Performance Indicators) are measurable metrics under each KRA.**
+        title: "Setting up KPIs",
+        content: `**KPIs (Key Performance Indicators) measure success within a KRA.**
+
+Every KRA should have at least one KPI that defines "what does good look like?"
 
 **Creating a KPI:**
-1. Select a KRA
-2. Click **Add KPI**
-3. Fill in:
-   - **Name** — e.g., "Monthly Revenue", "NPS Score"
-   - **Target** — The goal value
-   - **Unit** — Percentage, number, currency, etc.
-   - **Frequency** — How often it's measured
+1. Go to **KRA & KPIs** in the sidebar
+2. Select a KRA
+3. Click **Add KPI**
+4. Fill in:
+   - **Name** — What you're measuring (e.g., "Uptime Percentage")
+   - **Type** — Quantitative (numbers) or Qualitative (ratings)
+   - **Unit** — Percentage, count, hours, etc.
+   - **Frequency** — How often it's measured (Daily, Weekly, Monthly, Quarterly, Annually)
+   - **Target Value** — The goal (e.g., 99)
+   - **Target Label** — Human-readable target (e.g., "99% uptime")
 
-**Recording KPI Scores:**
-- Go to the KPI and click **Record Score**
-- Enter the actual value achieved
-- The system automatically calculates achievement percentage
-- Scores feed into the composite performance score`,
+**Examples:**
+| KRA | KPI | Target | Frequency |
+|-----|-----|--------|-----------|
+| Website Management | Uptime | 99% | Monthly |
+| Website Management | Page Load Time | < 2 seconds | Monthly |
+| Community Engagement | Comment Reply Rate | 100% within 24hrs | Weekly |
+| Client Retention | Renewal Rate | 85% | Quarterly |
+| Order Fulfillment | On-Time Delivery | 95% | Monthly |`,
+      },
+      {
+        title: "Recording KPI scores",
+        content: `**Recording scores is how performance gets tracked.**
+
+**How to record a KPI score:**
+1. Go to **KRA & KPIs**
+2. Find the KPI
+3. Click **Record Score**
+4. Enter:
+   - **Period** — Which period this score is for (e.g., "2026-04")
+   - **Target Value** — What the target was
+   - **Actual Value** — What was achieved
+   - **Notes** — Any context or explanation
+   - **Evidence** — Link to proof (optional)
+5. The system calculates a score automatically
+
+**Score Calculation:**
+- Score = (Actual / Target) × 100
+- Scores are capped at 120 (to allow exceeding targets)
+- These scores feed into the composite performance score (40% weight by default)
+
+**Who records scores?**
+- Employees can self-report their KPI actuals
+- Managers can record scores for their team
+- Scores can be submitted for approval before counting`,
       },
     ],
   },
   {
-    id: "tasks",
-    icon: <CheckSquare size={22} />,
+    id: "work-calendar",
+    icon: <CalendarDays size={22} />,
     color: "#FFA726",
-    title: "Tasks",
-    description: "Create, assign, and track tasks",
+    title: "Work Calendar",
+    description: "Plan and track daily work activities",
     articles: [
       {
-        title: "Creating & assigning tasks",
-        content: `**Tasks help you track work items and to-dos.**
+        title: "Using the Work Calendar",
+        content: `**The Work Calendar helps employees log what they're doing each day.**
 
-**Creating a Task:**
-1. Go to **Tasks** in the sidebar
-2. Click **Create Task** or use **+ Quick Add > Task**
+Unlike traditional task management, the Work Calendar is for tracking daily activities — not managing projects. It's a way for team members to show what they're working on and for managers to stay informed.
+
+**Adding a task to the calendar:**
+1. Go to **Work Calendar** in the sidebar
+2. Click the **+** button on any day, or click **Add Task** at the top
 3. Fill in:
-   - **Title** — What needs to be done
-   - **Description** — Details and context
-   - **Assignee** — Who will do it
-   - **Priority** — P0 (Critical), P1 (High), P2 (Medium), P3 (Low)
-   - **Deadline** — When it's due
-   - **Tags** — Optional labels for organization
+   - **Title** — What you're working on
+   - **Date** — Which day
+   - **Start/End Time** — Optional time range
+   - **Link to KRA** — Optionally connect to a KRA (helps show what responsibility this work supports)
+   - **Assign to** — Yourself or a team member
 
-**The assignee receives:**
-- An in-app notification
-- An email notification (if enabled in their preferences)
-
-**Task Statuses:**
+**Task statuses:**
 | Status | Meaning |
 |--------|---------|
-| **To Do** | Not started |
-| **In Progress** | Actively being worked on |
-| **In Review** | Waiting for review/approval |
+| **Planned** | Scheduled for the day |
+| **In Progress** | Currently working on it |
 | **Completed** | Done |
-| **Cancelled** | No longer needed |`,
-      },
-      {
-        title: "Task comments & collaboration",
-        content: `**Each task has a comments section for discussion.**
 
-- Click on a task to open its detail view
-- Add comments to provide updates, ask questions, or share files
-- All team members assigned to or watching the task can see comments
-- Comments show timestamps and who wrote them
+**Updating status:**
+- Hover over a task and click the play button to start it
+- Click the check button to mark it complete
 
-**Task Overdue Reminders:**
-- The system automatically sends email reminders for overdue tasks (daily at 9 AM IST)
-- Reminders include how many days the task is overdue
-- Reminders are always sent regardless of notification preferences`,
+**Manager view:**
+- Use the dropdown at the top to switch between "My Calendar", "All Team", or a specific person
+- This lets managers see what their team is doing on any given day
+
+**Note:** Calendar tasks do NOT affect performance scores. They are purely for visibility and coordination.`,
       },
     ],
   },
@@ -317,16 +356,27 @@ const docs: DocSection[] = [
     articles: [
       {
         title: "Creating SOPs",
-        content: `**SOPs (Standard Operating Procedures) document your processes.**
+        content: `**SOPs (Standard Operating Procedures) document how work should be done.**
+
+SOPs can be linked to KRAs — this way, a KRA defines "what" someone is responsible for, and the SOP defines "how" to do it.
 
 **Creating a SOP:**
 1. Go to **SOPs** in the sidebar
 2. Click **Create SOP**
 3. Fill in:
    - **Title** — Name of the procedure
-   - **Category** — Group related SOPs
-   - **Content** — Step-by-step procedure (supports rich text)
+   - **Category** — Group related SOPs (e.g., "Engineering", "Sales")
+   - **Link to KRA** — Optionally connect to a KRA
+   - **Content** — Step-by-step procedure
    - **Version** — Track changes over time
+
+**SOP Statuses:**
+| Status | Meaning |
+|--------|---------|
+| **Draft** | Being written, not visible to team |
+| **In Review** | Under review before publishing |
+| **Published** | Active and visible to assigned users |
+| **Archived** | No longer active |
 
 **SOP Sections:**
 - **All SOPs** — View all SOPs in your organization
@@ -340,15 +390,25 @@ const docs: DocSection[] = [
 **Assigning:**
 1. Open a SOP
 2. Click **Assign**
-3. Select team members or departments
+3. Select team members or an entire department
 4. Set a due date for completion
 5. Assignees receive an email notification
 
-**Compliance Tracking:**
-- View compliance status from SOPs > Compliance
-- See who has completed, who is pending, and who is overdue
-- Overdue SOP assignments trigger automatic email reminders
-- Compliance rates feed into performance scores`,
+**How compliance works:**
+- Each SOP has steps that must be completed
+- Assignees mark steps as done
+- Progress is tracked as a percentage
+- Compliance scores feed into performance scores (20% weight)
+
+**Overdue reminders:**
+- The system sends automatic email reminders for overdue SOP assignments
+- Reminders run daily at 9 AM IST
+- These reminders are always sent (cannot be disabled by users)
+
+**Compliance in performance scoring:**
+- SOP compliance contributes 20% to the composite performance score
+- Higher compliance = higher performance score
+- This encourages teams to follow documented procedures`,
       },
     ],
   },
@@ -361,24 +421,25 @@ const docs: DocSection[] = [
     articles: [
       {
         title: "Setting up review cycles",
-        content: `**Performance Reviews allow you to formally evaluate team members.**
+        content: `**Performance Reviews formally evaluate team members.**
 
 **Creating a Review Cycle:**
 1. Go to **Reviews** in the sidebar
 2. Click **Create Review Cycle**
 3. Fill in:
    - **Name** — e.g., "Q1 2026 Review"
+   - **Type** — Quarterly, Annual, Probation, PIP Review
    - **Period** — Start and end dates
    - **Participants** — Select who will be reviewed
-   - **Reviewers** — Assign managers and peers
 
 **Review Flow:**
 1. **Draft** — Set up the review cycle
-2. **Launch** — Activate the cycle (sends emails to all participants)
-3. **Self-Assessment** — Employees complete their self-review
+2. **Launch** — Activate (sends emails to all participants)
+3. **Self-Assessment** — Employees rate themselves on each KRA
 4. **Manager Review** — Managers review their direct reports
-5. **Peer Review** — Optional peer feedback
-6. **Finalize** — Complete the cycle and share results
+5. **Peer Review** — Optional feedback from colleagues
+6. **Calibration** — Leaders align scores across the organization
+7. **Finalize** — Complete the cycle and share results
 
 **Emails sent automatically:**
 - When a cycle is launched (to all participants)
@@ -387,24 +448,28 @@ const docs: DocSection[] = [
       {
         title: "Self-assessment & manager reviews",
         content: `**Self-Assessment:**
-- Employees rate themselves on each KRA/KPI
-- Add accomplishments, challenges, and goals
+- Employees rate themselves on each assigned KRA
+- Add accomplishments, challenges, and goals for next period
 - Submit for manager review
 
 **Manager Review:**
 - Review the self-assessment
-- Provide manager ratings and comments
+- Provide manager ratings on each KRA
+- Rate behavioral aspects (quality, reliability, collaboration, initiative, growth)
 - Add overall feedback and development suggestions
-- Finalize the review
+- Recommend an outcome (promotion eligible, hike eligible, PIP, etc.)
 
 **Peer Feedback:**
 - Optional 360-degree feedback
 - Peers provide ratings and comments
-- Feedback can be anonymous or named (configurable)
+- Feedback can be anonymous (configurable)
 
-**Review Scores:**
-- Reviews contribute to the composite performance score
-- Weight is configurable in Settings > General (default 25%)`,
+**How reviews affect performance scores:**
+- Manager rating contributes 25% to the composite score
+- Peer rating contributes 10%
+- Self rating contributes 5%
+- KPI achievement (separate from reviews) contributes 40%
+- SOP compliance contributes 20%`,
       },
     ],
   },
@@ -412,7 +477,7 @@ const docs: DocSection[] = [
     id: "scores",
     icon: <BarChart3 size={22} />,
     color: "#AB47BC",
-    title: "Composite Scores & Analytics",
+    title: "Performance Scores & Analytics",
     description: "Understand how performance scoring works",
     articles: [
       {
@@ -420,12 +485,13 @@ const docs: DocSection[] = [
         content: `**TheywrK calculates a composite performance score for each employee.**
 
 **Score Components:**
-| Component | Default Weight | Source |
-|-----------|---------------|--------|
+| Component | Weight | Source |
+|-----------|--------|--------|
 | KPI Achievement | 40% | KPI scores vs targets |
-| Task Completion | 25% | Task completion rate and timeliness |
-| Review Score | 25% | Performance review ratings |
-| SOP Compliance | 10% | SOP completion rate |
+| Manager Rating | 25% | Performance review ratings |
+| SOP Compliance | 20% | SOP completion rate |
+| Peer Rating | 10% | Peer feedback ratings |
+| Self Rating | 5% | Self-assessment ratings |
 
 **Weights are configurable** in Settings > General > Scoring Weights.
 
@@ -438,19 +504,23 @@ const docs: DocSection[] = [
 | Needs Improvement | 40-59 |
 | Unsatisfactory | 0-39 |
 
-**Kudos Bonus:** Receiving kudos adds a small bonus to the score.
+**Kudos Bonus:** Receiving kudos adds a small bonus (up to +5 points).
+
+**What does NOT affect scores:**
+- Work Calendar tasks — these are for visibility only, not scoring
 
 **Analytics:**
 - Go to **Analytics** in the sidebar
-- View team-wide performance trends
-- Compare departments and individuals
-- Export data for reporting`,
+- View organization health score
+- Compare departments
+- Track performance trends over time
+- See top performers and most recognized employees`,
       },
     ],
   },
   {
     id: "meetings",
-    icon: <Calendar size={22} />,
+    icon: <CalendarDays size={22} />,
     color: "#29B6F6",
     title: "Meetings",
     description: "Schedule meetings and track action items",
@@ -464,15 +534,21 @@ const docs: DocSection[] = [
 2. Click **Create Meeting**
 3. Fill in:
    - **Title** — Meeting name
+   - **Type** — Daily Standup, Weekly Review, 1-on-1, Quarterly Review, etc.
    - **Date & Time** — When it happens
+   - **Duration** — How long (in minutes)
    - **Attendees** — Who should attend
    - **Agenda** — What to discuss
-   - **Notes** — Meeting minutes (can be added during/after)
+
+**During/After the meeting:**
+- Add **Notes** and **Decisions**
+- Create **Action Items** — assigned to specific people with deadlines
+- Mark attendees as present/absent
 
 **Action Items:**
-- Add action items during meetings
-- Assign them to specific people with deadlines
-- Track follow-up completion`,
+- Action items can be converted to Work Calendar tasks
+- They have their own status tracking (Not Started, In Progress, Completed)
+- Managers can track follow-up completion`,
       },
     ],
   },
@@ -488,22 +564,23 @@ const docs: DocSection[] = [
         content: `**Kudos let you publicly recognize team members.**
 
 **Sending Kudos:**
-1. Click **+ Quick Add > Kudos** from the top bar
-2. Or go to the dashboard and use the kudos widget
+1. Click **+ Quick Add** from the top bar
+2. Or go to the dashboard and use the kudos section
 3. Select the recipient
 4. Write a message about what they did well
-5. Optionally tag a company value
+5. Optionally tag a company value (e.g., "Customer First", "Ownership")
 
 **When someone receives kudos:**
 - They get an in-app notification
 - They receive an email notification (if enabled)
-- It appears on the company kudos feed
-- It contributes a small bonus to their performance score
+- It appears on the company kudos feed on the dashboard
+- It adds a small bonus to their performance score (up to +5 points)
 
-**Kudos can be viewed:**
+**Kudos are visible:**
 - On the dashboard feed
 - On individual profile pages
-- In the activity log`,
+- In the activity log
+- In Analytics (Most Recognized leaderboard)`,
       },
     ],
   },
@@ -522,18 +599,23 @@ const docs: DocSection[] = [
 1. Click **AI Assistant** in the sidebar
 2. Ask questions in natural language, such as:
    - "How is the engineering team performing?"
-   - "Which tasks are overdue?"
-   - "Summarize recent review scores"
-   - "What are the top priorities this week?"
+   - "Who are our top performers?"
+   - "Show department breakdown"
+   - "What's our SOP compliance status?"
+   - "Who should I consider for promotion?"
 
-**The AI can analyze:**
-- Task completion rates and trends
-- Team performance and KPI achievement
+**The AI analyzes:**
+- KRA assignments and KPI achievement
+- Team performance and composite scores
 - SOP compliance status
 - Review cycle results
-- Activity patterns
+- Department comparisons
+- Recent activity patterns
 
-**Note:** The AI Assistant requires an Anthropic API key to be configured. Without it, the feature will show a fallback message.`,
+**Tips for best results:**
+- Be specific: "How is Priya performing?" vs "Show performance"
+- Ask follow-up questions — the AI remembers context
+- Use it for data-driven decisions about promotions, PIPs, and team changes`,
       },
     ],
   },
@@ -555,11 +637,12 @@ const docs: DocSection[] = [
 4. Select which events to listen for
 
 **Available events:**
-- \`user_invited\` — When a team member is invited
-- \`task_created\` — When a new task is created
-- \`task_completed\` — When a task is completed
-- \`review_completed\` — When a review is finalized
-- \`kudos_given\` — When kudos are sent
+- user_invited — When a team member is invited
+- kra_assigned — When a KRA is assigned
+- kpi_recorded — When a KPI score is recorded
+- review_completed — When a review is finalized
+- sop_completed — When an SOP assignment is completed
+- kudos_given — When kudos are sent
 
 **Webhook payload** includes the event type and relevant data in JSON format.`,
       },
@@ -581,10 +664,10 @@ const docs: DocSection[] = [
 | Tab | What it does |
 |-----|-------------|
 | **General** | Organization name, timezone, currency, fiscal year, review frequency, scoring weights and bands |
-| **Modules** | Enable/disable features (People, Tasks, SOPs, Reviews, etc.) — disabled modules hide from sidebar |
-| **Team** | Invite new members, manage pending invitations, view team size |
+| **Modules** | Enable/disable features — disabled modules hide from the sidebar |
+| **Team** | Invite new members, cancel pending invitations |
 | **Security** | Password policy, session timeout, 2FA settings |
-| **Notifications** | Company-wide email notification toggles and personal email preferences |
+| **Notifications** | Company-wide email toggles and personal email preferences |
 | **Removed People** | View and restore soft-deleted team members |
 | **Billing** | Current plan, usage metrics, upgrade options |
 | **Data** | Export all data as CSV, danger zone (delete organization) |`,
@@ -594,12 +677,12 @@ const docs: DocSection[] = [
         content: `**TheywrK sends emails for important events.**
 
 **Emails that are always sent (cannot be disabled):**
-- Invitation emails (when inviting team members)
+- Invitation emails
 - Password reset emails
-- Overdue task/SOP reminders
+- Overdue SOP reminders
 
 **Emails configurable per user (Settings > Notifications):**
-- Task assignment notifications
+- KRA assignment notifications
 - Review cycle notifications
 - SOP assignment notifications
 - Kudos/recognition notifications
@@ -607,29 +690,7 @@ const docs: DocSection[] = [
 **How to manage preferences:**
 1. Go to **Settings > Notifications**
 2. Toggle individual email categories on/off
-3. Changes apply to the logged-in user
-
-**Company-wide defaults** can be set by admins at the top of the Notifications tab.`,
-      },
-      {
-        title: "Security settings",
-        content: `**Configure password and security policies.**
-
-**Password Policy:**
-- Minimum password length
-- Require uppercase letters
-- Require numbers
-- Require special characters
-
-**Session Settings:**
-- Session timeout duration
-- Two-factor authentication (when available)
-
-**Password Reset:**
-- Users can reset their password from the login page
-- Click "Forgot password?" to receive a reset email
-- Reset links expire after 1 hour
-- Each reset link can only be used once`,
+3. Changes apply to the logged-in user`,
       },
       {
         title: "Plans & billing",
@@ -642,36 +703,7 @@ const docs: DocSection[] = [
 | **Scale** | Up to 200 | Unlimited | 1000/month | Priority support |
 | **Enterprise** | Unlimited | Unlimited | Unlimited | Custom, SSO, API |
 
-**Usage Metrics** are shown in Settings > Billing:
-- Current user count vs limit
-- Active SOPs vs limit
-- AI queries used this month vs limit
-
 **To upgrade:** Contact support@theywrk.com or click Upgrade in the Billing tab.`,
-      },
-      {
-        title: "Exporting data",
-        content: `**Export all your organization data.**
-
-1. Go to **Settings > Data**
-2. Click **Export All Data**
-3. A CSV file is generated with all your organization data including:
-   - People and profiles
-   - Tasks and completion status
-   - KRAs and KPI scores
-   - SOPs and compliance records
-   - Review data
-   - Activity logs
-
-**Individual exports** are also available:
-- Export tasks from the Tasks page
-- Export people from the People page
-- Export review data from individual review cycles
-
-**Deleting Organization:**
-- The Data tab has a "Danger Zone" section
-- Type your organization name to confirm deletion
-- This permanently deletes all data and cannot be undone`,
       },
     ],
   },
@@ -786,7 +818,6 @@ export default function DocsPage() {
               <h2 className="text-xl font-semibold mb-6">{currentArticle.title}</h2>
               <div className="prose prose-invert prose-sm max-w-none">
                 {currentArticle.content.split("\n").map((line, i) => {
-                  // Handle headers
                   if (line.startsWith("**") && line.endsWith("**")) {
                     return (
                       <h3 key={i} className="text-base font-semibold text-[#E8E8F0] mt-6 mb-3">
@@ -794,111 +825,55 @@ export default function DocsPage() {
                       </h3>
                     );
                   }
-
-                  // Handle table rows
                   if (line.startsWith("|") && line.includes("|")) {
-                    const cells = line
-                      .split("|")
-                      .filter((c) => c.trim())
-                      .map((c) => c.trim());
-                    if (cells.every((c) => c.match(/^[-:]+$/))) return null; // separator row
+                    const cells = line.split("|").filter((c) => c.trim()).map((c) => c.trim());
+                    if (cells.every((c) => c.match(/^[-:]+$/))) return null;
                     const isHeader = i > 0 && currentArticle.content.split("\n")[i + 1]?.match(/^\|[\s-:|]+\|$/);
                     return (
                       <div key={i} className="flex border-b border-[#2A2A3A] text-sm">
                         {cells.map((cell, j) => (
-                          <div
-                            key={j}
-                            className={`flex-1 px-3 py-2 ${
-                              isHeader ? "font-semibold text-[#E8E8F0]" : "text-[#8888A0]"
-                            }`}
-                          >
+                          <div key={j} className={`flex-1 px-3 py-2 ${isHeader ? "font-semibold text-[#E8E8F0]" : "text-[#8888A0]"}`}>
                             {cell.replace(/\*\*/g, "")}
                           </div>
                         ))}
                       </div>
                     );
                   }
-
-                  // Handle numbered lists
                   if (line.match(/^\d+\.\s/)) {
                     return (
                       <div key={i} className="flex gap-2 text-sm text-[#8888A0] ml-2 mb-1">
-                        <span className="text-purple-400 font-mono text-xs mt-0.5">
-                          {line.match(/^(\d+)\./)?.[1]}.
-                        </span>
-                        <span
-                          dangerouslySetInnerHTML={{
-                            __html: line
-                              .replace(/^\d+\.\s/, "")
-                              .replace(
-                                /\*\*(.+?)\*\*/g,
-                                '<strong class="text-[#E8E8F0]">$1</strong>'
-                              )
-                              .replace(
-                                /\[(.+?)\]\((.+?)\)/g,
-                                '<a href="$2" class="text-purple-400 hover:text-purple-300">$1</a>'
-                              ),
-                          }}
-                        />
+                        <span className="text-purple-400 font-mono text-xs mt-0.5">{line.match(/^(\d+)\./)?.[1]}.</span>
+                        <span dangerouslySetInnerHTML={{
+                          __html: line.replace(/^\d+\.\s/, "")
+                            .replace(/\*\*(.+?)\*\*/g, '<strong class="text-[#E8E8F0]">$1</strong>')
+                            .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-purple-400 hover:text-purple-300">$1</a>'),
+                        }} />
                       </div>
                     );
                   }
-
-                  // Handle bullet points
                   if (line.startsWith("- ") || line.startsWith("   - ")) {
                     const indent = line.startsWith("   - ");
                     return (
-                      <div
-                        key={i}
-                        className={`flex gap-2 text-sm text-[#8888A0] mb-1 ${indent ? "ml-6" : "ml-2"}`}
-                      >
-                        <span className="text-purple-400 mt-1.5">
-                          <div className="w-1 h-1 rounded-full bg-current" />
-                        </span>
-                        <span
-                          dangerouslySetInnerHTML={{
-                            __html: line
-                              .replace(/^-\s+/, "")
-                              .replace(/^\s+-\s+/, "")
-                              .replace(
-                                /\*\*(.+?)\*\*/g,
-                                '<strong class="text-[#E8E8F0]">$1</strong>'
-                              )
-                              .replace(
-                                /`(.+?)`/g,
-                                '<code class="text-purple-300 bg-purple-500/10 px-1 rounded text-xs">$1</code>'
-                              ),
-                          }}
-                        />
+                      <div key={i} className={`flex gap-2 text-sm text-[#8888A0] mb-1 ${indent ? "ml-6" : "ml-2"}`}>
+                        <span className="text-purple-400 mt-1.5"><div className="w-1 h-1 rounded-full bg-current" /></span>
+                        <span dangerouslySetInnerHTML={{
+                          __html: line.replace(/^-\s+/, "").replace(/^\s+-\s+/, "")
+                            .replace(/\*\*(.+?)\*\*/g, '<strong class="text-[#E8E8F0]">$1</strong>')
+                            .replace(/`(.+?)`/g, '<code class="text-purple-300 bg-purple-500/10 px-1 rounded text-xs">$1</code>'),
+                        }} />
                       </div>
                     );
                   }
-
-                  // Handle paragraphs with bold and links
                   if (line.trim()) {
                     return (
-                      <p
-                        key={i}
-                        className="text-sm text-[#8888A0] mb-3 leading-relaxed"
-                        dangerouslySetInnerHTML={{
-                          __html: line
-                            .replace(
-                              /\*\*(.+?)\*\*/g,
-                              '<strong class="text-[#E8E8F0]">$1</strong>'
-                            )
-                            .replace(
-                              /\[(.+?)\]\((.+?)\)/g,
-                              '<a href="$2" class="text-purple-400 hover:text-purple-300">$1</a>'
-                            )
-                            .replace(
-                              /`(.+?)`/g,
-                              '<code class="text-purple-300 bg-purple-500/10 px-1 rounded text-xs">$1</code>'
-                            ),
-                        }}
-                      />
+                      <p key={i} className="text-sm text-[#8888A0] mb-3 leading-relaxed" dangerouslySetInnerHTML={{
+                        __html: line
+                          .replace(/\*\*(.+?)\*\*/g, '<strong class="text-[#E8E8F0]">$1</strong>')
+                          .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-purple-400 hover:text-purple-300">$1</a>')
+                          .replace(/`(.+?)`/g, '<code class="text-purple-300 bg-purple-500/10 px-1 rounded text-xs">$1</code>'),
+                      }} />
                     );
                   }
-
                   return null;
                 })}
               </div>
