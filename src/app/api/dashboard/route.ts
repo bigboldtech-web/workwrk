@@ -9,44 +9,27 @@ export async function GET() {
   const orgId = getOrgId(session);
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
   const [
     totalPeople,
     newPeopleThisMonth,
-    taskStats,
-    completedTasksThisWeek,
-    totalTasksThisWeek,
-    overdueTasks,
     departments,
-    recentTasks,
     sopCount,
     sopComplianceRecords,
     users,
     notifications,
     recentActivity,
     recentKudos,
+    recentKpiRecords,
   ] = await Promise.all([
     prisma.user.count({ where: { organizationId: orgId } }),
     prisma.user.count({ where: { organizationId: orgId, createdAt: { gte: thirtyDaysAgo } } }),
-    prisma.task.groupBy({ by: ["status"], where: { organizationId: orgId }, _count: true }),
-    prisma.task.count({ where: { organizationId: orgId, completedAt: { gte: sevenDaysAgo } } }),
-    prisma.task.count({ where: { organizationId: orgId, createdAt: { gte: sevenDaysAgo } } }),
-    prisma.task.count({
-      where: { organizationId: orgId, status: { in: ["NOT_STARTED", "IN_PROGRESS"] }, deadline: { lt: now } },
-    }),
     prisma.department.findMany({
       where: { organizationId: orgId },
       include: {
         head: { select: { firstName: true, lastName: true } },
         _count: { select: { members: true } },
       },
-    }),
-    prisma.task.findMany({
-      where: { organizationId: orgId },
-      include: { assignee: { select: { firstName: true, lastName: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 5,
     }),
     prisma.sOP.count({ where: { organizationId: orgId, status: "PUBLISHED" } }),
     prisma.sOPCompliance.findMany({
@@ -59,7 +42,6 @@ export async function GET() {
         role: { select: { title: true } },
         department: { select: { name: true } },
         kpiRecords: { orderBy: { createdAt: "desc" }, take: 5, select: { score: true } },
-        _count: { select: { assignedTasks: true } },
       },
     }),
     prisma.notification.findMany({
@@ -80,6 +62,15 @@ export async function GET() {
       include: {
         giver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
         receiver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    prisma.kPIRecord.findMany({
+      where: { kpi: { organizationId: orgId } },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        kpi: { select: { name: true, unit: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 5,
@@ -136,36 +127,28 @@ export async function GET() {
 
   // Alerts
   const alerts: { type: string; message: string; time: string }[] = [];
-  if (overdueTasks > 0) alerts.push({ type: "warning", message: `${overdueTasks} tasks are overdue`, time: "now" });
   const pipUsers = users.filter((u) => u.status === "PIP");
   if (pipUsers.length > 0) alerts.push({ type: "danger", message: `${pipUsers.length} employee(s) on PIP`, time: "active" });
 
-  const completedCount = taskStats.find((s) => s.status === "COMPLETED")?._count || 0;
-  const totalCount = taskStats.reduce((sum, s) => sum + s._count, 0);
-  if (completedCount > 0 && totalCount > 0) {
-    const rate = Math.round((completedCount / totalCount) * 100);
-    if (rate > 75) alerts.push({ type: "success", message: `Task completion rate is ${rate}%`, time: "this period" });
-  }
+  if (sopCompliance > 80) alerts.push({ type: "success", message: `SOP compliance is at ${sopCompliance}%`, time: "this period" });
 
   return jsonSuccess({
     stats: {
       totalPeople,
       newPeopleThisMonth,
-      completedTasksThisWeek,
-      totalTasksThisWeek,
       sopCompliance,
       sopCount,
-      overdueTasks,
     },
     topPerformers,
-    recentTasks: recentTasks.map((t) => ({
-      id: t.id,
-      title: t.title,
-      priority: t.priority,
-      status: t.status,
-      assignee: t.assignee ? `${t.assignee.firstName} ${t.assignee.lastName.charAt(0)}.` : "Unassigned",
-      deadline: t.deadline?.toISOString() || null,
-      completedAt: t.completedAt?.toISOString() || null,
+    recentKpiRecords: recentKpiRecords.map((r) => ({
+      id: r.id,
+      kpiName: r.kpi.name,
+      unit: r.kpi.unit,
+      score: r.score,
+      actualValue: r.actualValue,
+      targetValue: r.targetValue,
+      userName: `${r.user.firstName} ${r.user.lastName}`,
+      createdAt: r.createdAt.toISOString(),
     })),
     departmentPerformance: deptPerformance,
     alerts,

@@ -126,20 +126,18 @@ async function main() {
     )
   );
 
-  // Create some tasks
+  // Create some calendar tasks
   const tasks = [
-    { title: "Finalize hiring plan for Ops team", priority: "P0" as const, status: "IN_PROGRESS" as const, assigneeId: userMap["Amit Joshi"], deadline: new Date("2026-03-26") },
-    { title: "Prepare client escalation report", priority: "P1" as const, status: "IN_REVIEW" as const, assigneeId: userMap["Priya Sharma"], deadline: new Date("2026-03-27") },
-    { title: "Update SOP for order processing", priority: "P2" as const, status: "NOT_STARTED" as const, assigneeId: userMap["Ravi Kumar"], deadline: new Date("2026-03-28") },
-    { title: "Review vendor SLA documents", priority: "P2" as const, status: "COMPLETED" as const, assigneeId: userMap["Neha Mehta"], deadline: new Date("2026-03-25"), completedAt: new Date() },
-    { title: "Submit Q3 budget forecast", priority: "P1" as const, status: "COMPLETED" as const, assigneeId: userMap["Sanjay Reddy"], deadline: new Date("2026-03-24"), completedAt: new Date() },
-    { title: "Fix authentication timeout bug", priority: "P0" as const, status: "IN_PROGRESS" as const, assigneeId: userMap["Deepak Patel"], deadline: new Date("2026-03-26") },
+    { title: "Finalize hiring plan for Ops team", status: "IN_PROGRESS" as const, assigneeId: userMap["Amit Joshi"], date: new Date("2026-04-01"), startTime: "09:00", endTime: "11:00" },
+    { title: "Prepare client escalation report", status: "PLANNED" as const, assigneeId: userMap["Priya Sharma"], date: new Date("2026-04-02"), startTime: "10:00", endTime: "12:00" },
+    { title: "Review vendor SLA documents", status: "COMPLETED" as const, assigneeId: userMap["Neha Mehta"], date: new Date("2026-04-01"), startTime: "14:00", endTime: "15:00" },
+    { title: "Fix authentication timeout bug", status: "IN_PROGRESS" as const, assigneeId: userMap["Deepak Patel"], date: new Date("2026-04-01"), startTime: "09:00", endTime: "17:00" },
   ];
 
   await Promise.all(
     tasks.map((t) =>
       prisma.task.create({
-        data: { ...t, creatorId: admin.id, organizationId: org.id },
+        data: { ...t, organizationId: org.id },
       })
     )
   );

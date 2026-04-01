@@ -28,10 +28,10 @@ const FROM_ADDRESS = process.env.SMTP_FROM || "TheywrK <noreply@theywrk.com>";
 // Preference Types
 // ==========================================
 
-export type EmailCategory = "task" | "review" | "sop" | "kudos" | "invitation" | "reminder";
+export type EmailCategory = "kra" | "review" | "sop" | "kudos" | "invitation" | "reminder";
 
 const CATEGORY_TO_PREF: Record<string, string> = {
-  task: "taskNotifications",
+  kra: "kraNotifications",
   review: "reviewNotifications",
   sop: "sopNotifications",
   kudos: "kudosNotifications",

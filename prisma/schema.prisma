@@ -85,9 +85,7 @@ model User {
   certifications Certification[]
   kraAssignments KRAAssignment[]
   kpiRecords     KPIRecord[]
-  assignedTasks  Task[]   @relation("TaskAssignee")
-  createdTasks   Task[]   @relation("TaskCreator")
-  taskComments   TaskComment[]
+  tasks          Task[]   @relation("TaskAssignee")
   sopComplianceRecords SOPCompliance[]
   sopAssignments       SOPAssignment[]
   reviewsAsSubject   Review[]       @relation("ReviewSubject")
@@ -276,6 +274,8 @@ model KRA {
   role           Role?    @relation(fields: [roleId], references: [id])
   assignments    KRAAssignment[]
   kpis           KPI[]
+  tasks          Task[]
+  sops           SOP[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -312,6 +312,8 @@ model KPI {
   type           KPIType  @default(QUANTITATIVE)
   unit           String?
   frequency      Frequency @default(MONTHLY)
+  targetValue    Float?
+  targetLabel    String?
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   kraId          String?
@@ -366,66 +368,35 @@ enum KPIRecordStatus {
 }
 
 // ==========================================
-// MODULE 4: TASK MANAGEMENT
+// MODULE 4: TASKS (Calendar Work Items)
 // ==========================================
 
 model Task {
   id             String     @id @default(cuid())
   title          String
   description    String?
-  priority       Priority   @default(P2)
-  status         TaskStatus @default(NOT_STARTED)
-  progress       Int        @default(0)
-  deadline       DateTime?
-  completedAt    DateTime?
-  isRecurring    Boolean    @default(false)
-  recurPattern   String?
+  date           DateTime
+  startTime      String?
+  endTime        String?
+  status         TaskStatus @default(PLANNED)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assigneeId     String?
-  assignee       User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  creatorId      String
-  creator        User       @relation("TaskCreator", fields: [creatorId], references: [id])
-  parentId       String?
-  parent         Task?      @relation("SubTasks", fields: [parentId], references: [id])
-  subTasks       Task[]     @relation("SubTasks")
-  dependsOnId    String?
-  dependsOn      Task?      @relation("TaskDependency", fields: [dependsOnId], references: [id])
-  dependents     Task[]     @relation("TaskDependency")
-  tags           String[]
-  comments       TaskComment[]
+  assigneeId     String
+  assignee       User       @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  kraId          String?
+  kra            KRA?       @relation(fields: [kraId], references: [id])
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
   @@index([organizationId])
   @@index([assigneeId])
-  @@index([status])
-}
-
-enum Priority {
-  P0
-  P1
-  P2
-  P3
+  @@index([date])
 }
 
 enum TaskStatus {
-  NOT_STARTED
+  PLANNED
   IN_PROGRESS
-  IN_REVIEW
   COMPLETED
-  BLOCKED
-  CANCELLED
-}
-
-model TaskComment {
-  id        String   @id @default(cuid())
-  content   String
-  taskId    String
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  authorId  String
-  author    User     @relation(fields: [authorId], references: [id])
-  createdAt DateTime @default(now())
 }
 
 // ==========================================
@@ -437,6 +408,8 @@ model SOP {
   title          String
   description    String?
   category       String?
+  kraId          String?
+  kra            KRA?     @relation(fields: [kraId], references: [id])
   content        Json
   version        Int       @default(1)
   status         SOPStatus @default(DRAFT)
@@ -570,7 +543,6 @@ model Review {
   // Structured manager review data
   managerAssessment Json?     // {kraRatings: [{kraId, kraName, rating, comments}], behavioral: {quality, reliability, collaboration, initiative, growth}, overallComments, recommendation}
   // Auto-calculated metrics
-  taskCompletionRate Float?
   sopComplianceScore Float?
   peerRating      Float?
   compositeScore  Float?
@@ -665,6 +637,15 @@ model MeetingAttendee {
   @@unique([meetingId, userId])
 }
 
+enum ActionItemStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  IN_REVIEW
+  COMPLETED
+  BLOCKED
+  CANCELLED
+}
+
 model ActionItem {
   id          String     @id @default(cuid())
   title       String
@@ -673,7 +654,7 @@ model ActionItem {
   assigneeId  String
   assignee    User       @relation(fields: [assigneeId], references: [id])
   deadline    DateTime?
-  status      TaskStatus @default(NOT_STARTED)
+  status      ActionItemStatus @default(NOT_STARTED)
   completedAt DateTime?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -932,7 +913,7 @@ enum EmailStatus {
 model EmailPreference {
   id                  String   @id @default(cuid())
   userId              String   @unique
-  taskNotifications   Boolean  @default(true)
+  kraNotifications    Boolean  @default(true)
   reviewNotifications Boolean  @default(true)
   sopNotifications    Boolean  @default(true)
   kudosNotifications  Boolean  @default(true)
@@ -953,7 +934,7 @@ model PerformanceScore {
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   period         String   // "2026-03", "2026-Q1", etc.
   score          Float    // Composite score 0-100
-  breakdown      Json     // {kpiScore, managerRating, peerRating, selfRating, sopCompliance, taskCompletion, weights}
+  breakdown      Json     // {kpiScore, managerRating, peerRating, selfRating, sopCompliance, weights}
   calculatedAt   DateTime @default(now())
   organizationId String
   createdAt      DateTime @default(now())

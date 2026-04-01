@@ -6,7 +6,6 @@ interface ScoreWeights {
   peer: number;
   self: number;
   sopCompliance: number;
-  taskCompletion: number;
 }
 
 interface ScoreBreakdown {
@@ -15,18 +14,16 @@ interface ScoreBreakdown {
   peerRating: number | null;
   selfRating: number | null;
   sopCompliance: number | null;
-  taskCompletion: number | null;
   kudosBonus: number;
   weights: ScoreWeights;
 }
 
 const DEFAULT_WEIGHTS: ScoreWeights = {
-  kpi: 30,
+  kpi: 40,
   manager: 25,
   peer: 10,
-  self: 10,
-  sopCompliance: 10,
-  taskCompletion: 15,
+  self: 5,
+  sopCompliance: 20,
 };
 
 function getCurrentPeriod(): string {
@@ -51,14 +48,9 @@ async function getOrgWeights(organizationId: string): Promise<ScoreWeights> {
     peer: sw.peer ?? DEFAULT_WEIGHTS.peer,
     self: sw.self ?? DEFAULT_WEIGHTS.self,
     sopCompliance: sw.sopCompliance ?? DEFAULT_WEIGHTS.sopCompliance,
-    taskCompletion: sw.taskCompletion ?? DEFAULT_WEIGHTS.taskCompletion,
   };
 }
 
-/**
- * Calculate KPI achievement score for a user (0-100, capped at 120 from individual KPIs).
- * Uses records from the last 90 days.
- */
 async function calcKpiScore(userId: string): Promise<number | null> {
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
@@ -74,14 +66,9 @@ async function calcKpiScore(userId: string): Promise<number | null> {
   if (records.length === 0) return null;
 
   const avg = records.reduce((sum, r) => sum + r.score!, 0) / records.length;
-  // Normalize: KPI scores can be 0-120, map to 0-100
   return Math.min(Math.round((avg / 120) * 100), 100);
 }
 
-/**
- * Get manager review rating for a user (0-100).
- * Uses the most recent completed review.
- */
 async function calcManagerRating(userId: string): Promise<number | null> {
   const review = await prisma.review.findFirst({
     where: {
@@ -94,15 +81,11 @@ async function calcManagerRating(userId: string): Promise<number | null> {
   });
 
   if (!review) return null;
-  // Prefer calibrated score if available, otherwise use manager rating
   const rating = review.calibratedScore ?? review.managerRating;
   if (rating == null) return null;
   return Math.min(Math.round(rating), 100);
 }
 
-/**
- * Get peer review average rating for a user (0-100).
- */
 async function calcPeerRating(userId: string): Promise<number | null> {
   const feedback = await prisma.peerFeedback.findMany({
     where: {
@@ -121,10 +104,6 @@ async function calcPeerRating(userId: string): Promise<number | null> {
   return Math.min(Math.round(avg), 100);
 }
 
-/**
- * Get self-assessment rating for a user (0-100).
- * Derived from structured selfRatings in latest review.
- */
 async function calcSelfRating(userId: string): Promise<number | null> {
   const review = await prisma.review.findFirst({
     where: {
@@ -149,13 +128,9 @@ async function calcSelfRating(userId: string): Promise<number | null> {
   if (validRatings.length === 0) return null;
 
   const avg = validRatings.reduce((sum, r) => sum + r.rating!, 0) / validRatings.length;
-  // Self-ratings typically 1-5 scale, normalize to 0-100
   return Math.min(Math.round((avg / 5) * 100), 100);
 }
 
-/**
- * Calculate SOP compliance score for a user (0-100).
- */
 async function calcSopCompliance(userId: string): Promise<number | null> {
   const assignments = await prisma.sOPAssignment.findMany({
     where: { userId, status: { in: ["IN_PROGRESS", "COMPLETED"] } },
@@ -164,14 +139,12 @@ async function calcSopCompliance(userId: string): Promise<number | null> {
 
   if (assignments.length === 0) return null;
 
-  // If scores are available, average them
   const scored = assignments.filter((a) => a.score != null);
   if (scored.length > 0) {
     const avg = scored.reduce((sum, a) => sum + a.score!, 0) / scored.length;
     return Math.min(Math.round(avg), 100);
   }
 
-  // Fallback to step completion ratio
   const totalSteps = assignments.reduce((sum, a) => sum + a.stepsTotal, 0);
   const completedSteps = assignments.reduce((sum, a) => sum + a.stepsCompleted, 0);
   if (totalSteps === 0) return null;
@@ -179,32 +152,6 @@ async function calcSopCompliance(userId: string): Promise<number | null> {
   return Math.round((completedSteps / totalSteps) * 100);
 }
 
-/**
- * Calculate task completion rate for a user (0-100).
- * Uses tasks from the last 90 days.
- */
-async function calcTaskCompletion(userId: string): Promise<number | null> {
-  const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-
-  const tasks = await prisma.task.findMany({
-    where: {
-      assigneeId: userId,
-      createdAt: { gte: ninetyDaysAgo },
-      status: { not: "CANCELLED" },
-    },
-    select: { status: true },
-  });
-
-  if (tasks.length === 0) return null;
-
-  const completed = tasks.filter((t) => t.status === "COMPLETED").length;
-  return Math.round((completed / tasks.length) * 100);
-}
-
-/**
- * Calculate kudos bonus (0-5 points).
- * 1 point per 2 kudos received in last 30 days, max 5.
- */
 async function calcKudosBonus(userId: string): Promise<number> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -218,23 +165,19 @@ async function calcKudosBonus(userId: string): Promise<number> {
   return Math.min(Math.floor(count / 2), 5);
 }
 
-/**
- * Calculate and store composite performance score for a user.
- */
 export async function calculatePerformanceScore(
   userId: string,
   organizationId: string
 ): Promise<{ score: number; breakdown: ScoreBreakdown }> {
   const weights = await getOrgWeights(organizationId);
 
-  const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, taskCompletion, kudosBonus] =
+  const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, kudosBonus] =
     await Promise.all([
       calcKpiScore(userId),
       calcManagerRating(userId),
       calcPeerRating(userId),
       calcSelfRating(userId),
       calcSopCompliance(userId),
-      calcTaskCompletion(userId),
       calcKudosBonus(userId),
     ]);
 
@@ -244,19 +187,16 @@ export async function calculatePerformanceScore(
     peerRating,
     selfRating,
     sopCompliance,
-    taskCompletion,
     kudosBonus,
     weights,
   };
 
-  // Calculate weighted composite — only include components that have data
   const components: { value: number; weight: number }[] = [];
   if (kpiScore != null) components.push({ value: kpiScore, weight: weights.kpi });
   if (managerRating != null) components.push({ value: managerRating, weight: weights.manager });
   if (peerRating != null) components.push({ value: peerRating, weight: weights.peer });
   if (selfRating != null) components.push({ value: selfRating, weight: weights.self });
   if (sopCompliance != null) components.push({ value: sopCompliance, weight: weights.sopCompliance });
-  if (taskCompletion != null) components.push({ value: taskCompletion, weight: weights.taskCompletion });
 
   let compositeScore = 0;
   if (components.length > 0) {
@@ -266,13 +206,11 @@ export async function calculatePerformanceScore(
     );
   }
 
-  // Add kudos bonus (up to +5 points)
   compositeScore += kudosBonus;
   compositeScore = Math.min(Math.max(compositeScore, 0), 100);
 
   const period = getCurrentPeriod();
 
-  // Upsert the score
   await prisma.performanceScore.upsert({
     where: { userId_period: { userId, period } },
     create: {
@@ -293,18 +231,12 @@ export async function calculatePerformanceScore(
   return { score: compositeScore, breakdown };
 }
 
-/**
- * Recalculate scores for a specific user (fire-and-forget).
- */
 export function triggerRecalculation(userId: string, organizationId: string): void {
   calculatePerformanceScore(userId, organizationId).catch((err) => {
     console.error(`Performance score recalculation failed for user ${userId}:`, err);
   });
 }
 
-/**
- * Recalculate scores for all users in an organization.
- */
 export async function recalculateAllScores(organizationId: string): Promise<void> {
   const users = await prisma.user.findMany({
     where: { organizationId, deletedAt: null, status: { not: "INACTIVE" } },
@@ -316,9 +248,6 @@ export async function recalculateAllScores(organizationId: string): Promise<void
   );
 }
 
-/**
- * Get performance score history for a user (last N periods).
- */
 export async function getScoreHistory(
   userId: string,
   limit: number = 6
@@ -338,9 +267,6 @@ export async function getScoreHistory(
   }));
 }
 
-/**
- * Get latest performance score for a user.
- */
 export async function getLatestScore(
   userId: string
 ): Promise<{ score: number; breakdown: ScoreBreakdown; period: string; calculatedAt: Date } | null> {
@@ -360,9 +286,6 @@ export async function getLatestScore(
   };
 }
 
-/**
- * Get top performers in an organization by composite score.
- */
 export async function getTopPerformers(
   organizationId: string,
   limit: number = 10

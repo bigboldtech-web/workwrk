@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
         organizationId: orgId,
         title: { contains: searchTerm, mode: "insensitive" },
       },
-      select: { id: true, title: true, status: true, priority: true },
+      select: { id: true, title: true, status: true, date: true },
       take: 5,
     }),
     prisma.sOP.findMany({
@@ -76,8 +76,8 @@ export async function GET(req: NextRequest) {
       type: "task" as const,
       id: t.id,
       title: t.title,
-      subtitle: `${t.priority} · ${t.status.replace(/_/g, " ")}`,
-      href: `/tasks/${t.id}`,
+      subtitle: `${t.status.replace(/_/g, " ")} · ${t.date.toISOString().split("T")[0]}`,
+      href: `/tasks`,
     })),
     ...sops.map((s) => ({
       type: "sop" as const,

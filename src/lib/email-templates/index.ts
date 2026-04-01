@@ -1,5 +1,4 @@
 export { invitationTemplate } from "./invitation";
-export { taskAssignedTemplate } from "./task-assigned";
 export { reviewPendingTemplate } from "./review-pending";
 export { reviewCompletedTemplate } from "./review-completed";
 export { sopAssignedTemplate } from "./sop-assigned";

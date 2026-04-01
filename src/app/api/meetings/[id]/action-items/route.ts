@@ -144,17 +144,15 @@ export async function PATCH(
   });
   if (!item) return jsonError("Action item not found", 404);
 
-  // Create a task from this action item
+  // Create a calendar task from this action item
   const task = await prisma.task.create({
     data: {
       title: item.title,
       description: `From meeting: ${item.meeting.title}`,
       assigneeId: item.assigneeId,
-      creatorId: userId,
       organizationId: orgId,
-      deadline: item.deadline,
-      status: "NOT_STARTED",
-      priority: "P2",
+      date: item.deadline || new Date(),
+      status: "PLANNED",
     },
   });
 

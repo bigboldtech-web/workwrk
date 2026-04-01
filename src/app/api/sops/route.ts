@@ -11,11 +11,13 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const category = searchParams.get("category");
   const status = searchParams.get("status");
+  const kraId = searchParams.get("kraId");
   const pagination = parsePaginationParams(req);
 
   const where: any = { organizationId: getOrgId(session) };
   if (category) where.category = category;
   if (status) where.status = status;
+  if (kraId) where.kraId = kraId;
   if (pagination.search) {
     where.OR = [
       { title: { contains: pagination.search, mode: "insensitive" } },
@@ -28,6 +30,7 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         _count: { select: { compliance: true } },
+        kra: { select: { id: true, name: true } },
       },
       orderBy: { updatedAt: "desc" },
       ...skipTake(pagination),
@@ -44,7 +47,7 @@ export async function POST(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const body = await req.json();
-  const { title, description, category, content } = body;
+  const { title, description, category, content, kraId } = body;
 
   if (!title) return jsonError("SOP title is required");
 
@@ -55,6 +58,7 @@ export async function POST(req: NextRequest) {
       category,
       content: content || { steps: [] },
       organizationId: getOrgId(session),
+      ...(kraId ? { kraId } : {}),
     },
   });
 

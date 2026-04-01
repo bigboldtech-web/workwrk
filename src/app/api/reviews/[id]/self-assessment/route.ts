@@ -43,15 +43,6 @@ export async function GET(
   const kpiScores = kpiRecords.filter((r) => r.score != null).map((r) => r.score!);
   const avgKpiScore = kpiScores.length > 0 ? Math.round(kpiScores.reduce((a, b) => a + b, 0) / kpiScores.length) : null;
 
-  // Task completion rate
-  const tasks = await prisma.task.findMany({
-    where: { assigneeId: userId, organizationId: orgId },
-    select: { status: true, deadline: true, completedAt: true },
-  });
-  const totalTasks = tasks.length;
-  const completedTasks = tasks.filter((t) => t.status === "COMPLETED").length;
-  const taskCompletionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null;
-
   // SOP compliance
   const sopRecords = await prisma.sOPCompliance.findMany({
     where: { userId },
@@ -75,9 +66,6 @@ export async function GET(
     metrics: {
       kpiRecords,
       avgKpiScore,
-      taskCompletionRate,
-      totalTasks,
-      completedTasks,
       avgSopScore,
     },
     kraAssignments,

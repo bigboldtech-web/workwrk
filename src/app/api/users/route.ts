@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
         department: { select: { id: true, name: true } },
         role: { select: { id: true, title: true } },
         manager: { select: { id: true, firstName: true, lastName: true } },
-        _count: { select: { directReports: true, assignedTasks: true } },
+        _count: { select: { directReports: true, kraAssignments: true } },
       },
       orderBy,
       ...skipTake(pagination),

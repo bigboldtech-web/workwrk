@@ -41,12 +41,10 @@ export async function POST(req: NextRequest) {
   // Gather comprehensive org context
   const [
     users,
-    taskStats,
     departments,
     recentKPIs,
     sops,
-    activeTasks,
-    overdueTasks,
+    kraAssignments,
     reviewCycles,
     recentMeetings,
     recentActivity,
@@ -61,13 +59,8 @@ export async function POST(req: NextRequest) {
         accessLevel: true,
         department: { select: { name: true } },
         role: { select: { title: true } },
-        _count: { select: { assignedTasks: true, directReports: true } },
+        _count: { select: { directReports: true, kraAssignments: true } },
       },
-    }),
-    prisma.task.groupBy({
-      by: ["status"],
-      where: { organizationId: orgId },
-      _count: true,
     }),
     prisma.department.findMany({
       where: { organizationId: orgId },
@@ -89,24 +82,13 @@ export async function POST(req: NextRequest) {
       where: { organizationId: orgId },
       select: { title: true, category: true, status: true, version: true },
     }),
-    prisma.task.findMany({
-      where: { organizationId: orgId, status: { in: ["IN_PROGRESS", "NOT_STARTED", "IN_REVIEW"] } },
-      select: {
-        title: true,
-        priority: true,
-        status: true,
-        deadline: true,
-        assignee: { select: { firstName: true, lastName: true } },
+    prisma.kRAAssignment.findMany({
+      where: { kra: { organizationId: orgId }, status: "ACTIVE" },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        kra: { select: { name: true } },
       },
-      orderBy: { priority: "asc" },
-      take: 20,
-    }),
-    prisma.task.count({
-      where: {
-        organizationId: orgId,
-        status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
-        deadline: { lt: new Date() },
-      },
+      take: 50,
     }),
     prisma.reviewCycle.findMany({
       where: { organizationId: orgId },
@@ -156,18 +138,16 @@ ORGANIZATION DATA:
 - Departments: ${departments.map(d => `${d.name} (${d._count.members} members, head: ${d.head ? d.head.firstName + ' ' + d.head.lastName : 'vacant'})`).join('; ')}
 
 PEOPLE:
-${users.map(u => `- ${u.firstName} ${u.lastName}: ${u.role?.title || 'No role'}, ${u.department?.name || 'No dept'}, Status: ${u.status}, Level: ${u.accessLevel}, Tasks: ${u._count.assignedTasks}, Reports: ${u._count.directReports}`).join('\n')}
+${users.map(u => `- ${u.firstName} ${u.lastName}: ${u.role?.title || 'No role'}, ${u.department?.name || 'No dept'}, Status: ${u.status}, Level: ${u.accessLevel}, KRAs: ${u._count.kraAssignments}, Reports: ${u._count.directReports}`).join('\n')}
 
 COMPOSITE PERFORMANCE SCORES (current period):
 ${performanceScores.length > 0 ? performanceScores.map(s => {
   const bd = s.breakdown as Record<string, unknown>;
-  return `- ${s.user.firstName} ${s.user.lastName}: Score ${Math.round(s.score)} (KPI: ${bd.kpiScore ?? 'N/A'}, Manager: ${bd.managerRating ?? 'N/A'}, Peer: ${bd.peerRating ?? 'N/A'}, Self: ${bd.selfRating ?? 'N/A'}, SOP: ${bd.sopCompliance ?? 'N/A'}, Tasks: ${bd.taskCompletion ?? 'N/A'})`;
-}).join('\n') : 'No performance scores calculated yet. Scores auto-calculate from KPI records, reviews, SOP compliance, and task completion.'}
+  return `- ${s.user.firstName} ${s.user.lastName}: Score ${Math.round(s.score)} (KPI: ${bd.kpiScore ?? 'N/A'}, Manager: ${bd.managerRating ?? 'N/A'}, Peer: ${bd.peerRating ?? 'N/A'}, Self: ${bd.selfRating ?? 'N/A'}, SOP: ${bd.sopCompliance ?? 'N/A'})`;
+}).join('\n') : 'No performance scores calculated yet. Scores auto-calculate from KPI achievement (40%), manager rating (25%), SOP compliance (20%), peer rating (10%), and self rating (5%).'}
 
-TASK STATUS:
-- Breakdown: ${taskStats.map(s => `${s.status}: ${s._count}`).join(', ')}
-- Overdue tasks: ${overdueTasks}
-- Active tasks: ${activeTasks.map(t => `"${t.title}" (${t.priority}, ${t.status}, assigned to ${t.assignee?.firstName || 'unassigned'}, deadline: ${t.deadline?.toISOString().split('T')[0] || 'none'})`).join('; ')}
+KRA ASSIGNMENTS:
+${kraAssignments.length > 0 ? kraAssignments.map(a => `- ${a.user.firstName} ${a.user.lastName}: "${a.kra.name}" (weight: ${a.weightage}%)`).join('\n') : 'No KRA assignments yet.'}
 
 KPI RECORDS (Recent):
 ${recentKPIs.length > 0 ? recentKPIs.map(r => `- ${r.user.firstName} ${r.user.lastName}: ${r.kpi.name} = ${r.actualValue ?? 'pending'}/${r.targetValue} ${r.kpi.unit || ''} (Score: ${r.score ?? 'N/A'})`).join('\n') : 'No KPI records yet.'}
@@ -205,7 +185,7 @@ ${recentActivity.length > 0 ? recentActivity.map(a => `- [${a.createdAt.toISOStr
 
   try {
     if (!process.env.ANTHROPIC_API_KEY) {
-      response = generateFallbackResponse(query, users, taskStats, departments, overdueTasks, recentKPIs, sops);
+      response = generateFallbackResponse(query, users, departments, recentKPIs, sops);
     } else {
       const message = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
@@ -227,7 +207,7 @@ ${orgContext}`,
     }
   } catch (err: any) {
     console.error("AI error:", err);
-    response = generateFallbackResponse(query, users, taskStats, departments, overdueTasks, recentKPIs, sops);
+    response = generateFallbackResponse(query, users, departments, recentKPIs, sops);
   }
 
   // Save the query
@@ -246,9 +226,7 @@ ${orgContext}`,
 function generateFallbackResponse(
   query: string,
   users: any[],
-  taskStats: any[],
   departments: any[],
-  overdueTasks: number,
   kpiRecords: any[],
   sops: any[],
 ): string {
@@ -262,13 +240,9 @@ function generateFallbackResponse(
         if (!acc.find(x => x.name === name)) acc.push({ name, score: r.score });
         return acc;
       }, []).slice(0, 5);
-      return `Based on composite performance scores, here are the top performers:\n\n${unique.map((p, i) => `${i + 1}. **${p.name}** — Score: ${Math.round(p.score)}`).join('\n')}\n\nComposite scores factor in KPI achievement, manager ratings, peer feedback, self-assessment, SOP compliance, and task completion.`;
+      return `Based on KPI scores, here are the top performers:\n\n${unique.map((p, i) => `${i + 1}. **${p.name}** — Score: ${Math.round(p.score)}`).join('\n')}\n\nComposite scores factor in KPI achievement (40%), manager ratings (25%), SOP compliance (20%), peer feedback (10%), and self-assessment (5%).`;
     }
-    return `No performance scores calculated yet. Scores auto-calculate when employees have KPI records, completed reviews, SOP assignments, or task data.`;
-  }
-
-  if (q.includes("overdue") || q.includes("late") || q.includes("missed")) {
-    return `There are currently **${overdueTasks} overdue tasks** across the organization.\n\nTask breakdown: ${taskStats.map(s => `${s.status.replace(/_/g, ' ')}: ${s._count}`).join(', ')}.`;
+    return `No performance scores calculated yet. Assign KRAs with KPIs and start recording scores to see performance data.`;
   }
 
   if (q.includes("department") || q.includes("team")) {
@@ -281,8 +255,8 @@ function generateFallbackResponse(
   }
 
   if (q.includes("promot") || q.includes("hike") || q.includes("raise")) {
-    return `To determine promotion eligibility, I look at:\n\n1. **KPI scores** (must be >85 for 2 consecutive periods)\n2. **Task completion rate**\n3. **SOP compliance**\n4. **Manager ratings**\n\nCurrently there are ${kpiRecords.length} KPI records in the system. Add more performance data to get personalized promotion recommendations.`;
+    return `To determine promotion eligibility, I look at:\n\n1. **KPI achievement** (must be >85 for 2 consecutive periods)\n2. **SOP compliance**\n3. **Manager ratings**\n4. **Peer feedback**\n\nCurrently there are ${kpiRecords.length} KPI records in the system. Add more performance data to get personalized promotion recommendations.`;
   }
 
-  return `Here's a quick summary of your organization:\n\n- **${users.length}** total people\n- **${departments.length}** departments\n- **${overdueTasks}** overdue tasks\n- **${sops.length}** SOPs\n- Task status: ${taskStats.map(s => `${s.status.replace(/_/g, ' ')}: ${s._count}`).join(', ') || 'No tasks yet'}\n\nTry asking about:\n- "Who are the top performers?"\n- "Show overdue tasks"\n- "Department breakdown"\n- "SOP compliance status"\n- "Who should I promote?"`;
+  return `Here's a quick summary of your organization:\n\n- **${users.length}** total people\n- **${departments.length}** departments\n- **${sops.length}** SOPs\n- **${kpiRecords.length}** KPI records\n\nTry asking about:\n- "Who are the top performers?"\n- "Department breakdown"\n- "SOP compliance status"\n- "Who should I promote?"`;
 }

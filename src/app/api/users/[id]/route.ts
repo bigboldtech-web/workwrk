@@ -31,10 +31,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         orderBy: { createdAt: "desc" },
         take: 20,
       },
-      assignedTasks: {
-        orderBy: { createdAt: "desc" },
+      tasks: {
+        orderBy: { date: "desc" },
         take: 10,
-        select: { id: true, title: true, priority: true, status: true, deadline: true },
+        select: { id: true, title: true, status: true, date: true, kra: { select: { name: true } } },
       },
       reviewsAsSubject: {
         include: {
@@ -62,9 +62,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const kpiScores = user.kpiRecords.filter((r) => r.score != null).map((r) => r.score!);
   const avgKPI = kpiScores.length > 0 ? Math.round(kpiScores.reduce((a, b) => a + b, 0) / kpiScores.length) : null;
 
-  const totalTasks = user.assignedTasks.length;
-  const completedTasks = user.assignedTasks.filter((t) => t.status === "COMPLETED").length;
-
   const recentMoods = user.checkIns.filter((c) => c.mood != null).map((c) => c.mood!);
   const avgMood = recentMoods.length > 0 ? Number((recentMoods.reduce((a, b) => a + b, 0) / recentMoods.length).toFixed(1)) : null;
 
@@ -79,9 +76,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     passwordHash: undefined,
     performanceSummary: {
       avgKPI,
-      totalTasks,
-      completedTasks,
-      taskCompletionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
       avgMood,
       activeKRAs: user.kraAssignments.length,
       latestReviewScore: user.reviewsAsSubject[0]?.overallScore ?? null,

@@ -80,7 +80,6 @@ export async function GET(
       calibrationNotes: review.calibrationNotes,
       outcome: review.outcome,
       status: review.status,
-      taskCompletionRate: review.taskCompletionRate,
     };
   });
 

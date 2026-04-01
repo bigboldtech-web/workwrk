@@ -9,16 +9,10 @@ import Link from "next/link";
 import {
   Users,
   Target,
-  CheckSquare,
   BookOpen,
   Heart,
-  TrendingUp,
-  TrendingDown,
-  AlertTriangle,
-  Clock,
   ArrowUpRight,
   ArrowDownRight,
-  Minus,
   Activity,
   Calendar,
   GraduationCap,
@@ -28,11 +22,8 @@ import { ErrorState } from "@/components/ui/error-state";
 interface DashboardStats {
   totalPeople: number;
   newPeopleThisMonth: number;
-  completedTasksThisWeek: number;
-  totalTasksThisWeek: number;
   sopCompliance: number;
   sopCount: number;
-  overdueTasks: number;
 }
 
 interface TopPerformer {
@@ -43,14 +34,15 @@ interface TopPerformer {
   department: string;
 }
 
-interface RecentTask {
+interface KpiRecord {
   id: string;
-  title: string;
-  priority: string;
-  status: string;
-  assignee: string;
-  deadline: string;
-  completedAt: string | null;
+  kpiName: string;
+  unit: string | null;
+  score: number | null;
+  actualValue: number | null;
+  targetValue: number;
+  userName: string;
+  createdAt: string;
 }
 
 interface DepartmentPerformance {
@@ -86,7 +78,7 @@ interface KudosItem {
 interface DashboardData {
   stats: DashboardStats;
   topPerformers: TopPerformer[];
-  recentTasks: RecentTask[];
+  recentKpiRecords: KpiRecord[];
   departmentPerformance: DepartmentPerformance[];
   alerts: Alert[];
   recentActivity: ActivityItem[];
@@ -107,25 +99,6 @@ function getScoreBgColor(score: number) {
   return "bg-red-500";
 }
 
-function getPriorityStyle(priority: string) {
-  switch (priority) {
-    case "P0": return "bg-red-500/20 text-red-400 border-red-500/30";
-    case "P1": return "bg-orange-500/20 text-orange-400 border-orange-500/30";
-    case "P2": return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-    default: return "bg-slate-500/20 text-slate-400 border-slate-500/30";
-  }
-}
-
-function getStatusStyle(status: string) {
-  switch (status) {
-    case "COMPLETED": return "bg-green-500/20 text-green-400";
-    case "IN_PROGRESS": return "bg-blue-500/20 text-blue-400";
-    case "IN_REVIEW": return "bg-purple-500/20 text-purple-400";
-    case "NOT_STARTED": return "bg-slate-500/20 text-slate-400";
-    default: return "bg-slate-500/20 text-slate-400";
-  }
-}
-
 function getAlertStyle(type: string) {
   switch (type) {
     case "warning": return "border-l-orange-500 bg-orange-500/5";
@@ -133,20 +106,6 @@ function getAlertStyle(type: string) {
     case "success": return "border-l-green-500 bg-green-500/5";
     default: return "border-l-blue-500 bg-blue-500/5";
   }
-}
-
-function formatDeadline(deadline: string, completedAt: string | null): string {
-  if (completedAt) return "Completed";
-  const date = new Date(deadline);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const deadlineDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-  if (deadlineDate.getTime() === today.getTime()) return "Today";
-  if (deadlineDate.getTime() === tomorrow.getTime()) return "Tomorrow";
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function SkeletonBlock({ className }: { className?: string }) {
@@ -233,7 +192,7 @@ export default function DashboardPage() {
     );
   }
 
-  const { stats: apiStats, topPerformers, recentTasks, departmentPerformance, alerts, recentActivity, recentKudos } = data;
+  const { stats: apiStats, topPerformers, recentKpiRecords, departmentPerformance, alerts, recentActivity, recentKudos } = data;
 
   const avgKpiScore =
     topPerformers.length > 0
@@ -260,11 +219,11 @@ export default function DashboardPage() {
       bgColor: "bg-green-500/10",
     },
     {
-      title: "Tasks Completed",
-      value: String(apiStats.completedTasksThisWeek),
-      change: `of ${apiStats.totalTasksThisWeek} this week`,
+      title: "Active SOPs",
+      value: String(apiStats.sopCount),
+      change: "published",
       trend: "neutral",
-      icon: CheckSquare,
+      icon: BookOpen,
       color: "text-blue-400",
       bgColor: "bg-blue-500/10",
     },
@@ -355,46 +314,43 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Recent Tasks */}
+        {/* Recent KPI Updates */}
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Recent Tasks</CardTitle>
-              <Badge variant="secondary" className="text-xs">
-                {recentTasks.filter(t => t.status !== "COMPLETED").length} Active
-              </Badge>
+              <CardTitle className="text-base">KPI Updates</CardTitle>
+              <Link href="/kra-kpi" className="text-xs text-purple-400 hover:text-purple-300">
+                View all
+              </Link>
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {recentTasks.map((task) => (
-              <div
-                key={task.id}
-                className="flex items-start gap-3 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F]/50 p-3"
-              >
-                <div className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${
-                  task.status === "COMPLETED" ? "bg-green-500" :
-                  task.status === "IN_PROGRESS" ? "bg-blue-500" :
-                  task.status === "IN_REVIEW" ? "bg-purple-500" : "bg-slate-500"
-                }`} />
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm ${task.status === "COMPLETED" ? "line-through text-[#8888A0]" : ""}`}>
-                    {task.title}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded ${getPriorityStyle(task.priority)}`}>
-                      {task.priority}
-                    </span>
-                    <span className="text-[10px] text-[#8888A0]">{task.assignee}</span>
-                    <span className="text-[10px] text-[#8888A0] flex items-center gap-0.5">
-                      <Clock size={8} />
-                      {formatDeadline(task.deadline, task.completedAt)}
-                    </span>
+            {(recentKpiRecords || []).map((record) => {
+              const achievement = record.targetValue > 0 && record.actualValue != null
+                ? Math.round((record.actualValue / record.targetValue) * 100)
+                : null;
+              return (
+                <div
+                  key={record.id}
+                  className="flex items-start gap-3 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F]/50 p-3"
+                >
+                  <Target size={14} className="text-purple-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{record.kpiName}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[10px] text-[#8888A0]">{record.userName}</span>
+                      {achievement != null && (
+                        <span className={`text-[10px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-purple-400" : "text-orange-400"}`}>
+                          {achievement}%
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-            {recentTasks.length === 0 && (
-              <p className="text-xs text-[#8888A0] text-center py-6">No tasks yet. Create your first task to see activity here.</p>
+              );
+            })}
+            {(!recentKpiRecords || recentKpiRecords.length === 0) && (
+              <p className="text-xs text-[#8888A0] text-center py-6">No KPI records yet. Start tracking KPIs to see updates here.</p>
             )}
           </CardContent>
         </Card>
@@ -441,13 +397,14 @@ export default function DashboardPage() {
             ) : (
               recentActivity.slice(0, 6).map((item) => {
                 const IconMap: Record<string, any> = {
-                  task_created: CheckSquare,
-                  task_completed: CheckSquare,
-                  task_updated: CheckSquare,
                   user_added: Users,
+                  kra_assigned: Target,
+                  kpi_recorded: Target,
                   sop_created: BookOpen,
+                  sop_completed: BookOpen,
                   meeting_created: Calendar,
                   reviews_finalized: Target,
+                  kudos_given: Heart,
                   onboarding_started: GraduationCap,
                   onboarding_completed: GraduationCap,
                 };

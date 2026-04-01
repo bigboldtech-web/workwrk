@@ -37,8 +37,9 @@ export async function GET(req: NextRequest) {
     prisma.task.findMany({
       where: { organizationId: orgId },
       select: {
-        id: true, title: true, priority: true, status: true, deadline: true, completedAt: true,
+        id: true, title: true, status: true, date: true,
         assignee: { select: { firstName: true, lastName: true } },
+        kra: { select: { name: true } },
         createdAt: true,
       },
     }),
@@ -86,12 +87,14 @@ export async function GET(req: NextRequest) {
   );
 
   csvFiles["tasks.csv"] = toCsv(
-    ["id", "title", "priority", "status", "assignee", "deadline", "completedAt", "createdAt"],
+    ["id", "title", "status", "date", "assignee", "kra", "createdAt"],
     tasks.map((t) => ({
-      ...t,
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      date: t.date.toISOString().split("T")[0],
       assignee: t.assignee ? `${t.assignee.firstName} ${t.assignee.lastName}` : "",
-      deadline: t.deadline?.toISOString() || "",
-      completedAt: t.completedAt?.toISOString() || "",
+      kra: t.kra?.name || "",
       createdAt: t.createdAt.toISOString(),
     }))
   );
