@@ -15,8 +15,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   BookOpen, Plus, Search, FileText, Clock, CheckCircle, AlertTriangle,
   Eye, Edit3, Users, BarChart3, ClipboardList, ShieldCheck,
+  PenLine, Video, ListChecks,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -109,6 +111,7 @@ function SkeletonCard() {
 }
 
 export default function SOPsPage() {
+  const router = useRouter();
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -126,6 +129,7 @@ export default function SOPsPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newCategory, setNewCategory] = useState("");
   const [newDescription, setNewDescription] = useState("");
+  const [sopType, setSopType] = useState<"WRITTEN" | "RECORDED" | "CHECKLIST">("WRITTEN");
 
   const { success: toastSuccess, error: toastError } = useToast();
 
@@ -165,8 +169,21 @@ export default function SOPsPage() {
 
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
+
+    // For recorded SOPs, redirect to the recorder
+    if (sopType === "RECORDED") {
+      setShowAddDialog(false);
+      // TODO: open recorder flow
+      toastSuccess("Recording mode coming soon — use the browser extension to record SOPs");
+      return;
+    }
+
     setCreating(true);
     try {
+      const initialContent = sopType === "CHECKLIST"
+        ? { sections: [] }
+        : { steps: [] };
+
       const res = await fetch("/api/sops", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -174,17 +191,21 @@ export default function SOPsPage() {
           title: newTitle,
           description: newDescription,
           category: newCategory,
-          content: { steps: [] },
+          sopType,
+          content: initialContent,
           status: "DRAFT",
         }),
       });
       if (!res.ok) throw new Error("Failed to create SOP");
+      const created = await res.json();
       setShowAddDialog(false);
       setNewTitle("");
       setNewCategory("");
       setNewDescription("");
-      await fetchSOPs();
+      setSopType("WRITTEN");
       toastSuccess("SOP created successfully");
+      // Navigate to the detail page to start building
+      router.push(`/sops/${created.id}`);
     } catch (err) {
       toastError("Failed to create SOP");
     } finally {
@@ -219,9 +240,36 @@ export default function SOPsPage() {
             <DialogTrigger asChild>
               <Button className="gap-2"><Plus size={16} /> New SOP</Button>
             </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-lg">
             <DialogHeader><DialogTitle>Create SOP</DialogTitle></DialogHeader>
             <div className="space-y-4 py-4">
+              {/* SOP Type Selector */}
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: "WRITTEN" as const, icon: PenLine, label: "Write", desc: "Manual rich text" },
+                    { value: "RECORDED" as const, icon: Video, label: "Record", desc: "Screen recording" },
+                    { value: "CHECKLIST" as const, icon: ListChecks, label: "Checklist", desc: "Runnable process" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setSopType(opt.value)}
+                      className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-all text-center ${
+                        sopType === opt.value
+                          ? "border-purple-500 bg-purple-500/10 text-purple-400"
+                          : "border-[#2A2A3A] hover:border-[#3A3A4A] text-[#8888A0]"
+                      }`}
+                    >
+                      <opt.icon size={20} />
+                      <span className="text-xs font-medium">{opt.label}</span>
+                      <span className="text-[10px] opacity-70">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-2"><Label>Title <span className="text-red-400">*</span></Label><Input placeholder="e.g., Client Onboarding Process" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} /></div>
               <div className="space-y-2"><Label>Category</Label>
                 <Select value={newCategory} onValueChange={setNewCategory}><SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
@@ -234,7 +282,9 @@ export default function SOPsPage() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowAddDialog(false)}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={creating || !newTitle.trim()}>{creating ? "Creating..." : "Create SOP"}</Button>
+              <Button onClick={handleCreate} disabled={creating || !newTitle.trim()}>
+                {creating ? "Creating..." : sopType === "RECORDED" ? "Start Recording" : "Create SOP"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

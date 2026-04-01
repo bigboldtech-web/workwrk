@@ -18,6 +18,7 @@ import {
   GraduationCap,
 } from "lucide-react";
 import { ErrorState } from "@/components/ui/error-state";
+import { OnboardingChecklist } from "@/components/onboarding-checklist";
 
 interface DashboardStats {
   totalPeople: number;
@@ -247,6 +248,9 @@ export default function DashboardPage() {
           Overview of your business operating system
         </p>
       </div>
+
+      {/* Onboarding Checklist */}
+      <OnboardingChecklist />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

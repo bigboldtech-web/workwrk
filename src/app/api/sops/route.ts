@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const body = await req.json();
-  const { title, description, category, content, kraId } = body;
+  const { title, description, category, content, kraId, sopType } = body;
 
   if (!title) return jsonError("SOP title is required");
 
@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
       title,
       description,
       category,
+      sopType: sopType || "WRITTEN",
       content: content || { steps: [] },
       organizationId: getOrgId(session),
       ...(kraId ? { kraId } : {}),

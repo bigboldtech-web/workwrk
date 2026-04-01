@@ -16,9 +16,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 interface KeyMetrics {
   totalPeople: number;
   avgKPI: number;
-  taskCompletionRate: number;
+  activeKRAs: number;
   sopComplianceRate: number;
-  overdueTasks: number;
   avgMood: number;
   publishedSOPs: number;
   totalCheckIns: number;
@@ -26,8 +25,7 @@ interface KeyMetrics {
 
 interface MonthlyTrend {
   month: string;
-  tasksCreated: number;
-  tasksCompleted: number;
+  kpiRecords: number;
   avgKPI: number;
 }
 
@@ -35,8 +33,6 @@ interface DeptComparison {
   name: string;
   members: number;
   avgKPI: number;
-  taskCompletion: number;
-  totalTasks: number;
 }
 
 interface ScoreTrendItem {
@@ -195,11 +191,11 @@ export default function AnalyticsPage() {
   const { healthScore, keyMetrics, monthlyTrend, deptComparison, scoreTrend, topPerformers, mostRecognized, totalKudosThisMonth } = data;
 
   const metricCards = [
-    { name: "Avg Performance Score", value: keyMetrics.avgKPI.toFixed(1), icon: Target },
-    { name: "Task Completion Rate", value: `${keyMetrics.taskCompletionRate}%`, icon: CheckSquare },
+    { name: "Avg KPI Score", value: keyMetrics.avgKPI.toFixed(1), icon: Target },
+    { name: "Active KRAs", value: String(keyMetrics.activeKRAs), icon: Target },
     { name: "SOP Compliance", value: `${keyMetrics.sopComplianceRate}%`, icon: BookOpen },
     { name: "Active Employees", value: String(keyMetrics.totalPeople), icon: Users },
-    { name: "Overdue Tasks", value: String(keyMetrics.overdueTasks), icon: CheckSquare },
+    { name: "Published SOPs", value: String(keyMetrics.publishedSOPs), icon: BookOpen },
     { name: "Total Check-ins", value: String(keyMetrics.totalCheckIns), icon: BarChart3 },
   ];
 
@@ -234,7 +230,7 @@ export default function AnalyticsPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: "Avg KPI", score: Math.round(keyMetrics.avgKPI) },
-              { label: "Task Completion", score: keyMetrics.taskCompletionRate },
+              { label: "Active KRAs", score: Math.min(keyMetrics.activeKRAs * 10, 100) },
               { label: "SOP Compliance", score: keyMetrics.sopComplianceRate },
               { label: "Avg Mood", score: Math.round((keyMetrics.avgMood / 5) * 100) },
             ].map((item) => (
@@ -364,8 +360,6 @@ export default function AnalyticsPage() {
               <tr className="border-b border-[#2A2A3A]">
                 <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Department</th>
                 <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">KPI Avg</th>
-                <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Task Rate</th>
-                <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Total Tasks</th>
                 <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Members</th>
               </tr>
             </thead>
@@ -379,8 +373,6 @@ export default function AnalyticsPage() {
                     </div>
                   </td>
                   <td className={`p-4 text-center font-mono text-sm ${getScoreColor(Math.round(dept.avgKPI))}`}>{Math.round(dept.avgKPI)}</td>
-                  <td className={`p-4 text-center font-mono text-sm ${getScoreColor(dept.taskCompletion)}`}>{dept.taskCompletion}%</td>
-                  <td className="p-4 text-center text-sm text-[#8888A0]">{dept.totalTasks}</td>
                   <td className="p-4 text-center text-sm text-[#8888A0]">{dept.members}</td>
                 </tr>
               ))}

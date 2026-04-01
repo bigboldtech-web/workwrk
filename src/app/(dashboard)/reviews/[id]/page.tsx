@@ -409,12 +409,6 @@ export default function ReviewCycleDetailPage() {
                       <p className="text-[10px] text-[#8888A0]">Avg KPI Score</p>
                     </div>
                     <div className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3 text-center">
-                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.taskCompletionRate != null ? getScoreColor(selfData.metrics.taskCompletionRate) : "text-[#8888A0]"}`}>
-                        {selfData.metrics.taskCompletionRate != null ? `${selfData.metrics.taskCompletionRate}%` : "N/A"}
-                      </p>
-                      <p className="text-[10px] text-[#8888A0]">{selfData.metrics.completedTasks}/{selfData.metrics.totalTasks} Tasks Done</p>
-                    </div>
-                    <div className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3 text-center">
                       <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgSopScore != null ? getScoreColor(selfData.metrics.avgSopScore) : "text-[#8888A0]"}`}>
                         {selfData.metrics.avgSopScore ?? "N/A"}
                       </p>
@@ -600,8 +594,8 @@ export default function ReviewCycleDetailPage() {
                     {selectedReview.kpiScore != null && (
                       <span className="text-xs text-[#8888A0]">KPI Score: <span className={`font-mono ${getScoreColor(selectedReview.kpiScore)}`}>{selectedReview.kpiScore}</span></span>
                     )}
-                    {selectedReview.taskCompletionRate != null && (
-                      <span className="text-xs text-[#8888A0]">Tasks: <span className="font-mono">{selectedReview.taskCompletionRate}%</span></span>
+                    {selectedReview.sopComplianceScore != null && (
+                      <span className="text-xs text-[#8888A0]">SOP: <span className="font-mono">{selectedReview.sopComplianceScore}%</span></span>
                     )}
                   </div>
 

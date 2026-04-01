@@ -40,8 +40,13 @@ import {
   Activity,
   UserPlus,
   Trash2,
+  Play,
+  Link2,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-builder";
 
 interface ComplianceUser {
   id: string;
@@ -83,7 +88,8 @@ interface SOP {
   title: string;
   description: string | null;
   category: string | null;
-  content: { type?: string; steps: SOPStep[] | RecordedStep[] };
+  sopType: "WRITTEN" | "RECORDED" | "CHECKLIST";
+  content: { type?: string; steps?: SOPStep[] | RecordedStep[]; sections?: ChecklistSection[] };
   version: number;
   status: string;
   publishedAt: string | null;
@@ -135,9 +141,19 @@ export default function SOPDetailPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [steps, setSteps] = useState<SOPStep[]>([]);
+  const [checklistSections, setChecklistSections] = useState<ChecklistSection[]>([]);
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   const [showPublishDialog, setShowPublishDialog] = useState(false);
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
+
+  // Process run state
+  const [showRunDialog, setShowRunDialog] = useState(false);
+  const [runTitle, setRunTitle] = useState("");
+  const [runDueDate, setRunDueDate] = useState("");
+  const [runAssigneeId, setRunAssigneeId] = useState("");
+  const [creatingRun, setCreatingRun] = useState(false);
+  const [shareLink, setShareLink] = useState("");
 
   // Assignment state
   const [showAssignDialog, setShowAssignDialog] = useState(false);
@@ -233,7 +249,11 @@ export default function SOPDetailPage() {
       setSop(data);
       setTitle(data.title);
       setDescription(data.description || "");
-      setSteps((data.content?.type === "recorded" ? [] : data.content?.steps || []) as SOPStep[]);
+      if (data.sopType === "CHECKLIST") {
+        setChecklistSections((data.content?.sections || []) as ChecklistSection[]);
+      } else {
+        setSteps((data.content?.type === "recorded" ? [] : data.content?.steps || []) as SOPStep[]);
+      }
     } catch (err) {
       console.error("Error fetching SOP:", err);
     } finally {
@@ -247,6 +267,13 @@ export default function SOPDetailPage() {
     fetchOrgUsers();
   }, [fetchSOP, fetchAssignments, fetchOrgUsers]);
 
+  const getContentPayload = () => {
+    if (sop?.sopType === "CHECKLIST") {
+      return { sections: checklistSections };
+    }
+    return { steps };
+  };
+
   const handleSave = async () => {
     if (!sop) return;
     setSaving(true);
@@ -257,15 +284,17 @@ export default function SOPDetailPage() {
         body: JSON.stringify({
           title,
           description,
-          content: { steps },
+          content: getContentPayload(),
         }),
       });
       if (!res.ok) throw new Error("Failed to save SOP");
       const updated = await res.json();
       setSop(updated);
       setEditing(false);
+      toastSuccess("Saved successfully");
     } catch (err) {
       console.error("Error saving SOP:", err);
+      toastError("Failed to save");
     } finally {
       setSaving(false);
     }
@@ -281,7 +310,7 @@ export default function SOPDetailPage() {
         body: JSON.stringify({
           title,
           description,
-          content: { steps },
+          content: getContentPayload(),
           status: "PUBLISHED",
           version: sop.version + 1,
         }),
@@ -291,10 +320,49 @@ export default function SOPDetailPage() {
       setSop(updated);
       setEditing(false);
       setShowPublishDialog(false);
+      toastSuccess("Published successfully");
     } catch (err) {
       console.error("Error publishing SOP:", err);
+      toastError("Failed to publish");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAiGenerate = async () => {
+    if (!sop) return;
+    setAiGenerating(true);
+    try {
+      const res = await fetch("/api/sops/ai-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: sop.title, context: description }),
+      });
+      if (!res.ok) throw new Error("AI generation failed");
+      const data = await res.json();
+      const generated = data.data || data;
+      if (generated.sections) {
+        // Map AI sections to have proper inputs/contentBlocks arrays
+        const mapped: ChecklistSection[] = generated.sections.map((s: any) => ({
+          id: s.id,
+          title: s.title,
+          steps: (s.steps || []).map((st: any) => ({
+            id: st.id,
+            title: st.title,
+            description: st.description || "",
+            type: st.type || "task",
+            inputs: st.inputs || [],
+            contentBlocks: st.contentBlocks || [],
+          })),
+        }));
+        setChecklistSections(mapped);
+        toastSuccess("Checklist generated! Review and customize the steps.");
+      }
+    } catch (err) {
+      console.error("AI generation error:", err);
+      toastError("Failed to generate checklist. Try again.");
+    } finally {
+      setAiGenerating(false);
     }
   };
 
@@ -316,6 +384,41 @@ export default function SOPDetailPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleStartRun = async () => {
+    if (!sop) return;
+    setCreatingRun(true);
+    try {
+      const res = await fetch("/api/process-runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sopId: sop.id,
+          title: runTitle || sop.title,
+          assigneeId: runAssigneeId || undefined,
+          dueDate: runDueDate || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        toastError(err.error || "Failed to start process");
+        return;
+      }
+      const data = await res.json();
+      const result = data.data || data;
+      setShareLink(result.shareLink || "");
+      toastSuccess("Process run started!");
+    } catch (err) {
+      toastError("Failed to start process run");
+    } finally {
+      setCreatingRun(false);
+    }
+  };
+
+  const copyShareLink = () => {
+    navigator.clipboard.writeText(shareLink);
+    toastSuccess("Link copied to clipboard!");
   };
 
   const addStep = () => {
@@ -421,7 +524,11 @@ export default function SOPDetailPage() {
                   setEditing(false);
                   setTitle(sop.title);
                   setDescription(sop.description || "");
-                  setSteps((sop.content?.type === "recorded" ? [] : sop.content?.steps || []) as SOPStep[]);
+                  if (sop.sopType === "CHECKLIST") {
+                    setChecklistSections((sop.content?.sections || []) as ChecklistSection[]);
+                  } else {
+                    setSteps((sop.content?.type === "recorded" ? [] : sop.content?.steps || []) as SOPStep[]);
+                  }
                   setEditingStepId(null);
                 }}
               >
@@ -442,6 +549,80 @@ export default function SOPDetailPage() {
               <Edit3 size={14} />
               Edit
             </Button>
+          )}
+
+          {/* Run Process - only for published checklists */}
+          {sop.status === "PUBLISHED" && sop.sopType === "CHECKLIST" && (
+            <Dialog open={showRunDialog} onOpenChange={(open) => {
+              setShowRunDialog(open);
+              if (!open) { setShareLink(""); setRunTitle(""); setRunDueDate(""); setRunAssigneeId(""); }
+            }}>
+              <DialogTrigger asChild>
+                <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700">
+                  <Play size={14} /> Run Process
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>{shareLink ? "Process Started!" : "Start Process Run"}</DialogTitle></DialogHeader>
+                {shareLink ? (
+                  <div className="space-y-4 py-4">
+                    <p className="text-sm text-[#8888A0]">
+                      Share this link with anyone who needs to complete this process:
+                    </p>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-[#0D0D14] border border-[#2A2A3A]">
+                      <Link2 size={14} className="text-purple-400 shrink-0" />
+                      <code className="text-xs text-purple-300 flex-1 break-all">{shareLink}</code>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copyShareLink}>
+                        <Copy size={12} />
+                      </Button>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setShowRunDialog(false)} className="flex-1">
+                        Close
+                      </Button>
+                      <Button size="sm" onClick={() => window.open(shareLink, "_blank")} className="flex-1 gap-1.5">
+                        <ExternalLink size={14} /> Open
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label>Run Title</Label>
+                      <Input
+                        value={runTitle}
+                        onChange={(e) => setRunTitle(e.target.value)}
+                        placeholder={sop.title}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Assign To</Label>
+                      <Select value={runAssigneeId} onValueChange={setRunAssigneeId}>
+                        <SelectTrigger><SelectValue placeholder="Anyone (optional)" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Anyone</SelectItem>
+                          {orgUsers.map((u: any) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.firstName} {u.lastName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Due Date</Label>
+                      <Input type="date" value={runDueDate} onChange={(e) => setRunDueDate(e.target.value)} />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setShowRunDialog(false)}>Cancel</Button>
+                      <Button onClick={handleStartRun} disabled={creatingRun} className="gap-1.5">
+                        <Play size={14} /> {creatingRun ? "Starting..." : "Start Run"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
           )}
 
           {sop.status === "PUBLISHED" && (
@@ -634,7 +815,23 @@ export default function SOPDetailPage() {
                 </CardContent>
               </Card>
 
-              {/* Steps */}
+              {/* Steps / Checklist Builder */}
+              {sop.sopType === "CHECKLIST" ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium">Checklist Builder</h3>
+                    {aiGenerating && (
+                      <span className="text-xs text-purple-400 animate-pulse">Generating with AI...</span>
+                    )}
+                  </div>
+                  <ChecklistBuilder
+                    sections={checklistSections}
+                    onChange={setChecklistSections}
+                    editing={editing}
+                    onAiGenerate={handleAiGenerate}
+                  />
+                </div>
+              ) : (
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
@@ -676,7 +873,7 @@ export default function SOPDetailPage() {
                     </div>
                   ) : sop?.content?.type === "recorded" ? (
                     /* Recorded SOP Steps with Screenshots */
-                    (sop.content.steps as RecordedStep[]).map((step, index) => (
+                    ((sop.content.steps || []) as RecordedStep[]).map((step, index) => (
                       <div
                         key={index}
                         className="rounded-lg border border-[#2A2A3A] bg-[#0D0D14] overflow-hidden"
@@ -709,17 +906,12 @@ export default function SOPDetailPage() {
                         key={step.id}
                         className="flex items-start gap-3 p-3 rounded-lg border border-[#2A2A3A] bg-[#0D0D14] group"
                       >
-                        {/* Drag handle indicator */}
                         <div className="pt-0.5 text-[#8888A0] opacity-30">
                           <GripVertical size={16} />
                         </div>
-
-                        {/* Step number */}
                         <div className="flex items-center justify-center w-6 h-6 rounded-full bg-purple-500/10 text-purple-400 text-xs font-bold shrink-0 mt-0.5">
                           {index + 1}
                         </div>
-
-                        {/* Step content */}
                         <div className="flex-1 min-w-0">
                           {editing && editingStepId === step.id ? (
                             <div className="space-y-2">
@@ -738,11 +930,7 @@ export default function SOPDetailPage() {
                               <Textarea
                                 value={step.description || ""}
                                 onChange={(e) =>
-                                  updateStep(
-                                    step.id,
-                                    "description",
-                                    e.target.value
-                                  )
+                                  updateStep(step.id, "description", e.target.value)
                                 }
                                 placeholder="Step description (optional)..."
                                 rows={2}
@@ -760,27 +948,19 @@ export default function SOPDetailPage() {
                           ) : (
                             <div
                               className={editing ? "cursor-pointer" : ""}
-                              onClick={() =>
-                                editing && setEditingStepId(step.id)
-                              }
+                              onClick={() => editing && setEditingStepId(step.id)}
                             >
                               <p className="text-sm font-medium">
                                 {step.title || (
-                                  <span className="text-[#8888A0] italic">
-                                    Untitled step
-                                  </span>
+                                  <span className="text-[#8888A0] italic">Untitled step</span>
                                 )}
                               </p>
                               {step.description && (
-                                <p className="text-xs text-[#8888A0] mt-0.5">
-                                  {step.description}
-                                </p>
+                                <p className="text-xs text-[#8888A0] mt-0.5">{step.description}</p>
                               )}
                             </div>
                           )}
                         </div>
-
-                        {/* Delete */}
                         {editing && (
                           <Button
                             variant="ghost"
@@ -796,6 +976,7 @@ export default function SOPDetailPage() {
                   )}
                 </CardContent>
               </Card>
+              )}
             </TabsContent>
 
             {/* Compliance Tab */}

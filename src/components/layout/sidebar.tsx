@@ -24,6 +24,7 @@ import {
   Link2,
   Activity,
   FileText,
+  ListChecks,
 } from "lucide-react";
 
 // moduleKey maps nav items to module keys from settings.enabledModules
@@ -35,6 +36,7 @@ const navigation = [
   { name: "KRA & KPIs", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi" },
   { name: "Work Calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks" },
   { name: "SOPs", href: "/sops", icon: BookOpen, moduleKey: "sops" },
+  { name: "Process Runs", href: "/process-runs", icon: ListChecks, moduleKey: "sops" },
   { name: "Reviews", href: "/reviews", icon: Star, moduleKey: "reviews" },
   { name: "Meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings" },
   { name: "Analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics" },

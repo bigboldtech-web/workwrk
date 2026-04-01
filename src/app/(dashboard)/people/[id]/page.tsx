@@ -364,9 +364,9 @@ export default function UserProfilePage() {
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <CheckSquare size={20} className="mx-auto text-blue-400 mb-1" />
-            <p className="text-2xl font-bold font-mono">{perf.taskCompletionRate}%</p>
-            <p className="text-xs text-[#8888A0]">{perf.completedTasks}/{perf.totalTasks} Tasks Done</p>
+            <Target size={20} className="mx-auto text-blue-400 mb-1" />
+            <p className="text-2xl font-bold font-mono">{perf.activeKRAs ?? 0}</p>
+            <p className="text-xs text-[#8888A0]">Active KRAs</p>
           </CardContent>
         </Card>
         <Card>
@@ -388,10 +388,10 @@ export default function UserProfilePage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="tasks">
+      <Tabs defaultValue="kras">
         <TabsList>
-          <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="kras">KRAs</TabsTrigger>
+          <TabsTrigger value="calendar">Work Calendar</TabsTrigger>
           <TabsTrigger value="kpis">KPIs</TabsTrigger>
           <TabsTrigger value="skills">Skills</TabsTrigger>
           <TabsTrigger value="reviews">Reviews</TabsTrigger>
@@ -400,24 +400,26 @@ export default function UserProfilePage() {
           <TabsTrigger value="reports">Direct Reports</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="tasks" className="mt-4 space-y-2">
-          {user.assignedTasks.length === 0 ? (
-            <p className="text-[#8888A0] text-sm py-8 text-center">No tasks assigned</p>
+        <TabsContent value="calendar" className="mt-4 space-y-2">
+          {!user.tasks || user.tasks.length === 0 ? (
+            <p className="text-[#8888A0] text-sm py-8 text-center">No calendar entries yet</p>
           ) : (
-            user.assignedTasks.map((t: any) => (
+            user.tasks.map((t: any) => (
               <div key={t.id} className="flex items-center gap-3 rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3">
                 <div className={`h-2 w-2 rounded-full flex-shrink-0 ${
-                  t.status === "COMPLETED" ? "bg-green-500" : t.status === "IN_PROGRESS" ? "bg-blue-500" : "bg-slate-500"
+                  t.status === "COMPLETED" ? "bg-green-500" : t.status === "IN_PROGRESS" ? "bg-amber-500" : "bg-blue-500"
                 }`} />
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm ${t.status === "COMPLETED" ? "line-through text-[#8888A0]" : ""}`}>{t.title}</p>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded ${getPriorityStyle(t.priority)}`}>{t.priority}</span>
-                    <Badge className={`text-[10px] ${getTaskStatusStyle(t.status)}`}>{t.status.replace(/_/g, " ")}</Badge>
-                    {t.deadline && (
+                    <Badge className="text-[10px]">{t.status.replace(/_/g, " ")}</Badge>
+                    {t.date && (
                       <span className="text-[10px] text-[#8888A0] flex items-center gap-0.5">
-                        <Clock size={8} /> {new Date(t.deadline).toLocaleDateString()}
+                        <Clock size={8} /> {new Date(t.date).toLocaleDateString()}
                       </span>
+                    )}
+                    {t.kra?.name && (
+                      <span className="text-[10px] text-purple-400">{t.kra.name}</span>
                     )}
                   </div>
                 </div>

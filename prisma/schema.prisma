@@ -408,21 +408,64 @@ model SOP {
   title          String
   description    String?
   category       String?
+  sopType        SOPType   @default(WRITTEN)
   kraId          String?
   kra            KRA?     @relation(fields: [kraId], references: [id])
   content        Json
   version        Int       @default(1)
   status         SOPStatus @default(DRAFT)
+  shareToken     String?   @unique
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   compliance     SOPCompliance[]
   assignments    SOPAssignment[]
+  processRuns    ProcessRun[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   publishedAt    DateTime?
 
   @@index([organizationId])
   @@index([category])
+  @@index([shareToken])
+}
+
+enum SOPType {
+  WRITTEN
+  RECORDED
+  CHECKLIST
+}
+
+// Process Run — tracks a single execution of a checklist SOP
+model ProcessRun {
+  id             String          @id @default(cuid())
+  sopId          String
+  sop            SOP             @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  title          String
+  assigneeId     String?
+  status         ProcessRunStatus @default(ACTIVE)
+  progress       Int             @default(0)
+  dueDate        DateTime?
+  shareToken     String?         @unique
+  completedSteps Json            @default("[]")  // Array of completed step IDs
+  stepData       Json            @default("{}")   // {stepId: {completedAt, completedBy, notes, inputValues}}
+  organizationId String
+  startedAt      DateTime        @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([sopId])
+  @@index([assigneeId])
+  @@index([organizationId])
+  @@index([shareToken])
+  @@index([status])
+}
+
+enum ProcessRunStatus {
+  ACTIVE
+  COMPLETED
+  OVERDUE
+  CANCELLED
 }
 
 enum SOPStatus {
