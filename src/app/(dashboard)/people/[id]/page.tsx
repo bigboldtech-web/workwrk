@@ -11,7 +11,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Users,
   Target, CheckSquare, TrendingUp, Clock, Star, Smile, Zap, Heart,
+  Edit3, Save,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/toast";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
@@ -239,6 +249,63 @@ export default function UserProfilePage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { success: toastSuccess, error: toastError } = useToast();
+
+  // Edit state
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editDepartmentId, setEditDepartmentId] = useState("");
+  const [editRoleId, setEditRoleId] = useState("");
+  const [editAccessLevel, setEditAccessLevel] = useState("");
+  const [editStatus, setEditStatus] = useState("");
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [roles, setRoles] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/departments").then((r) => r.ok ? r.json() : []),
+      fetch("/api/roles").then((r) => r.ok ? r.json() : []),
+    ]).then(([depts, rls]) => {
+      setDepartments(Array.isArray(depts) ? depts : []);
+      setRoles(Array.isArray(rls) ? rls : []);
+    });
+  }, []);
+
+  const openEditDialog = () => {
+    if (!user) return;
+    setEditDepartmentId(user.department?.id || "");
+    setEditRoleId(user.role?.id || "");
+    setEditAccessLevel(user.accessLevel || "");
+    setEditStatus(user.status || "");
+    setShowEditDialog(true);
+  };
+
+  const handleSaveEdit = async () => {
+    setSaving(true);
+    try {
+      const body: any = {};
+      if (editDepartmentId) body.departmentId = editDepartmentId;
+      if (editRoleId) body.roleId = editRoleId;
+      if (editAccessLevel) body.accessLevel = editAccessLevel;
+      if (editStatus) body.status = editStatus;
+
+      const res = await fetch(`/api/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      // Refetch user
+      const updated = await fetch(`/api/users/${id}`).then((r) => r.json());
+      setUser(updated);
+      setShowEditDialog(false);
+      toastSuccess("Profile updated successfully");
+    } catch (err) {
+      toastError("Failed to update profile");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     fetch(`/api/users/${id}`)
@@ -295,10 +362,15 @@ export default function UserProfilePage() {
               </AvatarFallback>
             </Avatar>
             <div className="flex-1">
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold">{user.firstName} {user.lastName}</h1>
-                <Badge className={getStatusBadge(user.status)}>{user.status.replace(/_/g, " ")}</Badge>
-                <Badge variant="secondary">{user.accessLevel.replace(/_/g, " ")}</Badge>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-bold">{user.firstName} {user.lastName}</h1>
+                  <Badge className={getStatusBadge(user.status)}>{user.status.replace(/_/g, " ")}</Badge>
+                  <Badge variant="secondary">{user.accessLevel.replace(/_/g, " ")}</Badge>
+                </div>
+                <Button variant="outline" size="sm" onClick={openEditDialog} className="gap-1.5">
+                  <Edit3 size={14} /> Edit
+                </Button>
               </div>
               <p className="text-[#8888A0] mt-1">{user.role?.title || "No role assigned"}</p>
               <div className="flex items-center gap-6 mt-3 text-sm text-[#8888A0]">
@@ -314,6 +386,71 @@ export default function UserProfilePage() {
                 )}
               </div>
             </div>
+
+            {/* Edit Dialog */}
+            <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Edit {user.firstName} {user.lastName}</DialogTitle></DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Department</Label>
+                    <Select value={editDepartmentId} onValueChange={setEditDepartmentId}>
+                      <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                      <SelectContent>
+                        {departments.map((d: any) => (
+                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Role</Label>
+                    <Select value={editRoleId} onValueChange={setEditRoleId}>
+                      <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
+                      <SelectContent>
+                        {roles.map((r: any) => (
+                          <SelectItem key={r.id} value={r.id}>{r.title}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Access Level</Label>
+                    <Select value={editAccessLevel} onValueChange={setEditAccessLevel}>
+                      <SelectTrigger><SelectValue placeholder="Select level" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="EMPLOYEE">Employee</SelectItem>
+                        <SelectItem value="TEAM_LEAD">Team Lead</SelectItem>
+                        <SelectItem value="MANAGER">Manager</SelectItem>
+                        <SelectItem value="DIRECTOR">Director</SelectItem>
+                        <SelectItem value="VP">VP</SelectItem>
+                        <SelectItem value="C_LEVEL">C-Level</SelectItem>
+                        <SelectItem value="HR">HR</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Status</Label>
+                    <Select value={editStatus} onValueChange={setEditStatus}>
+                      <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ACTIVE">Active</SelectItem>
+                        <SelectItem value="PROBATION">Probation</SelectItem>
+                        <SelectItem value="PIP">PIP</SelectItem>
+                        <SelectItem value="ON_LEAVE">On Leave</SelectItem>
+                        <SelectItem value="NOTICE_PERIOD">Notice Period</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowEditDialog(false)}>Cancel</Button>
+                  <Button onClick={handleSaveEdit} disabled={saving} className="gap-1.5">
+                    <Save size={14} /> {saving ? "Saving..." : "Save Changes"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </CardContent>
       </Card>

@@ -422,9 +422,9 @@ export default function PeoplePage() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      <p className="text-sm text-[#8888A0]">{person.role}</p>
+                      {person.role && <p className="text-sm text-[#8888A0]">{person.role}</p>}
                       <div className="flex items-center gap-2 mt-1">
-                        <Badge variant="outline" className="text-[10px]">{person.department}</Badge>
+                        {person.department && <Badge variant="outline" className="text-[10px]">{person.department}</Badge>}
                         {getStatusBadge(person.status)}
                       </div>
                     </div>
