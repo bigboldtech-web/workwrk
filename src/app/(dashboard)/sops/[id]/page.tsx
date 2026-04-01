@@ -68,12 +68,22 @@ interface SOPStep {
   description?: string;
 }
 
+interface RecordedStep {
+  order: number;
+  action: string;
+  description: string;
+  url: string;
+  screenshot: string | null;
+  elementText: string;
+  elementTag: string;
+}
+
 interface SOP {
   id: string;
   title: string;
   description: string | null;
   category: string | null;
-  content: { steps: SOPStep[] };
+  content: { type?: string; steps: SOPStep[] | RecordedStep[] };
   version: number;
   status: string;
   publishedAt: string | null;
@@ -223,7 +233,7 @@ export default function SOPDetailPage() {
       setSop(data);
       setTitle(data.title);
       setDescription(data.description || "");
-      setSteps(data.content?.steps || []);
+      setSteps((data.content?.type === "recorded" ? [] : data.content?.steps || []) as SOPStep[]);
     } catch (err) {
       console.error("Error fetching SOP:", err);
     } finally {
@@ -411,7 +421,7 @@ export default function SOPDetailPage() {
                   setEditing(false);
                   setTitle(sop.title);
                   setDescription(sop.description || "");
-                  setSteps(sop.content?.steps || []);
+                  setSteps((sop.content?.type === "recorded" ? [] : sop.content?.steps || []) as SOPStep[]);
                   setEditingStepId(null);
                 }}
               >
@@ -664,6 +674,35 @@ export default function SOPDetailPage() {
                         </Button>
                       )}
                     </div>
+                  ) : sop?.content?.type === "recorded" ? (
+                    /* Recorded SOP Steps with Screenshots */
+                    (sop.content.steps as RecordedStep[]).map((step, index) => (
+                      <div
+                        key={index}
+                        className="rounded-lg border border-[#2A2A3A] bg-[#0D0D14] overflow-hidden"
+                      >
+                        <div className="flex items-center gap-3 p-4">
+                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 text-sm font-bold shrink-0">
+                            {step.order || index + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">{step.description}</p>
+                            {step.url && (
+                              <p className="text-xs text-[#6B6B80] mt-0.5 truncate">{step.url}</p>
+                            )}
+                          </div>
+                        </div>
+                        {step.screenshot && (
+                          <div className="px-4 pb-4">
+                            <img
+                              src={step.screenshot}
+                              alt={`Step ${step.order || index + 1}: ${step.description}`}
+                              className="w-full rounded-lg border border-[#2A2A3A]"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))
                   ) : (
                     steps.map((step, index) => (
                       <div
