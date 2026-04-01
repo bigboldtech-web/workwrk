@@ -232,7 +232,7 @@ export async function getEmailPreferences(userId: string) {
 export async function updateEmailPreferences(
   userId: string,
   data: {
-    taskNotifications?: boolean;
+    kraNotifications?: boolean;
     reviewNotifications?: boolean;
     sopNotifications?: boolean;
     kudosNotifications?: boolean;

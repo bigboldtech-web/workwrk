@@ -61,7 +61,7 @@ export async function GET() {
         fiscalYearStart: settings.fiscalYearStart || 4,
         reviewFrequency: settings.reviewFrequency || "QUARTERLY",
         scoreWeights: settings.scoreWeights || {
-          kpi: 40, manager: 30, peer: 15, self: 15,
+          kpi: 40, manager: 25, peer: 10, self: 5, sopCompliance: 20,
         },
         scoringBands: settings.scoringBands || [
           { label: "Exceptional", min: 90, max: 100, color: "green" },
@@ -71,12 +71,12 @@ export async function GET() {
           { label: "Underperforming", min: 0, max: 39, color: "red" },
         ],
         notifications: settings.notifications || {
-          taskAssigned: true,
-          taskCompleted: true,
+          kraAssigned: true,
+          kpiUpdate: true,
           reviewDue: true,
-          leaveRequest: true,
           sopUpdate: true,
           checkInReminder: true,
+          kudosReceived: true,
           emailEnabled: true,
           reminderFrequency: "daily",
         },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +71,7 @@ function getStatusBadge(status: string) {
 }
 
 export default function PeoplePage() {
+  const router = useRouter();
   const [people, setPeople] = useState<Person[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -409,10 +411,10 @@ export default function PeoplePage() {
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>View Profile</DropdownMenuItem>
-                            <DropdownMenuItem>Assign Task</DropdownMenuItem>
-                            <DropdownMenuItem>Start Review</DropdownMenuItem>
-                            <DropdownMenuItem>Edit Details</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => router.push(`/people/${person.id}`)}>View Profile</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => router.push(`/kra-kpi`)}>Assign KRA</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => router.push(`/reviews`)}>Start Review</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => router.push(`/people/${person.id}`)}>Edit Details</DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem className="text-red-400 focus:text-red-400" onClick={(e) => { e.stopPropagation(); setDeleteTarget(person); }}>
                               <UserMinus size={14} className="mr-2" /> Remove from Organization

@@ -15,10 +15,10 @@ export async function PATCH(req: NextRequest) {
   if (error) return error;
 
   const body = await req.json();
-  const { taskNotifications, reviewNotifications, sopNotifications, kudosNotifications, dailyDigest } = body;
+  const { kraNotifications, reviewNotifications, sopNotifications, kudosNotifications, dailyDigest } = body;
 
   const updated = await updateEmailPreferences(getUserId(session), {
-    taskNotifications,
+    kraNotifications,
     reviewNotifications,
     sopNotifications,
     kudosNotifications,

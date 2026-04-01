@@ -36,7 +36,7 @@ interface SettingsData {
     currency: string;
     fiscalYearStart: number;
     reviewFrequency: string;
-    scoreWeights: { kpi: number; manager: number; peer: number; self: number };
+    scoreWeights: { kpi: number; manager: number; peer: number; self: number; sopCompliance: number };
     scoringBands: { label: string; min: number; max: number; color: string }[];
     notifications: Record<string, any>;
     security: {
@@ -63,15 +63,15 @@ interface PendingInvite {
 }
 
 const ALL_MODULES = [
-  { key: "people", label: "People", description: "Team directory and management" },
-  { key: "kra-kpi", label: "KRA & KPIs", description: "Key result areas and performance indicators" },
-  { key: "tasks", label: "Tasks", description: "Task management and tracking" },
-  { key: "sops", label: "SOPs", description: "Standard operating procedures" },
+  { key: "people", label: "People", description: "Team directory and employee profiles" },
+  { key: "kra-kpi", label: "KRA & KPIs", description: "Key responsible areas and performance indicators" },
+  { key: "tasks", label: "Work Calendar", description: "Daily work planning and calendar view" },
+  { key: "sops", label: "SOPs", description: "Standard operating procedures and compliance" },
   { key: "reviews", label: "Reviews", description: "Performance review cycles" },
-  { key: "meetings", label: "Meetings", description: "Meeting scheduling and check-ins" },
-  { key: "checkins", label: "Check-ins", description: "Daily mood and progress check-ins" },
+  { key: "meetings", label: "Meetings", description: "Meeting scheduling and action items" },
+  { key: "checkins", label: "Onboarding & Check-ins", description: "Employee onboarding and daily check-ins" },
   { key: "ai", label: "AI Assistant", description: "AI-powered insights and queries" },
-  { key: "analytics", label: "Analytics", description: "Dashboards and reporting" },
+  { key: "analytics", label: "Analytics", description: "Performance dashboards and reporting" },
 ];
 
 const MONTH_NAMES = [
@@ -94,7 +94,7 @@ export default function SettingsPage() {
   const [currency, setCurrency] = useState("INR");
   const [fiscalYearStart, setFiscalYearStart] = useState(4);
   const [reviewFrequency, setReviewFrequency] = useState("QUARTERLY");
-  const [scoreWeights, setScoreWeights] = useState({ kpi: 40, manager: 30, peer: 15, self: 15 });
+  const [scoreWeights, setScoreWeights] = useState({ kpi: 40, manager: 25, peer: 10, self: 5, sopCompliance: 20 });
   const [scoringBands, setScoringBands] = useState([
     { label: "Exceptional", min: 90, max: 100, color: "green" },
     { label: "Good", min: 75, max: 89, color: "blue" },
@@ -123,19 +123,19 @@ export default function SettingsPage() {
 
   // Notifications
   const [notifPrefs, setNotifPrefs] = useState<Record<string, any>>({
-    taskAssigned: true,
-    taskCompleted: true,
+    kraAssigned: true,
+    kpiUpdate: true,
     reviewDue: true,
-    leaveRequest: true,
     sopUpdate: true,
     checkInReminder: true,
+    kudosReceived: true,
     emailEnabled: true,
     reminderFrequency: "daily",
   });
 
   // Email preferences
   const [emailPrefs, setEmailPrefs] = useState({
-    taskNotifications: true,
+    kraNotifications: true,
     reviewNotifications: true,
     sopNotifications: true,
     kudosNotifications: true,
@@ -304,7 +304,7 @@ export default function SettingsPage() {
           const json = await res.json();
           const prefs = json.data || json;
           setEmailPrefs({
-            taskNotifications: prefs.taskNotifications ?? true,
+            kraNotifications: prefs.kraNotifications ?? true,
             reviewNotifications: prefs.reviewNotifications ?? true,
             sopNotifications: prefs.sopNotifications ?? true,
             kudosNotifications: prefs.kudosNotifications ?? true,
@@ -408,12 +408,12 @@ export default function SettingsPage() {
   const limits = planLimits[plan] || planLimits.GROWTH;
 
   const notifLabels: Record<string, string> = {
-    taskAssigned: "Task assignments and updates",
-    taskCompleted: "Task completion notifications",
+    kraAssigned: "KRA assignment notifications",
+    kpiUpdate: "KPI score update notifications",
     reviewDue: "Review cycle reminders",
-    leaveRequest: "Leave request alerts",
-    sopUpdate: "SOP compliance alerts",
+    sopUpdate: "SOP assignment and compliance alerts",
     checkInReminder: "Daily check-in reminders",
+    kudosReceived: "Kudos and recognition notifications",
   };
 
   function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
@@ -461,7 +461,7 @@ export default function SettingsPage() {
     );
   }
 
-  const weightTotal = scoreWeights.kpi + scoreWeights.manager + scoreWeights.peer + scoreWeights.self;
+  const weightTotal = scoreWeights.kpi + scoreWeights.manager + scoreWeights.peer + scoreWeights.self + (scoreWeights.sopCompliance || 0);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -597,15 +597,21 @@ export default function SettingsPage() {
 
               <div className="space-y-2">
                 <Label>Performance Score Formula Weights</Label>
-                <div className="grid grid-cols-4 gap-3">
-                  {(["kpi", "manager", "peer", "self"] as const).map((key) => (
+                <div className="grid grid-cols-5 gap-3">
+                  {([
+                    { key: "kpi", label: "KPI Achievement %" },
+                    { key: "manager", label: "Manager Rating %" },
+                    { key: "sopCompliance", label: "SOP Compliance %" },
+                    { key: "peer", label: "Peer Rating %" },
+                    { key: "self", label: "Self Rating %" },
+                  ] as const).map(({ key, label }) => (
                     <div key={key} className="space-y-1">
-                      <Label className="text-xs text-[#8888A0] capitalize">{key} Rating %</Label>
+                      <Label className="text-xs text-[#8888A0]">{label}</Label>
                       <Input
                         type="number"
                         min={0}
                         max={100}
-                        value={scoreWeights[key]}
+                        value={scoreWeights[key as keyof typeof scoreWeights]}
                         onChange={(e) => setScoreWeights({ ...scoreWeights, [key]: parseInt(e.target.value) || 0 })}
                       />
                     </div>
@@ -861,7 +867,7 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {[
-                { key: "taskNotifications", label: "Task assignment & update emails" },
+                { key: "kraNotifications", label: "KRA assignment & KPI update emails" },
                 { key: "reviewNotifications", label: "Performance review emails" },
                 { key: "sopNotifications", label: "SOP assignment emails" },
                 { key: "kudosNotifications", label: "Recognition & kudos emails" },

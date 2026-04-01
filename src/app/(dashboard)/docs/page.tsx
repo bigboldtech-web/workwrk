@@ -154,16 +154,21 @@ Employees use the Work Calendar to log what they're working on each day. Manager
 - **Avg Performance** — Average composite score across top performers
 - **Active SOPs** — Number of published SOPs
 - **SOP Compliance** — Overall compliance percentage
+
+**Cards:**
 - **Top Performers** — Employees with the highest composite scores
 - **KPI Updates** — Recent KPI score recordings
 - **Alerts** — Important notifications (PIP status, compliance warnings)
 - **Recent Activity** — Latest actions across your organization
 - **Kudos Feed** — Recent recognition given
+- **Department Performance** — Performance comparison by department
 
 **Quick Actions:**
 - Use the **+ Quick Add** button in the top bar
 - Use **Cmd+K** (Mac) or **Ctrl+K** (Windows) to open global search
-- Click the **bell icon** to view notifications`,
+- Click the **bell icon** to view notifications
+
+**Note:** Make sure KRA & KPIs module is enabled in Settings > Modules for it to appear in the sidebar.`,
       },
     ],
   },
