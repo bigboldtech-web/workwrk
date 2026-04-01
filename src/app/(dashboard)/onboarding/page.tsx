@@ -211,21 +211,21 @@ export default function OnboardingPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Template</Label>
-                  <select className="w-full rounded-md border border-[#2A2A3A] bg-[#12121A] px-3 py-2 text-sm" value={assignForm.templateId} onChange={(e) => setAssignForm({ ...assignForm, templateId: e.target.value })}>
+                  <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.templateId} onChange={(e) => setAssignForm({ ...assignForm, templateId: e.target.value })}>
                     <option value="">Select template...</option>
                     {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
                   <Label>New Employee</Label>
-                  <select className="w-full rounded-md border border-[#2A2A3A] bg-[#12121A] px-3 py-2 text-sm" value={assignForm.userId} onChange={(e) => setAssignForm({ ...assignForm, userId: e.target.value })}>
+                  <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.userId} onChange={(e) => setAssignForm({ ...assignForm, userId: e.target.value })}>
                     <option value="">Select person...</option>
                     {users.map((u: any) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
                   <Label>Buddy (optional)</Label>
-                  <select className="w-full rounded-md border border-[#2A2A3A] bg-[#12121A] px-3 py-2 text-sm" value={assignForm.buddyId} onChange={(e) => setAssignForm({ ...assignForm, buddyId: e.target.value })}>
+                  <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.buddyId} onChange={(e) => setAssignForm({ ...assignForm, buddyId: e.target.value })}>
                     <option value="">No buddy</option>
                     {users.map((u: any) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
                   </select>

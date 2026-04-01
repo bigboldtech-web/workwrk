@@ -276,6 +276,24 @@ export default function SettingsPage() {
     } catch {}
   }
 
+  async function cancelInvite(id: string) {
+    try {
+      const res = await fetch("/api/invitations", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (res.ok) {
+        toastSuccess("Invitation cancelled");
+        fetchInvites();
+      } else {
+        toastError("Failed to cancel invitation");
+      }
+    } catch {
+      toastError("Failed to cancel invitation");
+    }
+  }
+
   useEffect(() => { fetchInvites(); }, []);
 
   useEffect(() => {
@@ -529,7 +547,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Timezone</Label>
-                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-9 w-full rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] px-3 text-sm text-[#E8E8F0]">
+                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
                     <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
                     <option value="America/New_York">America/New_York (EST)</option>
                     <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
@@ -540,7 +558,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Currency</Label>
-                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-9 w-full rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] px-3 text-sm text-[#E8E8F0]">
+                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
                     <option value="INR">INR (&#8377;)</option>
                     <option value="USD">USD ($)</option>
                     <option value="EUR">EUR (&euro;)</option>
@@ -551,7 +569,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Fiscal Year Start</Label>
-                  <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(parseInt(e.target.value))} className="h-9 w-full rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] px-3 text-sm text-[#E8E8F0]">
+                  <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(parseInt(e.target.value))} className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
                     {MONTH_NAMES.map((name, i) => (
                       <option key={i} value={i + 1}>{name}</option>
                     ))}
@@ -570,7 +588,7 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Default Review Frequency</Label>
-                <select value={reviewFrequency} onChange={(e) => setReviewFrequency(e.target.value)} className="h-9 w-full rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] px-3 text-sm text-[#E8E8F0]">
+                <select value={reviewFrequency} onChange={(e) => setReviewFrequency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
                   <option value="MONTHLY">Monthly</option>
                   <option value="QUARTERLY">Quarterly</option>
                   <option value="ANNUALLY">Annually</option>
@@ -724,7 +742,12 @@ export default function SettingsPage() {
                             {inv.accessLevel} &middot; Expires {new Date(inv.expiresAt).toLocaleDateString()}
                           </p>
                         </div>
-                        <Badge variant="secondary" className="text-xs">Pending</Badge>
+                        <button
+                          onClick={() => cancelInvite(inv.id)}
+                          className="text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-md px-3 py-1 transition-colors"
+                        >
+                          Cancel
+                        </button>
                       </div>
                     ))}
                   </div>

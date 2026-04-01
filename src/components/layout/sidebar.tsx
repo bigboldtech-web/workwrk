@@ -23,6 +23,7 @@ import {
   LogOut,
   Link2,
   Activity,
+  FileText,
 } from "lucide-react";
 
 // moduleKey maps nav items to module keys from settings.enabledModules
@@ -44,6 +45,7 @@ const navigation = [
 ];
 
 const bottomNav = [
+  { name: "Docs", href: "/docs", icon: FileText },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

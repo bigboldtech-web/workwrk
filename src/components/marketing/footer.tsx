@@ -30,7 +30,7 @@ const companyLinks = [
   { href: "/pricing", label: "Pricing" },
   { href: "/blog", label: "Blog" },
   { href: "/faq", label: "FAQ" },
-  { href: "/docs", label: "Documentation" },
+  { href: "/help-center", label: "Documentation" },
   { href: "/terms", label: "Terms of Service" },
   { href: "/privacy", label: "Privacy Policy" },
 ];

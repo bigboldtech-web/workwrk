@@ -108,3 +108,45 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
+
+export async function DELETE(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const orgId = (session.user as any).organizationId;
+    const accessLevel = (session.user as any).accessLevel;
+
+    if (!["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL"].includes(accessLevel)) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
+
+    const { id } = await req.json();
+
+    if (!id) {
+      return NextResponse.json({ error: "Invitation ID is required" }, { status: 400 });
+    }
+
+    // Verify invitation belongs to this org
+    const invitation = await prisma.invitation.findFirst({
+      where: { id, organizationId: orgId },
+    });
+
+    if (!invitation) {
+      return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
+    }
+
+    if (invitation.accepted) {
+      return NextResponse.json({ error: "Cannot delete an accepted invitation" }, { status: 400 });
+    }
+
+    await prisma.invitation.delete({ where: { id } });
+
+    return NextResponse.json({ message: "Invitation cancelled" });
+  } catch (error) {
+    console.error("Invitations DELETE error:", error);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
+}
