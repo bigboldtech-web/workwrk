@@ -989,16 +989,27 @@ export default function KraKpiPage() {
                 <SelectContent>
                   {(() => {
                     const now = new Date();
-                    const q = Math.ceil((now.getMonth() + 1) / 3);
                     const year = now.getFullYear();
-                    return [
-                      <SelectItem key="q-cur" value={`Q${q} ${year}`}>Q{q} {year} (Current)</SelectItem>,
-                      <SelectItem key="q-next" value={`Q${q < 4 ? q + 1 : 1} ${q < 4 ? year : year + 1}`}>Q{q < 4 ? q + 1 : 1} {q < 4 ? year : year + 1}</SelectItem>,
-                      <SelectItem key="h1" value={`H1 ${year}`}>H1 {year}</SelectItem>,
-                      <SelectItem key="h2" value={`H2 ${year}`}>H2 {year}</SelectItem>,
-                      <SelectItem key="fy" value={`FY ${year}`}>FY {year}</SelectItem>,
-                      <SelectItem key="fy-next" value={`FY ${year + 1}`}>FY {year + 1}</SelectItem>,
-                    ];
+                    const month = now.getMonth();
+                    const q = Math.ceil((month + 1) / 3);
+                    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                    const items = [];
+                    // Monthly options (current + next 2 months)
+                    for (let i = 0; i < 3; i++) {
+                      const d = new Date(year, month + i);
+                      const m = months[d.getMonth()];
+                      const y = d.getFullYear();
+                      items.push(<SelectItem key={`m-${i}`} value={`${m} ${y}`}>{m} {y}{i === 0 ? " (Current)" : ""}</SelectItem>);
+                    }
+                    // Quarterly
+                    items.push(<SelectItem key="q-cur" value={`Q${q} ${year}`}>Q{q} {year}</SelectItem>);
+                    if (q < 4) items.push(<SelectItem key="q-next" value={`Q${q+1} ${year}`}>Q{q+1} {year}</SelectItem>);
+                    else items.push(<SelectItem key="q-next" value={`Q1 ${year+1}`}>Q1 {year+1}</SelectItem>);
+                    // Half-yearly & FY
+                    items.push(<SelectItem key="h1" value={`H1 ${year}`}>H1 {year}</SelectItem>);
+                    items.push(<SelectItem key="h2" value={`H2 ${year}`}>H2 {year}</SelectItem>);
+                    items.push(<SelectItem key="fy" value={`FY ${year}-${year+1}`}>FY {year}-{year+1}</SelectItem>);
+                    return items;
                   })()}
                 </SelectContent>
               </Select>
