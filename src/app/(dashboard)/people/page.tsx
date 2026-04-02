@@ -31,15 +31,15 @@ interface Person {
   lastName: string;
   email: string;
   phone?: string;
-  role: string;
-  department: string;
+  role: { id: string; title: string } | null;
+  department: { id: string; name: string } | null;
   status: string;
   accessLevel: string;
   score: number;
   trend: string;
   avatar?: string | null;
   joinDate?: string;
-  directReports: number;
+  _count?: { directReports: number };
 }
 
 interface Department {
@@ -422,9 +422,9 @@ export default function PeoplePage() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      {person.role && <p className="text-sm text-[#8888A0]">{person.role}</p>}
+                      {person.role && <p className="text-sm text-[#8888A0]">{person.role.title}</p>}
                       <div className="flex items-center gap-2 mt-1">
-                        {person.department && <Badge variant="outline" className="text-[10px]">{person.department}</Badge>}
+                        {person.department && <Badge variant="outline" className="text-[10px]">{person.department.name}</Badge>}
                         {getStatusBadge(person.status)}
                       </div>
                     </div>
@@ -440,8 +440,8 @@ export default function PeoplePage() {
                       {person.trend === "stable" && <Minus size={14} className="text-[#8888A0]" />}
                     </div>
                   </div>
-                  {person.directReports > 0 && (
-                    <div className="mt-2 text-xs text-[#8888A0] flex items-center gap-1"><Users size={12} /> {person.directReports} direct reports</div>
+                  {(person._count?.directReports ?? 0) > 0 && (
+                    <div className="mt-2 text-xs text-[#8888A0] flex items-center gap-1"><Users size={12} /> {person._count?.directReports} direct reports</div>
                   )}
                 </CardContent>
               </Card>
