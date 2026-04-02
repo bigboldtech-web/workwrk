@@ -17,7 +17,7 @@ import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
-  Target, Plus, TrendingUp, TrendingDown, Minus, BarChart3, ChevronRight, Users,
+  Target, Plus, TrendingUp, TrendingDown, Minus, BarChart3, ChevronRight, ChevronDown, Users,
   Pencil, Trash2, UserPlus, AlertTriangle,
 } from "lucide-react";
 
@@ -167,12 +167,25 @@ export default function KraKpiPage() {
   const [kpiKraId, setKpiKraId] = useState("");
   const [editingKpi, setEditingKpi] = useState<Kpi | null>(null);
   const [savingKpi, setSavingKpi] = useState(false);
+  const [expandedKraIds, setExpandedKraIds] = useState<Set<string>>(new Set());
+
+  function toggleExpandKra(kraId: string) {
+    setExpandedKraIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kraId)) next.delete(kraId);
+      else next.add(kraId);
+      return next;
+    });
+  }
 
   // Assignment form state
   const [assignUserId, setAssignUserId] = useState("");
   const [assignKraId, setAssignKraId] = useState("");
   const [assignWeightage, setAssignWeightage] = useState("");
   const [assignPeriod, setAssignPeriod] = useState("");
+
+  // Multi-KRA assignment
+  const [multiAssignKras, setMultiAssignKras] = useState<{ kraId: string; weightage: string }[]>([]);
   const [savingAssignment, setSavingAssignment] = useState(false);
 
   // KPI Record form state
@@ -358,22 +371,29 @@ export default function KraKpiPage() {
   };
 
   const handleAssign = async () => {
-    if (!assignUserId || !assignKraId || !assignPeriod || !assignWeightage) return;
+    const kraList = multiAssignKras.length > 0 ? multiAssignKras : (assignKraId ? [{ kraId: assignKraId, weightage: assignWeightage }] : []);
+    if (!assignUserId || !assignPeriod || kraList.length === 0) return;
     setSavingAssignment(true);
     try {
-      const res = await fetch("/api/kra-assignments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: assignUserId, kraId: assignKraId, weightage: parseFloat(assignWeightage), period: assignPeriod }),
-      });
-      if (res.ok) {
+      let allOk = true;
+      for (const entry of kraList) {
+        if (!entry.kraId || !entry.weightage) continue;
+        const res = await fetch("/api/kra-assignments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: assignUserId, kraId: entry.kraId, weightage: parseFloat(entry.weightage), period: assignPeriod }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          toastError(data.error || `Failed to assign KRA`);
+          allOk = false;
+        }
+      }
+      if (allOk) {
         setShowAssignDialog(false);
         resetAssignForm();
         await fetchAssignments();
-        toastSuccess("KRA assigned successfully");
-      } else {
-        const data = await res.json();
-        toastError(data.error || "Failed to assign KRA");
+        toastSuccess(`${kraList.length} KRA${kraList.length > 1 ? "s" : ""} assigned successfully`);
       }
     } catch { toastError("Failed to assign KRA"); } finally { setSavingAssignment(false); }
   };
@@ -414,7 +434,7 @@ export default function KraKpiPage() {
 
   function resetKraForm() { setKraName(""); setKraDescription(""); setKraCategory(""); setKraRoleId(""); setEditingKra(null); }
   function resetKpiForm() { setKpiName(""); setKpiDescription(""); setKpiType("QUANTITATIVE"); setKpiUnit(""); setKpiFrequency("MONTHLY"); setKpiTargetValue(""); setKpiKraId(""); setEditingKpi(null); }
-  function resetAssignForm() { setAssignUserId(""); setAssignKraId(""); setAssignWeightage(""); setAssignPeriod(""); }
+  function resetAssignForm() { setAssignUserId(""); setAssignKraId(""); setAssignWeightage(""); setAssignPeriod(""); setMultiAssignKras([]); }
   function resetRecordForm() { setRecordKpiId(""); setRecordUserId(""); setRecordPeriod(""); setRecordTargetValue(""); setRecordActualValue(""); setRecordNotes(""); }
 
   function openEditKra(kra: Kra) {
@@ -440,6 +460,7 @@ export default function KraKpiPage() {
 
   function openAssignForKra(kraId: string) {
     setAssignKraId(kraId);
+    setMultiAssignKras([{ kraId, weightage: "" }]);
     setShowAssignDialog(true);
   }
 
@@ -662,128 +683,100 @@ export default function KraKpiPage() {
         </TabsContent>
 
         {/* KRAs Tab */}
-        <TabsContent value="kras" className="mt-4 space-y-4">
-          <Card>
-            <CardContent className="p-0">
-              {loadingKras ? (
-                <div className="space-y-0">{[1,2,3,4].map((i) => <SkeletonRow key={i} />)}</div>
-              ) : kras.length === 0 ? (
-                <EmptyState
-                  icon={Target}
-                  title="No KRAs defined"
-                  description="Define what success looks like for your team by creating Key Result Areas."
-                  actionLabel="Create KRA"
-                  onAction={() => setShowAddKraDialog(true)}
-                />
-              ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-[#2A2A3A]">
-                      <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">KRA Name</th>
-                      <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Category</th>
-                      <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Linked Role</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">KPIs</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Assigned</th>
-                      <th className="text-right p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {kras.map((kra) => (
-                      <tr key={kra.id} className="border-b border-[#2A2A3A]/50 hover:bg-[#1A1A26]/50 transition-colors">
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
-                            <Target size={14} className="text-purple-400" />
-                            <div>
-                              <span className="text-sm font-medium">{kra.name}</span>
-                              {kra.description && <p className="text-[10px] text-[#8888A0] truncate max-w-xs">{kra.description}</p>}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-4"><Badge variant="outline" className="text-xs">{kra.category}</Badge></td>
-                        <td className="p-4 text-sm text-[#8888A0]">{kra.role?.title ?? ""}</td>
-                        <td className="p-4 text-center">
-                          <Badge variant="secondary" className="text-xs">{kra.kpis?.length ?? 0} KPIs</Badge>
-                        </td>
-                        <td className="p-4 text-center text-sm text-[#8888A0]">{kra._count?.assignments ?? 0}</td>
-                        <td className="p-4 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openAssignForKra(kra.id)} title="Assign">
-                              <UserPlus size={14} className="text-purple-400" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditKra(kra)} title="Edit">
-                              <Pencil size={14} className="text-[#8888A0]" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowDeleteConfirm({ type: "kra", id: kra.id })} title="Delete">
-                              <Trash2 size={14} className="text-red-400" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </CardContent>
-          </Card>
+        <TabsContent value="kras" className="mt-4 space-y-3">
+          {loadingKras ? (
+            <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-12 bg-[#1A1A26] rounded animate-pulse" /></CardContent></Card>)}</div>
+          ) : kras.length === 0 ? (
+            <Card><CardContent className="p-0">
+              <EmptyState
+                icon={Target}
+                title="No KRAs defined"
+                description="Define what success looks like for your team by creating Key Result Areas."
+                actionLabel="Create KRA"
+                onAction={() => setShowAddKraDialog(true)}
+              />
+            </CardContent></Card>
+          ) : (
+            kras.map((kra) => {
+              const isExpanded = expandedKraIds.has(kra.id);
+              return (
+                <Card key={kra.id} className="overflow-hidden">
+                  {/* KRA Header */}
+                  <div className="flex items-center gap-3 p-4 hover:bg-[#1A1A26]/50 transition-colors">
+                    <button onClick={() => toggleExpandKra(kra.id)} className="shrink-0 text-[#8888A0] hover:text-[#E8E8F0]">
+                      {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </button>
+                    <Target size={16} className="text-purple-400 shrink-0" />
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpandKra(kra.id)}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold">{kra.name}</span>
+                        <Badge variant="outline" className="text-[10px]">{kra.category}</Badge>
+                        {kra.role?.title && <span className="text-[10px] text-[#6B6B80]">{kra.role.title}</span>}
+                      </div>
+                      {kra.description && <p className="text-xs text-[#8888A0] truncate">{kra.description}</p>}
+                    </div>
+                    <Badge variant="secondary" className="text-[10px] shrink-0">{kra.kpis?.length ?? 0} KPIs</Badge>
+                    <span className="text-xs text-[#6B6B80] shrink-0">{kra._count?.assignments ?? 0} assigned</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openAssignForKra(kra.id)} title="Assign"><UserPlus size={14} className="text-purple-400" /></Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditKra(kra)} title="Edit"><Pencil size={14} className="text-[#8888A0]" /></Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowDeleteConfirm({ type: "kra", id: kra.id })} title="Delete"><Trash2 size={14} className="text-red-400" /></Button>
+                    </div>
+                  </div>
 
-          {/* KPIs Section */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">KPIs</CardTitle>
-                <Button variant="outline" size="sm" className="gap-1" onClick={() => { resetKpiForm(); setShowAddKpiDialog(true); }}>
-                  <Plus size={14} /> Add KPI
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {loadingKpis ? (
-                <div className="space-y-0">{[1,2,3].map((i) => <SkeletonRow key={i} />)}</div>
-              ) : kpis.length === 0 ? (
-                <EmptyState
-                  icon={BarChart3}
-                  title="No KPIs tracked"
-                  description="Create KPIs under your KRAs to start measuring performance."
-                  actionLabel="Create KPI"
-                  onAction={() => setShowAddKpiDialog(true)}
-                />
-              ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-[#2A2A3A]">
-                      <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">KPI Name</th>
-                      <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">KRA</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Type</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Frequency</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Unit</th>
-                      <th className="text-right p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {kpis.map((kpi) => (
-                      <tr key={kpi.id} className="border-b border-[#2A2A3A]/50 hover:bg-[#1A1A26]/50 transition-colors">
-                        <td className="p-4 text-sm font-medium">{kpi.name}</td>
-                        <td className="p-4 text-sm text-[#8888A0]">{kpi.kra?.name ?? "—"}</td>
-                        <td className="p-4 text-center"><Badge variant="outline" className="text-[10px]">{kpi.type}</Badge></td>
-                        <td className="p-4 text-center text-xs text-[#8888A0]">{kpi.frequency}</td>
-                        <td className="p-4 text-center text-xs text-[#8888A0]">{kpi.unit || "—"}</td>
-                        <td className="p-4 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditKpi(kpi)} title="Edit">
-                              <Pencil size={14} className="text-[#8888A0]" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowDeleteConfirm({ type: "kpi", id: kpi.id })} title="Delete">
-                              <Trash2 size={14} className="text-red-400" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </CardContent>
-          </Card>
+                  {/* Expanded KPIs */}
+                  {isExpanded && (
+                    <div className="border-t border-[#2A2A3A] bg-[#0D0D14]">
+                      {(!kra.kpis || kra.kpis.length === 0) ? (
+                        <div className="p-4 text-center text-xs text-[#8888A0]">
+                          No KPIs under this KRA yet.
+                        </div>
+                      ) : (
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-[#1A1A26]">
+                              <th className="text-left px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">KPI Name</th>
+                              <th className="text-center px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Type</th>
+                              <th className="text-center px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Unit</th>
+                              <th className="text-center px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Target</th>
+                              <th className="text-center px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Frequency</th>
+                              <th className="text-right px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {kra.kpis.map((kpi) => (
+                              <tr key={kpi.id} className="border-b border-[#1A1A26] last:border-b-0 hover:bg-[#12121A] transition-colors">
+                                <td className="px-4 py-2.5">
+                                  <span className="text-sm">{kpi.name}</span>
+                                  {kpi.description && <p className="text-[10px] text-[#6B6B80] truncate max-w-xs">{kpi.description}</p>}
+                                </td>
+                                <td className="px-4 py-2.5 text-center"><Badge variant="outline" className="text-[9px]">{kpi.type}</Badge></td>
+                                <td className="px-4 py-2.5 text-center text-xs text-[#8888A0]">{kpi.unit || "—"}</td>
+                                <td className="px-4 py-2.5 text-center text-xs font-mono text-purple-400">{kpi.targetValue != null ? kpi.targetValue : "—"}</td>
+                                <td className="px-4 py-2.5 text-center text-xs text-[#8888A0]">{kpi.frequency}</td>
+                                <td className="px-4 py-2.5 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEditKpi(kpi)} title="Edit"><Pencil size={12} className="text-[#8888A0]" /></Button>
+                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setShowDeleteConfirm({ type: "kpi", id: kpi.id })} title="Delete"><Trash2 size={12} className="text-red-400" /></Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                      <div className="p-3 border-t border-[#1A1A26]">
+                        <Button variant="ghost" size="sm" className="w-full text-xs text-[#8888A0] hover:text-purple-400 gap-1 border border-dashed border-[#2A2A3A]"
+                          onClick={() => { resetKpiForm(); setKpiKraId(kra.id); setShowAddKpiDialog(true); }}>
+                          <Plus size={12} /> Add KPI to {kra.name}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              );
+            })
+          )}
         </TabsContent>
 
         {/* Assignments Tab */}
@@ -975,8 +968,8 @@ export default function KraKpiPage() {
 
       {/* Assign KRA Dialog */}
       <Dialog open={showAssignDialog} onOpenChange={(open) => { setShowAssignDialog(open); if (!open) resetAssignForm(); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Assign KRA to Person</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Assign KRAs</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Person</Label>
@@ -990,35 +983,103 @@ export default function KraKpiPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>KRA</Label>
-              <Select value={assignKraId} onValueChange={setAssignKraId}>
-                <SelectTrigger><SelectValue placeholder="Select KRA" /></SelectTrigger>
+              <Label>Period</Label>
+              <Select value={assignPeriod} onValueChange={setAssignPeriod}>
+                <SelectTrigger><SelectValue placeholder="Select period" /></SelectTrigger>
                 <SelectContent>
-                  {kras.map((k) => (
-                    <SelectItem key={k.id} value={k.id}>{k.name}</SelectItem>
-                  ))}
+                  {(() => {
+                    const now = new Date();
+                    const q = Math.ceil((now.getMonth() + 1) / 3);
+                    const year = now.getFullYear();
+                    return [
+                      <SelectItem key="q-cur" value={`Q${q} ${year}`}>Q{q} {year} (Current)</SelectItem>,
+                      <SelectItem key="q-next" value={`Q${q < 4 ? q + 1 : 1} ${q < 4 ? year : year + 1}`}>Q{q < 4 ? q + 1 : 1} {q < 4 ? year : year + 1}</SelectItem>,
+                      <SelectItem key="h1" value={`H1 ${year}`}>H1 {year}</SelectItem>,
+                      <SelectItem key="h2" value={`H2 ${year}`}>H2 {year}</SelectItem>,
+                      <SelectItem key="fy" value={`FY ${year}`}>FY {year}</SelectItem>,
+                      <SelectItem key="fy-next" value={`FY ${year + 1}`}>FY {year + 1}</SelectItem>,
+                    ];
+                  })()}
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Weightage (%)</Label>
-                <Input type="number" min="1" max="100" placeholder="e.g., 30" value={assignWeightage} onChange={(e) => setAssignWeightage(e.target.value)} />
+
+            {/* Multi-KRA Selection */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>KRAs & Weightage</Label>
+                <Button variant="ghost" size="sm" className="text-xs text-purple-400 h-6" onClick={() => setMultiAssignKras([...multiAssignKras, { kraId: "", weightage: "" }])}>
+                  <Plus size={12} className="mr-1" /> Add KRA
+                </Button>
               </div>
+              {multiAssignKras.length === 0 && (
+                <div className="text-center py-4 border border-dashed border-[#2A2A3A] rounded-lg">
+                  <p className="text-xs text-[#8888A0] mb-2">No KRAs added yet</p>
+                  <Button variant="outline" size="sm" className="text-xs gap-1" onClick={() => setMultiAssignKras([{ kraId: "", weightage: "" }])}>
+                    <Plus size={12} /> Add KRA
+                  </Button>
+                </div>
+              )}
               <div className="space-y-2">
-                <Label>Period</Label>
-                <Input placeholder="e.g., Q1 2026" value={assignPeriod} onChange={(e) => setAssignPeriod(e.target.value)} />
+                {multiAssignKras.map((entry, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <Select value={entry.kraId} onValueChange={(v) => {
+                      const updated = [...multiAssignKras];
+                      updated[idx] = { ...updated[idx], kraId: v };
+                      setMultiAssignKras(updated);
+                    }}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Select KRA" /></SelectTrigger>
+                      <SelectContent>
+                        {kras.filter((k) => !multiAssignKras.some((e, i) => i !== idx && e.kraId === k.id)).map((k) => (
+                          <SelectItem key={k.id} value={k.id}>{k.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      min="1"
+                      max="100"
+                      placeholder="%"
+                      className="w-20"
+                      value={entry.weightage}
+                      onChange={(e) => {
+                        const updated = [...multiAssignKras];
+                        updated[idx] = { ...updated[idx], weightage: e.target.value };
+                        setMultiAssignKras(updated);
+                      }}
+                    />
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-400 shrink-0" onClick={() => setMultiAssignKras(multiAssignKras.filter((_, i) => i !== idx))}>
+                      <Trash2 size={12} />
+                    </Button>
+                  </div>
+                ))}
               </div>
+
+              {/* Weightage Total */}
+              {multiAssignKras.length > 0 && (() => {
+                const total = multiAssignKras.reduce((sum, e) => sum + (parseFloat(e.weightage) || 0), 0);
+                const isOver = total > 100;
+                const isExact = total === 100;
+                return (
+                  <div className={`flex items-center justify-between p-2 rounded-lg border ${isOver ? "border-red-500/30 bg-red-500/5" : isExact ? "border-green-500/30 bg-green-500/5" : "border-[#2A2A3A]"}`}>
+                    <span className="text-xs text-[#8888A0]">Total Weightage</span>
+                    <span className={`text-sm font-mono font-bold ${isOver ? "text-red-400" : isExact ? "text-green-400" : "text-[#E8E8F0]"}`}>
+                      {total}%
+                      {isOver && <span className="text-[10px] ml-1">(exceeds 100%)</span>}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
-            <p className="text-xs text-[#8888A0]">
-              <AlertTriangle size={12} className="inline mr-1" />
-              Total weightage for a person per period must not exceed 100%.
-            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAssignDialog(false)}>Cancel</Button>
-            <Button onClick={handleAssign} disabled={savingAssignment || !assignUserId || !assignKraId || !assignPeriod || !assignWeightage}>
-              {savingAssignment ? "Assigning..." : "Assign KRA"}
+            <Button onClick={handleAssign} disabled={
+              savingAssignment || !assignUserId || !assignPeriod || multiAssignKras.length === 0 ||
+              multiAssignKras.some((e) => !e.kraId || !e.weightage) ||
+              multiAssignKras.reduce((sum, e) => sum + (parseFloat(e.weightage) || 0), 0) > 100
+            }>
+              {savingAssignment ? "Assigning..." : `Assign ${multiAssignKras.length} KRA${multiAssignKras.length !== 1 ? "s" : ""}`}
             </Button>
           </DialogFooter>
         </DialogContent>
