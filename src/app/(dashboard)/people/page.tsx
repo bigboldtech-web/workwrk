@@ -104,8 +104,6 @@ export default function PeoplePage() {
   const { success: toastSuccess, error: toastError } = useToast();
 
   // Add form state
-  const [formFirstName, setFormFirstName] = useState("");
-  const [formLastName, setFormLastName] = useState("");
   const [formEmail, setFormEmail] = useState("");
   const [formDepartmentId, setFormDepartmentId] = useState("");
   const [formRoleId, setFormRoleId] = useState("");
@@ -170,6 +168,38 @@ export default function PeoplePage() {
     }
   };
 
+  // Pending invitations
+  const [pendingInvitations, setPendingInvitations] = useState<any[]>([]);
+
+  const fetchPendingInvitations = useCallback(async () => {
+    try {
+      const res = await fetch("/api/invitations");
+      if (res.ok) {
+        const data = await res.json();
+        const pending = (Array.isArray(data) ? data : data.data || []).filter(
+          (inv: any) => !inv.accepted && new Date(inv.expiresAt) > new Date()
+        );
+        setPendingInvitations(pending);
+      }
+    } catch {}
+  }, []);
+
+  const handleCancelInvite = async (id: string) => {
+    try {
+      const res = await fetch("/api/invitations", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (res.ok) {
+        toastSuccess("Invitation cancelled");
+        fetchPendingInvitations();
+      }
+    } catch {
+      toastError("Failed to cancel invitation");
+    }
+  };
+
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
@@ -220,34 +250,40 @@ export default function PeoplePage() {
 
   useEffect(() => {
     fetchUsers();
-  }, [fetchUsers]);
+    fetchPendingInvitations();
+  }, [fetchUsers, fetchPendingInvitations]);
 
   const filtered = people; // Server-side filtering now
 
   const resetForm = () => {
-    setFormFirstName(""); setFormLastName(""); setFormEmail("");
+    setFormEmail("");
     setFormDepartmentId(""); setFormRoleId(""); setFormAccessLevel("");
   };
 
   const handleAddPerson = async () => {
     setSubmitting(true);
     try {
-      const res = await fetch("/api/users", {
+      const res = await fetch("/api/invitations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          firstName: formFirstName, lastName: formLastName, email: formEmail,
-          departmentId: formDepartmentId, roleId: formRoleId, accessLevel: formAccessLevel,
+          email: formEmail,
+          accessLevel: formAccessLevel || "EMPLOYEE",
+          departmentId: formDepartmentId || undefined,
+          roleId: formRoleId || undefined,
         }),
       });
-      if (!res.ok) throw new Error("Failed to add person");
+      if (!res.ok) {
+        const err = await res.json();
+        toastError(err.error || "Failed to send invitation");
+        return;
+      }
       setShowAddDialog(false);
       resetForm();
-      setLoading(true);
-      await fetchUsers();
-      toastSuccess("Team member added successfully");
+      fetchPendingInvitations();
+      toastSuccess("Invitation sent! They'll appear here once they accept.");
     } catch (err) {
-      toastError("Failed to add team member", "Please try again.");
+      toastError("Failed to send invitation");
     } finally {
       setSubmitting(false);
     }
@@ -334,18 +370,9 @@ export default function PeoplePage() {
               <Button className="gap-2"><Plus size={16} /> Add Person</Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>Add New Team Member</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>Invite Team Member</DialogTitle></DialogHeader>
+              <p className="text-xs text-[#8888A0]">They&apos;ll receive an email invite to join your organization.</p>
               <div className="space-y-4 py-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>First Name <span className="text-red-400">*</span></Label>
-                    <Input placeholder="First name" value={formFirstName} onChange={(e) => setFormFirstName(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Last Name <span className="text-red-400">*</span></Label>
-                    <Input placeholder="Last name" value={formLastName} onChange={(e) => setFormLastName(e.target.value)} />
-                  </div>
-                </div>
                 <div className="space-y-2">
                   <Label>Email <span className="text-red-400">*</span></Label>
                   <Input type="email" placeholder="email@company.com" value={formEmail} onChange={(e) => setFormEmail(e.target.value)} />
@@ -431,8 +458,8 @@ export default function PeoplePage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => { setShowAddDialog(false); resetForm(); }}>Cancel</Button>
-                <Button onClick={handleAddPerson} disabled={submitting || !formFirstName || !formLastName || !formEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail)}>
-                  {submitting ? "Adding..." : "Add Member"}
+                <Button onClick={handleAddPerson} disabled={submitting || !formEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail)}>
+                  {submitting ? "Sending..." : "Send Invite"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -564,6 +591,43 @@ export default function PeoplePage() {
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Pending Invitations */}
+      {pendingInvitations.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-[#8888A0]">Pending Invitations ({pendingInvitations.length})</h3>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {pendingInvitations.map((inv: any) => (
+              <Card key={inv.id} className="border-dashed border-[#2A2A3A]">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400 text-xs font-bold shrink-0">
+                      <Mail size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{inv.email}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Badge variant="warning" className="text-[10px]">Invited</Badge>
+                        <span className="text-[10px] text-[#6B6B80]">
+                          Expires {new Date(inv.expiresAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-red-400 hover:text-red-300 shrink-0"
+                      onClick={() => handleCancelInvite(inv.id)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
 
