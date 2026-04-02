@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
+import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -73,6 +74,7 @@ function getStatusBadge(status: string) {
 
 export default function PeoplePage() {
   const router = useRouter();
+  const { canManagePeople, canInvite, isManager } = useRole();
   const [people, setPeople] = useState<Person[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -365,9 +367,9 @@ export default function PeoplePage() {
           <Button variant="outline" size="sm" onClick={handleExport} className="gap-2">
             <Download size={14} /> Export
           </Button>
-          <Dialog open={showAddDialog} onOpenChange={(open) => { setShowAddDialog(open); if (!open) resetForm(); }}>
+          {canInvite && <Dialog open={showAddDialog} onOpenChange={(open) => { setShowAddDialog(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
-              <Button className="gap-2"><Plus size={16} /> Add Person</Button>
+              <Button className="gap-2"><Plus size={16} /> Invite Person</Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>Invite Team Member</DialogTitle></DialogHeader>
@@ -463,7 +465,7 @@ export default function PeoplePage() {
                 </Button>
               </DialogFooter>
             </DialogContent>
-          </Dialog>
+          </Dialog>}
         </div>
       </div>
 
@@ -496,7 +498,7 @@ export default function PeoplePage() {
             <SelectItem value="ON_LEAVE">On Leave</SelectItem>
           </SelectContent>
         </Select>
-        {filtered.length > 0 && (
+        {filtered.length > 0 && canManagePeople && (
           <Button variant="ghost" size="sm" onClick={toggleSelectAll} className="text-xs text-[#8888A0]">
             {selectedIds.size === filtered.length ? "Deselect All" : "Select All"}
           </Button>
@@ -523,14 +525,14 @@ export default function PeoplePage() {
               <Card key={person.id} className={`hover:border-[#3A3A4A] transition-all group cursor-pointer ${isSelected ? "border-purple-500/50 bg-purple-500/5" : ""}`}>
                 <CardContent className="p-5">
                   <div className="flex items-start gap-3">
-                    <button
+                    {canManagePeople && <button
                       onClick={(e) => { e.stopPropagation(); toggleSelect(person.id); }}
                       className={`mt-1 h-5 w-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
                         isSelected ? "border-purple-500 bg-purple-500" : "border-[#2A2A3A] hover:border-[#8888A0]"
                       }`}
                     >
                       {isSelected && <span className="text-white text-xs font-bold">&#10003;</span>}
-                    </button>
+                    </button>}
                     <Avatar className="h-12 w-12">
                       <AvatarFallback className="text-base">{person.firstName[0]}{person.lastName[0]}</AvatarFallback>
                     </Avatar>
@@ -548,10 +550,12 @@ export default function PeoplePage() {
                             <DropdownMenuItem onClick={() => router.push(`/kra-kpi`)}>Assign KRA</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => router.push(`/reviews`)}>Start Review</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => router.push(`/people/${person.id}`)}>Edit Details</DropdownMenuItem>
+                            {canManagePeople && <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem className="text-red-400 focus:text-red-400" onClick={(e) => { e.stopPropagation(); setDeleteTarget(person); }}>
                               <UserMinus size={14} className="mr-2" /> Remove from Organization
                             </DropdownMenuItem>
+                            </>}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>

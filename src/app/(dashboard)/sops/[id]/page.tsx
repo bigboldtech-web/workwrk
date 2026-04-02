@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-builder";
+import { useRole } from "@/hooks/use-role";
 
 interface ComplianceUser {
   id: string;
@@ -130,6 +131,7 @@ export default function SOPDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
+  const { canManageSOPs } = useRole();
   const [sop, setSop] = useState<SOP | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -515,7 +517,7 @@ export default function SOPDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {editing ? (
+          {!canManageSOPs ? null : editing ? (
             <>
               <Button
                 variant="outline"

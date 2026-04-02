@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
+import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
 
 interface SOPCompliance {
@@ -112,6 +113,7 @@ function SkeletonCard() {
 
 export default function SOPsPage() {
   const router = useRouter();
+  const { canManageSOPs } = useRole();
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -236,7 +238,7 @@ export default function SOPsPage() {
           <Link href="/sops/compliance">
             <Button variant="outline" className="gap-2"><ShieldCheck size={16} /> Compliance</Button>
           </Link>
-          <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+          {canManageSOPs && <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
             <DialogTrigger asChild>
               <Button className="gap-2"><Plus size={16} /> New SOP</Button>
             </DialogTrigger>
@@ -287,7 +289,7 @@ export default function SOPsPage() {
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
         </div>
       </div>
 
