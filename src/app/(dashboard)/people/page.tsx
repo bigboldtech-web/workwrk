@@ -49,7 +49,8 @@ interface Department {
 
 interface Role {
   id: string;
-  name: string;
+  name?: string;
+  title?: string;
 }
 
 function getScoreColor(score: number) {
@@ -109,6 +110,65 @@ export default function PeoplePage() {
   const [formDepartmentId, setFormDepartmentId] = useState("");
   const [formRoleId, setFormRoleId] = useState("");
   const [formAccessLevel, setFormAccessLevel] = useState("");
+
+  // Inline creation state
+  const [showNewRole, setShowNewRole] = useState(false);
+  const [newRoleTitle, setNewRoleTitle] = useState("");
+  const [creatingRole, setCreatingRole] = useState(false);
+  const [showNewDept, setShowNewDept] = useState(false);
+  const [newDeptName, setNewDeptName] = useState("");
+  const [creatingDept, setCreatingDept] = useState(false);
+
+  const handleCreateRole = async () => {
+    if (!newRoleTitle.trim()) return;
+    setCreatingRole(true);
+    try {
+      const res = await fetch("/api/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newRoleTitle,
+          departmentId: formDepartmentId || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to create role");
+      const role = await res.json();
+      const created = role.data || role;
+      setRoles((prev) => [...prev, { id: created.id, title: created.title }]);
+      setFormRoleId(created.id);
+      setNewRoleTitle("");
+      setShowNewRole(false);
+      toastSuccess(`Role "${created.title}" created`);
+    } catch {
+      toastError("Failed to create role");
+    } finally {
+      setCreatingRole(false);
+    }
+  };
+
+  const handleCreateDept = async () => {
+    if (!newDeptName.trim()) return;
+    setCreatingDept(true);
+    try {
+      const res = await fetch("/api/departments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newDeptName }),
+      });
+      if (!res.ok) throw new Error("Failed to create department");
+      const dept = await res.json();
+      const created = dept.data || dept;
+      setDepartments((prev) => [...prev, { id: created.id, name: created.name }]);
+      setFormDepartmentId(created.id);
+      setNewDeptName("");
+      setShowNewDept(false);
+      toastSuccess(`Department "${created.name}" created`);
+    } catch {
+      toastError("Failed to create department");
+    } finally {
+      setCreatingDept(false);
+    }
+  };
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -295,17 +355,63 @@ export default function PeoplePage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Department</Label>
-                  <Select value={formDepartmentId} onValueChange={setFormDepartmentId}>
-                    <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                    <SelectContent>{departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
-                  </Select>
+                  {showNewDept ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        placeholder="Department name..."
+                        value={newDeptName}
+                        onChange={(e) => setNewDeptName(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleCreateDept()}
+                        autoFocus
+                      />
+                      <Button size="sm" onClick={handleCreateDept} disabled={creatingDept || !newDeptName.trim()}>
+                        {creatingDept ? "..." : "Add"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setShowNewDept(false); setNewDeptName(""); }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Select value={formDepartmentId} onValueChange={setFormDepartmentId}>
+                        <SelectTrigger className="flex-1"><SelectValue placeholder="Select department" /></SelectTrigger>
+                        <SelectContent>{departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <Button size="sm" variant="outline" onClick={() => setShowNewDept(true)} className="shrink-0 text-xs">
+                        + New
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Role</Label>
-                  <Select value={formRoleId} onValueChange={setFormRoleId}>
-                    <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
-                    <SelectContent>{roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}</SelectContent>
-                  </Select>
+                  {showNewRole ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        placeholder="Role title..."
+                        value={newRoleTitle}
+                        onChange={(e) => setNewRoleTitle(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleCreateRole()}
+                        autoFocus
+                      />
+                      <Button size="sm" onClick={handleCreateRole} disabled={creatingRole || !newRoleTitle.trim()}>
+                        {creatingRole ? "..." : "Add"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setShowNewRole(false); setNewRoleTitle(""); }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Select value={formRoleId} onValueChange={setFormRoleId}>
+                        <SelectTrigger className="flex-1"><SelectValue placeholder="Select role" /></SelectTrigger>
+                        <SelectContent>{roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.title || r.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <Button size="sm" variant="outline" onClick={() => setShowNewRole(true)} className="shrink-0 text-xs">
+                        + New
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Access Level</Label>
