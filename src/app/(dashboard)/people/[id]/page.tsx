@@ -22,6 +22,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
@@ -528,14 +529,19 @@ export default function UserProfilePage() {
       <Tabs defaultValue="kras">
         <TabsList>
           <TabsTrigger value="kras">KRAs</TabsTrigger>
+          <TabsTrigger value="monthly-kpis">Monthly KPIs</TabsTrigger>
           <TabsTrigger value="calendar">Work Calendar</TabsTrigger>
-          <TabsTrigger value="kpis">KPIs</TabsTrigger>
+          <TabsTrigger value="kpis">KPI History</TabsTrigger>
           <TabsTrigger value="skills">Skills</TabsTrigger>
           <TabsTrigger value="reviews">Reviews</TabsTrigger>
           <TabsTrigger value="kudos">Kudos {user._count?.kudosReceived > 0 ? `(${user._count.kudosReceived})` : ""}</TabsTrigger>
           <TabsTrigger value="checkins">Check-ins</TabsTrigger>
           <TabsTrigger value="reports">Direct Reports</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="monthly-kpis" className="mt-4">
+          <MonthlyKpiRecorder userId={id as string} />
+        </TabsContent>
 
         <TabsContent value="calendar" className="mt-4 space-y-2">
           {!user.tasks || user.tasks.length === 0 ? (

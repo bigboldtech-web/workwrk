@@ -39,6 +39,7 @@ interface Kpi {
   type?: string;
   unit?: string;
   frequency?: string;
+  targetValue?: number | null;
   kraId?: string;
   kra?: { id: string; name: string };
   records?: any[];
@@ -162,6 +163,7 @@ export default function KraKpiPage() {
   const [kpiType, setKpiType] = useState("QUANTITATIVE");
   const [kpiUnit, setKpiUnit] = useState("");
   const [kpiFrequency, setKpiFrequency] = useState("MONTHLY");
+  const [kpiTargetValue, setKpiTargetValue] = useState("");
   const [kpiKraId, setKpiKraId] = useState("");
   const [editingKpi, setEditingKpi] = useState<Kpi | null>(null);
   const [savingKpi, setSavingKpi] = useState(false);
@@ -313,7 +315,7 @@ export default function KraKpiPage() {
       const res = await fetch("/api/kpis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: kpiName, description: kpiDescription, type: kpiType, unit: kpiUnit || undefined, frequency: kpiFrequency, kraId: kpiKraId || undefined }),
+        body: JSON.stringify({ name: kpiName, description: kpiDescription, type: kpiType, unit: kpiUnit || undefined, frequency: kpiFrequency, targetValue: kpiTargetValue ? Number(kpiTargetValue) : undefined, kraId: kpiKraId || undefined }),
       });
       if (res.ok) {
         setShowAddKpiDialog(false);
@@ -332,7 +334,7 @@ export default function KraKpiPage() {
       const res = await fetch("/api/kpis", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: editingKpi.id, name: kpiName, description: kpiDescription, type: kpiType, unit: kpiUnit, frequency: kpiFrequency, kraId: kpiKraId || null }),
+        body: JSON.stringify({ id: editingKpi.id, name: kpiName, description: kpiDescription, type: kpiType, unit: kpiUnit, frequency: kpiFrequency, targetValue: kpiTargetValue ? Number(kpiTargetValue) : null, kraId: kpiKraId || null }),
       });
       if (res.ok) {
         setShowEditKpiDialog(false);
@@ -411,7 +413,7 @@ export default function KraKpiPage() {
   };
 
   function resetKraForm() { setKraName(""); setKraDescription(""); setKraCategory(""); setKraRoleId(""); setEditingKra(null); }
-  function resetKpiForm() { setKpiName(""); setKpiDescription(""); setKpiType("QUANTITATIVE"); setKpiUnit(""); setKpiFrequency("MONTHLY"); setKpiKraId(""); setEditingKpi(null); }
+  function resetKpiForm() { setKpiName(""); setKpiDescription(""); setKpiType("QUANTITATIVE"); setKpiUnit(""); setKpiFrequency("MONTHLY"); setKpiTargetValue(""); setKpiKraId(""); setEditingKpi(null); }
   function resetAssignForm() { setAssignUserId(""); setAssignKraId(""); setAssignWeightage(""); setAssignPeriod(""); }
   function resetRecordForm() { setRecordKpiId(""); setRecordUserId(""); setRecordPeriod(""); setRecordTargetValue(""); setRecordActualValue(""); setRecordNotes(""); }
 
@@ -431,6 +433,7 @@ export default function KraKpiPage() {
     setKpiType(kpi.type || "QUANTITATIVE");
     setKpiUnit(kpi.unit || "");
     setKpiFrequency(kpi.frequency || "MONTHLY");
+    setKpiTargetValue(kpi.targetValue != null ? String(kpi.targetValue) : "");
     setKpiKraId(kpi.kraId || kpi.kra?.id || "");
     setShowEditKpiDialog(true);
   }
@@ -561,9 +564,26 @@ export default function KraKpiPage() {
           </Select>
         </div>
       </div>
-      <div className="space-y-2">
-        <Label>Unit</Label>
-        <Input placeholder="e.g., $, %, hours" value={kpiUnit} onChange={(e) => setKpiUnit(e.target.value)} />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label>Unit</Label>
+          <Select value={kpiUnit} onValueChange={setKpiUnit}>
+            <SelectTrigger><SelectValue placeholder="Select unit" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="%">Percentage (%)</SelectItem>
+              <SelectItem value="count">Count</SelectItem>
+              <SelectItem value="₹">₹ (INR)</SelectItem>
+              <SelectItem value="$">$ (USD)</SelectItem>
+              <SelectItem value="hours">Hours</SelectItem>
+              <SelectItem value="days">Days</SelectItem>
+              <SelectItem value="rating">Rating (1-5)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Target Value</Label>
+          <Input type="number" placeholder={kpiUnit === "%" ? "e.g., 95" : kpiUnit === "count" ? "e.g., 30" : "e.g., 100"} value={kpiTargetValue} onChange={(e) => setKpiTargetValue(e.target.value)} />
+        </div>
       </div>
       <div className="space-y-2">
         <Label>Description</Label>

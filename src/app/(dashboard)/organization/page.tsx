@@ -19,6 +19,146 @@ import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
+// ============================================
+// Dynamic Org Chart Component
+// ============================================
+
+const ACCESS_LEVEL_ORDER: Record<string, number> = {
+  SUPER_ADMIN: 0, COMPANY_ADMIN: 1, C_LEVEL: 2, VP: 3,
+  DIRECTOR: 4, MANAGER: 5, HR: 5, TEAM_LEAD: 6, EMPLOYEE: 7, AGENT: 8,
+};
+
+function getAccessLabel(level: string) {
+  return level.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[]; depth?: number }) {
+  const directReports = allUsers.filter((u) => u.manager?.id === user.id);
+  const borderColor = depth === 0 ? "border-purple-500/30" : "border-[#2A2A3A]";
+  const bgColor = depth === 0 ? "bg-purple-500/10" : "bg-[#12121A]";
+
+  return (
+    <div className="flex flex-col items-center">
+      {/* Node */}
+      <div className={`rounded-xl border ${borderColor} ${bgColor} p-4 min-w-[180px] max-w-[220px] text-center`}>
+        <Avatar className="h-10 w-10 mx-auto mb-2">
+          <AvatarFallback className={`text-sm font-bold ${depth === 0 ? "bg-purple-600/20 text-purple-400" : "bg-[#2A2A3A] text-[#8888A0]"}`}>
+            {user.firstName?.[0]}{user.lastName?.[0]}
+          </AvatarFallback>
+        </Avatar>
+        <p className="font-semibold text-sm">{user.firstName} {user.lastName}</p>
+        <p className="text-xs text-[#8888A0]">{user.role?.title || getAccessLabel(user.accessLevel)}</p>
+        {user.department && (
+          <Badge variant="outline" className="text-[9px] mt-1.5">{user.department.name}</Badge>
+        )}
+        {directReports.length > 0 && (
+          <p className="text-[10px] text-purple-400 mt-1">{directReports.length} report{directReports.length !== 1 ? "s" : ""}</p>
+        )}
+      </div>
+
+      {/* Children */}
+      {directReports.length > 0 && (
+        <>
+          <div className="h-6 w-px bg-[#2A2A3A]" />
+          {directReports.length === 1 ? (
+            <OrgChartNode user={directReports[0]} allUsers={allUsers} depth={depth + 1} />
+          ) : (
+            <div className="relative">
+              {/* Horizontal connector line */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 h-px bg-[#2A2A3A]" style={{
+                width: `${Math.min(directReports.length * 200, 900)}px`,
+              }} />
+              <div className="flex gap-6 pt-0">
+                {directReports
+                  .sort((a: any, b: any) => (ACCESS_LEVEL_ORDER[a.accessLevel] ?? 7) - (ACCESS_LEVEL_ORDER[b.accessLevel] ?? 7))
+                  .map((report: any) => (
+                    <div key={report.id} className="flex flex-col items-center">
+                      <div className="h-6 w-px bg-[#2A2A3A]" />
+                      <OrgChartNode user={report} allUsers={allUsers} depth={depth + 1} />
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function OrgChart({ users, departments }: { users: any[]; departments: any[] }) {
+  if (users.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <Users size={40} className="mx-auto text-[#8888A0] mb-3" />
+        <p className="text-sm text-[#8888A0]">Add team members to see the org chart</p>
+      </div>
+    );
+  }
+
+  // Find top-level users (no manager assigned)
+  const topLevel = users
+    .filter((u) => !u.manager && !u.deletedAt)
+    .sort((a, b) => (ACCESS_LEVEL_ORDER[a.accessLevel] ?? 7) - (ACCESS_LEVEL_ORDER[b.accessLevel] ?? 7));
+
+  // Users with managers who aren't in the top level
+  const managedUsers = users.filter((u) => u.manager && !u.deletedAt);
+
+  // Find unlinked users (have no manager and no reports — orphans not in the tree)
+  const usersInTree = new Set<string>();
+  function collectTree(userId: string) {
+    usersInTree.add(userId);
+    users.filter((u) => u.manager?.id === userId).forEach((u) => collectTree(u.id));
+  }
+  topLevel.forEach((u) => collectTree(u.id));
+
+  const unlinked = users.filter((u) => !usersInTree.has(u.id) && !u.deletedAt);
+
+  return (
+    <div className="space-y-8 overflow-x-auto">
+      {/* Main tree */}
+      <div className="flex justify-center min-w-fit">
+        <div className="flex flex-col items-center">
+          {topLevel.length === 1 ? (
+            <OrgChartNode user={topLevel[0]} allUsers={users} depth={0} />
+          ) : topLevel.length > 1 ? (
+            <div className="flex gap-8">
+              {topLevel.map((user) => (
+                <OrgChartNode key={user.id} user={user} allUsers={users} depth={0} />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Unlinked users — no manager assigned */}
+      {unlinked.length > 0 && (
+        <div className="border-t border-[#2A2A3A] pt-6">
+          <p className="text-xs text-[#8888A0] mb-3 text-center">
+            Not in hierarchy — assign a manager to link them
+          </p>
+          <div className="flex flex-wrap gap-3 justify-center">
+            {unlinked.map((u) => (
+              <div key={u.id} className="rounded-lg border border-dashed border-[#2A2A3A] bg-[#0D0D14] p-3 min-w-[140px] text-center">
+                <Avatar className="h-8 w-8 mx-auto mb-1">
+                  <AvatarFallback className="text-xs bg-[#2A2A3A] text-[#8888A0]">
+                    {u.firstName?.[0]}{u.lastName?.[0]}
+                  </AvatarFallback>
+                </Avatar>
+                <p className="text-xs font-medium">{u.firstName} {u.lastName}</p>
+                <p className="text-[10px] text-[#6B6B80]">{u.role?.title || u.accessLevel?.replace(/_/g, " ")}</p>
+                {u.department && (
+                  <p className="text-[10px] text-[#6B6B80]">{u.department.name}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OrganizationPage() {
   const [departments, setDepartments] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
@@ -48,14 +188,14 @@ export default function OrganizationPage() {
       const [deptRes, roleRes, userRes] = await Promise.all([
         fetch("/api/departments"),
         fetch("/api/roles"),
-        fetch("/api/users"),
+        fetch("/api/users?limit=500"),
       ]);
       const [deptData, roleData, userData] = await Promise.all([
         deptRes.json(), roleRes.json(), userRes.json(),
       ]);
       setDepartments(Array.isArray(deptData) ? deptData : []);
       setRoles(Array.isArray(roleData) ? roleData : []);
-      setUsers(Array.isArray(userData) ? userData : []);
+      setUsers(Array.isArray(userData) ? userData : userData?.data || []);
     } catch (err) {
       console.error("Failed to fetch org data:", err);
     } finally {
@@ -399,33 +539,8 @@ export default function OrganizationPage() {
 
         <TabsContent value="orgchart" className="mt-4">
           <Card>
-            <CardContent className="p-12 text-center">
-              <div className="flex flex-col items-center gap-4">
-                <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-4 min-w-[200px]">
-                  <Avatar className="h-12 w-12 mx-auto mb-2">
-                    <AvatarFallback>CEO</AvatarFallback>
-                  </Avatar>
-                  <p className="font-semibold">Admin</p>
-                  <p className="text-xs text-[#8888A0]">Company Admin</p>
-                </div>
-
-                <div className="h-8 w-px bg-[#2A2A3A]" />
-
-                <div className="flex flex-wrap gap-4 justify-center">
-                  {departments.map((dept) => {
-                    const headName = dept.head ? `${dept.head.firstName} ${dept.head.lastName}` : "Vacant";
-                    const memberCount = dept._count?.members ?? 0;
-                    return (
-                      <div key={dept.id} className="rounded-xl border border-[#2A2A3A] bg-[#12121A] p-4 min-w-[160px]">
-                        <div className="h-3 w-3 rounded-full mx-auto mb-2" style={{ backgroundColor: dept.color || "#6C5CE7" }} />
-                        <p className="font-medium text-sm">{headName}</p>
-                        <p className="text-xs text-[#8888A0]">{dept.name} Head</p>
-                        <p className="text-[10px] text-[#8888A0] mt-1">{memberCount} members</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+            <CardContent className="p-8">
+              <OrgChart users={users} departments={departments} />
             </CardContent>
           </Card>
         </TabsContent>

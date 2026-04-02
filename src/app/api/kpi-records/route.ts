@@ -43,32 +43,49 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   const body = await req.json();
-  const { kpiId, userId, period, targetValue, actualValue, notes, evidence } = body;
+  const { kpiId, userId, period, targetValue: manualTarget, actualValue, notes, managerNotes, evidence } = body;
 
-  if (!kpiId || !userId || !period || targetValue == null) {
-    return jsonError("kpiId, userId, period, and targetValue are required");
+  if (!kpiId || !userId || !period) {
+    return jsonError("kpiId, userId, and period are required");
   }
 
-  // Calculate score: actual/target * 100, capped at 120%
-  const score = actualValue != null ? Math.min(Math.round((actualValue / targetValue) * 100), 120) : null;
+  // Auto-pull target from KPI definition, fallback to manual
+  const kpi = await prisma.kPI.findUnique({ where: { id: kpiId }, select: { targetValue: true, organizationId: true } });
+  if (!kpi) return jsonError("KPI not found", 404);
 
-  const record = await prisma.kPIRecord.create({
-    data: {
+  const target = kpi.targetValue ?? manualTarget;
+  if (target == null) return jsonError("Target value not set on this KPI. Please set it first.");
+
+  // Calculate score: actual/target * 100, capped at 120%
+  const score = actualValue != null ? Math.min(Math.round((actualValue / target) * 100), 120) : null;
+
+  const record = await prisma.kPIRecord.upsert({
+    where: { kpiId_userId_period: { kpiId, userId, period } },
+    create: {
       kpiId,
       userId,
       period,
-      targetValue,
+      targetValue: target,
       actualValue,
       score,
       notes,
+      managerNotes,
+      evidence,
+      status: actualValue != null ? "SUBMITTED" : "PENDING",
+    },
+    update: {
+      actualValue,
+      targetValue: target,
+      score,
+      notes,
+      managerNotes,
       evidence,
       status: actualValue != null ? "SUBMITTED" : "PENDING",
     },
   });
 
   // Auto-recalculate performance score
-  const kpi = await prisma.kPI.findUnique({ where: { id: kpiId }, select: { organizationId: true } });
-  if (kpi) triggerRecalculation(userId, kpi.organizationId);
+  if (kpi.organizationId) triggerRecalculation(userId, kpi.organizationId);
 
   return jsonSuccess(record, 201);
 }

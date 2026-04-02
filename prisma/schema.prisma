@@ -350,6 +350,7 @@ model KPIRecord {
   actualValue Float?
   score       Float?
   notes       String?
+  managerNotes String?
   evidence    String?
   status      KPIRecordStatus @default(PENDING)
   createdAt   DateTime @default(now())
