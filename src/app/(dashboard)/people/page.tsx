@@ -522,7 +522,7 @@ export default function PeoplePage() {
           {filtered.map((person) => {
             const isSelected = selectedIds.has(person.id);
             return (
-              <Card key={person.id} className={`hover:border-[#3A3A4A] transition-all group cursor-pointer ${isSelected ? "border-purple-500/50 bg-purple-500/5" : ""}`}>
+              <Card key={person.id} className={`hover:border-[#3A3A4A] transition-all group cursor-pointer ${isSelected ? "border-purple-500/50 bg-purple-500/5" : ""}`} onClick={() => router.push(`/people/${person.id}`)}>
                 <CardContent className="p-5">
                   <div className="flex items-start gap-3">
                     {canManagePeople && <button
