@@ -63,7 +63,7 @@ export function OnboardingChecklist() {
   if (loading || dismissed || !data || data.allDone) return null;
 
   return (
-    <Card className="border-purple-500/20 bg-gradient-to-br from-surface to-purple-950">
+    <Card className="border-purple-500/20 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-surface dark:to-purple-950">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
