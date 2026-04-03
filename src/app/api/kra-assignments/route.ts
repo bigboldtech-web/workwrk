@@ -103,6 +103,34 @@ export async function POST(req: NextRequest) {
   });
   if (!user) return jsonError("User not found", 404);
 
+  // Check if this KRA is already assigned to this user
+  const existing = await prisma.kRAAssignment.findUnique({
+    where: { userId_kraId: { userId, kraId } },
+  });
+
+  if (existing) {
+    // Update weightage if already assigned
+    const otherAssignments = await prisma.kRAAssignment.findMany({
+      where: { userId, status: { not: "ARCHIVED" }, id: { not: existing.id } },
+    });
+    const othersTotal = otherAssignments.reduce((sum, a) => sum + a.weightage, 0);
+    if (othersTotal + weightage > 100) {
+      return jsonError(
+        `Total weightage would be ${othersTotal + weightage}%. Others: ${othersTotal}%, this: ${weightage}%. Must not exceed 100%.`
+      );
+    }
+
+    const assignment = await prisma.kRAAssignment.update({
+      where: { id: existing.id },
+      data: { weightage, status: status || existing.status },
+      include: {
+        kra: { select: { id: true, name: true, category: true } },
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+    return jsonSuccess(assignment);
+  }
+
   // Check total weightage for this user won't exceed 100%
   const existingAssignments = await prisma.kRAAssignment.findMany({
     where: { userId, status: { not: "ARCHIVED" } },
