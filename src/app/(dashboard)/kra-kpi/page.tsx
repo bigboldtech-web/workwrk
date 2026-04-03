@@ -789,40 +789,147 @@ export default function KraKpiPage() {
         </TabsList>
 
         {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-6 mt-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {loadingRecords ? (
-              <>{[1,2,3,4,5,6].map((i) => <SkeletonKpiCard key={i} />)}</>
-            ) : overviewRecords.length === 0 ? (
-              <Card className="col-span-full">
-                <CardContent className="p-8 text-center">
-                  <p className="text-muted text-sm">No KPI records found. Go to People → Monthly KPIs to record data.</p>
+        <TabsContent value="overview" className="space-y-4 mt-4">
+          {loadingRecords ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[1,2,3,4].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-16 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}
+            </div>
+          ) : overviewRecords.length === 0 ? (
+            <Card>
+              <CardContent className="p-8 text-center">
+                <BarChart3 size={32} className="mx-auto text-muted mb-3" />
+                <p className="font-medium mb-1">No KPI data yet</p>
+                <p className="text-sm text-muted">Go to People → select a person → Monthly KPIs to start recording scores.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              {/* Summary Stats */}
+              {(() => {
+                const totalRecords = overviewRecords.length;
+                const scoredRecords = overviewRecords.filter((r) => r.achievement > 0);
+                const avgScore = scoredRecords.length > 0 ? Math.round(scoredRecords.reduce((s, r) => s + r.achievement, 0) / scoredRecords.length) : 0;
+                const onTrack = scoredRecords.filter((r) => r.achievement >= 90).length;
+                const needsAttention = scoredRecords.filter((r) => r.achievement >= 50 && r.achievement < 90).length;
+                const critical = scoredRecords.filter((r) => r.achievement < 50).length;
+                const periods = [...new Set(overviewRecords.map((r) => r.period))].sort().reverse();
+                const latestPeriod = periods[0] || "";
+
+                return (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted">
+                        Showing <span className="font-medium text-foreground">{latestPeriod}</span> &middot; {teamScores.length} people scored &middot; {totalRecords} KPI records
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <p className={`text-3xl font-bold font-mono ${getScoreColor(avgScore)}`}>{avgScore}%</p>
+                          <p className="text-xs text-muted mt-1">Avg KPI Score</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <p className="text-3xl font-bold text-green-400">{onTrack}</p>
+                          <p className="text-xs text-muted mt-1">On Track (&ge;90%)</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <p className="text-3xl font-bold text-orange-400">{needsAttention}</p>
+                          <p className="text-xs text-muted mt-1">Needs Attention</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <p className="text-3xl font-bold text-red-400">{critical}</p>
+                          <p className="text-xs text-muted mt-1">Critical (&lt;50%)</p>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </>
+                );
+              })()}
+
+              {/* People Scoreboard */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">People Scoreboard</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {teamScores.length === 0 ? (
+                    <p className="p-4 text-sm text-muted text-center">No scores yet.</p>
+                  ) : (
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left p-3 text-[10px] font-medium text-muted uppercase">#</th>
+                          <th className="text-left p-3 text-[10px] font-medium text-muted uppercase">Person</th>
+                          <th className="text-left p-3 text-[10px] font-medium text-muted uppercase">Department</th>
+                          <th className="text-center p-3 text-[10px] font-medium text-muted uppercase">Score</th>
+                          <th className="text-center p-3 text-[10px] font-medium text-muted uppercase">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teamScores.map((person, idx) => (
+                          <tr key={person.name} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
+                            <td className="p-3 text-xs text-muted">{idx + 1}</td>
+                            <td className="p-3 text-sm font-medium">{person.name}</td>
+                            <td className="p-3"><Badge variant="outline" className="text-[10px]">{person.department || "—"}</Badge></td>
+                            <td className="p-3 text-center">
+                              <span className={`text-sm font-mono font-bold ${getScoreColor(person.overall)}`}>{person.overall}%</span>
+                            </td>
+                            <td className="p-3 text-center">
+                              {person.status === "green" && <Badge variant="success" className="text-[10px]">On Track</Badge>}
+                              {person.status === "yellow" && <Badge variant="warning" className="text-[10px]">Attention</Badge>}
+                              {person.status === "red" && <Badge variant="destructive" className="text-[10px]">Critical</Badge>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </CardContent>
               </Card>
-            ) : (
-              overviewRecords.map((kpi, idx) => (
-                <Card key={idx} className="hover:border-muted-2 transition-colors">
-                  <CardContent className="p-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-xs font-medium truncate">{kpi.name}</p>
-                      {kpi.lowerIsBetter && <span className="text-[9px] text-amber-500 shrink-0">lower = better</span>}
-                    </div>
-                    <p className="text-[10px] text-muted mb-1.5">{kpi.kraName} &middot; {kpi.period}</p>
-                    <div className="flex items-end gap-1.5 mb-1.5">
-                      <span className={`text-lg font-bold font-mono ${getScoreColor(kpi.achievement)}`}>
-                        {kpi.actual.toLocaleString()}
-                      </span>
-                      <span className="text-[10px] text-muted mb-0.5">/ {kpi.target.toLocaleString()} {kpi.unit}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Progress value={Math.min(kpi.achievement, 100)} className="h-1" indicatorClassName={getProgressColor(kpi.achievement)} />
-                      <span className={`text-[10px] font-mono ${getScoreColor(kpi.achievement)}`}>{kpi.achievement}%</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
+
+              {/* Department Summary */}
+              {(() => {
+                const deptMap = new Map<string, number[]>();
+                teamScores.forEach((p) => {
+                  const dept = p.department || "Unassigned";
+                  if (!deptMap.has(dept)) deptMap.set(dept, []);
+                  deptMap.get(dept)!.push(p.overall);
+                });
+                const deptScores = Array.from(deptMap.entries()).map(([dept, scores]) => ({
+                  dept,
+                  avg: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+                  count: scores.length,
+                })).sort((a, b) => b.avg - a.avg);
+
+                if (deptScores.length <= 1) return null;
+
+                return (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Department Performance</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {deptScores.map((d) => (
+                        <div key={d.dept} className="flex items-center gap-3">
+                          <span className="text-sm w-40 truncate">{d.dept}</span>
+                          <Progress value={Math.min(d.avg, 100)} className="h-2 flex-1" indicatorClassName={getProgressColor(d.avg)} />
+                          <span className={`text-sm font-mono font-bold w-12 text-right ${getScoreColor(d.avg)}`}>{d.avg}%</span>
+                          <span className="text-[10px] text-muted w-16 text-right">{d.count} people</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+            </>
+          )}
         </TabsContent>
 
         {/* KRAs Tab */}

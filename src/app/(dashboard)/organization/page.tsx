@@ -199,21 +199,28 @@ export default function OrganizationPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState<{ type: "dept" | "role"; id: string; name: string; count: number } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Offices
+  const [officesList, setOfficesList] = useState<any[]>([]);
+  const [showAddOffice, setShowAddOffice] = useState(false);
+  const [officeForm, setOfficeForm] = useState({ name: "", city: "", country: "", isHeadquarters: false });
+
   useEffect(() => {
     fetchData();
   }, []);
 
   async function fetchData() {
     try {
-      const [deptRes, roleRes, userRes, settingsRes] = await Promise.all([
+      const [deptRes, roleRes, userRes, settingsRes, officesRes] = await Promise.all([
         fetch("/api/departments"),
         fetch("/api/roles"),
         fetch("/api/users?limit=500"),
         fetch("/api/settings"),
+        fetch("/api/offices"),
       ]);
-      const [deptData, roleData, userData, settingsData] = await Promise.all([
-        deptRes.json(), roleRes.json(), userRes.json(), settingsRes.json(),
+      const [deptData, roleData, userData, settingsData, officesData] = await Promise.all([
+        deptRes.json(), roleRes.json(), userRes.json(), settingsRes.json(), officesRes.json(),
       ]);
+      setOfficesList(Array.isArray(officesData) ? officesData : officesData?.data || []);
       setDepartments(Array.isArray(deptData) ? deptData : []);
       setRoles(Array.isArray(roleData) ? roleData : []);
       setUsers(Array.isArray(userData) ? userData : userData?.data || []);
@@ -403,6 +410,7 @@ export default function OrganizationPage() {
           <TabsTrigger value="about" className="gap-2"><Heart size={14} /> About</TabsTrigger>
           <TabsTrigger value="departments" className="gap-2"><Building2 size={14} /> Departments</TabsTrigger>
           <TabsTrigger value="roles" className="gap-2"><Briefcase size={14} /> Roles</TabsTrigger>
+          <TabsTrigger value="offices" className="gap-2"><Globe size={14} /> Offices</TabsTrigger>
           <TabsTrigger value="orgchart" className="gap-2"><Users size={14} /> Org Chart</TabsTrigger>
         </TabsList>
 
@@ -812,6 +820,83 @@ export default function OrganizationPage() {
               </table>
             </CardContent>
           </Card>
+          )}
+        </TabsContent>
+
+        {/* Offices Tab */}
+        <TabsContent value="offices" className="space-y-4 mt-4">
+          <div className="flex justify-end">
+            <Dialog open={showAddOffice} onOpenChange={setShowAddOffice}>
+              <Button className="gap-2" onClick={() => setShowAddOffice(true)}><Plus size={16} /> Add Office</Button>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Add Office Location</DialogTitle></DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Office Name <span className="text-red-400">*</span></Label>
+                    <Input placeholder="e.g., Mumbai HQ" value={officeForm.name} onChange={(e) => setOfficeForm({ ...officeForm, name: e.target.value })} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>City</Label>
+                      <Input placeholder="e.g., Mumbai" value={officeForm.city} onChange={(e) => setOfficeForm({ ...officeForm, city: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Country</Label>
+                      <Input placeholder="e.g., India" value={officeForm.country} onChange={(e) => setOfficeForm({ ...officeForm, country: e.target.value })} />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={officeForm.isHeadquarters} onChange={(e) => setOfficeForm({ ...officeForm, isHeadquarters: e.target.checked })} className="rounded" />
+                    <span className="text-sm">This is the headquarters</span>
+                  </label>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowAddOffice(false)}>Cancel</Button>
+                  <Button onClick={async () => {
+                    if (!officeForm.name.trim()) return;
+                    const res = await fetch("/api/offices", {
+                      method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(officeForm),
+                    });
+                    if (res.ok) {
+                      setShowAddOffice(false);
+                      setOfficeForm({ name: "", city: "", country: "", isHeadquarters: false });
+                      fetchData();
+                      toastSuccess("Office added");
+                    }
+                  }} disabled={!officeForm.name.trim()}>Add Office</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+          {officesList.length === 0 ? (
+            <Card><CardContent className="p-8 text-center">
+              <Globe size={32} className="mx-auto text-muted mb-2" />
+              <p className="text-sm text-muted">No offices added yet. Add your company locations.</p>
+            </CardContent></Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {officesList.map((office: any) => (
+                <Card key={office.id}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Globe size={16} className="text-purple-400" />
+                        <h3 className="font-semibold text-sm">{office.name}</h3>
+                        {office.isHeadquarters && <Badge variant="secondary" className="text-[10px]">HQ</Badge>}
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-xs text-muted">
+                      {office.city && <p>{office.city}{office.country ? `, ${office.country}` : ""}</p>}
+                      {office.timezone && <p>Timezone: {office.timezone}</p>}
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-border">
+                      <p className="text-xs text-muted">{office._count?.members ?? 0} members</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           )}
         </TabsContent>
 

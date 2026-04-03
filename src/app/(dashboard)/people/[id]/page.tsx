@@ -258,17 +258,23 @@ export default function UserProfilePage() {
   const [editRoleId, setEditRoleId] = useState("");
   const [editAccessLevel, setEditAccessLevel] = useState("");
   const [editStatus, setEditStatus] = useState("");
+  const [editDob, setEditDob] = useState("");
+  const [editOfficeId, setEditOfficeId] = useState("");
   const [departments, setDepartments] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
+  const [offices, setOffices] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useEffect(() => {
     Promise.all([
       fetch("/api/departments").then((r) => r.ok ? r.json() : []),
       fetch("/api/roles").then((r) => r.ok ? r.json() : []),
-    ]).then(([depts, rls]) => {
-      setDepartments(Array.isArray(depts) ? depts : []);
-      setRoles(Array.isArray(rls) ? rls : []);
+      fetch("/api/offices").then((r) => r.ok ? r.json() : []),
+    ]).then(([depts, rls, offs]) => {
+      setDepartments(Array.isArray(depts) ? depts : depts?.data || []);
+      setRoles(Array.isArray(rls) ? rls : rls?.data || []);
+      setOffices(Array.isArray(offs) ? offs : offs?.data || []);
     });
   }, []);
 
@@ -278,7 +284,28 @@ export default function UserProfilePage() {
     setEditRoleId(user.role?.id || "");
     setEditAccessLevel(user.accessLevel || "");
     setEditStatus(user.status || "");
+    setEditDob(user.dateOfBirth ? new Date(user.dateOfBirth).toISOString().split("T")[0] : "");
+    setEditOfficeId(user.office?.id || "");
     setShowEditDialog(true);
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/users/${id}/avatar`, { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setUser({ ...user, avatar: (data.data || data).avatar });
+        toastSuccess("Photo updated");
+      } else {
+        const err = await res.json();
+        toastError(err.error || "Upload failed");
+      }
+    } catch { toastError("Upload failed"); } finally { setUploadingAvatar(false); }
   };
 
   const handleSaveEdit = async () => {
@@ -289,6 +316,8 @@ export default function UserProfilePage() {
       if (editRoleId) body.roleId = editRoleId;
       if (editAccessLevel) body.accessLevel = editAccessLevel;
       if (editStatus) body.status = editStatus;
+      if (editDob) body.dateOfBirth = new Date(editDob).toISOString();
+      if (editOfficeId) body.officeId = editOfficeId;
 
       const res = await fetch(`/api/users/${id}`, {
         method: "PATCH",
@@ -357,11 +386,21 @@ export default function UserProfilePage() {
       <Card>
         <CardContent className="p-6">
           <div className="flex items-start gap-6">
-            <Avatar className="h-20 w-20 text-2xl">
-              <AvatarFallback className="bg-purple-600/20 text-purple-400 text-xl font-bold">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
+            <div className="relative group">
+              <Avatar className="h-20 w-20 text-2xl">
+                {user.avatar ? (
+                  <img src={user.avatar} alt="" className="h-full w-full object-cover rounded-full" />
+                ) : (
+                  <AvatarFallback className="bg-purple-600/20 text-purple-400 text-xl font-bold">
+                    {initials}
+                  </AvatarFallback>
+                )}
+              </Avatar>
+              <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                <span className="text-white text-[10px]">{uploadingAvatar ? "..." : "Upload"}</span>
+                <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} />
+              </label>
+            </div>
             <div className="flex-1">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -440,6 +479,23 @@ export default function UserProfilePage() {
                         <SelectItem value="PIP">PIP</SelectItem>
                         <SelectItem value="ON_LEAVE">On Leave</SelectItem>
                         <SelectItem value="NOTICE_PERIOD">Notice Period</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Date of Birth</Label>
+                    <Input type="date" value={editDob} onChange={(e) => setEditDob(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Office / Location</Label>
+                    <Select value={editOfficeId} onValueChange={setEditOfficeId}>
+                      <SelectTrigger><SelectValue placeholder="Select office" /></SelectTrigger>
+                      <SelectContent>
+                        {offices.map((o: any) => (
+                          <SelectItem key={o.id} value={o.id}>{o.name}{o.isHeadquarters ? " (HQ)" : ""}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>

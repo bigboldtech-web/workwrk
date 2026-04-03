@@ -94,7 +94,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   const body = await req.json();
 
-  const allowedFields = ["firstName", "lastName", "phone", "avatar", "status", "departmentId", "roleId", "accessLevel", "managerId"];
+  const allowedFields = ["firstName", "lastName", "phone", "avatar", "status", "departmentId", "roleId", "accessLevel", "managerId", "dateOfBirth", "officeId"];
   const data: any = {};
   for (const key of allowedFields) {
     if (body[key] !== undefined) data[key] = body[key];

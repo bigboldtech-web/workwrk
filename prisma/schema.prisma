@@ -37,6 +37,9 @@ model Organization {
   onboardingTemplates OnboardingTemplate[]
   trainingCourses     TrainingCourse[]
   integrations        Integration[]
+  employeeOfMonths    EmployeeOfMonth[]
+  ideas               Idea[]
+  offices             Office[]
 
   @@index([slug])
 }
@@ -63,6 +66,9 @@ model User {
   lastName       String
   avatar         String?
   phone          String?
+  dateOfBirth    DateTime?
+  officeId       String?
+  office         Office?      @relation(fields: [officeId], references: [id])
   status         UserStatus @default(ACTIVE)
   joinDate       DateTime  @default(now())
   createdAt      DateTime  @default(now())
@@ -106,6 +112,11 @@ model User {
   performanceScores   PerformanceScore[]
   kudosGiven          Kudos[] @relation("KudosGiver")
   kudosReceived       Kudos[] @relation("KudosReceiver")
+  employeeOfMonthWins EmployeeOfMonth[]
+  ideasSubmitted      Idea[] @relation("IdeaSubmitter")
+  ideasReviewed       Idea[] @relation("IdeaReviewer")
+  ideaVotes           IdeaVote[]
+  ideaComments        IdeaComment[]
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -1035,4 +1046,112 @@ model ActivityLog {
   @@index([actorId])
   @@index([type])
   @@index([createdAt])
+}
+
+// ==========================================
+// OFFICES / LOCATIONS
+// ==========================================
+
+model Office {
+  id             String   @id @default(cuid())
+  name           String
+  address        String?
+  city           String?
+  state          String?
+  country        String?
+  timezone       String?
+  isHeadquarters Boolean  @default(false)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        User[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// ==========================================
+// EMPLOYEE OF THE MONTH
+// ==========================================
+
+model EmployeeOfMonth {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period         String
+  score          Float
+  breakdown      Json?
+  method         String   @default("auto")
+  overriddenBy   String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@unique([period, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// ==========================================
+// IDEAS BOARD
+// ==========================================
+
+model Idea {
+  id             String     @id @default(cuid())
+  title          String
+  description    String
+  category       String?
+  status         IdeaStatus @default(SUBMITTED)
+  submitterId    String
+  submitter      User       @relation("IdeaSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
+  reviewerId     String?
+  reviewer       User?      @relation("IdeaReviewer", fields: [reviewerId], references: [id])
+  reviewNotes    String?
+  rewardType     String?
+  rewardValue    String?
+  rewardedAt     DateTime?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  votes          IdeaVote[]
+  comments       IdeaComment[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([organizationId])
+  @@index([submitterId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum IdeaStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  IMPLEMENTED
+  REWARDED
+}
+
+model IdeaVote {
+  id        String   @id @default(cuid())
+  ideaId    String
+  idea      Idea     @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([ideaId, userId])
+  @@index([ideaId])
+}
+
+model IdeaComment {
+  id        String   @id @default(cuid())
+  ideaId    String
+  idea      Idea     @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([ideaId])
 }

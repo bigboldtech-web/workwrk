@@ -22,6 +22,7 @@ import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { EmployeeDashboard } from "@/components/dashboard/employee-dashboard";
 import { ManagerTeamDashboard } from "@/components/dashboard/manager-dashboard";
 import { useRole } from "@/hooks/use-role";
+import { Trophy } from "lucide-react";
 
 interface DashboardStats {
   totalPeople: number;
@@ -114,6 +115,43 @@ function getAlertStyle(type: string) {
 
 function SkeletonBlock({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded bg-surface-2 ${className ?? ""}`} />;
+}
+
+function EmployeeOfMonthCard() {
+  const [eom, setEom] = useState<any>(null);
+
+  useEffect(() => {
+    fetch("/api/employee-of-month")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.data?.current) setEom(d.data.current); })
+      .catch(() => {});
+  }, []);
+
+  if (!eom) return null;
+
+  return (
+    <Card className="border-yellow-500/20 bg-gradient-to-r from-yellow-500/5 to-amber-500/5 dark:from-yellow-500/10 dark:to-amber-500/5">
+      <CardContent className="p-4">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-yellow-500/20">
+            <Trophy size={24} className="text-yellow-400" />
+          </div>
+          <div className="flex-1">
+            <p className="text-xs text-muted uppercase tracking-wider font-medium">Employee of the Month</p>
+            <p className="text-lg font-bold">{eom.user?.firstName} {eom.user?.lastName}</p>
+            <div className="flex items-center gap-2 text-xs text-muted">
+              {eom.user?.role?.title && <span>{eom.user.role.title}</span>}
+              {eom.user?.department?.name && <span>&middot; {eom.user.department.name}</span>}
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl font-bold font-mono text-yellow-400">{Math.round(eom.score)}</p>
+            <p className="text-[10px] text-muted">Score</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function DashboardPage() {
@@ -255,6 +293,9 @@ export default function DashboardPage() {
 
       {/* Onboarding Checklist */}
       <OnboardingChecklist />
+
+      {/* Employee of the Month */}
+      <EmployeeOfMonthCard />
 
       {/* Employee Dashboard — employees see their own KPIs, SOPs, reviews */}
       {isEmployee && <EmployeeDashboard />}

@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   const bytes = await file.arrayBuffer();
   await writeFile(filePath, Buffer.from(bytes));
 
-  const logoUrl = `/uploads/${filename}`;
+  const logoUrl = `/api/uploads/${filename}`;
 
   await prisma.organization.update({
     where: { id: orgId },
