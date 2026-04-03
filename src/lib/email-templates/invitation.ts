@@ -9,8 +9,8 @@ interface InvitationVars {
 export function invitationTemplate(vars: InvitationVars): { subject: string; html: string } {
   const html = baseLayout(`
     <h1>You've been invited!</h1>
-    <p><span class="highlight">${vars.companyName}</span> has invited you to join their team on TheywrK as <strong>${vars.accessLevel.replace(/_/g, " ")}</strong>.</p>
-    <p>TheywrK is a Business Operating System that helps teams manage performance, tasks, SOPs, and more — all in one place.</p>
+    <p><span class="highlight">${vars.companyName}</span> has invited you to join their team on WorkwrK as <strong>${vars.accessLevel.replace(/_/g, " ")}</strong>.</p>
+    <p>WorkwrK is a Business Operating System that helps teams manage performance, tasks, SOPs, and more — all in one place.</p>
     <hr class="divider" />
     <p style="text-align: center;">
       <a href="${vars.inviteLink}" class="btn">Accept Invitation</a>
@@ -19,7 +19,7 @@ export function invitationTemplate(vars: InvitationVars): { subject: string; htm
   `);
 
   return {
-    subject: `You've been invited to join ${vars.companyName} on TheywrK`,
+    subject: `You've been invited to join ${vars.companyName} on WorkwrK`,
     html,
   };
 }

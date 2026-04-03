@@ -22,13 +22,13 @@ import {
 import { FadeIn, StaggerContainer, StaggerItem, ScaleIn } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
-  title: "Industries — TheywrK | Business OS for Every Industry",
+  title: "Industries — WorkwrK | Business OS for Every Industry",
   description:
-    "TheywrK adapts to every industry — professional services, real estate, retail, manufacturing, healthcare, education, logistics, IT, finance, franchises, security, and media. One platform, tailored workflows, measurable outcomes.",
+    "WorkwrK adapts to every industry — professional services, real estate, retail, manufacturing, healthcare, education, logistics, IT, finance, franchises, security, and media. One platform, tailored workflows, measurable outcomes.",
   openGraph: {
-    title: "Industries — TheywrK | Business OS for Every Industry",
+    title: "Industries — WorkwrK | Business OS for Every Industry",
     description:
-      "From professional services to manufacturing, healthcare to SaaS — see how TheywrK powers operations, people management, and performance tracking across 12+ industries worldwide.",
+      "From professional services to manufacturing, healthcare to SaaS — see how WorkwrK powers operations, people management, and performance tracking across 12+ industries worldwide.",
   },
 };
 
@@ -38,7 +38,7 @@ const industries = [
     color: "#6C5CE7",
     title: "Professional Services",
     description:
-      "Run consulting, legal, and accounting firms with clarity. TheywrK tracks billable utilization, manages client deliverables, and scores consultants on project outcomes — not timesheets.",
+      "Run consulting, legal, and accounting firms with clarity. WorkwrK tracks billable utilization, manages client deliverables, and scores consultants on project outcomes — not timesheets.",
     useCases: [
       "Consultant utilization & KPI tracking",
       "Client deliverable SOP workflows",
@@ -64,7 +64,7 @@ const industries = [
     color: "#A29BFE",
     title: "Retail & D2C",
     description:
-      "Multi-store chains and e-commerce brands use TheywrK to standardize store operations, track per-location performance, and build consistent customer experiences at scale.",
+      "Multi-store chains and e-commerce brands use WorkwrK to standardize store operations, track per-location performance, and build consistent customer experiences at scale.",
     useCases: [
       "Store-level KPI dashboards",
       "Visual merchandising SOPs",
@@ -103,7 +103,7 @@ const industries = [
     color: "#6C5CE7",
     title: "Education",
     description:
-      "Schools, coaching institutes, and EdTech companies use TheywrK to evaluate faculty, standardize teaching methodologies, and track student outcome metrics tied to educator KPIs.",
+      "Schools, coaching institutes, and EdTech companies use WorkwrK to evaluate faculty, standardize teaching methodologies, and track student outcome metrics tied to educator KPIs.",
     useCases: [
       "Faculty KRA & student outcome KPIs",
       "Curriculum delivery SOP workflows",
@@ -116,7 +116,7 @@ const industries = [
     color: "#00D68F",
     title: "Logistics",
     description:
-      "Warehousing, fleet management, and supply chain operations thrive on process discipline. TheywrK brings SOP compliance, driver scoring, and hub-level analytics to logistics teams.",
+      "Warehousing, fleet management, and supply chain operations thrive on process discipline. WorkwrK brings SOP compliance, driver scoring, and hub-level analytics to logistics teams.",
     useCases: [
       "Driver & warehouse staff KPIs",
       "Dispatch & loading dock SOPs",
@@ -155,7 +155,7 @@ const industries = [
     color: "#6C5CE7",
     title: "Franchise Operations",
     description:
-      "Multi-location franchises need consistency. TheywrK standardizes operations across every outlet with shared SOPs, franchisee scoring, and real-time cross-location dashboards.",
+      "Multi-location franchises need consistency. WorkwrK standardizes operations across every outlet with shared SOPs, franchisee scoring, and real-time cross-location dashboards.",
     useCases: [
       "Franchisee performance scorecards",
       "Brand compliance SOP enforcement",
@@ -168,7 +168,7 @@ const industries = [
     color: "#00D68F",
     title: "Security & Facilities",
     description:
-      "Guard services and facilities management companies manage large distributed workforces. TheywrK tracks guard performance, site SOPs, incident reports, and client-level analytics.",
+      "Guard services and facilities management companies manage large distributed workforces. WorkwrK tracks guard performance, site SOPs, incident reports, and client-level analytics.",
     useCases: [
       "Guard attendance & performance KPIs",
       "Site patrol & incident SOPs",
@@ -181,7 +181,7 @@ const industries = [
     color: "#FF6B6B",
     title: "Media & Marketing",
     description:
-      "Agencies, production houses, and PR firms juggle multiple clients and creative teams. TheywrK tracks project delivery, creative output KPIs, and team utilization across accounts.",
+      "Agencies, production houses, and PR firms juggle multiple clients and creative teams. WorkwrK tracks project delivery, creative output KPIs, and team utilization across accounts.",
     useCases: [
       "Account manager KRA tracking",
       "Campaign delivery SOP workflows",
@@ -228,7 +228,7 @@ const stats = [
 const testimonials = [
   {
     quote:
-      "TheywrK transformed how we manage our 8 restaurant locations. Every store manager now follows the same SOPs, and I can compare performance across locations in seconds.",
+      "WorkwrK transformed how we manage our 8 restaurant locations. Every store manager now follows the same SOPs, and I can compare performance across locations in seconds.",
     name: "Rahul Mehta",
     title: "Founder, FreshBite Restaurants",
     color: "#FF9F43",
@@ -236,7 +236,7 @@ const testimonials = [
   },
   {
     quote:
-      "As a consulting firm, we needed visibility into consultant utilization and project delivery. TheywrK gave us that overnight.",
+      "As a consulting firm, we needed visibility into consultant utilization and project delivery. WorkwrK gave us that overnight.",
     name: "Ananya Rao",
     title: "Managing Partner, Elevate Advisory",
     color: "#6C5CE7",
@@ -262,7 +262,7 @@ export default function IndustriesPage() {
           </FadeIn>
           <FadeIn delay={0.2}>
             <p className="mb-8 max-w-[600px] text-lg text-[#8888A0]">
-              TheywrK adapts to the workflows, KPIs, and compliance needs of your
+              WorkwrK adapts to the workflows, KPIs, and compliance needs of your
               sector. One platform — configured for professional services,
               manufacturing, healthcare, SaaS, and everything in between.
             </p>
@@ -366,7 +366,7 @@ export default function IndustriesPage() {
             </h2>
             <p className="mx-auto mb-12 max-w-[520px] text-base text-[#8888A0]">
               Hear from founders, partners, and operations heads who transformed
-              their businesses with TheywrK.
+              their businesses with WorkwrK.
             </p>
           </FadeIn>
 
@@ -425,7 +425,7 @@ export default function IndustriesPage() {
               <span className="text-gradient">four continents.</span>
             </h2>
             <p className="mx-auto mb-12 max-w-[520px] text-base text-[#8888A0]">
-              From Mumbai to Dubai, Singapore to San Francisco — TheywrK runs
+              From Mumbai to Dubai, Singapore to San Francisco — WorkwrK runs
               wherever your teams operate.
             </p>
           </FadeIn>
@@ -589,7 +589,7 @@ export default function IndustriesPage() {
               <span className="text-gradient">Your OS.</span>
             </h2>
             <p className="mx-auto mb-8 max-w-[480px] text-base text-[#8888A0]">
-              Start your free trial and configure TheywrK for your industry in
+              Start your free trial and configure WorkwrK for your industry in
               minutes — not months.
             </p>
             <div className="flex items-center justify-center gap-4">

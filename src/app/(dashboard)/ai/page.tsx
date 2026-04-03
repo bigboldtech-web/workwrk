@@ -93,7 +93,7 @@ export default function AIPage() {
       id: "welcome",
       role: "assistant",
       content:
-        "Hello! I'm the TheywrK AI Assistant. I can help you understand your organization's performance, analyze team data, and make data-driven decisions.\n\nTry asking me about your team's performance, overdue tasks, SOP compliance, or anything else about your business.",
+        "Hello! I'm the WorkwrK AI Assistant. I can help you understand your organization's performance, analyze team data, and make data-driven decisions.\n\nTry asking me about your team's performance, overdue tasks, SOP compliance, or anything else about your business.",
       timestamp: new Date(),
     },
   ]);
@@ -284,7 +284,7 @@ export default function AIPage() {
                 }`}
               >
                 {msg.role === "assistant" && (
-                  <p className="text-[10px] text-purple-400 font-mono mb-1 font-medium">theywrk AI</p>
+                  <p className="text-[10px] text-purple-400 font-mono mb-1 font-medium">workwrk AI</p>
                 )}
                 <div className="text-sm leading-relaxed">
                   {msg.role === "assistant" ? renderMarkdown(msg.content) : (

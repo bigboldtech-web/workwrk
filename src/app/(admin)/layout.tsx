@@ -50,7 +50,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="h-16 flex items-center px-4 border-b border-[#2A2A3A]">
           <div className="flex items-center gap-2">
             <Shield size={20} className="text-red-400" />
-            <span className="font-bold text-sm">TheywrK Admin</span>
+            <span className="font-bold text-sm">WorkwrK Admin</span>
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">

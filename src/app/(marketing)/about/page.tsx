@@ -11,15 +11,15 @@ import {
 import { FadeIn, StaggerContainer, StaggerItem, ScaleIn } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
-  title: "About — TheywrK | The Business Operating System",
+  title: "About — WorkwrK | The Business Operating System",
   description:
-    "TheywrK is the unified business operating system replacing 15+ disconnected tools with one platform for people, KPIs, SOPs, performance reviews, tasks, recognition, and AI intelligence. Built for growing businesses that refuse to stay small.",
+    "WorkwrK is the unified business operating system replacing 15+ disconnected tools with one platform for people, KPIs, SOPs, performance reviews, tasks, recognition, and AI intelligence. Built for growing businesses that refuse to stay small.",
   openGraph: {
-    title: "About — TheywrK | The Business Operating System",
+    title: "About — WorkwrK | The Business Operating System",
     description:
       "We're building the operating system every growing business deserves. One platform to replace chaos with clarity, guesswork with data, and disconnected tools with unified intelligence.",
-    url: "https://theywrk.com/about",
-    siteName: "TheywrK",
+    url: "https://workwrk.com/about",
+    siteName: "WorkwrK",
     type: "website",
   },
 };
@@ -47,7 +47,7 @@ const values = [
     icon: <Rocket size={28} />,
     color: "#FF9F43",
     title: "Built for Builders",
-    desc: "Designed for growing businesses that refuse to stay small. From a 10-person agency to a 500-person enterprise, TheywrK scales with your ambition.",
+    desc: "Designed for growing businesses that refuse to stay small. From a 10-person agency to a 500-person enterprise, WorkwrK scales with your ambition.",
   },
 ];
 
@@ -114,7 +114,7 @@ const team = [
 const testimonials = [
   {
     quote:
-      "TheywrK is not just a tool — it's how we run our company now.",
+      "WorkwrK is not just a tool — it's how we run our company now.",
     name: "Aditya Sharma",
     role: "CEO",
     company: "GrowthForce",
@@ -147,7 +147,7 @@ export default function AboutPage() {
         <div className="hero-grid" />
         <div className="relative z-10 mx-auto max-w-[1200px] px-6 text-center">
           <FadeIn>
-            <p className="mkt-label">About TheywrK</p>
+            <p className="mkt-label">About WorkwrK</p>
           </FadeIn>
           <FadeIn delay={0.1}>
             <h1 className="mkt-title mx-auto mb-6 max-w-[800px] text-[clamp(2.2rem,5vw,3.5rem)]">
@@ -206,7 +206,7 @@ export default function AboutPage() {
               </h2>
               <div className="flex flex-col gap-5 text-[15px] leading-relaxed text-[#8888A0]">
                 <p>
-                  TheywrK was born from watching businesses drown in 15+
+                  WorkwrK was born from watching businesses drown in 15+
                   disconnected tools. HR data in one system, KPIs in a
                   spreadsheet, SOPs in a Google Doc that nobody reads, task
                   management on WhatsApp, and performance reviews that

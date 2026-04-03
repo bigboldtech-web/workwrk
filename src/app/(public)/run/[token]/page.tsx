@@ -363,7 +363,7 @@ export default function ProcessRunPage() {
         <div className="mx-auto max-w-3xl px-6 py-6">
           <div className="flex items-center gap-2 text-xs text-[#8888A0] mb-2">
             <span className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-transparent font-bold text-sm">
-              TheywrK
+              WorkwrK
             </span>
             <span>/</span>
             <span>{data.sopTitle}</span>

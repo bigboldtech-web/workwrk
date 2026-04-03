@@ -182,7 +182,7 @@ export default function AnalyticsPage() {
         <EmptyState
           icon={BarChart3}
           title="No analytics data yet"
-          description="Analytics will populate as your team starts using TheywrK. Add people, create tasks, and track KPIs to see insights here."
+          description="Analytics will populate as your team starts using WorkwrK. Add people, create tasks, and track KPIs to see insights here."
         />
       </div>
     );

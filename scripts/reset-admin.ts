@@ -12,7 +12,7 @@ const adapter = new PrismaNeon({ connectionString: connStr });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const email = "admin@theywrk.com";
+  const email = "admin@workwrk.com";
   const password = "Admin@1212@TW";
   const hash = await bcrypt.hash(password, 12);
 
@@ -31,7 +31,7 @@ async function main() {
     let org = await prisma.organization.findFirst();
     if (!org) {
       org = await prisma.organization.create({
-        data: { name: "TheywrK", slug: "theywrk", plan: "GROWTH", status: "ACTIVE" },
+        data: { name: "WorkwrK", slug: "workwrk", plan: "GROWTH", status: "ACTIVE" },
       });
     }
 
@@ -39,7 +39,7 @@ async function main() {
       data: {
         email,
         firstName: "Admin",
-        lastName: "TheywrK",
+        lastName: "WorkwrK",
         passwordHash: hash,
         accessLevel: "COMPANY_ADMIN",
         organizationId: org.id,

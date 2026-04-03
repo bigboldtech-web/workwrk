@@ -33,7 +33,7 @@ const testimonials = [
     name: "Arjun Mehta",
     role: "CEO, ScaleOps India",
     avatar: "AM",
-    text: "We went from managing 80 people across 4 spreadsheets and 3 WhatsApp groups to one single dashboard. Performance reviews that took 2 weeks now take 2 days. TheywrK is not just a tool — it's how we run the company now.",
+    text: "We went from managing 80 people across 4 spreadsheets and 3 WhatsApp groups to one single dashboard. Performance reviews that took 2 weeks now take 2 days. WorkwrK is not just a tool — it's how we run the company now.",
     metric: "80% faster reviews",
   },
   {
@@ -47,7 +47,7 @@ const testimonials = [
     name: "Ravi Krishnan",
     role: "COO, LogiFleet",
     avatar: "RK",
-    text: "With 12 warehouse locations, we couldn't replicate what worked in one branch. TheywrK's SOP playbook fixed that. Now every location follows the same process, compliance is tracked, and AI flags problems before they escalate.",
+    text: "With 12 warehouse locations, we couldn't replicate what worked in one branch. WorkwrK's SOP playbook fixed that. Now every location follows the same process, compliance is tracked, and AI flags problems before they escalate.",
     metric: "12 locations standardized",
   },
 ];
@@ -138,7 +138,7 @@ const featureTabs = [
           Who should I promote this quarter?
         </div>
         <div className="mr-auto max-w-[85%] rounded-xl rounded-bl-sm bg-[#2A2A3A] px-3 py-2 text-xs text-[#E8E8F0]">
-          <div className="mb-1 font-[family-name:var(--font-mono)] text-[0.55rem] text-[#A29BFE]">theywrk AI</div>
+          <div className="mb-1 font-[family-name:var(--font-mono)] text-[0.55rem] text-[#A29BFE]">workwrk AI</div>
           Based on composite scores, tenure, and peer feedback:<br />
           <strong>Priya S.</strong> (92) — 14mo tenure, 8 kudos<br />
           <strong>Amit J.</strong> (87) — 22mo, consistent uptrend<br /><br />
@@ -183,7 +183,7 @@ const featureTabs = [
 
 /* ── FAQ Data ── */
 const homeFaqs = [
-  { q: "What is TheywrK?", a: "TheywrK is an all-in-one business operating system that replaces 15+ disconnected tools. It unifies people management, KPI tracking, performance reviews, SOPs, task management, employee recognition, and AI intelligence into one platform." },
+  { q: "What is WorkwrK?", a: "WorkwrK is an all-in-one business operating system that replaces 15+ disconnected tools. It unifies people management, KPI tracking, performance reviews, SOPs, task management, employee recognition, and AI intelligence into one platform." },
   { q: "Do you offer a free trial?", a: "Yes — every plan includes a 14-day free trial with full access to all features. No credit card required." },
   { q: "How long does setup take?", a: "Most teams are fully set up in under 30 minutes. Create your organization, add your team (or bulk import), set up KRAs/KPIs, and assign SOPs. No implementation consultants required." },
 ];
@@ -434,7 +434,7 @@ export function LandingPage() {
                   <FadeIn>
                     <p className="mkt-label">Results</p>
                     <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.4rem)]">Real impact.<br />Measurable outcomes.</h2>
-                    <p className="mb-8 text-sm leading-relaxed text-[#8888A0]">Companies using TheywrK report dramatic improvements in visibility, efficiency, and team culture within the first 90 days.</p>
+                    <p className="mb-8 text-sm leading-relaxed text-[#8888A0]">Companies using WorkwrK report dramatic improvements in visibility, efficiency, and team culture within the first 90 days.</p>
                   </FadeIn>
                   <StaggerContainer className="flex flex-col gap-4">
                     {[

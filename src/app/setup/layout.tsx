@@ -46,7 +46,7 @@ export default function SetupLayout({
             className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-xl font-extrabold tracking-tight text-transparent"
             style={{ fontFamily: "'Syne', sans-serif" }}
           >
-            theywrk
+            workwrk
           </span>
           <span className="text-[#8888A0] opacity-50 text-xl font-extrabold">.</span>
           <span className="ml-4 text-sm text-[#8888A0]">Setup your workspace</span>

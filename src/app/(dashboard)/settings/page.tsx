@@ -863,7 +863,7 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Your Email Notifications</CardTitle>
-              <CardDescription>Control which emails you personally receive from TheywrK</CardDescription>
+              <CardDescription>Control which emails you personally receive from WorkwrK</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {[

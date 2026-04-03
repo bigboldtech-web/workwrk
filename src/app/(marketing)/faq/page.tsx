@@ -4,13 +4,13 @@ import { ArrowUpRight, MessageCircle } from "lucide-react";
 import { FaqAccordion } from "@/components/marketing/faq-accordion";
 
 export const metadata: Metadata = {
-  title: "FAQ — TheywrK | Frequently Asked Questions",
+  title: "FAQ — WorkwrK | Frequently Asked Questions",
   description:
-    "Get answers to common questions about TheywrK — the business operating system for performance management, composite scoring, AI intelligence, SOPs, and team recognition.",
+    "Get answers to common questions about WorkwrK — the business operating system for performance management, composite scoring, AI intelligence, SOPs, and team recognition.",
   openGraph: {
-    title: "FAQ — TheywrK | Frequently Asked Questions",
+    title: "FAQ — WorkwrK | Frequently Asked Questions",
     description:
-      "Everything you need to know about TheywrK: setup, features, security, integrations, and more.",
+      "Everything you need to know about WorkwrK: setup, features, security, integrations, and more.",
   },
 };
 
@@ -19,19 +19,19 @@ const faqCategories = [
     label: "General",
     items: [
       {
-        question: "What is TheywrK?",
+        question: "What is WorkwrK?",
         answer:
-          "TheywrK is a business operating system that brings together 12 integrated modules — people management, KRA/KPI tracking, performance reviews, SOPs, task management, recognition, composite scoring, AI intelligence, analytics, meetings, notifications, and integrations — into one platform. Instead of juggling separate tools, everything lives in one place where data flows between modules automatically.",
+          "WorkwrK is a business operating system that brings together 12 integrated modules — people management, KRA/KPI tracking, performance reviews, SOPs, task management, recognition, composite scoring, AI intelligence, analytics, meetings, notifications, and integrations — into one platform. Instead of juggling separate tools, everything lives in one place where data flows between modules automatically.",
       },
       {
-        question: "How is TheywrK different from an HRMS?",
+        question: "How is WorkwrK different from an HRMS?",
         answer:
-          "Traditional HRMS platforms focus on administrative HR tasks like payroll, leave, and attendance. TheywrK focuses on operational performance — how well your team actually executes. We combine KPIs, task completion, SOP compliance, peer recognition, and manager reviews into a single composite score, giving you a data-driven picture of performance instead of gut feelings and annual review storytelling.",
+          "Traditional HRMS platforms focus on administrative HR tasks like payroll, leave, and attendance. WorkwrK focuses on operational performance — how well your team actually executes. We combine KPIs, task completion, SOP compliance, peer recognition, and manager reviews into a single composite score, giving you a data-driven picture of performance instead of gut feelings and annual review storytelling.",
       },
       {
-        question: "Who is TheywrK for?",
+        question: "Who is WorkwrK for?",
         answer:
-          "TheywrK is built for business owners, operations managers, and team leads who run teams of 5 to 500+ people. Whether you run a restaurant chain, a marketing agency, a retail operation, or a tech startup — if you need to know how your team is performing and want to stop relying on spreadsheets and guesswork, TheywrK is for you.",
+          "WorkwrK is built for business owners, operations managers, and team leads who run teams of 5 to 500+ people. Whether you run a restaurant chain, a marketing agency, a retail operation, or a tech startup — if you need to know how your team is performing and want to stop relying on spreadsheets and guesswork, WorkwrK is for you.",
       },
     ],
   },
@@ -91,7 +91,7 @@ const faqCategories = [
       {
         question: "Can I integrate with existing tools?",
         answer:
-          "TheywrK supports webhook integrations that let you push event data (new reviews, task completions, kudos, etc.) to any external endpoint. This means you can connect to Slack, Zapier, Make, or your own internal systems. API access is available for programmatic data retrieval and updates.",
+          "WorkwrK supports webhook integrations that let you push event data (new reviews, task completions, kudos, etc.) to any external endpoint. This means you can connect to Slack, Zapier, Make, or your own internal systems. API access is available for programmatic data retrieval and updates.",
       },
       {
         question: "Do you support multi-location businesses?",
@@ -117,7 +117,7 @@ export default function FaqPage() {
             <span className="text-gradient">questions.</span>
           </h1>
           <p className="mb-8 max-w-[560px] text-lg text-[#8888A0]">
-            Everything you need to know about TheywrK. Can&apos;t find the
+            Everything you need to know about WorkwrK. Can&apos;t find the
             answer you&apos;re looking for? Reach out to our team.
           </p>
         </div>

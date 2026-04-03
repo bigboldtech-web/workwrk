@@ -21,7 +21,7 @@ export async function POST(
 
   // Verify signature if secret is configured
   if (config?.secret) {
-    const signature = req.headers.get("x-theywrk-signature") || req.headers.get("x-hub-signature-256");
+    const signature = req.headers.get("x-workwrk-signature") || req.headers.get("x-hub-signature-256");
     if (!verifyWebhookSignature(rawBody, signature, config.secret)) {
       await prisma.webhookLog.create({
         data: {

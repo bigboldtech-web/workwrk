@@ -214,7 +214,7 @@ function ActivityTimeline({ grouped, loading }: { grouped: Record<string, any[]>
       <EmptyState
         icon={Activity}
         title="No activity yet"
-        description="Activity will appear here as your team uses TheywrK."
+        description="Activity will appear here as your team uses WorkwrK."
       />
     );
   }

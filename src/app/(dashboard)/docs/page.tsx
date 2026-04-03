@@ -38,17 +38,17 @@ const docs: DocSection[] = [
     icon: <Rocket size={22} />,
     color: "#6C5CE7",
     title: "Getting Started",
-    description: "Set up your organization and start using TheywrK",
+    description: "Set up your organization and start using WorkwrK",
     articles: [
       {
         title: "Creating your account",
         content: `**How to create a new account:**
 
-1. Go to [theywrk.com/register](/register) and fill in your organization name, your name, work email, and password (min. 8 characters).
+1. Go to [workwrk.com/register](/register) and fill in your organization name, your name, work email, and password (min. 8 characters).
 2. After submitting, you'll be automatically logged in and taken to the **Setup Wizard**.
 3. The setup wizard walks you through 6 steps:
    - **Business Profile** — Company type (SMB, Enterprise, etc.)
-   - **Industry & Use Case** — Select your industry and how you plan to use TheywrK
+   - **Industry & Use Case** — Select your industry and how you plan to use WorkwrK
    - **Module Priorities** — Choose which modules to enable
    - **Team Size** — Select your team size range
    - **Departments** — Enable/disable default departments or add custom ones
@@ -57,8 +57,8 @@ const docs: DocSection[] = [
 **Note:** You can skip the Invite Team step and add members later from Settings > Team.`,
       },
       {
-        title: "How TheywrK works",
-        content: `**TheywrK is a KRA-centric business operating system.**
+        title: "How WorkwrK works",
+        content: `**WorkwrK is a KRA-centric business operating system.**
 
 The core idea is simple: every employee has **Key Responsible Areas (KRAs)** that define what they're accountable for. Under each KRA, you define **KPIs (Key Performance Indicators)** that measure success.
 
@@ -81,7 +81,7 @@ The core idea is simple: every employee has **Key Responsible Areas (KRAs)** tha
   - SOP: Social Media Response Guidelines
 
 **Performance Scoring:**
-TheywrK automatically calculates a composite performance score for each employee based on:
+WorkwrK automatically calculates a composite performance score for each employee based on:
 - **KPI Achievement** — 40% (how well they hit their KPI targets)
 - **Manager Rating** — 25% (from performance reviews)
 - **SOP Compliance** — 20% (are they following procedures?)
@@ -221,11 +221,11 @@ Employees use the Work Calendar to log what they're working on each day. Manager
     icon: <Target size={22} />,
     color: "#FF6B6B",
     title: "KRAs & KPIs",
-    description: "The core of TheywrK — define responsibilities and measure success",
+    description: "The core of WorkwrK — define responsibilities and measure success",
     articles: [
       {
         title: "Understanding KRAs",
-        content: `**KRAs (Key Result Areas) are the foundation of TheywrK.**
+        content: `**KRAs (Key Result Areas) are the foundation of WorkwrK.**
 
 A KRA defines what an employee is responsible for. It's not a task — it's an ongoing area of accountability.
 
@@ -487,7 +487,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
     articles: [
       {
         title: "How scoring works",
-        content: `**TheywrK calculates a composite performance score for each employee.**
+        content: `**WorkwrK calculates a composite performance score for each employee.**
 
 **Score Components:**
 | Component | Weight | Source |
@@ -629,11 +629,11 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
     icon: <Link2 size={22} />,
     color: "#29B6F6",
     title: "Integrations",
-    description: "Connect TheywrK with external services",
+    description: "Connect WorkwrK with external services",
     articles: [
       {
         title: "Webhooks",
-        content: `**Webhooks notify external services when events happen in TheywrK.**
+        content: `**Webhooks notify external services when events happen in WorkwrK.**
 
 **Setting up webhooks:**
 1. Go to **Integrations** in the sidebar
@@ -679,7 +679,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
       },
       {
         title: "Email notifications",
-        content: `**TheywrK sends emails for important events.**
+        content: `**WorkwrK sends emails for important events.**
 
 **Emails that are always sent (cannot be disabled):**
 - Invitation emails
@@ -699,7 +699,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
       },
       {
         title: "Plans & billing",
-        content: `**TheywrK has four plans:**
+        content: `**WorkwrK has four plans:**
 
 | Plan | Users | SOPs | AI Queries | Key Features |
 |------|-------|------|------------|--------------|
@@ -708,7 +708,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
 | **Scale** | Up to 200 | Unlimited | 1000/month | Priority support |
 | **Enterprise** | Unlimited | Unlimited | Unlimited | Custom, SSO, API |
 
-**To upgrade:** Contact support@theywrk.com or click Upgrade in the Billing tab.`,
+**To upgrade:** Contact support@workwrk.com or click Upgrade in the Billing tab.`,
       },
     ],
   },
@@ -739,7 +739,7 @@ export default function DocsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Documentation</h1>
-        <p className="text-[#8888A0]">Learn how to use every feature in TheywrK</p>
+        <p className="text-[#8888A0]">Learn how to use every feature in WorkwrK</p>
       </div>
 
       <div className="relative">

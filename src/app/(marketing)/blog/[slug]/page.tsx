@@ -18,7 +18,7 @@ export async function generateMetadata({
   if (!post) return { title: "Post Not Found" };
 
   return {
-    title: `${post.title} — TheywrK Blog`,
+    title: `${post.title} — WorkwrK Blog`,
     description: post.excerpt,
     keywords: post.tags,
     openGraph: {

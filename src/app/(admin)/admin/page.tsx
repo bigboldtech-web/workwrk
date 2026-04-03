@@ -261,7 +261,7 @@ export default function AdminDashboard() {
         <CardContent className="space-y-2 text-sm text-[#8888A0]">
           <div className="flex justify-between">
             <span>Platform</span>
-            <span className="text-[#E8E8F0] font-medium">TheywrK v1.0</span>
+            <span className="text-[#E8E8F0] font-medium">WorkwrK v1.0</span>
           </div>
           <div className="flex justify-between">
             <span>Environment</span>

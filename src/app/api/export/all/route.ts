@@ -141,7 +141,7 @@ export async function GET(req: NextRequest) {
   return new Response(sections, {
     headers: {
       "Content-Type": "text/csv",
-      "Content-Disposition": `attachment; filename="theywrk-export-${new Date().toISOString().split("T")[0]}.csv"`,
+      "Content-Disposition": `attachment; filename="workwrk-export-${new Date().toISOString().split("T")[0]}.csv"`,
     },
   });
 }

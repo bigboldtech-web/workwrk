@@ -87,7 +87,7 @@ export function Sidebar() {
             <Link href="/dashboard" className="flex items-center gap-2">
               <span className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-xl font-extrabold tracking-tight text-transparent"
                 style={{ fontFamily: "'Syne', sans-serif" }}>
-                theywrk
+                workwrk
               </span>
               <span className="text-[#8888A0] opacity-50">.</span>
             </Link>

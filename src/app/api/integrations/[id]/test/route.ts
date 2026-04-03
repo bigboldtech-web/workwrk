@@ -30,7 +30,7 @@ export async function POST(
     integrationId: integration.id,
     event: "test",
     payload: {
-      message: "This is a test webhook from TheywrK",
+      message: "This is a test webhook from WorkwrK",
       integration: integration.name,
       timestamp: new Date().toISOString(),
     },

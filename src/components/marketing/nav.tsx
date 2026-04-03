@@ -39,8 +39,8 @@ export function MarketingNav() {
       aria-label="Main navigation"
     >
       <div className="mx-auto flex max-w-[1200px] items-center justify-between px-6 py-4">
-        <Link href="/" className="flex flex-col items-center" aria-label="TheywrK Home">
-          <span className="mkt-logo leading-none">theywrk<span style={{ opacity: 0.5 }}>.</span></span>
+        <Link href="/" className="flex flex-col items-center" aria-label="WorkwrK Home">
+          <span className="mkt-logo leading-none">workwrk<span style={{ opacity: 0.5 }}>.</span></span>
           <span className="text-[9px] font-medium tracking-wide text-[#8888A0]" style={{ fontFamily: "var(--font-mono)" }}>great teams aren't guesswork</span>
         </Link>
 

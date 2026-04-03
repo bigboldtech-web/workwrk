@@ -11,11 +11,11 @@ import {
 } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
-  title: "Features — TheywrK | 12 Integrated Business Modules",
+  title: "Features — WorkwrK | 12 Integrated Business Modules",
   description:
     "Explore all 12 modules: People Management, KRA/KPI Engine, Performance Reviews, SOPs, Tasks, Recognition, Composite Scoring, AI Intelligence, Analytics, Meetings, Notifications, and Integrations.",
   openGraph: {
-    title: "TheywrK Features — 12 Modules, One Platform",
+    title: "WorkwrK Features — 12 Modules, One Platform",
     description:
       "People, KPIs, SOPs, reviews, tasks, kudos, AI, analytics — see every feature of the business operating system.",
   },
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 /* ── testimonial inserted after the 6th module ── */
 const testimonials = [
   {
-    quote: "We replaced 6 different tools with TheywrK. Our managers finally have a single place to see the full picture of every team member.",
+    quote: "We replaced 6 different tools with WorkwrK. Our managers finally have a single place to see the full picture of every team member.",
     name: "Sarah Chen",
     role: "VP of People",
     company: "Nexora Technologies",
@@ -641,7 +641,7 @@ export default function FeaturesPage() {
                             <div className="h-2.5 w-2.5 rounded-full bg-[#28C840]" />
                           </div>
                           <span className="ml-2 font-[family-name:var(--font-mono)] text-[10px] text-[#555566]">
-                            theywrk.com/{mod.id}
+                            workwrk.com/{mod.id}
                           </span>
                         </div>
                         {DemoComponent && <DemoComponent />}

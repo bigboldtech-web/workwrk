@@ -4,11 +4,11 @@ import { blogPosts, getAllCategories } from "@/data/blog-posts";
 import { ArrowRight, Clock, Tag } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Blog — TheywrK | Insights on Business Operations, Performance & Growth",
+  title: "Blog — WorkwrK | Insights on Business Operations, Performance & Growth",
   description:
     "Practical guides on business operations, performance management, KPI tracking, SOP compliance, employee recognition, and AI intelligence for growing companies.",
   openGraph: {
-    title: "TheywrK Blog — Business Operations Insights",
+    title: "WorkwrK Blog — Business Operations Insights",
     description:
       "Guides on performance management, KPIs, SOPs, employee recognition, and AI for growing businesses.",
   },

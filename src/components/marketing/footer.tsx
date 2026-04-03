@@ -68,7 +68,7 @@ export function MarketingFooter() {
             <StaggerItem className="col-span-2 md:col-span-3 lg:col-span-1">
               <div className="mb-3 flex flex-col items-center lg:items-center">
                 <Link href="/" className="mkt-logo mb-1 inline-block">
-                  theywrk<span style={{ opacity: 0.5 }}>.</span>
+                  workwrk<span style={{ opacity: 0.5 }}>.</span>
                 </Link>
                 <p className="text-[11px] font-medium tracking-wide text-[#8888A0]" style={{ fontFamily: "var(--font-mono)" }}>great teams aren&apos;t guesswork</p>
               </div>
@@ -97,7 +97,7 @@ export function MarketingFooter() {
         <FadeIn delay={0.3}>
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#2A2A3A] pt-6">
             <p className="text-xs text-[#8888A0]">
-              © 2026 TheywrK. All rights reserved.
+              © 2026 WorkwrK. All rights reserved.
             </p>
             <div className="flex gap-6">
               <a href="#" className="text-xs text-[#8888A0] transition-colors duration-200 hover:text-[#E8E8F0]">

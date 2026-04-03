@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
 
   return jsonSuccess({
     ...run,
-    shareLink: `${process.env.NEXTAUTH_URL || "https://theywrk.com"}/run/${shareToken}`,
+    shareLink: `${process.env.NEXTAUTH_URL || "https://workwrk.com"}/run/${shareToken}`,
   }, 201);
 }
 

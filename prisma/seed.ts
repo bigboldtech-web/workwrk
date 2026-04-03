@@ -70,7 +70,7 @@ async function main() {
   // Create admin user
   const admin = await prisma.user.create({
     data: {
-      email: "admin@theywrk.com",
+      email: "admin@workwrk.com",
       passwordHash: adminPasswordHash,
       firstName: "Admin",
       lastName: "User",
@@ -160,7 +160,7 @@ async function main() {
 
   console.log("Seed complete!");
   console.log(`\nLogin credentials:`);
-  console.log(`  Email: admin@theywrk.com`);
+  console.log(`  Email: admin@workwrk.com`);
   console.log(`  Password: password123`);
 }
 

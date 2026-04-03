@@ -22,7 +22,7 @@ function getTransporter() {
   });
 }
 
-const FROM_ADDRESS = process.env.SMTP_FROM || "TheywrK <noreply@theywrk.com>";
+const FROM_ADDRESS = process.env.SMTP_FROM || "WorkwrK <noreply@workwrk.com>";
 
 // ==========================================
 // Preference Types

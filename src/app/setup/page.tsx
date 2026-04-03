@@ -371,7 +371,7 @@ export default function SetupPage() {
             </div>
 
             <div>
-              <h2 className="text-xl font-semibold">How will you primarily use theywrk?</h2>
+              <h2 className="text-xl font-semibold">How will you primarily use workwrk?</h2>
               <p className="mt-1 text-sm text-[#8888A0]">
                 Select the area that matters most to you right now
               </p>

@@ -19,7 +19,7 @@ export function passwordResetTemplate(vars: PasswordResetVars): { subject: strin
   `);
 
   return {
-    subject: "Reset your TheywrK password",
+    subject: "Reset your WorkwrK password",
     html,
   };
 }

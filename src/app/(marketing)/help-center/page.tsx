@@ -21,13 +21,13 @@ import {
 } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
-  title: "Documentation — TheywrK | Help Center",
+  title: "Documentation — WorkwrK | Help Center",
   description:
-    "Browse TheywrK documentation and help guides. Learn how to set up your organization, manage people, track KPIs, run performance reviews, and more.",
+    "Browse WorkwrK documentation and help guides. Learn how to set up your organization, manage people, track KPIs, run performance reviews, and more.",
   openGraph: {
-    title: "Documentation — TheywrK Help Center",
+    title: "Documentation — WorkwrK Help Center",
     description:
-      "Guides and documentation for every TheywrK module — getting started, people management, KRAs, tasks, SOPs, reviews, scoring, AI, and integrations.",
+      "Guides and documentation for every WorkwrK module — getting started, people management, KRAs, tasks, SOPs, reviews, scoring, AI, and integrations.",
   },
 };
 
@@ -157,7 +157,7 @@ export default function DocsPage() {
               <span className="text-gradient">guides.</span>
             </h1>
             <p className="mb-8 max-w-[560px] text-lg text-[#8888A0]">
-              Everything you need to get the most out of TheywrK. Browse by
+              Everything you need to get the most out of WorkwrK. Browse by
               topic or search for what you need.
             </p>
           </FadeIn>
@@ -219,10 +219,10 @@ export default function DocsPage() {
               </p>
               <div className="flex items-center justify-center gap-4">
                 <Link
-                  href="mailto:support@theywrk.com"
+                  href="mailto:support@workwrk.com"
                   className="btn-primary px-8 py-3.5"
                 >
-                  support@theywrk.com <ArrowUpRight size={16} />
+                  support@workwrk.com <ArrowUpRight size={16} />
                 </Link>
                 <Link href="/faq" className="btn-outline px-8 py-3.5">
                   Browse FAQ

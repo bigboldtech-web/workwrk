@@ -28,7 +28,7 @@ function showRecordingIndicator() {
   indicator.id = "twrk-recording-indicator";
   indicator.innerHTML = `
     <span class="twrk-pulse"></span>
-    <span>TheywrK Recording</span>
+    <span>WorkwrK Recording</span>
   `;
   document.body.appendChild(indicator);
 }

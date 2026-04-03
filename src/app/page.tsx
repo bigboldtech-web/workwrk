@@ -5,9 +5,9 @@ import { LandingPage } from "@/components/landing/landing-page";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "TheywrK — Business Operating System | People, Performance, KPIs, SOPs & AI",
+  title: "WorkwrK — Business Operating System | People, Performance, KPIs, SOPs & AI",
   description:
-    "TheywrK is the all-in-one business operating system that unifies people management, KPI tracking, performance reviews, SOPs, task management, recognition, and AI intelligence. Replace 15 disconnected tools with one platform. Built for growing businesses in India, UAE, Southeast Asia & beyond.",
+    "WorkwrK is the all-in-one business operating system that unifies people management, KPI tracking, performance reviews, SOPs, task management, recognition, and AI intelligence. Replace 15 disconnected tools with one platform. Built for growing businesses in India, UAE, Southeast Asia & beyond.",
   keywords: [
     "business operating system",
     "employee performance management software",
@@ -30,11 +30,11 @@ export const metadata: Metadata = {
     "HRMS India",
     "business software UAE",
     "SaaS for SMBs",
-    "theywrk",
+    "workwrk",
   ],
-  authors: [{ name: "TheywrK" }],
-  creator: "TheywrK",
-  publisher: "TheywrK",
+  authors: [{ name: "WorkwrK" }],
+  creator: "WorkwrK",
+  publisher: "WorkwrK",
   robots: {
     index: true,
     follow: true,
@@ -49,21 +49,21 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    siteName: "TheywrK",
-    title: "TheywrK — The Business Operating System Your Team Deserves",
+    siteName: "WorkwrK",
+    title: "WorkwrK — The Business Operating System Your Team Deserves",
     description:
       "Unify people, KPIs, SOPs, performance reviews, tasks, recognition, and AI intelligence into one platform. Stop managing chaos — start operating your business.",
-    url: "https://theywrk.com",
+    url: "https://workwrk.com",
   },
   twitter: {
     card: "summary_large_image",
-    title: "TheywrK — Business Operating System",
+    title: "WorkwrK — Business Operating System",
     description:
       "One platform for people, performance, KPIs, SOPs, tasks, recognition & AI. Replace 15 tools with one.",
-    creator: "@theywrk",
+    creator: "@workwrk",
   },
   alternates: {
-    canonical: "https://theywrk.com",
+    canonical: "https://workwrk.com",
   },
   category: "Business Software",
 };
@@ -80,19 +80,19 @@ export default async function Home() {
     "@graph": [
       {
         "@type": "WebSite",
-        name: "TheywrK",
-        url: "https://theywrk.com",
+        name: "WorkwrK",
+        url: "https://workwrk.com",
         description:
           "All-in-one business operating system for people, performance, KPIs, SOPs, and AI intelligence.",
         potentialAction: {
           "@type": "SearchAction",
-          target: "https://theywrk.com/search?q={search_term_string}",
+          target: "https://workwrk.com/search?q={search_term_string}",
           "query-input": "required name=search_term_string",
         },
       },
       {
         "@type": "SoftwareApplication",
-        name: "TheywrK",
+        name: "WorkwrK",
         applicationCategory: "BusinessApplication",
         operatingSystem: "Web",
         description:
@@ -140,16 +140,16 @@ export default async function Home() {
       },
       {
         "@type": "Organization",
-        name: "TheywrK",
-        url: "https://theywrk.com",
+        name: "WorkwrK",
+        url: "https://workwrk.com",
         sameAs: [
-          "https://twitter.com/theywrk",
-          "https://linkedin.com/company/theywrk",
+          "https://twitter.com/workwrk",
+          "https://linkedin.com/company/workwrk",
         ],
         contactPoint: {
           "@type": "ContactPoint",
           contactType: "sales",
-          email: "hello@theywrk.com",
+          email: "hello@workwrk.com",
         },
       },
       {
@@ -157,42 +157,42 @@ export default async function Home() {
         mainEntity: [
           {
             "@type": "Question",
-            name: "What is TheywrK?",
+            name: "What is WorkwrK?",
             acceptedAnswer: {
               "@type": "Answer",
-              text: "TheywrK is an all-in-one business operating system that replaces 15+ disconnected tools. It unifies people management, KPI tracking, performance reviews, SOPs, task management, employee recognition, and AI intelligence into one seamless platform — from the CEO to the last field agent.",
+              text: "WorkwrK is an all-in-one business operating system that replaces 15+ disconnected tools. It unifies people management, KPI tracking, performance reviews, SOPs, task management, employee recognition, and AI intelligence into one seamless platform — from the CEO to the last field agent.",
             },
           },
           {
             "@type": "Question",
-            name: "How does TheywrK calculate performance scores?",
+            name: "How does WorkwrK calculate performance scores?",
             acceptedAnswer: {
               "@type": "Answer",
-              text: "TheywrK uses a weighted composite scoring engine that combines 6 data sources: KPI achievement (30%), manager review ratings (25%), task completion rate (15%), peer review ratings (10%), self-assessment (10%), and SOP compliance (10%). Scores auto-recalculate whenever any input changes. Organizations can customize the weight distribution.",
+              text: "WorkwrK uses a weighted composite scoring engine that combines 6 data sources: KPI achievement (30%), manager review ratings (25%), task completion rate (15%), peer review ratings (10%), self-assessment (10%), and SOP compliance (10%). Scores auto-recalculate whenever any input changes. Organizations can customize the weight distribution.",
             },
           },
           {
             "@type": "Question",
-            name: "Can I use TheywrK for my business in India?",
+            name: "Can I use WorkwrK for my business in India?",
             acceptedAnswer: {
               "@type": "Answer",
-              text: "Yes. TheywrK is built for growing businesses across India, UAE, Southeast Asia, and globally. It supports INR pricing, multi-location organizations, and is designed for the operational realities of businesses scaling from 10 to 500+ employees.",
+              text: "Yes. WorkwrK is built for growing businesses across India, UAE, Southeast Asia, and globally. It supports INR pricing, multi-location organizations, and is designed for the operational realities of businesses scaling from 10 to 500+ employees.",
             },
           },
           {
             "@type": "Question",
-            name: "Does TheywrK have AI features?",
+            name: "Does WorkwrK have AI features?",
             acceptedAnswer: {
               "@type": "Answer",
-              text: "Yes. TheywrK includes an AI intelligence layer that lets you ask your business anything in plain English — 'Who should I promote?', 'Which SOPs have lowest compliance?', 'Compare branch performance'. AI uses real data from all modules to give instant, data-backed answers.",
+              text: "Yes. WorkwrK includes an AI intelligence layer that lets you ask your business anything in plain English — 'Who should I promote?', 'Which SOPs have lowest compliance?', 'Compare branch performance'. AI uses real data from all modules to give instant, data-backed answers.",
             },
           },
           {
             "@type": "Question",
-            name: "How is TheywrK different from an HRMS?",
+            name: "How is WorkwrK different from an HRMS?",
             acceptedAnswer: {
               "@type": "Answer",
-              text: "Traditional HRMS tools focus on HR administration (payroll, leave, attendance). TheywrK is a business operating system that focuses on operational excellence — KPIs, SOPs, performance, tasks, and AI intelligence. It helps you run your business better, not just manage HR paperwork.",
+              text: "Traditional HRMS tools focus on HR administration (payroll, leave, attendance). WorkwrK is a business operating system that focuses on operational excellence — KPIs, SOPs, performance, tasks, and AI intelligence. It helps you run your business better, not just manage HR paperwork.",
             },
           },
           {
@@ -200,7 +200,7 @@ export default async function Home() {
             name: "What is the employee recognition/kudos feature?",
             acceptedAnswer: {
               "@type": "Answer",
-              text: "TheywrK's recognition system lets anyone give kudos to colleagues with messages and company value tags. Kudos appear in a social feed, count on profiles, factor into performance scores as a bonus, and drive a monthly 'Most Recognized' leaderboard — building a culture of appreciation.",
+              text: "WorkwrK's recognition system lets anyone give kudos to colleagues with messages and company value tags. Kudos appear in a social feed, count on profiles, factor into performance scores as a bonus, and drive a monthly 'Most Recognized' leaderboard — building a culture of appreciation.",
             },
           },
         ],

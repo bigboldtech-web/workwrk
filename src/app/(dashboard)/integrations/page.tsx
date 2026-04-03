@@ -282,7 +282,7 @@ export default function IntegrationsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Integrations</h1>
           <p className="text-[#8888A0] text-sm mt-1">
-            Connect your existing tools to pull data into TheywrK for performance intelligence
+            Connect your existing tools to pull data into WorkwrK for performance intelligence
           </p>
         </div>
       </div>
@@ -294,9 +294,9 @@ export default function IntegrationsPage() {
             <Zap size={20} className="text-purple-400" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold">TheywrK connects, it doesn&apos;t replace</h3>
+            <h3 className="text-sm font-semibold">WorkwrK connects, it doesn&apos;t replace</h3>
             <p className="text-xs text-[#8888A0] mt-1">
-              Your HRMS handles attendance, payroll, and leave. TheywrK pulls that data to power
+              Your HRMS handles attendance, payroll, and leave. WorkwrK pulls that data to power
               performance scoring, review decisions, and AI insights. We sit on top of your existing tools.
             </p>
           </div>
@@ -308,7 +308,7 @@ export default function IntegrationsPage() {
         <EmptyState
           icon={Link2}
           title="No integrations"
-          description="Connect TheywrK with your existing tools like Slack, webhooks, and more."
+          description="Connect WorkwrK with your existing tools like Slack, webhooks, and more."
           actionLabel="Add Integration"
           onAction={() => setConnectDialogOpen(true)}
         />
@@ -611,7 +611,7 @@ export default function IntegrationsPage() {
               <code className="text-[10px] text-purple-300 break-all">
                 {typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/{detailIntegration?.id}
               </code>
-              <p className="text-[10px] text-[#8888A0] mt-1">Use this URL to send data to TheywrK from external services.</p>
+              <p className="text-[10px] text-[#8888A0] mt-1">Use this URL to send data to WorkwrK from external services.</p>
             </div>
           </div>
           <DialogFooter>

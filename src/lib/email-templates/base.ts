@@ -24,12 +24,12 @@ export function baseLayout(content: string): string {
 </head>
 <body>
   <div class="container">
-    <div class="logo"><span>TheywrK</span></div>
+    <div class="logo"><span>WorkwrK</span></div>
     <div class="card">
       ${content}
     </div>
     <div class="footer">
-      <p>This email was sent by TheywrK. If you didn't expect this, you can safely ignore it.</p>
+      <p>This email was sent by WorkwrK. If you didn't expect this, you can safely ignore it.</p>
     </div>
   </div>
 </body>

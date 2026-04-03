@@ -57,7 +57,7 @@ document.getElementById("stop-btn").addEventListener("click", async () => {
   });
 });
 
-// Save to TheywrK
+// Save to WorkwrK
 document.getElementById("save-btn").addEventListener("click", async () => {
   const title = document.getElementById("sop-title").value.trim();
   const category = document.getElementById("sop-category").value.trim();
@@ -74,7 +74,7 @@ document.getElementById("save-btn").addEventListener("click", async () => {
 
   chrome.storage.local.get(["steps", "serverUrl"], async (result) => {
     const steps = result.steps || [];
-    const serverUrl = result.serverUrl || "https://theywrk.com";
+    const serverUrl = result.serverUrl || "https://workwrk.com";
 
     try {
       const response = await fetch(`${serverUrl}/api/sops/record`, {
@@ -102,7 +102,7 @@ document.getElementById("save-btn").addEventListener("click", async () => {
       } else {
         const data = await response.json();
         showState("review");
-        errorEl.textContent = data.error || "Failed to save. Make sure you're logged in to TheywrK.";
+        errorEl.textContent = data.error || "Failed to save. Make sure you're logged in to WorkwrK.";
         errorEl.style.display = "block";
       }
     } catch (err) {

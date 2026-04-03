@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "TheywrK SOP Recorder",
+  "name": "WorkwrK SOP Recorder",
   "version": "1.0.0",
   "description": "Record step-by-step SOPs by capturing your screen actions",
   "permissions": [

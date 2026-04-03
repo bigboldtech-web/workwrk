@@ -77,7 +77,7 @@ If you answer "yes" to any of these, you need one:
 
 A Business OS isn't another tool to add to your stack. It's the tool that **replaces the stack**. One platform. One source of truth. Zero chaos.
     `.trim(),
-    author: "TheywrK Team",
+    author: "WorkwrK Team",
     authorRole: "Product",
     date: "2026-03-25",
     category: "Business Operations",
@@ -159,7 +159,7 @@ When decisions are tied to data, they're fair, defensible, and trusted by the te
 4. Calibrate across teams for fairness
 5. Tie scores to actionable outcomes (promotions, PIPs, hikes)
     `.trim(),
-    author: "TheywrK Team",
+    author: "WorkwrK Team",
     authorRole: "Product",
     date: "2026-03-20",
     category: "Performance Management",
@@ -226,7 +226,7 @@ Aggregate by:
 
 ### Step 5: Feed Into Performance Scores
 
-SOP compliance should be one factor in the composite performance score. In TheywrK, it carries a default weight of 10% — enough to matter, not enough to dominate.
+SOP compliance should be one factor in the composite performance score. In WorkwrK, it carries a default weight of 10% — enough to matter, not enough to dominate.
 
 ## Common Compliance Problems and Fixes
 
@@ -248,7 +248,7 @@ Companies that track SOP compliance see:
 - Consistent quality across locations and teams
 - Easier identification of process bottlenecks
     `.trim(),
-    author: "TheywrK Team",
+    author: "WorkwrK Team",
     authorRole: "Operations",
     date: "2026-03-15",
     category: "Process Management",
@@ -333,7 +333,7 @@ Beyond the feel-good factor, recognition data reveals:
 - **Which values are reinforced most** — culture health check
 - **Which teams recognize each other** — collaboration patterns
     `.trim(),
-    author: "TheywrK Team",
+    author: "WorkwrK Team",
     authorRole: "People & Culture",
     date: "2026-03-10",
     category: "Employee Engagement",
@@ -399,7 +399,7 @@ You don't need a data science team. You need a platform that:
 
 The AI gets smarter as more data flows in. After 3 months, it can spot trends. After 6, it can predict outcomes.
     `.trim(),
-    author: "TheywrK Team",
+    author: "WorkwrK Team",
     authorRole: "Product",
     date: "2026-03-05",
     category: "AI & Analytics",
@@ -466,7 +466,7 @@ For each role, define:
 
 When KPIs are tracked this way, they become the foundation of a data-driven culture — not just numbers in a spreadsheet that nobody looks at.
     `.trim(),
-    author: "TheywrK Team",
+    author: "WorkwrK Team",
     authorRole: "Product",
     date: "2026-02-28",
     category: "KPI Management",

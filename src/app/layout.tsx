@@ -22,7 +22,7 @@ const syne = Syne({
 });
 
 export const metadata: Metadata = {
-  title: "TheywrK - Your Business Operating System",
+  title: "WorkwrK - Your Business Operating System",
   description:
     "Unify people, processes, KPIs, SOPs, and AI intelligence into one seamless platform.",
 };

@@ -2,15 +2,15 @@ import type { Metadata } from "next";
 import { FadeIn } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — TheywrK",
+  title: "Privacy Policy — WorkwrK",
   description:
-    "Privacy Policy for TheywrK, the unified business operating system. Learn how we collect, use, store, and protect your personal and organizational data.",
+    "Privacy Policy for WorkwrK, the unified business operating system. Learn how we collect, use, store, and protect your personal and organizational data.",
   openGraph: {
-    title: "Privacy Policy — TheywrK",
+    title: "Privacy Policy — WorkwrK",
     description:
-      "Privacy Policy for TheywrK, the unified business operating system.",
-    url: "https://theywrk.com/privacy",
-    siteName: "TheywrK",
+      "Privacy Policy for WorkwrK, the unified business operating system.",
+    url: "https://workwrk.com/privacy",
+    siteName: "WorkwrK",
     type: "website",
   },
 };
@@ -45,10 +45,10 @@ export default function PrivacyPage() {
           <FadeIn>
             <div className="prose-custom">
               <p>
-                This Privacy Policy (&quot;Policy&quot;) describes how TheywrK
+                This Privacy Policy (&quot;Policy&quot;) describes how WorkwrK
                 (&quot;Company,&quot; &quot;we,&quot; &quot;us,&quot; or
                 &quot;our&quot;) collects, uses, stores, shares, and protects
-                your personal information when you access or use the TheywrK
+                your personal information when you access or use the WorkwrK
                 platform, including all associated services, features, content,
                 and applications (collectively, the &quot;Service&quot;). By
                 accessing or using the Service, you consent to the practices
@@ -306,10 +306,10 @@ export default function PrivacyPage() {
               <p>
                 To exercise any of these rights, please contact us at{" "}
                 <a
-                  href="mailto:privacy@theywrk.com"
+                  href="mailto:privacy@workwrk.com"
                   className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
                 >
-                  privacy@theywrk.com
+                  privacy@workwrk.com
                 </a>
                 . We will respond to your request within 30 days, or as
                 required by applicable law. We may need to verify your identity
@@ -330,7 +330,7 @@ export default function PrivacyPage() {
                 </strong>{" "}
                 We do not embed third-party ad networks, social media tracking
                 pixels, or cross-site tracking technologies in the Service.
-                Your activity on TheywrK is not tracked by external advertisers
+                Your activity on WorkwrK is not tracked by external advertisers
                 or data brokers.
               </p>
               <p>
@@ -354,17 +354,17 @@ export default function PrivacyPage() {
                 that a child under 18 has provided us with personal
                 information, please contact us immediately at{" "}
                 <a
-                  href="mailto:privacy@theywrk.com"
+                  href="mailto:privacy@workwrk.com"
                   className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
                 >
-                  privacy@theywrk.com
+                  privacy@workwrk.com
                 </a>
                 .
               </p>
 
               <h2>9. International Data Transfers</h2>
               <p>
-                TheywrK operates from India, and your data may be processed and
+                WorkwrK operates from India, and your data may be processed and
                 stored in India or in other jurisdictions where our cloud
                 infrastructure providers maintain data centers. If you access
                 the Service from outside India, your information may be
@@ -415,22 +415,22 @@ export default function PrivacyPage() {
                 Privacy Policy or our data practices, please contact us at:
               </p>
               <p>
-                <strong>TheywrK</strong>
+                <strong>WorkwrK</strong>
                 <br />
                 Email:{" "}
                 <a
-                  href="mailto:privacy@theywrk.com"
+                  href="mailto:privacy@workwrk.com"
                   className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
                 >
-                  privacy@theywrk.com
+                  privacy@workwrk.com
                 </a>
                 <br />
                 Website:{" "}
                 <a
-                  href="https://theywrk.com"
+                  href="https://workwrk.com"
                   className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
                 >
-                  https://theywrk.com
+                  https://workwrk.com
                 </a>
               </p>
               <p>
@@ -439,10 +439,10 @@ export default function PrivacyPage() {
                 regulations, please direct your correspondence to our Data
                 Protection Officer at{" "}
                 <a
-                  href="mailto:privacy@theywrk.com"
+                  href="mailto:privacy@workwrk.com"
                   className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
                 >
-                  privacy@theywrk.com
+                  privacy@workwrk.com
                 </a>
                 .
               </p>

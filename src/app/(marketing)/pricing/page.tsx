@@ -17,11 +17,11 @@ import {
 import { FadeIn, StaggerContainer, StaggerItem, ScaleIn } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
-  title: "Pricing — TheywrK | Plans for Every Business Size",
+  title: "Pricing — WorkwrK | Plans for Every Business Size",
   description:
     "Transparent pricing for teams of every size. From startups with 25 users to enterprise organizations — get the business operating system that scales with you. Plans start at ₹4,999/mo.",
   openGraph: {
-    title: "Pricing — TheywrK | Plans for Every Business Size",
+    title: "Pricing — WorkwrK | Plans for Every Business Size",
     description:
       "Transparent pricing for teams of every size. From startups with 25 users to enterprise organizations — get the business operating system that scales with you.",
   },

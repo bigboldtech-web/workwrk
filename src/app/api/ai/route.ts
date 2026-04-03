@@ -190,7 +190,7 @@ ${recentActivity.length > 0 ? recentActivity.map(a => `- [${a.createdAt.toISOStr
       const message = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 1500,
-        system: `You are the AI assistant for TheywrK, a Business Operating System. You help managers and leaders understand their organization's performance, identify issues, and make data-driven decisions.
+        system: `You are the AI assistant for WorkwrK, a Business Operating System. You help managers and leaders understand their organization's performance, identify issues, and make data-driven decisions.
 
 You have access to real-time organization data provided below. Answer questions directly with specific data points, names, and numbers. Be concise but thorough. Use markdown formatting — bullet points for lists, **bold** for emphasis, and headers when appropriate. If you identify concerning patterns, flag them proactively.
 

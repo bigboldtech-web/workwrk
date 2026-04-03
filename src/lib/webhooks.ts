@@ -33,10 +33,10 @@ export async function sendWebhook(params: {
   try {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "X-TheywrK-Event": event,
+      "X-WorkwrK-Event": event,
     };
     if (signature) {
-      headers["X-TheywrK-Signature"] = `sha256=${signature}`;
+      headers["X-WorkwrK-Signature"] = `sha256=${signature}`;
     }
 
     const res = await fetch(webhookUrl, {

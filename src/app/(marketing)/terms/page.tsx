@@ -2,15 +2,15 @@ import type { Metadata } from "next";
 import { FadeIn } from "@/components/marketing/motion";
 
 export const metadata: Metadata = {
-  title: "Terms of Service — TheywrK",
+  title: "Terms of Service — WorkwrK",
   description:
-    "Terms of Service for TheywrK, the unified business operating system. Read our terms governing the use of our platform, subscription plans, data ownership, and more.",
+    "Terms of Service for WorkwrK, the unified business operating system. Read our terms governing the use of our platform, subscription plans, data ownership, and more.",
   openGraph: {
-    title: "Terms of Service — TheywrK",
+    title: "Terms of Service — WorkwrK",
     description:
-      "Terms of Service for TheywrK, the unified business operating system.",
-    url: "https://theywrk.com/terms",
-    siteName: "TheywrK",
+      "Terms of Service for WorkwrK, the unified business operating system.",
+    url: "https://workwrk.com/terms",
+    siteName: "WorkwrK",
     type: "website",
   },
 };
@@ -47,10 +47,10 @@ export default function TermsPage() {
               <p>
                 These Terms of Service (&quot;Terms&quot;) constitute a legally
                 binding agreement between you (&quot;Customer,&quot;
-                &quot;you,&quot; or &quot;your&quot;) and TheywrK
+                &quot;you,&quot; or &quot;your&quot;) and WorkwrK
                 (&quot;Company,&quot; &quot;we,&quot; &quot;us,&quot; or
                 &quot;our&quot;), governing your access to and use of the
-                TheywrK platform, including all associated services, features,
+                WorkwrK platform, including all associated services, features,
                 content, and applications (collectively, the
                 &quot;Service&quot;). By accessing or using the Service, you
                 agree to be bound by these Terms. If you do not agree, you must
@@ -76,7 +76,7 @@ export default function TermsPage() {
 
               <h2>2. Description of Service</h2>
               <p>
-                TheywrK is a unified business operating system designed for
+                WorkwrK is a unified business operating system designed for
                 growing businesses. The platform consolidates multiple
                 operational functions into a single integrated solution,
                 replacing disconnected tools with one cohesive system. The
@@ -155,7 +155,7 @@ export default function TermsPage() {
                 You are solely responsible for maintaining the confidentiality
                 of your account credentials, including your password and any
                 API keys. You agree to notify us immediately at{" "}
-                <strong>legal@theywrk.com</strong> if you become aware of any
+                <strong>legal@workwrk.com</strong> if you become aware of any
                 unauthorized access to or use of your account.
               </p>
               <p>
@@ -355,7 +355,7 @@ export default function TermsPage() {
               <p>
                 The Service, including all software, code, design, text,
                 graphics, logos, trademarks, and other content provided by
-                TheywrK (collectively, &quot;Company Materials&quot;), is owned
+                WorkwrK (collectively, &quot;Company Materials&quot;), is owned
                 by or licensed to us and is protected by copyright, trademark,
                 patent, trade secret, and other intellectual property laws.
               </p>
@@ -369,7 +369,7 @@ export default function TermsPage() {
                 You may not copy, modify, distribute, sell, lease, or create
                 derivative works based on the Company Materials without our
                 prior written consent. All rights not expressly granted herein
-                are reserved by TheywrK.
+                are reserved by WorkwrK.
               </p>
               <p>
                 Any feedback, suggestions, or ideas you provide regarding the
@@ -380,7 +380,7 @@ export default function TermsPage() {
 
               <h2>10. Limitation of Liability</h2>
               <p>
-                To the maximum extent permitted by applicable law, TheywrK and
+                To the maximum extent permitted by applicable law, WorkwrK and
                 its directors, officers, employees, agents, and affiliates
                 shall not be liable for any indirect, incidental, special,
                 consequential, or punitive damages, including but not limited
@@ -394,7 +394,7 @@ export default function TermsPage() {
               <p>
                 Our total cumulative liability to you for all claims arising
                 out of or relating to these Terms or the Service shall not
-                exceed the total fees paid by you to TheywrK during the twelve
+                exceed the total fees paid by you to WorkwrK during the twelve
                 (12) months immediately preceding the event giving rise to the
                 claim.
               </p>
@@ -489,22 +489,22 @@ export default function TermsPage() {
                 these Terms of Service, please contact us at:
               </p>
               <p>
-                <strong>TheywrK</strong>
+                <strong>WorkwrK</strong>
                 <br />
                 Email:{" "}
                 <a
-                  href="mailto:legal@theywrk.com"
+                  href="mailto:legal@workwrk.com"
                   className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
                 >
-                  legal@theywrk.com
+                  legal@workwrk.com
                 </a>
                 <br />
                 Website:{" "}
                 <a
-                  href="https://theywrk.com"
+                  href="https://workwrk.com"
                   className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
                 >
-                  https://theywrk.com
+                  https://workwrk.com
                 </a>
               </p>
             </div>
