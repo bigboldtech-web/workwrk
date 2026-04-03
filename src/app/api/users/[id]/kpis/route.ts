@@ -37,6 +37,7 @@ export async function GET(
               frequency: true,
               targetValue: true,
               targetLabel: true,
+              lowerIsBetter: true,
             },
           },
         },
@@ -71,6 +72,7 @@ export async function GET(
         frequency: kpi.frequency,
         targetValue: kpi.targetValue,
         targetLabel: kpi.targetLabel,
+        lowerIsBetter: kpi.lowerIsBetter,
         existingRecord: record
           ? {
               id: record.id,

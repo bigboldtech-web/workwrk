@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   const kpiIds = records.map((r: any) => r.kpiId);
   const kpis = await prisma.kPI.findMany({
     where: { id: { in: kpiIds }, organizationId: orgId },
-    select: { id: true, targetValue: true },
+    select: { id: true, targetValue: true, lowerIsBetter: true },
   });
   const kpiMap = new Map(kpis.map((k) => [k.id, k]));
 
@@ -38,9 +38,14 @@ export async function POST(req: NextRequest) {
 
     const target = kpi.targetValue ?? r.targetValue ?? null;
     const actual = r.actualValue != null ? Number(r.actualValue) : null;
-    const score = actual != null && target != null && target > 0
-      ? Math.min(Math.round((actual / target) * 100), 120)
-      : null;
+    let score: number | null = null;
+    if (actual != null && target != null && target > 0) {
+      if (kpi.lowerIsBetter) {
+        score = actual === 0 ? 120 : Math.min(Math.round((target / actual) * 100), 120);
+      } else {
+        score = Math.min(Math.round((actual / target) * 100), 120);
+      }
+    }
 
     return prisma.kPIRecord.upsert({
       where: { kpiId_userId_period: { kpiId: r.kpiId, userId, period } },

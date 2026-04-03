@@ -314,6 +314,7 @@ model KPI {
   frequency      Frequency @default(MONTHLY)
   targetValue    Float?
   targetLabel    String?
+  lowerIsBetter  Boolean  @default(false)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   kraId          String?

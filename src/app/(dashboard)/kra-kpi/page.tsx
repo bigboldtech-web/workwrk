@@ -196,6 +196,7 @@ export default function KraKpiPage() {
   const [kpiUnit, setKpiUnit] = useState("");
   const [kpiFrequency, setKpiFrequency] = useState("MONTHLY");
   const [kpiTargetValue, setKpiTargetValue] = useState("");
+  const [kpiLowerIsBetter, setKpiLowerIsBetter] = useState(false);
   const [kpiKraId, setKpiKraId] = useState("");
   const [editingKpi, setEditingKpi] = useState<Kpi | null>(null);
   const [savingKpi, setSavingKpi] = useState(false);
@@ -380,7 +381,7 @@ export default function KraKpiPage() {
       const res = await fetch("/api/kpis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: kpiName, description: kpiDescription, type: kpiType, unit: kpiUnit || undefined, frequency: kpiFrequency, targetValue: kpiTargetValue ? Number(kpiTargetValue) : undefined, kraId: kpiKraId || undefined }),
+        body: JSON.stringify({ name: kpiName, description: kpiDescription, type: kpiType, unit: kpiUnit || undefined, frequency: kpiFrequency, targetValue: kpiTargetValue ? Number(kpiTargetValue) : undefined, lowerIsBetter: kpiLowerIsBetter, kraId: kpiKraId || undefined }),
       });
       if (res.ok) {
         setShowAddKpiDialog(false);
@@ -399,7 +400,7 @@ export default function KraKpiPage() {
       const res = await fetch("/api/kpis", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: editingKpi.id, name: kpiName, description: kpiDescription, type: kpiType, unit: kpiUnit, frequency: kpiFrequency, targetValue: kpiTargetValue ? Number(kpiTargetValue) : null, kraId: kpiKraId || null }),
+        body: JSON.stringify({ id: editingKpi.id, name: kpiName, description: kpiDescription, type: kpiType, unit: kpiUnit, frequency: kpiFrequency, targetValue: kpiTargetValue ? Number(kpiTargetValue) : null, lowerIsBetter: kpiLowerIsBetter, kraId: kpiKraId || null }),
       });
       if (res.ok) {
         setShowEditKpiDialog(false);
@@ -485,7 +486,7 @@ export default function KraKpiPage() {
   };
 
   function resetKraForm() { setKraName(""); setKraDescription(""); setKraCategory(""); setKraRoleId(""); setEditingKra(null); setInlineKpis([]); }
-  function resetKpiForm() { setKpiName(""); setKpiDescription(""); setKpiType("QUANTITATIVE"); setKpiUnit(""); setKpiFrequency("MONTHLY"); setKpiTargetValue(""); setKpiKraId(""); setEditingKpi(null); }
+  function resetKpiForm() { setKpiName(""); setKpiDescription(""); setKpiType("QUANTITATIVE"); setKpiUnit(""); setKpiFrequency("MONTHLY"); setKpiTargetValue(""); setKpiLowerIsBetter(false); setKpiKraId(""); setEditingKpi(null); }
   function resetAssignForm() { setAssignUserId(""); setAssignKraId(""); setAssignWeightage(""); setAssignPeriod(""); setMultiAssignKras([]); }
   function resetRecordForm() { setRecordKpiId(""); setRecordUserId(""); setRecordPeriod(""); setRecordTargetValue(""); setRecordActualValue(""); setRecordNotes(""); }
 
@@ -506,6 +507,7 @@ export default function KraKpiPage() {
     setKpiUnit(kpi.unit || "");
     setKpiFrequency(kpi.frequency || "MONTHLY");
     setKpiTargetValue(kpi.targetValue != null ? String(kpi.targetValue) : "");
+    setKpiLowerIsBetter((kpi as any).lowerIsBetter === true);
     setKpiKraId(kpi.kraId || kpi.kra?.id || "");
     setShowEditKpiDialog(true);
   }
@@ -709,6 +711,11 @@ export default function KraKpiPage() {
           <Input type="number" placeholder={kpiUnit === "%" ? "e.g., 95" : kpiUnit === "count" ? "e.g., 30" : "e.g., 100"} value={kpiTargetValue} onChange={(e) => setKpiTargetValue(e.target.value)} />
         </div>
       </div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" checked={kpiLowerIsBetter} onChange={(e) => setKpiLowerIsBetter(e.target.checked)} className="rounded" />
+        <span className="text-sm">Lower is better</span>
+        <span className="text-[10px] text-[#6B6B80]">(e.g., errors, complaints, response time)</span>
+      </label>
       <div className="space-y-2">
         <Label>Description</Label>
         <Textarea placeholder="What does this KPI measure?" value={kpiDescription} onChange={(e) => setKpiDescription(e.target.value)} />

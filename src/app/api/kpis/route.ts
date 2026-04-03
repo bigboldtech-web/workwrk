@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const body = await req.json();
-  const { name, description, type, unit, frequency, kraId, targetValue } = body;
+  const { name, description, type, unit, frequency, kraId, targetValue, lowerIsBetter } = body;
 
   if (!name) return jsonError("KPI name is required");
 
@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
       unit,
       frequency: frequency || "MONTHLY",
       targetValue: targetValue != null ? Number(targetValue) : null,
+      lowerIsBetter: lowerIsBetter === true,
       kraId,
       organizationId: getOrgId(session),
     },
@@ -61,7 +62,7 @@ export async function PATCH(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const body = await req.json();
-  const { id, name, description, type, unit, frequency, kraId, targetValue } = body;
+  const { id, name, description, type, unit, frequency, kraId, targetValue, lowerIsBetter } = body;
 
   if (!id) return jsonError("KPI id is required");
 
@@ -80,6 +81,7 @@ export async function PATCH(req: NextRequest) {
       ...(frequency !== undefined && { frequency }),
       ...(kraId !== undefined && { kraId: kraId || null }),
       ...(targetValue !== undefined && { targetValue: targetValue != null ? Number(targetValue) : null }),
+      ...(lowerIsBetter !== undefined && { lowerIsBetter: lowerIsBetter === true }),
     },
   });
 

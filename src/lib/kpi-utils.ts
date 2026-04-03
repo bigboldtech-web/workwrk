@@ -25,7 +25,14 @@ export function formatPeriodLabel(period: string): string {
   return date.toLocaleString("default", { month: "short", year: "numeric" });
 }
 
-export function calculateScore(actual: number | null, target: number | null): number | null {
+export function calculateScore(actual: number | null, target: number | null, lowerIsBetter: boolean = false): number | null {
   if (actual == null || target == null || target === 0) return null;
+  if (lowerIsBetter) {
+    // Lower actual = better score. At target = 100%, above target = worse
+    // Example: target 5 errors, actual 2 → score = 160% (capped at 120)
+    // Example: target 5 errors, actual 8 → score = 40% (bad)
+    if (actual === 0) return 120;
+    return Math.min(Math.round((target / actual) * 100), 120);
+  }
   return Math.min(Math.round((actual / target) * 100), 120);
 }

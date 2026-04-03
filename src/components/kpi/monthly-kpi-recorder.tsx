@@ -30,6 +30,7 @@ interface KpiEntry {
   unit: string | null;
   type: string;
   targetValue: number | null;
+  lowerIsBetter?: boolean;
   existingRecord: {
     id: string;
     actualValue: number | null;
@@ -281,7 +282,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                 {kra.kpis.map((kpi) => {
                   const fd = formData[kpi.kpiId] || { actualValue: "", managerNotes: "" };
                   const actual = fd.actualValue ? Number(fd.actualValue) : null;
-                  const score = calculateScore(actual, kpi.targetValue);
+                  const score = calculateScore(actual, kpi.targetValue, kpi.lowerIsBetter);
                   const isNoteOpen = showNotes.has(kpi.kpiId);
                   const hasExisting = kpi.existingRecord?.actualValue != null;
 
@@ -296,9 +297,14 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                               <CheckCircle2 size={12} className="text-green-400 shrink-0" />
                             )}
                           </div>
-                          {kpi.unit && (
-                            <span className="text-[10px] text-[#6B6B80]">Unit: {kpi.unit}</span>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {kpi.unit && (
+                              <span className="text-[10px] text-[#6B6B80]">Unit: {kpi.unit}</span>
+                            )}
+                            {kpi.lowerIsBetter && (
+                              <span className="text-[10px] text-amber-400">Lower is better</span>
+                            )}
+                          </div>
                         </div>
 
                         {/* Target */}
