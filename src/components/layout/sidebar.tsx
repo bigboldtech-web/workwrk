@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { useRole } from "@/hooks/use-role";
 import {
   LayoutDashboard,
   Users,
@@ -30,20 +31,20 @@ import {
 
 // moduleKey maps nav items to module keys from settings.enabledModules
 // Items without a moduleKey are always shown (Dashboard, Organization)
-const navigation = [
+const navigation: { name: string; href: string; icon: any; moduleKey?: string; managerOnly?: boolean; adminOnly?: boolean }[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "People", href: "/people", icon: Users, moduleKey: "people" },
+  { name: "People", href: "/people", icon: Users, moduleKey: "people", managerOnly: true },
   { name: "Organization", href: "/organization", icon: Building2 },
   { name: "KRA & KPIs", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi" },
   { name: "Work Calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks" },
   { name: "SOPs", href: "/sops", icon: BookOpen, moduleKey: "sops" },
-  { name: "Process Runs", href: "/process-runs", icon: ListChecks, moduleKey: "sops" },
+  { name: "Process Runs", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true },
   { name: "Reviews", href: "/reviews", icon: Star, moduleKey: "reviews" },
   { name: "Meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings" },
-  { name: "Analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics" },
-  { name: "Onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins" },
+  { name: "Analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true },
+  { name: "Onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true },
   { name: "Activity", href: "/activity", icon: Activity },
-  { name: "Integrations", href: "/integrations", icon: Link2 },
+  { name: "Integrations", href: "/integrations", icon: Link2, adminOnly: true },
   { name: "AI Assistant", href: "/ai", icon: Bot, moduleKey: "ai" },
 ];
 
@@ -68,10 +69,13 @@ export function Sidebar() {
       .catch(() => {});
   }, []);
 
+  const { isManager: isManagerRole, isAdmin: isAdminRole } = useRole();
+
   const visibleNav = navigation.filter((item) => {
-    if (!item.moduleKey) return true;
-    if (!enabledModules) return true; // show all while loading
-    return enabledModules.includes(item.moduleKey);
+    if (item.adminOnly && !isAdminRole) return false;
+    if (item.managerOnly && !isManagerRole) return false;
+    if (item.moduleKey && enabledModules && !enabledModules.includes(item.moduleKey)) return false;
+    return true;
   });
 
   return (

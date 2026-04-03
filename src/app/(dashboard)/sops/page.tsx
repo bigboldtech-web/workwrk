@@ -113,7 +113,13 @@ function SkeletonCard() {
 
 export default function SOPsPage() {
   const router = useRouter();
-  const { canManageSOPs } = useRole();
+  const { canManageSOPs, isEmployee } = useRole();
+
+  // Employees go directly to My SOPs
+  useEffect(() => {
+    if (isEmployee) router.replace("/sops/my-sops");
+  }, [isEmployee, router]);
+
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -176,7 +182,7 @@ export default function SOPsPage() {
     if (sopType === "RECORDED") {
       setShowAddDialog(false);
       // TODO: open recorder flow
-      toastSuccess("Recording mode coming soon — use the browser extension to record SOPs");
+      toastSuccess("Use the WorkwrK browser extension to record SOPs — it captures your screen steps automatically");
       return;
     }
 

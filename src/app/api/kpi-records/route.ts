@@ -25,8 +25,8 @@ export async function GET(req: NextRequest) {
     prisma.kPIRecord.findMany({
       where,
       include: {
-        user: { select: { firstName: true, lastName: true } },
-        kpi: { select: { name: true, unit: true, type: true } },
+        user: { select: { firstName: true, lastName: true, department: { select: { name: true } } } },
+        kpi: { select: { name: true, unit: true, type: true, lowerIsBetter: true, kra: { select: { name: true } } } },
       },
       orderBy: { createdAt: "desc" },
       take: limit,

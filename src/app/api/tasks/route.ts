@@ -14,14 +14,23 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
 
   const userId = url.searchParams.get("userId");
+  const view = url.searchParams.get("view"); // "team" for manager team view
   const startDate = url.searchParams.get("startDate");
   const endDate = url.searchParams.get("endDate");
   const kraId = url.searchParams.get("kraId");
 
   const where: Record<string, unknown> = { organizationId: orgId };
 
-  // If not a manager/admin, only show own tasks
-  if (userId) {
+  if (view === "team" && ["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD"].includes(accessLevel)) {
+    // Manager team view — show direct reports' tasks
+    const directReports = await prisma.user.findMany({
+      where: { managerId: currentUserId, organizationId: orgId },
+      select: { id: true },
+    });
+    const reportIds = directReports.map((r) => r.id);
+    reportIds.push(currentUserId); // include own tasks too
+    where.assigneeId = { in: reportIds };
+  } else if (userId) {
     where.assigneeId = userId;
   } else if (!["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL", "VP", "DIRECTOR", "MANAGER"].includes(accessLevel)) {
     where.assigneeId = currentUserId;
@@ -52,7 +61,7 @@ export async function POST(req: NextRequest) {
   const currentUserId = getUserId(session);
   const body = await req.json();
 
-  const { title, description, date, startTime, endTime, assigneeId, kraId } = body;
+  const { title, description, date, startTime, endTime, hoursSpent, category, assigneeId, kraId } = body;
 
   if (!title?.trim() || !date) {
     return jsonError("Title and date are required");
@@ -65,6 +74,8 @@ export async function POST(req: NextRequest) {
       date: new Date(date),
       startTime: startTime || null,
       endTime: endTime || null,
+      hoursSpent: hoursSpent != null ? Number(hoursSpent) : null,
+      category: category || null,
       assigneeId: assigneeId || currentUserId,
       kraId: kraId || null,
       organizationId: orgId,

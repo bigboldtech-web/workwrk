@@ -14,6 +14,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { useRole } from "@/hooks/use-role";
+import { useSession } from "next-auth/react";
+import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -47,7 +50,7 @@ interface Kpi {
 
 interface KpiRecord {
   id: string;
-  kpi?: { name: string; kra?: { name: string }; unit?: string };
+  kpi?: { name: string; kra?: { name: string }; unit?: string; lowerIsBetter?: boolean };
   user?: { firstName: string; lastName: string; department?: { name: string } };
   period: string;
   targetValue: number;
@@ -126,6 +129,23 @@ function SkeletonKpiCard() {
 }
 
 export default function KraKpiPage() {
+  const { isEmployee, isManager: isManagerRole } = useRole();
+  const { data: session } = useSession();
+  const currentUserId = (session?.user as any)?.id;
+
+  // Employee view — show only their assigned KPIs
+  if (isEmployee && currentUserId) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">My KRAs & KPIs</h1>
+          <p className="text-muted text-sm mt-1">Your performance metrics and targets</p>
+        </div>
+        <MonthlyKpiRecorder userId={currentUserId} />
+      </div>
+    );
+  }
+
   // Dialog states
   const [showAddKraDialog, setShowAddKraDialog] = useState(false);
   const [showRecordKpiDialog, setShowRecordKpiDialog] = useState(false);
@@ -523,11 +543,19 @@ export default function KraKpiPage() {
     const name = rec.kpi?.name ?? "KPI";
     const kraName = rec.kpi?.kra?.name ?? "";
     const unit = rec.kpi?.unit ?? "";
+    const lowerIsBetter = rec.kpi?.lowerIsBetter === true;
     const target = rec.targetValue ?? 0;
     const actual = rec.actualValue ?? 0;
     const period = rec.period ?? "";
-    const achievement = target === 0 ? 0 : Math.min(Math.round((actual / target) * 100), 120);
-    return { name, kraName, unit, target, actual, period, achievement };
+    let achievement = 0;
+    if (target > 0) {
+      if (lowerIsBetter) {
+        achievement = actual === 0 ? 120 : Math.min(Math.round((target / actual) * 100), 120);
+      } else {
+        achievement = Math.min(Math.round((actual / target) * 100), 120);
+      }
+    }
+    return { name, kraName, unit, target, actual, period, achievement, lowerIsBetter };
   });
 
   // Scores grouped by user
@@ -540,7 +568,13 @@ export default function KraKpiPage() {
     }
     const target = rec.targetValue ?? 0;
     const actual = rec.actualValue ?? 0;
-    if (target > 0) userScoreMap.get(key)!.scores.push(Math.min(Math.round((actual / target) * 100), 120));
+    const lib = rec.kpi?.lowerIsBetter === true;
+    if (target > 0) {
+      const score = lib
+        ? (actual === 0 ? 120 : Math.min(Math.round((target / actual) * 100), 120))
+        : Math.min(Math.round((actual / target) * 100), 120);
+      userScoreMap.get(key)!.scores.push(score);
+    }
   });
 
   const teamScores = Array.from(userScoreMap.values())
@@ -756,34 +790,33 @@ export default function KraKpiPage() {
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6 mt-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {loadingRecords ? (
-              <>{[1,2,3,4].map((i) => <SkeletonKpiCard key={i} />)}</>
+              <>{[1,2,3,4,5,6].map((i) => <SkeletonKpiCard key={i} />)}</>
             ) : overviewRecords.length === 0 ? (
-              <Card className="col-span-2">
+              <Card className="col-span-full">
                 <CardContent className="p-8 text-center">
-                  <p className="text-muted text-sm">No KPI records found. Use &quot;Record KPI&quot; to add data.</p>
+                  <p className="text-muted text-sm">No KPI records found. Go to People → Monthly KPIs to record data.</p>
                 </CardContent>
               </Card>
             ) : (
               overviewRecords.map((kpi, idx) => (
                 <Card key={idx} className="hover:border-muted-2 transition-colors">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <p className="text-sm font-medium">{kpi.name}</p>
-                        <p className="text-[10px] text-muted">{kpi.kraName} &middot; {kpi.period}</p>
-                      </div>
+                  <CardContent className="p-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-medium truncate">{kpi.name}</p>
+                      {kpi.lowerIsBetter && <span className="text-[9px] text-amber-500 shrink-0">lower = better</span>}
                     </div>
-                    <div className="flex items-end gap-2 mb-2">
-                      <span className={`text-xl font-bold font-mono ${getScoreColor(kpi.achievement)}`}>
+                    <p className="text-[10px] text-muted mb-1.5">{kpi.kraName} &middot; {kpi.period}</p>
+                    <div className="flex items-end gap-1.5 mb-1.5">
+                      <span className={`text-lg font-bold font-mono ${getScoreColor(kpi.achievement)}`}>
                         {kpi.actual.toLocaleString()}
                       </span>
-                      <span className="text-xs text-muted mb-0.5">/ {kpi.target.toLocaleString()} {kpi.unit}</span>
+                      <span className="text-[10px] text-muted mb-0.5">/ {kpi.target.toLocaleString()} {kpi.unit}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Progress value={Math.min(kpi.achievement, 100)} className="h-1.5" indicatorClassName={getProgressColor(kpi.achievement)} />
-                      <span className={`text-xs font-mono ${getScoreColor(kpi.achievement)}`}>{kpi.achievement}%</span>
+                      <Progress value={Math.min(kpi.achievement, 100)} className="h-1" indicatorClassName={getProgressColor(kpi.achievement)} />
+                      <span className={`text-[10px] font-mono ${getScoreColor(kpi.achievement)}`}>{kpi.achievement}%</span>
                     </div>
                   </CardContent>
                 </Card>

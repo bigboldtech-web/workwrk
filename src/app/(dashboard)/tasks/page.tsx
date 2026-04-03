@@ -1,404 +1,425 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  ChevronLeft,
-  ChevronRight,
-  Plus,
-  Calendar as CalendarIcon,
-  Clock,
-  Target,
-  Check,
-  Play,
-  User,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Plus, ChevronLeft, ChevronRight, Calendar, List, Clock,
+  CheckCircle2, Circle, Play, Trash2, Users, AlertCircle,
 } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
+import { useRole } from "@/hooks/use-role";
 
-interface Task {
-  id: string;
-  title: string;
-  description: string | null;
-  date: string;
-  startTime: string | null;
-  endTime: string | null;
-  status: "PLANNED" | "IN_PROGRESS" | "COMPLETED";
-  assignee: { id: string; firstName: string; lastName: string; avatar: string | null };
-  kra: { id: string; name: string } | null;
-}
-
-interface KRA {
-  id: string;
-  name: string;
-}
-
-interface TeamMember {
-  id: string;
-  firstName: string;
-  lastName: string;
-}
-
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const STATUS_COLORS: Record<string, string> = {
-  PLANNED: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  IN_PROGRESS: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  COMPLETED: "bg-green-500/10 text-green-400 border-green-500/20",
-};
-
-function getWeekDates(date: Date): Date[] {
-  const day = date.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const monday = new Date(date);
-  monday.setDate(date.getDate() + diff);
-  const dates: Date[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    dates.push(d);
-  }
-  return dates;
-}
+const CATEGORIES = ["Development", "Meetings", "Admin", "Planning", "Review", "Communication", "Research", "Other"];
 
 function formatDate(d: Date): string {
   return d.toISOString().split("T")[0];
 }
 
-export default function TasksPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [kras, setKras] = useState<KRA[]>([]);
-  const [team, setTeam] = useState<TeamMember[]>([]);
-  const [currentWeek, setCurrentWeek] = useState(new Date());
-  const [selectedUser, setSelectedUser] = useState<string>("me");
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-
-  const [newTask, setNewTask] = useState({
-    title: "",
-    description: "",
-    date: "",
-    startTime: "",
-    endTime: "",
-    kraId: "",
-    assigneeId: "",
+function getWeekDates(baseDate: Date): Date[] {
+  const day = baseDate.getDay();
+  const monday = new Date(baseDate);
+  monday.setDate(baseDate.getDate() - ((day + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return d;
   });
+}
 
-  const weekDates = getWeekDates(currentWeek);
+function isToday(d: Date): boolean {
+  return d.toDateString() === new Date().toDateString();
+}
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  date: string;
+  hoursSpent?: number | null;
+  category?: string | null;
+  status: string;
+  incompleteReason?: string | null;
+  assignee?: { id: string; firstName: string; lastName: string };
+  kra?: { id: string; name: string } | null;
+}
+
+export default function TasksPage() {
+  const { isManager } = useRole();
+  const { success: toastSuccess, error: toastError } = useToast();
+
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [weekBase, setWeekBase] = useState(new Date());
+  const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
+  const [teamView, setTeamView] = useState(false);
+
+  // Task dialog
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [form, setForm] = useState({
+    title: "", description: "", date: formatDate(new Date()),
+    hoursSpent: "", category: "", status: "PLANNED",
+  });
+  const [saving, setSaving] = useState(false);
+
+  // Incomplete reason dialog
+  const [showReasonDialog, setShowReasonDialog] = useState(false);
+  const [reasonTaskId, setReasonTaskId] = useState("");
+  const [incompleteReason, setIncompleteReason] = useState("");
+
+  const weekDates = getWeekDates(weekBase);
   const weekStart = formatDate(weekDates[0]);
   const weekEnd = formatDate(weekDates[6]);
 
   const fetchTasks = useCallback(async () => {
-    const params = new URLSearchParams({ startDate: weekStart, endDate: weekEnd });
-    if (selectedUser && selectedUser !== "all") {
-      if (selectedUser !== "me") params.set("userId", selectedUser);
-    }
-    const res = await fetch(`/api/tasks?${params}`);
-    if (res.ok) {
-      const json = await res.json();
-      setTasks(json.data || json || []);
-    }
-    setLoading(false);
-  }, [weekStart, weekEnd, selectedUser]);
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ startDate: weekStart, endDate: weekEnd });
+      if (teamView && isManager) params.set("view", "team");
+      const res = await fetch(`/api/tasks?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(Array.isArray(data) ? data : data.data || []);
+      }
+    } catch {} finally { setLoading(false); }
+  }, [weekStart, weekEnd, teamView, isManager]);
 
-  useEffect(() => {
-    fetchTasks();
-  }, [fetchTasks]);
+  useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
-  useEffect(() => {
-    fetch("/api/kras").then((r) => r.json()).then((d) => setKras(Array.isArray(d) ? d : d.data || [])).catch(() => {});
-    fetch("/api/users?limit=200").then((r) => r.json()).then((d) => {
-      const users = d.data || d || [];
-      setTeam(Array.isArray(users) ? users : []);
-    }).catch(() => {});
-  }, []);
-
-  function prevWeek() {
-    const d = new Date(currentWeek);
-    d.setDate(d.getDate() - 7);
-    setCurrentWeek(d);
+  function openNewTask(date?: string) {
+    setEditingTask(null);
+    setForm({ title: "", description: "", date: date || formatDate(new Date()), hoursSpent: "", category: "", status: "PLANNED" });
+    setShowDialog(true);
   }
 
-  function nextWeek() {
-    const d = new Date(currentWeek);
-    d.setDate(d.getDate() + 7);
-    setCurrentWeek(d);
-  }
-
-  function goToday() {
-    setCurrentWeek(new Date());
-  }
-
-  function openAddForDate(dateStr: string) {
-    setSelectedDate(dateStr);
-    setNewTask({ title: "", description: "", date: dateStr, startTime: "", endTime: "", kraId: "", assigneeId: "" });
-    setShowAddDialog(true);
-  }
-
-  async function createTask() {
-    if (!newTask.title.trim() || !newTask.date) return;
-    const res = await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...newTask,
-        kraId: newTask.kraId || undefined,
-        assigneeId: newTask.assigneeId || undefined,
-      }),
+  function openEditTask(task: Task) {
+    setEditingTask(task);
+    setForm({
+      title: task.title, description: task.description || "", date: task.date.split("T")[0],
+      hoursSpent: task.hoursSpent != null ? String(task.hoursSpent) : "",
+      category: task.category || "", status: task.status,
     });
-    if (res.ok) {
-      setShowAddDialog(false);
+    setShowDialog(true);
+  }
+
+  async function handleSave() {
+    if (!form.title.trim()) return;
+    setSaving(true);
+    try {
+      const payload: any = {
+        title: form.title, description: form.description || null, date: form.date,
+        hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
+        category: form.category || null, status: form.status,
+      };
+      if (editingTask) payload.id = editingTask.id;
+
+      const res = await fetch("/api/tasks", {
+        method: editingTask ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        setShowDialog(false);
+        fetchTasks();
+        toastSuccess(editingTask ? "Task updated" : "Task created");
+      }
+    } catch { toastError("Failed to save task"); } finally { setSaving(false); }
+  }
+
+  async function toggleStatus(taskId: string, currentStatus: string) {
+    const newStatus = currentStatus === "COMPLETED" ? "PLANNED" : currentStatus === "PLANNED" ? "IN_PROGRESS" : "COMPLETED";
+    const task = tasks.find((t) => t.id === taskId);
+    if (task && newStatus !== "COMPLETED" && new Date(task.date) < new Date() && !isToday(new Date(task.date))) {
+      setReasonTaskId(taskId);
+      setShowReasonDialog(true);
+      return;
+    }
+    try {
+      await fetch("/api/tasks", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: taskId, status: newStatus }),
+      });
       fetchTasks();
-    }
+    } catch {}
   }
 
-  async function updateTaskStatus(taskId: string, status: string) {
-    await fetch("/api/tasks", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: taskId, status }),
-    });
-    fetchTasks();
+  async function handleSubmitReason() {
+    if (!incompleteReason.trim()) return;
+    try {
+      await fetch("/api/tasks", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: reasonTaskId, incompleteReason }),
+      });
+      setShowReasonDialog(false);
+      setIncompleteReason("");
+      fetchTasks();
+    } catch {}
   }
 
-  async function deleteTask(taskId: string) {
-    await fetch("/api/tasks", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: taskId }),
-    });
-    fetchTasks();
+  async function handleDelete(taskId: string) {
+    try {
+      await fetch("/api/tasks", {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: taskId }),
+      });
+      setShowDialog(false);
+      fetchTasks();
+      toastSuccess("Task deleted");
+    } catch {}
   }
 
-  function getTasksForDate(dateStr: string): Task[] {
-    return tasks.filter((t) => t.date.startsWith(dateStr));
-  }
+  function prevWeek() { const d = new Date(weekBase); d.setDate(d.getDate() - 7); setWeekBase(d); }
+  function nextWeek() { const d = new Date(weekBase); d.setDate(d.getDate() + 7); setWeekBase(d); }
+  function goToday() { setWeekBase(new Date()); }
 
-  const today = formatDate(new Date());
-  const monthYear = weekDates[3].toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  // Group tasks by date for list view
+  const tasksByDate = new Map<string, Task[]>();
+  tasks.forEach((t) => {
+    const key = t.date.split("T")[0];
+    if (!tasksByDate.has(key)) tasksByDate.set(key, []);
+    tasksByDate.get(key)!.push(t);
+  });
+
+  const totalHours = tasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
+  const completedCount = tasks.filter((t) => t.status === "COMPLETED").length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Work Calendar</h1>
-          <p className="text-muted">Plan and track daily work activities</p>
+          <h1 className="text-2xl font-bold tracking-tight">Work Calendar</h1>
+          <p className="text-muted text-sm mt-1">
+            {completedCount}/{tasks.length} tasks &middot; {totalHours}h logged this week
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Select value={selectedUser} onValueChange={setSelectedUser}>
-            <SelectTrigger className="w-[180px]">
-              <User size={14} className="text-muted" />
-              <SelectValue placeholder="View" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="me">My Calendar</SelectItem>
-              <SelectItem value="all">All Team</SelectItem>
-              {team.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.firstName} {m.lastName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button onClick={() => openAddForDate(today)}>
-            <Plus size={16} className="mr-2" /> Add Task
-          </Button>
-          <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add Task</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 pt-2">
-                <div className="space-y-2">
-                  <Label>Title</Label>
-                  <Input
-                    placeholder="What are you working on?"
-                    value={newTask.title}
-                    onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Input
-                    placeholder="Details (optional)"
-                    value={newTask.description}
-                    onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-2">
-                    <Label>Date</Label>
-                    <Input
-                      type="date"
-                      value={newTask.date}
-                      onChange={(e) => setNewTask({ ...newTask, date: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Start Time</Label>
-                    <Input
-                      type="time"
-                      value={newTask.startTime}
-                      onChange={(e) => setNewTask({ ...newTask, startTime: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>End Time</Label>
-                    <Input
-                      type="time"
-                      value={newTask.endTime}
-                      onChange={(e) => setNewTask({ ...newTask, endTime: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Link to KRA</Label>
-                  <Select value={newTask.kraId} onValueChange={(v) => setNewTask({ ...newTask, kraId: v })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="None (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">None</SelectItem>
-                      {kras.map((k) => (
-                        <SelectItem key={k.id} value={k.id}>{k.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {team.length > 0 && (
-                  <div className="space-y-2">
-                    <Label>Assign to</Label>
-                    <Select value={newTask.assigneeId} onValueChange={(v) => setNewTask({ ...newTask, assigneeId: v })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Myself" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">Myself</SelectItem>
-                        {team.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                <Button onClick={createTask} className="w-full" disabled={!newTask.title.trim() || !newTask.date}>
-                  Add Task
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+        <div className="flex items-center gap-2">
+          {isManager && (
+            <Button variant={teamView ? "default" : "outline"} size="sm" className="gap-1.5" onClick={() => setTeamView(!teamView)}>
+              <Users size={14} /> {teamView ? "My Tasks" : "Team"}
+            </Button>
+          )}
+          <Button onClick={() => openNewTask()} className="gap-1.5"><Plus size={14} /> Add Task</Button>
         </div>
       </div>
 
-      {/* Week Navigation */}
-      <Card className="border-border bg-surface">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={prevWeek}>
-                <ChevronLeft size={16} />
-              </Button>
-              <h2 className="text-lg font-semibold">{monthYear}</h2>
-              <Button variant="outline" size="sm" onClick={nextWeek}>
-                <ChevronRight size={16} />
-              </Button>
-            </div>
-            <Button variant="ghost" size="sm" onClick={goToday}>
-              Today
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {/* Calendar Grid */}
-          <div className="grid grid-cols-7 gap-3">
-            {weekDates.map((date, i) => {
-              const dateStr = formatDate(date);
-              const isToday = dateStr === today;
-              const dayTasks = getTasksForDate(dateStr);
+      {/* Week Nav */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={prevWeek}><ChevronLeft size={14} /></Button>
+          <Button variant="outline" size="sm" onClick={goToday}>Today</Button>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={nextWeek}><ChevronRight size={14} /></Button>
+          <span className="text-sm font-medium ml-2">
+            {weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          </span>
+        </div>
+        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)}>
+          <TabsList className="h-8">
+            <TabsTrigger value="calendar" className="text-xs gap-1 h-7"><Calendar size={12} /> Week</TabsTrigger>
+            <TabsTrigger value="list" className="text-xs gap-1 h-7"><List size={12} /> List</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
 
-              return (
-                <div
-                  key={dateStr}
-                  className={`min-h-[200px] rounded-lg border p-3 transition-colors ${
-                    isToday
-                      ? "border-purple-500/40 bg-purple-500/5"
-                      : "border-border bg-background hover:border-muted-2"
-                  }`}
-                >
-                  <div className="mb-3 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs text-muted">{DAYS[i]}</span>
-                      <p className={`text-lg font-semibold ${isToday ? "text-purple-400" : ""}`}>
-                        {date.getDate()}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => openAddForDate(dateStr)}
-                      className="rounded-md p-1 text-muted-2 hover:bg-surface-2 hover:text-foreground"
-                    >
-                      <Plus size={14} />
-                    </button>
+      {/* Calendar View */}
+      {viewMode === "calendar" && (
+        <div className="grid grid-cols-7 gap-2">
+          {weekDates.map((date, i) => {
+            const dateStr = formatDate(date);
+            const dayTasks = tasks.filter((t) => t.date.split("T")[0] === dateStr);
+            const dayHours = dayTasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
+            const today = isToday(date);
+            const isPast = date < new Date() && !today;
+
+            return (
+              <div key={i} className={`min-h-[200px] rounded-lg border p-2 ${today ? "border-purple-500/50 bg-purple-500/5" : "border-border bg-surface"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className={`text-[10px] font-medium ${today ? "text-purple-400" : "text-muted"}`}>{DAY_NAMES[i]}</p>
+                    <p className={`text-lg font-bold ${today ? "text-purple-400" : ""}`}>{date.getDate()}</p>
                   </div>
-
-                  <div className="space-y-1.5">
-                    {dayTasks.map((task) => (
-                      <div
-                        key={task.id}
-                        className={`group relative rounded-md border p-2 text-xs ${STATUS_COLORS[task.status]}`}
-                      >
-                        <div className="flex items-start justify-between gap-1">
-                          <span className="font-medium leading-tight">{task.title}</span>
-                          <div className="hidden shrink-0 gap-0.5 group-hover:flex">
-                            {task.status === "PLANNED" && (
-                              <button
-                                onClick={() => updateTaskStatus(task.id, "IN_PROGRESS")}
-                                className="rounded p-0.5 hover:bg-white/10"
-                                title="Start"
-                              >
-                                <Play size={10} />
-                              </button>
-                            )}
-                            {task.status === "IN_PROGRESS" && (
-                              <button
-                                onClick={() => updateTaskStatus(task.id, "COMPLETED")}
-                                className="rounded p-0.5 hover:bg-white/10"
-                                title="Complete"
-                              >
-                                <Check size={10} />
-                              </button>
-                            )}
+                  <button onClick={() => openNewTask(dateStr)} className="h-6 w-6 rounded-full flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground">
+                    <Plus size={12} />
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {loading ? <div className="h-8 bg-surface-2 rounded animate-pulse" /> : dayTasks.length === 0 ? (
+                    <p className="text-[10px] text-muted-2 text-center py-4">No tasks</p>
+                  ) : dayTasks.map((task) => (
+                    <button key={task.id} onClick={() => openEditTask(task)} className="w-full text-left rounded-md border border-border bg-background p-1.5 hover:bg-surface-2 transition-colors">
+                      <div className="flex items-start gap-1.5">
+                        {task.status === "COMPLETED" ? <CheckCircle2 size={11} className="mt-0.5 text-green-400 shrink-0" /> :
+                         task.status === "IN_PROGRESS" ? <Play size={11} className="mt-0.5 text-blue-400 shrink-0" /> :
+                         <Circle size={11} className="mt-0.5 text-muted shrink-0" />}
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[11px] font-medium truncate ${task.status === "COMPLETED" ? "line-through text-muted" : ""}`}>{task.title}</p>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            {task.hoursSpent != null && <span className="text-[9px] text-muted-2">{task.hoursSpent}h</span>}
+                            {task.category && <span className="text-[9px] text-purple-400">{task.category}</span>}
+                            {teamView && task.assignee && <span className="text-[9px] text-muted-2">{task.assignee.firstName}</span>}
                           </div>
                         </div>
-                        {task.startTime && (
-                          <span className="mt-0.5 flex items-center gap-1 opacity-70">
-                            <Clock size={8} />
-                            {task.startTime}{task.endTime ? `–${task.endTime}` : ""}
-                          </span>
-                        )}
-                        {task.kra && (
-                          <span className="mt-0.5 flex items-center gap-1 opacity-70">
-                            <Target size={8} />
-                            {task.kra.name}
-                          </span>
-                        )}
-                        {selectedUser === "all" && (
-                          <span className="mt-0.5 opacity-70">
-                            {task.assignee.firstName}
-                          </span>
-                        )}
                       </div>
+                      {isPast && task.status !== "COMPLETED" && !task.incompleteReason && (
+                        <div className="flex items-center gap-1 mt-1"><AlertCircle size={9} className="text-red-400" /><span className="text-[9px] text-red-400">Overdue</span></div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                {dayHours > 0 && (
+                  <div className="mt-2 pt-1 border-t border-border">
+                    <p className="text-[10px] text-muted flex items-center gap-1"><Clock size={10} /> {dayHours}h</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* List View */}
+      {viewMode === "list" && (
+        <div className="space-y-4">
+          {loading ? (
+            <Card><CardContent className="p-4"><div className="h-24 bg-surface-2 rounded animate-pulse" /></CardContent></Card>
+          ) : tasks.length === 0 ? (
+            <Card><CardContent className="p-8 text-center">
+              <Calendar size={32} className="mx-auto text-muted mb-2" />
+              <p className="text-sm text-muted">No tasks this week.</p>
+              <Button variant="outline" size="sm" className="mt-3 gap-1" onClick={() => openNewTask()}><Plus size={14} /> Add Task</Button>
+            </CardContent></Card>
+          ) : (
+            Array.from(tasksByDate.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([dateStr, dayTasks]) => {
+              const date = new Date(dateStr);
+              const dayHours = dayTasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
+              const dayCompleted = dayTasks.filter((t) => t.status === "COMPLETED").length;
+              return (
+                <div key={dateStr}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-medium text-muted">
+                      {date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+                      {isToday(date) && <Badge variant="secondary" className="text-[9px] ml-2">Today</Badge>}
+                    </p>
+                    <p className="text-[10px] text-muted">{dayCompleted}/{dayTasks.length} done &middot; {dayHours}h</p>
+                  </div>
+                  <div className="space-y-2">
+                    {dayTasks.map((task) => (
+                      <Card key={task.id} className="hover:border-muted-2 transition-colors cursor-pointer" onClick={() => openEditTask(task)}>
+                        <CardContent className="p-3 flex items-center gap-3">
+                          <button onClick={(e) => { e.stopPropagation(); toggleStatus(task.id, task.status); }} className="shrink-0">
+                            {task.status === "COMPLETED" ? <CheckCircle2 size={18} className="text-green-400" /> :
+                             task.status === "IN_PROGRESS" ? <Play size={18} className="text-blue-400" /> :
+                             <Circle size={18} className="text-muted" />}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-medium ${task.status === "COMPLETED" ? "line-through text-muted" : ""}`}>{task.title}</p>
+                            {task.description && <p className="text-xs text-muted truncate">{task.description}</p>}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {task.category && <Badge variant="outline" className="text-[9px]">{task.category}</Badge>}
+                            {task.hoursSpent != null && <span className="text-xs text-muted font-mono">{task.hoursSpent}h</span>}
+                            {teamView && task.assignee && <span className="text-[10px] text-muted">{task.assignee.firstName}</span>}
+                          </div>
+                        </CardContent>
+                      </Card>
                     ))}
                   </div>
                 </div>
               );
-            })}
+            })
+          )}
+        </div>
+      )}
+
+      {/* Task Dialog */}
+      <Dialog open={showDialog} onOpenChange={(open) => { setShowDialog(open); if (!open) setEditingTask(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{editingTask ? "Edit Task" : "Add Task"}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Title <span className="text-red-400">*</span></Label>
+              <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What did you work on?" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Time Spent (hours)</Label>
+                <Input type="number" step="0.5" min="0" max="24" placeholder="e.g., 2" value={form.hoursSpent} onChange={(e) => setForm({ ...form, hoursSpent: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PLANNED">Planned</SelectItem>
+                    <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                    <SelectItem value="COMPLETED">Completed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What did you do? Any notes..." rows={3} />
+            </div>
           </div>
-        </CardContent>
-      </Card>
+          <DialogFooter>
+            <div className="flex items-center justify-between w-full">
+              {editingTask && (
+                <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => handleDelete(editingTask.id)}>
+                  <Trash2 size={14} className="mr-1" /> Delete
+                </Button>
+              )}
+              <div className="flex items-center gap-2 ml-auto">
+                <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
+                <Button onClick={handleSave} disabled={saving || !form.title.trim()}>
+                  {saving ? "Saving..." : editingTask ? "Update" : "Add Task"}
+                </Button>
+              </div>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Incomplete Reason Dialog */}
+      <Dialog open={showReasonDialog} onOpenChange={setShowReasonDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Why was this task not completed?</DialogTitle></DialogHeader>
+          <div className="py-4">
+            <Textarea value={incompleteReason} onChange={(e) => setIncompleteReason(e.target.value)} placeholder="Explain why this task was not completed..." rows={3} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReasonDialog(false)}>Cancel</Button>
+            <Button onClick={handleSubmitReason} disabled={!incompleteReason.trim()}>Submit</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

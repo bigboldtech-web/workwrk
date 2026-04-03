@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
       title: title.trim(),
       description: `Recorded SOP with ${steps.length} steps`,
       category: category?.trim() || null,
+      sopType: "RECORDED",
       content,
       status: "PUBLISHED",
       organizationId: orgId,

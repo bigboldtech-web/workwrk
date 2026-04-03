@@ -24,11 +24,14 @@ export function useRole() {
   const { data: session } = useSession();
   const accessLevel = (session?.user as any)?.accessLevel || "EMPLOYEE";
 
+  const isExecutive = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL"].includes(accessLevel);
+
   return {
     accessLevel,
     isManager: MANAGER_ROLES.includes(accessLevel),
     isAdmin: ADMIN_ROLES.includes(accessLevel),
     isEmployee: accessLevel === "EMPLOYEE" || accessLevel === "AGENT",
+    isExecutive,
     canManagePeople: ADMIN_ROLES.includes(accessLevel),
     canManageSOPs: MANAGER_ROLES.includes(accessLevel),
     canManageReviews: MANAGER_ROLES.includes(accessLevel),

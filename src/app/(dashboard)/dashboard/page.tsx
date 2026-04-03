@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import { ErrorState } from "@/components/ui/error-state";
 import { OnboardingChecklist } from "@/components/onboarding-checklist";
+import { EmployeeDashboard } from "@/components/dashboard/employee-dashboard";
+import { ManagerTeamDashboard } from "@/components/dashboard/manager-dashboard";
+import { useRole } from "@/hooks/use-role";
 
 interface DashboardStats {
   totalPeople: number;
@@ -114,6 +117,7 @@ function SkeletonBlock({ className }: { className?: string }) {
 }
 
 export default function DashboardPage() {
+  const { isEmployee, isManager, isExecutive } = useRole();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -252,7 +256,13 @@ export default function DashboardPage() {
       {/* Onboarding Checklist */}
       <OnboardingChecklist />
 
-      {/* Stats Grid */}
+      {/* Employee Dashboard — employees see their own KPIs, SOPs, reviews */}
+      {isEmployee && <EmployeeDashboard />}
+
+      {/* Manager Team Dashboard — managers see their direct reports first */}
+      {isManager && <ManagerTeamDashboard />}
+
+      {/* Stats Grid — org-wide stats for managers/executives */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.title} className="hover:border-muted-2 transition-colors">
