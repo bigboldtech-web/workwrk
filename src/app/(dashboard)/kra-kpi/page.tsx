@@ -157,6 +157,38 @@ export default function KraKpiPage() {
   const [editingKra, setEditingKra] = useState<Kra | null>(null);
   const [savingKra, setSavingKra] = useState(false);
 
+  // Inline KPIs for KRA creation
+  interface InlineKpi {
+    id: string;
+    name: string;
+    type: string;
+    unit: string;
+    targetValue: string;
+    frequency: string;
+    description: string;
+  }
+  const [inlineKpis, setInlineKpis] = useState<InlineKpi[]>([]);
+
+  function addInlineKpi() {
+    setInlineKpis([...inlineKpis, {
+      id: `tmp_${Date.now()}`,
+      name: "",
+      type: "QUANTITATIVE",
+      unit: "",
+      targetValue: "",
+      frequency: "MONTHLY",
+      description: "",
+    }]);
+  }
+
+  function updateInlineKpi(id: string, field: keyof InlineKpi, value: string) {
+    setInlineKpis(inlineKpis.map((k) => k.id === id ? { ...k, [field]: value } : k));
+  }
+
+  function removeInlineKpi(id: string) {
+    setInlineKpis(inlineKpis.filter((k) => k.id !== id));
+  }
+
   // KPI form state
   const [kpiName, setKpiName] = useState("");
   const [kpiDescription, setKpiDescription] = useState("");
@@ -281,14 +313,34 @@ export default function KraKpiPage() {
       const res = await fetch("/api/kras", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: kraName, description: kraDescription, category: kraCategory || undefined, roleId: kraRoleId || undefined }),
+        body: JSON.stringify({ name: kraName, description: kraDescription, category: kraCategory || undefined }),
       });
-      if (res.ok) {
-        setShowAddKraDialog(false);
-        resetKraForm();
-        await fetchKras();
-        toastSuccess("KRA created successfully");
+      if (!res.ok) throw new Error("Failed to create KRA");
+      const kraData = await res.json();
+      const createdKra = kraData.data || kraData;
+
+      // Create inline KPIs under this KRA
+      const validKpis = inlineKpis.filter((k) => k.name.trim());
+      for (const kpi of validKpis) {
+        await fetch("/api/kpis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: kpi.name,
+            description: kpi.description || undefined,
+            type: kpi.type,
+            unit: kpi.unit || undefined,
+            frequency: kpi.frequency,
+            targetValue: kpi.targetValue ? Number(kpi.targetValue) : undefined,
+            kraId: createdKra.id,
+          }),
+        });
       }
+
+      setShowAddKraDialog(false);
+      resetKraForm();
+      await Promise.all([fetchKras(), fetchKpis()]);
+      toastSuccess(`KRA created with ${validKpis.length} KPI${validKpis.length !== 1 ? "s" : ""}`);
     } catch { toastError("Failed to create KRA"); } finally { setSavingKra(false); }
   };
 
@@ -432,7 +484,7 @@ export default function KraKpiPage() {
     } catch { toastError("Failed to log KPI record"); } finally { setSavingRecord(false); }
   };
 
-  function resetKraForm() { setKraName(""); setKraDescription(""); setKraCategory(""); setKraRoleId(""); setEditingKra(null); }
+  function resetKraForm() { setKraName(""); setKraDescription(""); setKraCategory(""); setKraRoleId(""); setEditingKra(null); setInlineKpis([]); }
   function resetKpiForm() { setKpiName(""); setKpiDescription(""); setKpiType("QUANTITATIVE"); setKpiUnit(""); setKpiFrequency("MONTHLY"); setKpiTargetValue(""); setKpiKraId(""); setEditingKpi(null); }
   function resetAssignForm() { setAssignUserId(""); setAssignKraId(""); setAssignWeightage(""); setAssignPeriod(""); setMultiAssignKras([]); }
   function resetRecordForm() { setRecordKpiId(""); setRecordUserId(""); setRecordPeriod(""); setRecordTargetValue(""); setRecordActualValue(""); setRecordNotes(""); }
@@ -508,38 +560,89 @@ export default function KraKpiPage() {
     entry.totalWeightage += a.weightage;
   });
 
-  const kraFormFields = (
+  const kraFormFields = (isCreate: boolean = false) => (
     <div className="space-y-4 py-4">
       <div className="space-y-2">
         <Label>KRA Name <span className="text-red-400">*</span></Label>
         <Input placeholder="e.g., Revenue Generation" value={kraName} onChange={(e) => setKraName(e.target.value)} />
       </div>
-      <div className="space-y-2">
-        <Label>Category</Label>
-        <Select value={kraCategory} onValueChange={setKraCategory}>
-          <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-          <SelectContent>
-            {["Sales", "Engineering", "Marketing", "Operations", "Support", "HR", "Finance"].map((c) => (
-              <SelectItem key={c} value={c}>{c}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label>Category</Label>
+          <Select value={kraCategory} onValueChange={setKraCategory}>
+            <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+            <SelectContent>
+              {["Sales", "Engineering", "Marketing", "Operations", "Support", "HR", "Finance"].map((c) => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Description</Label>
+          <Input placeholder="Brief description" value={kraDescription} onChange={(e) => setKraDescription(e.target.value)} />
+        </div>
       </div>
-      <div className="space-y-2">
-        <Label>Description</Label>
-        <Textarea placeholder="What does this KRA measure?" value={kraDescription} onChange={(e) => setKraDescription(e.target.value)} />
-      </div>
-      <div className="space-y-2">
-        <Label>Linked Role</Label>
-        <Select value={kraRoleId} onValueChange={setKraRoleId}>
-          <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
-          <SelectContent>
-            {roles.map((r) => (
-              <SelectItem key={r.id} value={r.id}>{r.title || r.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+
+      {/* Inline KPIs — only on create */}
+      {isCreate && (
+        <div className="space-y-3 pt-2 border-t border-[#2A2A3A]">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">KPIs</Label>
+            <Button variant="ghost" size="sm" className="text-xs text-purple-400 h-6 gap-1" onClick={addInlineKpi}>
+              <Plus size={12} /> Add KPI
+            </Button>
+          </div>
+          {inlineKpis.length === 0 && (
+            <p className="text-xs text-[#6B6B80] text-center py-2">Add KPIs to measure this KRA</p>
+          )}
+          {inlineKpis.map((kpi, idx) => (
+            <div key={kpi.id} className="rounded-lg border border-[#2A2A3A] bg-[#0D0D14] p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#6B6B80]">KPI {idx + 1}</span>
+                <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400" onClick={() => removeInlineKpi(kpi.id)}>
+                  <Trash2 size={10} />
+                </Button>
+              </div>
+              <Input
+                placeholder="KPI name"
+                value={kpi.name}
+                onChange={(e) => updateInlineKpi(kpi.id, "name", e.target.value)}
+                className="h-8 text-sm bg-transparent border-[#2A2A3A]"
+              />
+              <div className="grid grid-cols-3 gap-2">
+                <Select value={kpi.unit} onValueChange={(v) => updateInlineKpi(kpi.id, "unit", v)}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Unit" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="%">%</SelectItem>
+                    <SelectItem value="count">Count</SelectItem>
+                    <SelectItem value="₹">₹</SelectItem>
+                    <SelectItem value="hours">Hours</SelectItem>
+                    <SelectItem value="days">Days</SelectItem>
+                    <SelectItem value="rating">Rating</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  placeholder="Target"
+                  value={kpi.targetValue}
+                  onChange={(e) => updateInlineKpi(kpi.id, "targetValue", e.target.value)}
+                  className="h-8 text-xs bg-transparent border-[#2A2A3A]"
+                />
+                <Select value={kpi.frequency} onValueChange={(v) => updateInlineKpi(kpi.id, "frequency", v)}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Freq" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="DAILY">Daily</SelectItem>
+                    <SelectItem value="WEEKLY">Weekly</SelectItem>
+                    <SelectItem value="MONTHLY">Monthly</SelectItem>
+                    <SelectItem value="QUARTERLY">Quarterly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -911,13 +1014,13 @@ export default function KraKpiPage() {
 
       {/* Create KRA Dialog */}
       <Dialog open={showAddKraDialog} onOpenChange={(open) => { setShowAddKraDialog(open); if (!open) resetKraForm(); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Create Key Result Area</DialogTitle></DialogHeader>
-          {kraFormFields}
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Create KRA with KPIs</DialogTitle></DialogHeader>
+          {kraFormFields(true)}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddKraDialog(false)}>Cancel</Button>
             <Button onClick={handleCreateKra} disabled={savingKra || !kraName.trim()}>
-              {savingKra ? "Creating..." : "Create KRA"}
+              {savingKra ? "Creating..." : `Create KRA${inlineKpis.length > 0 ? ` + ${inlineKpis.length} KPIs` : ""}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -927,7 +1030,7 @@ export default function KraKpiPage() {
       <Dialog open={showEditKraDialog} onOpenChange={(open) => { setShowEditKraDialog(open); if (!open) resetKraForm(); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Edit KRA</DialogTitle></DialogHeader>
-          {kraFormFields}
+          {kraFormFields(false)}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditKraDialog(false)}>Cancel</Button>
             <Button onClick={handleEditKra} disabled={savingKra || !kraName.trim()}>
