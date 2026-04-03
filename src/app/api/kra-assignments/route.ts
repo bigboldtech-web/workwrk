@@ -37,6 +37,20 @@ export async function GET(req: NextRequest) {
     return jsonSuccess(assignments);
   }
 
+  // If no userId, check if requesting all org assignments
+  const all = searchParams.get("all");
+  if (all === "true") {
+    const assignments = await prisma.kRAAssignment.findMany({
+      where: { kra: { organizationId: orgId } },
+      include: {
+        kra: { select: { id: true, name: true, category: true, kpis: { select: { id: true, name: true, unit: true } } } },
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return jsonSuccess(assignments);
+  }
+
   // Get assignments for a specific user or current user
   const targetUserId = userId || getUserId(session);
 

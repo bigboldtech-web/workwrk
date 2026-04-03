@@ -267,7 +267,7 @@ export default function KraKpiPage() {
   const fetchAssignments = useCallback(async () => {
     try {
       setLoadingAssignments(true);
-      const res = await fetch("/api/kra-assignments");
+      const res = await fetch("/api/kra-assignments?all=true");
       if (res.ok) {
         const data = await res.json();
         setAssignments(Array.isArray(data) ? data : data.assignments ?? data.data ?? []);
