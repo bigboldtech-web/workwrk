@@ -372,7 +372,7 @@ export default function KraKpiPage() {
 
   const handleAssign = async () => {
     const kraList = multiAssignKras.length > 0 ? multiAssignKras : (assignKraId ? [{ kraId: assignKraId, weightage: assignWeightage }] : []);
-    if (!assignUserId || !assignPeriod || kraList.length === 0) return;
+    if (!assignUserId || kraList.length === 0) return;
     setSavingAssignment(true);
     try {
       let allOk = true;
@@ -381,7 +381,7 @@ export default function KraKpiPage() {
         const res = await fetch("/api/kra-assignments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: assignUserId, kraId: entry.kraId, weightage: parseFloat(entry.weightage), period: assignPeriod }),
+          body: JSON.stringify({ userId: assignUserId, kraId: entry.kraId, weightage: parseFloat(entry.weightage) }),
         });
         if (!res.ok) {
           const data = await res.json();
@@ -830,7 +830,6 @@ export default function KraKpiPage() {
                             <p className="text-sm font-medium">{a.kra.name}</p>
                             <div className="flex items-center gap-2 mt-0.5">
                               <Badge variant="outline" className="text-[10px]">{a.kra.category}</Badge>
-                              <span className="text-[10px] text-[#8888A0]">{a.period}</span>
                               <Badge className={`text-[10px] ${a.status === "ACTIVE" ? "bg-green-500/20 text-green-400" : a.status === "PAUSED" ? "bg-yellow-500/20 text-yellow-400" : "bg-slate-500/20 text-slate-400"}`}>
                                 {a.status}
                               </Badge>
@@ -982,39 +981,6 @@ export default function KraKpiPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Period</Label>
-              <Select value={assignPeriod} onValueChange={setAssignPeriod}>
-                <SelectTrigger><SelectValue placeholder="Select period" /></SelectTrigger>
-                <SelectContent>
-                  {(() => {
-                    const now = new Date();
-                    const year = now.getFullYear();
-                    const month = now.getMonth();
-                    const q = Math.ceil((month + 1) / 3);
-                    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-                    const items = [];
-                    // Monthly options (current + next 2 months)
-                    for (let i = 0; i < 3; i++) {
-                      const d = new Date(year, month + i);
-                      const m = months[d.getMonth()];
-                      const y = d.getFullYear();
-                      items.push(<SelectItem key={`m-${i}`} value={`${m} ${y}`}>{m} {y}{i === 0 ? " (Current)" : ""}</SelectItem>);
-                    }
-                    // Quarterly
-                    items.push(<SelectItem key="q-cur" value={`Q${q} ${year}`}>Q{q} {year}</SelectItem>);
-                    if (q < 4) items.push(<SelectItem key="q-next" value={`Q${q+1} ${year}`}>Q{q+1} {year}</SelectItem>);
-                    else items.push(<SelectItem key="q-next" value={`Q1 ${year+1}`}>Q1 {year+1}</SelectItem>);
-                    // Half-yearly & FY
-                    items.push(<SelectItem key="h1" value={`H1 ${year}`}>H1 {year}</SelectItem>);
-                    items.push(<SelectItem key="h2" value={`H2 ${year}`}>H2 {year}</SelectItem>);
-                    items.push(<SelectItem key="fy" value={`FY ${year}-${year+1}`}>FY {year}-{year+1}</SelectItem>);
-                    return items;
-                  })()}
-                </SelectContent>
-              </Select>
-            </div>
-
             {/* Multi-KRA Selection */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -1086,7 +1052,7 @@ export default function KraKpiPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAssignDialog(false)}>Cancel</Button>
             <Button onClick={handleAssign} disabled={
-              savingAssignment || !assignUserId || !assignPeriod || multiAssignKras.length === 0 ||
+              savingAssignment || !assignUserId || multiAssignKras.length === 0 ||
               multiAssignKras.some((e) => !e.kraId || !e.weightage) ||
               multiAssignKras.reduce((sum, e) => sum + (parseFloat(e.weightage) || 0), 0) > 100
             }>

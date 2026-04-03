@@ -82,8 +82,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { userId, kraId, weightage, period, status } = body;
 
-  if (!userId || !kraId || !period) {
-    return jsonError("userId, kraId, and period are required");
+  if (!userId || !kraId) {
+    return jsonError("userId and kraId are required");
   }
   if (weightage == null || weightage <= 0 || weightage > 100) {
     return jsonError("Weightage must be between 1 and 100");
@@ -103,9 +103,9 @@ export async function POST(req: NextRequest) {
   });
   if (!user) return jsonError("User not found", 404);
 
-  // Check total weightage for this user/period won't exceed 100%
+  // Check total weightage for this user won't exceed 100%
   const existingAssignments = await prisma.kRAAssignment.findMany({
-    where: { userId, period, status: { not: "ARCHIVED" } },
+    where: { userId, status: { not: "ARCHIVED" } },
   });
   const currentTotal = existingAssignments.reduce((sum, a) => sum + a.weightage, 0);
   if (currentTotal + weightage > 100) {
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       userId,
       kraId,
       weightage,
-      period,
+      period: period || "ongoing",
       status: status || "ACTIVE",
     },
     include: {

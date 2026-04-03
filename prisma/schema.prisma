@@ -289,12 +289,12 @@ model KRAAssignment {
   kraId      String
   kra        KRA      @relation(fields: [kraId], references: [id], onDelete: Cascade)
   weightage  Float    @default(0)
-  period     String
+  period     String   @default("ongoing")
   status     KRAStatus @default(ACTIVE)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  @@unique([userId, kraId, period])
+  @@unique([userId, kraId])
   @@index([userId])
 }
 
