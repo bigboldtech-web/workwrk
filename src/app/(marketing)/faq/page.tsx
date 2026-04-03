@@ -116,7 +116,7 @@ export default function FaqPage() {
             Frequently asked<br />
             <span className="text-gradient">questions.</span>
           </h1>
-          <p className="mb-8 max-w-[560px] text-lg text-[#8888A0]">
+          <p className="mb-8 max-w-[560px] text-lg text-muted">
             Everything you need to know about WorkwrK. Can&apos;t find the
             answer you&apos;re looking for? Reach out to our team.
           </p>
@@ -140,7 +140,7 @@ export default function FaqPage() {
             <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
               Still have questions?
             </h2>
-            <p className="mx-auto mb-8 max-w-[440px] text-base text-[#8888A0]">
+            <p className="mx-auto mb-8 max-w-[440px] text-base text-muted">
               Our team is here to help. Start a free trial or get in touch
               and we&apos;ll walk you through everything.
             </p>

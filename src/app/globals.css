@@ -1,21 +1,55 @@
 @import "tailwindcss";
 
-@theme inline {
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Light theme (default) */
+:root {
+  --color-background: #FFFFFF;
+  --color-foreground: #1A1A2E;
+  --color-surface: #F5F5F8;
+  --color-surface-2: #EBEBF0;
+  --color-surface-3: #E0E0E8;
+  --color-border: #D8D8E0;
+  --color-muted: #6B6B80;
+  --color-muted-2: #9898A8;
+  --color-accent: #6C5CE7;
+  --color-accent-light: #A29BFE;
+  --scrollbar-color: #D8D8E0;
+}
+
+/* Dark theme */
+.dark {
   --color-background: #0A0A0F;
   --color-foreground: #E8E8F0;
   --color-surface: #12121A;
   --color-surface-2: #1A1A26;
+  --color-surface-3: #0D0D14;
   --color-border: #2A2A3A;
   --color-muted: #8888A0;
+  --color-muted-2: #6B6B80;
   --color-accent: #6C5CE7;
   --color-accent-light: #A29BFE;
+  --scrollbar-color: #2A2A3A;
+}
+
+@theme inline {
+  --color-background: var(--color-background);
+  --color-foreground: var(--color-foreground);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-surface-3: var(--color-surface-3);
+  --color-border: var(--color-border);
+  --color-muted: var(--color-muted);
+  --color-muted-2: var(--color-muted-2);
+  --color-accent: var(--color-accent);
+  --color-accent-light: var(--color-accent-light);
   --font-sans: var(--font-outfit);
   --font-mono: var(--font-mono);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2A2A3A transparent;
+  scrollbar-color: var(--scrollbar-color) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -28,13 +62,13 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: #2A2A3A;
+  background-color: var(--scrollbar-color);
   border-radius: 3px;
 }
 
 body {
-  background: #0A0A0F;
-  color: #E8E8F0;
+  background: var(--color-background);
+  color: var(--color-foreground);
   font-family: var(--font-outfit), sans-serif;
 }
 

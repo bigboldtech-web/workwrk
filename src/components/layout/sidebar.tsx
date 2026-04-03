@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
   LayoutDashboard,
   Users,
@@ -76,20 +77,20 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 h-screen border-r border-[#2A2A3A] bg-[#0A0A0F] transition-all duration-300",
+        "fixed left-0 top-0 z-40 h-screen border-r border-border bg-background transition-all duration-300",
         collapsed ? "w-[68px]" : "w-[260px]"
       )}
     >
       <div className="flex h-full flex-col">
         {/* Logo */}
-        <div className="flex h-16 items-center justify-between border-b border-[#2A2A3A] px-4">
+        <div className="flex h-16 items-center justify-between border-b border-border px-4">
           {!collapsed && (
             <Link href="/dashboard" className="flex items-center gap-2">
               <span className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-xl font-extrabold tracking-tight text-transparent"
                 style={{ fontFamily: "'Syne', sans-serif" }}>
                 workwrk
               </span>
-              <span className="text-[#8888A0] opacity-50">.</span>
+              <span className="text-muted opacity-50">.</span>
             </Link>
           )}
           {collapsed && (
@@ -102,7 +103,7 @@ export function Sidebar() {
           )}
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className="rounded-md p-1 text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0] transition-colors"
+            className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-foreground transition-colors"
           >
             {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
@@ -120,7 +121,7 @@ export function Sidebar() {
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
                   isActive
                     ? "bg-purple-600/10 text-purple-400 border border-purple-600/20"
-                    : "text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0]",
+                    : "text-muted hover:bg-surface-2 hover:text-foreground",
                   collapsed && "justify-center px-2"
                 )}
                 title={collapsed ? item.name : undefined}
@@ -133,7 +134,7 @@ export function Sidebar() {
         </nav>
 
         {/* Bottom Navigation */}
-        <div className="border-t border-[#2A2A3A] px-3 py-4 space-y-1">
+        <div className="border-t border-border px-3 py-4 space-y-1">
           {bottomNav.map((item) => {
             const isActive = pathname === item.href;
             return (
@@ -144,7 +145,7 @@ export function Sidebar() {
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
                   isActive
                     ? "bg-purple-600/10 text-purple-400"
-                    : "text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0]",
+                    : "text-muted hover:bg-surface-2 hover:text-foreground",
                   collapsed && "justify-center px-2"
                 )}
               >
@@ -153,10 +154,11 @@ export function Sidebar() {
               </Link>
             );
           })}
+          <ThemeToggle collapsed={collapsed} />
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}
             className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-[#8888A0] hover:bg-red-500/10 hover:text-red-400 transition-all",
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted hover:bg-red-500/10 hover:text-red-400 transition-all",
               collapsed && "justify-center px-2"
             )}
           >

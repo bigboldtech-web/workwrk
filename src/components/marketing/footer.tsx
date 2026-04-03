@@ -38,7 +38,7 @@ const companyLinks = [
 function FooterColumn({ title, links: items }: { title: string; links: { href: string; label: string }[] }) {
   return (
     <div>
-      <h4 className="mb-4 font-[family-name:var(--font-syne)] text-xs font-bold uppercase tracking-widest text-[#E8E8F0]">
+      <h4 className="mb-4 font-[family-name:var(--font-syne)] text-xs font-bold uppercase tracking-widest text-foreground">
         {title}
       </h4>
       <ul className="flex flex-col gap-2.5">
@@ -46,7 +46,7 @@ function FooterColumn({ title, links: items }: { title: string; links: { href: s
           <li key={link.label}>
             <Link
               href={link.href}
-              className="text-sm text-[#8888A0] transition-colors duration-200 hover:text-[#E8E8F0]"
+              className="text-sm text-muted transition-colors duration-200 hover:text-foreground"
             >
               {link.label}
             </Link>
@@ -59,7 +59,7 @@ function FooterColumn({ title, links: items }: { title: string; links: { href: s
 
 export function MarketingFooter() {
   return (
-    <footer className="border-t border-[#2A2A3A] bg-[#0A0A0F]" aria-label="Site footer">
+    <footer className="border-t border-border bg-background" aria-label="Site footer">
       <div className="mx-auto max-w-[1200px] px-6 pb-10 pt-16">
         {/* Grid */}
         <FadeIn>
@@ -70,9 +70,9 @@ export function MarketingFooter() {
                 <Link href="/" className="mkt-logo mb-1 inline-block">
                   workwrk<span style={{ opacity: 0.5 }}>.</span>
                 </Link>
-                <p className="text-[11px] font-medium tracking-wide text-[#8888A0]" style={{ fontFamily: "var(--font-mono)" }}>great teams aren&apos;t guesswork</p>
+                <p className="text-[11px] font-medium tracking-wide text-muted" style={{ fontFamily: "var(--font-mono)" }}>great teams aren&apos;t guesswork</p>
               </div>
-              <p className="max-w-[260px] text-sm leading-relaxed text-[#8888A0]">
+              <p className="max-w-[260px] text-sm leading-relaxed text-muted">
                 The business operating system that unifies people, performance,
                 processes, and AI intelligence.
               </p>
@@ -95,18 +95,18 @@ export function MarketingFooter() {
 
         {/* Bottom bar */}
         <FadeIn delay={0.3}>
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#2A2A3A] pt-6">
-            <p className="text-xs text-[#8888A0]">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
+            <p className="text-xs text-muted">
               © 2026 WorkwrK. All rights reserved.
             </p>
             <div className="flex gap-6">
-              <a href="#" className="text-xs text-[#8888A0] transition-colors duration-200 hover:text-[#E8E8F0]">
+              <a href="#" className="text-xs text-muted transition-colors duration-200 hover:text-foreground">
                 Twitter
               </a>
-              <a href="#" className="text-xs text-[#8888A0] transition-colors duration-200 hover:text-[#E8E8F0]">
+              <a href="#" className="text-xs text-muted transition-colors duration-200 hover:text-foreground">
                 LinkedIn
               </a>
-              <a href="#" className="text-xs text-[#8888A0] transition-colors duration-200 hover:text-[#E8E8F0]">
+              <a href="#" className="text-xs text-muted transition-colors duration-200 hover:text-foreground">
                 YouTube
               </a>
             </div>

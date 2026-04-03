@@ -117,7 +117,7 @@ export default function ActivityPage() {
       <div className="space-y-6 animate-fade-in">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Activity Feed</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Track what's happening across your organization</p>
+          <p className="text-muted text-sm mt-1">Track what's happening across your organization</p>
         </div>
         <ErrorState message={error} onRetry={() => fetchActivity()} />
       </div>
@@ -129,7 +129,7 @@ export default function ActivityPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Activity Feed</h1>
-        <p className="text-[#8888A0] text-sm mt-1">Track what's happening across your organization</p>
+        <p className="text-muted text-sm mt-1">Track what's happening across your organization</p>
       </div>
 
       {/* Tabs for My / Team */}
@@ -144,7 +144,7 @@ export default function ActivityPage() {
 
         {/* Filter bar */}
         <div className="flex items-center gap-2 mt-4 flex-wrap">
-          <Filter size={14} className="text-[#8888A0]" />
+          <Filter size={14} className="text-muted" />
           {TYPE_FILTERS.map((f) => (
             <button
               key={f.value}
@@ -152,7 +152,7 @@ export default function ActivityPage() {
               className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                 typeFilter === f.value
                   ? "border-purple-500 bg-purple-500/10 text-purple-400"
-                  : "border-[#2A2A3A] text-[#8888A0] hover:border-[#3A3A4A]"
+                  : "border-border text-muted hover:border-muted-2"
               }`}
             >
               {f.label}
@@ -179,7 +179,7 @@ export default function ActivityPage() {
           >
             <ChevronLeft size={14} />
           </Button>
-          <span className="text-sm text-[#8888A0]">
+          <span className="text-sm text-muted">
             Page {page} of {pagination.totalPages}
           </span>
           <Button
@@ -201,7 +201,7 @@ function ActivityTimeline({ grouped, loading }: { grouped: Record<string, any[]>
     return (
       <div className="space-y-4">
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-16 bg-[#12121A] rounded-lg border border-[#2A2A3A] animate-pulse" />
+          <div key={i} className="h-16 bg-surface rounded-lg border border-border animate-pulse" />
         ))}
       </div>
     );
@@ -223,17 +223,17 @@ function ActivityTimeline({ grouped, loading }: { grouped: Record<string, any[]>
     <div className="space-y-6">
       {dates.map((date) => (
         <div key={date}>
-          <p className="text-xs font-medium text-[#8888A0] mb-3">{date}</p>
+          <p className="text-xs font-medium text-muted mb-3">{date}</p>
           <div className="space-y-2">
             {grouped[date].map((activity: any) => {
               const Icon = ACTIVITY_ICONS[activity.type] || Activity;
-              const colorClass = ACTIVITY_COLORS[activity.type] || "text-[#8888A0] bg-[#1A1A26]";
+              const colorClass = ACTIVITY_COLORS[activity.type] || "text-muted bg-surface-2";
               const [textColor, bgColor] = colorClass.split(" ");
 
               return (
                 <div
                   key={activity.id}
-                  className="flex items-start gap-3 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F]/50 p-3 hover:border-[#3A3A4A] transition-colors"
+                  className="flex items-start gap-3 rounded-lg border border-border bg-background/50 p-3 hover:border-muted-2 transition-colors"
                 >
                   <div className={`rounded-lg p-2 ${bgColor} flex-shrink-0`}>
                     <Icon size={14} className={textColor} />
@@ -241,11 +241,11 @@ function ActivityTimeline({ grouped, loading }: { grouped: Record<string, any[]>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm">{activity.description}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-[#8888A0]">
+                      <span className="text-[10px] text-muted">
                         {activity.actor?.firstName} {activity.actor?.lastName}
                       </span>
-                      <span className="text-[10px] text-[#8888A0]">·</span>
-                      <span className="text-[10px] text-[#8888A0]">{formatTimeAgo(activity.createdAt)}</span>
+                      <span className="text-[10px] text-muted">·</span>
+                      <span className="text-[10px] text-muted">{formatTimeAgo(activity.createdAt)}</span>
                       <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
                         {activity.type.replace(/_/g, " ")}
                       </Badge>

@@ -36,7 +36,7 @@ export default function LoginPage() {
   }
 
   return (
-    <Card className="border-[#2A2A3A] bg-[#12121A]/80 backdrop-blur">
+    <Card className="border-border bg-surface/80 backdrop-blur">
       <CardHeader className="text-center">
         <div className="mb-4">
           <span
@@ -45,7 +45,7 @@ export default function LoginPage() {
           >
             workwrk
           </span>
-          <span className="text-[#8888A0] opacity-50 text-3xl font-extrabold">.</span>
+          <span className="text-muted opacity-50 text-3xl font-extrabold">.</span>
         </div>
         <CardTitle className="text-xl">Welcome back</CardTitle>
         <CardDescription>Sign in to your account to continue</CardDescription>
@@ -94,7 +94,7 @@ export default function LoginPage() {
               "Sign In"
             )}
           </Button>
-          <p className="text-center text-sm text-[#8888A0]">
+          <p className="text-center text-sm text-muted">
             Don&apos;t have an account?{" "}
             <Link href="/register" className="text-purple-400 hover:text-purple-300">
               Get Started

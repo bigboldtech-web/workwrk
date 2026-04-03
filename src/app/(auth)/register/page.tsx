@@ -94,7 +94,7 @@ function RegisterForm() {
   // Invitation flow — simpler form
   if (token) {
     return (
-      <Card className="border-[#2A2A3A] bg-[#12121A]/80 backdrop-blur">
+      <Card className="border-border bg-surface/80 backdrop-blur">
         <CardHeader className="text-center">
           <div className="mb-4">
             <span
@@ -103,7 +103,7 @@ function RegisterForm() {
             >
               workwrk
             </span>
-            <span className="text-[#8888A0] opacity-50 text-3xl font-extrabold">.</span>
+            <span className="text-muted opacity-50 text-3xl font-extrabold">.</span>
           </div>
           <CardTitle className="text-xl">Join {invitation?.organizationName || "your team"}</CardTitle>
           <CardDescription>
@@ -170,7 +170,7 @@ function RegisterForm() {
                 </Button>
               </>
             )}
-            <p className="text-center text-sm text-[#8888A0]">
+            <p className="text-center text-sm text-muted">
               Already have an account?{" "}
               <Link href="/login" className="text-purple-400 hover:text-purple-300">
                 Sign In
@@ -184,7 +184,7 @@ function RegisterForm() {
 
   // Normal registration flow — create new organization
   return (
-    <Card className="border-[#2A2A3A] bg-[#12121A]/80 backdrop-blur">
+    <Card className="border-border bg-surface/80 backdrop-blur">
       <CardHeader className="text-center">
         <div className="mb-4">
           <span
@@ -193,7 +193,7 @@ function RegisterForm() {
           >
             workwrk
           </span>
-          <span className="text-[#8888A0] opacity-50 text-3xl font-extrabold">.</span>
+          <span className="text-muted opacity-50 text-3xl font-extrabold">.</span>
         </div>
         <CardTitle className="text-xl">Create your account</CardTitle>
         <CardDescription>Start building your business operating system</CardDescription>
@@ -270,7 +270,7 @@ function RegisterForm() {
               "Create Account"
             )}
           </Button>
-          <p className="text-center text-sm text-[#8888A0]">
+          <p className="text-center text-sm text-muted">
             Already have an account?{" "}
             <Link href="/login" className="text-purple-400 hover:text-purple-300">
               Sign In

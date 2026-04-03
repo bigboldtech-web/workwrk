@@ -445,10 +445,10 @@ export function ChecklistBuilder({
       )}
 
       {sections.length === 0 && (
-        <div className="text-center py-12 border border-dashed border-[#2A2A3A] rounded-lg">
-          <ListChecks size={40} className="mx-auto text-[#8888A0] mb-3" />
-          <p className="text-sm text-[#8888A0] mb-1">No sections yet</p>
-          <p className="text-xs text-[#6B6B80] mb-4">
+        <div className="text-center py-12 border border-dashed border-border rounded-lg">
+          <ListChecks size={40} className="mx-auto text-muted mb-3" />
+          <p className="text-sm text-muted mb-1">No sections yet</p>
+          <p className="text-xs text-muted-2 mb-4">
             Add sections and steps to build your checklist process
           </p>
           {editing && (
@@ -470,18 +470,18 @@ export function ChecklistBuilder({
       {sections.map((section, sIdx) => {
         const isExpanded = expandedSections.has(section.id);
         return (
-          <Card key={section.id} className="border-[#2A2A3A] overflow-hidden">
+          <Card key={section.id} className="border-border overflow-hidden">
             {/* Section Header */}
-            <div className="flex items-center gap-2 p-3 bg-[#0D0D14]">
+            <div className="flex items-center gap-2 p-3 bg-surface-3">
               {editing && (
                 <GripVertical
                   size={14}
-                  className="text-[#6B6B80] shrink-0 cursor-grab"
+                  className="text-muted-2 shrink-0 cursor-grab"
                 />
               )}
               <button
                 onClick={() => toggleSection(section.id)}
-                className="shrink-0 text-[#8888A0] hover:text-[#E8E8F0]"
+                className="shrink-0 text-muted hover:text-foreground"
               >
                 {isExpanded ? (
                   <ChevronDown size={16} />
@@ -499,18 +499,18 @@ export function ChecklistBuilder({
                     updateSectionTitle(section.id, e.target.value)
                   }
                   placeholder="Section title..."
-                  className="bg-transparent border-[#2A2A3A] h-8 text-sm font-medium flex-1"
+                  className="bg-transparent border-border h-8 text-sm font-medium flex-1"
                 />
               ) : (
                 <span className="text-sm font-medium flex-1">
                   {section.title || (
-                    <span className="text-[#8888A0] italic">
+                    <span className="text-muted italic">
                       Untitled section
                     </span>
                   )}
                 </span>
               )}
-              <span className="text-xs text-[#6B6B80] shrink-0">
+              <span className="text-xs text-muted-2 shrink-0">
                 {section.steps.length} step{section.steps.length !== 1 ? "s" : ""}
               </span>
               {editing && (
@@ -518,7 +518,7 @@ export function ChecklistBuilder({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-[#8888A0] hover:text-[#E8E8F0]"
+                    className="h-6 w-6 text-muted hover:text-foreground"
                     onClick={() => duplicateSection(section.id)}
                   >
                     <Copy size={12} />
@@ -546,19 +546,19 @@ export function ChecklistBuilder({
                   return (
                     <div
                       key={step.id}
-                      className="rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] overflow-hidden"
+                      className="rounded-lg border border-border bg-background overflow-hidden"
                     >
                       {/* Step Header */}
                       <div className="flex items-start gap-2 p-3">
                         {editing && (
                           <GripVertical
                             size={14}
-                            className="text-[#6B6B80] mt-1 shrink-0 cursor-grab"
+                            className="text-muted-2 mt-1 shrink-0 cursor-grab"
                           />
                         )}
                         <button
                           onClick={() => toggleStep(step.id)}
-                          className="mt-1 shrink-0 text-[#8888A0] hover:text-[#E8E8F0]"
+                          className="mt-1 shrink-0 text-muted hover:text-foreground"
                         >
                           {isStepExpanded ? (
                             <ChevronDown size={14} />
@@ -579,12 +579,12 @@ export function ChecklistBuilder({
                                 })
                               }
                               placeholder="Step title..."
-                              className="bg-transparent border-[#2A2A3A] h-7 text-sm"
+                              className="bg-transparent border-border h-7 text-sm"
                             />
                           ) : (
                             <p className="text-sm mt-0.5">
                               {step.title || (
-                                <span className="text-[#8888A0] italic">
+                                <span className="text-muted italic">
                                   Untitled step
                                 </span>
                               )}
@@ -617,11 +617,11 @@ export function ChecklistBuilder({
 
                       {/* Step Expanded Content */}
                       {isStepExpanded && (
-                        <div className="border-t border-[#2A2A3A] p-3 space-y-3">
+                        <div className="border-t border-border p-3 space-y-3">
                           {/* Description */}
                           {editing ? (
                             <div className="space-y-1">
-                              <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                              <Label className="text-[10px] text-muted uppercase tracking-wider">
                                 Description
                               </Label>
                               <Textarea
@@ -633,11 +633,11 @@ export function ChecklistBuilder({
                                 }
                                 placeholder="Describe what needs to be done..."
                                 rows={2}
-                                className="bg-transparent border-[#2A2A3A] text-sm"
+                                className="bg-transparent border-border text-sm"
                               />
                             </div>
                           ) : step.description ? (
-                            <p className="text-xs text-[#8888A0]">
+                            <p className="text-xs text-muted">
                               {step.description}
                             </p>
                           ) : null}
@@ -645,7 +645,7 @@ export function ChecklistBuilder({
                           {/* Step Type */}
                           {editing && (
                             <div className="space-y-1">
-                              <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                              <Label className="text-[10px] text-muted uppercase tracking-wider">
                                 Step Type
                               </Label>
                               <Select
@@ -673,7 +673,7 @@ export function ChecklistBuilder({
                           {(hasContent || editing) && (
                             <div className="space-y-2">
                               <div className="flex items-center justify-between">
-                                <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                                <Label className="text-[10px] text-muted uppercase tracking-wider">
                                   Content
                                 </Label>
                                 {editing && (
@@ -681,7 +681,7 @@ export function ChecklistBuilder({
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="h-6 text-[10px] gap-1 text-[#8888A0]"
+                                      className="h-6 text-[10px] gap-1 text-muted"
                                       onClick={() =>
                                         setShowContentPicker(
                                           showContentPicker === step.id
@@ -693,14 +693,14 @@ export function ChecklistBuilder({
                                       <Type size={10} /> Add Content
                                     </Button>
                                     {showContentPicker === step.id && (
-                                      <div className="absolute right-0 top-full mt-1 z-10 bg-[#12121A] border border-[#2A2A3A] rounded-lg p-2 shadow-xl min-w-[160px]">
-                                        <p className="text-[10px] text-[#6B6B80] uppercase tracking-wider px-2 pb-1">
+                                      <div className="absolute right-0 top-full mt-1 z-10 bg-surface border border-border rounded-lg p-2 shadow-xl min-w-[160px]">
+                                        <p className="text-[10px] text-muted-2 uppercase tracking-wider px-2 pb-1">
                                           Content
                                         </p>
                                         {CONTENT_TYPES.map((ct) => (
                                           <button
                                             key={ct.value}
-                                            className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-[#8888A0] hover:text-[#E8E8F0] hover:bg-[#1A1A26] rounded transition-colors"
+                                            className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-muted hover:text-foreground hover:bg-surface-2 rounded transition-colors"
                                             onClick={() =>
                                               addContentBlock(
                                                 section.id,
@@ -724,7 +724,7 @@ export function ChecklistBuilder({
                                   className="flex items-start gap-2"
                                 >
                                   {cb.type === "horizontal_line" ? (
-                                    <hr className="flex-1 border-[#2A2A3A] my-2" />
+                                    <hr className="flex-1 border-border my-2" />
                                   ) : cb.type === "text" ? (
                                     editing ? (
                                       <Textarea
@@ -739,10 +739,10 @@ export function ChecklistBuilder({
                                         }
                                         placeholder="Enter text..."
                                         rows={2}
-                                        className="flex-1 bg-transparent border-[#2A2A3A] text-xs"
+                                        className="flex-1 bg-transparent border-border text-xs"
                                       />
                                     ) : (
-                                      <p className="flex-1 text-xs text-[#8888A0] whitespace-pre-wrap">
+                                      <p className="flex-1 text-xs text-muted whitespace-pre-wrap">
                                         {cb.content}
                                       </p>
                                     )
@@ -763,14 +763,14 @@ export function ChecklistBuilder({
                                             ? "Image URL..."
                                             : "Video URL..."
                                         }
-                                        className="flex-1 bg-transparent border-[#2A2A3A] h-7 text-xs"
+                                        className="flex-1 bg-transparent border-border h-7 text-xs"
                                       />
                                     ) : cb.content ? (
                                       cb.type === "image" ? (
                                         <img
                                           src={cb.content}
                                           alt=""
-                                          className="max-w-full rounded border border-[#2A2A3A]"
+                                          className="max-w-full rounded border border-border"
                                         />
                                       ) : (
                                         <video
@@ -806,7 +806,7 @@ export function ChecklistBuilder({
                           {(hasInputs || editing) && (
                             <div className="space-y-2">
                               <div className="flex items-center justify-between">
-                                <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                                <Label className="text-[10px] text-muted uppercase tracking-wider">
                                   Input Fields
                                 </Label>
                                 {editing && (
@@ -814,7 +814,7 @@ export function ChecklistBuilder({
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="h-6 text-[10px] gap-1 text-[#8888A0]"
+                                      className="h-6 text-[10px] gap-1 text-muted"
                                       onClick={() =>
                                         setShowInputPicker(
                                           showInputPicker === step.id
@@ -826,14 +826,14 @@ export function ChecklistBuilder({
                                       <Hash size={10} /> Add Input
                                     </Button>
                                     {showInputPicker === step.id && (
-                                      <div className="absolute right-0 top-full mt-1 z-10 bg-[#12121A] border border-[#2A2A3A] rounded-lg p-2 shadow-xl min-w-[160px]">
-                                        <p className="text-[10px] text-[#6B6B80] uppercase tracking-wider px-2 pb-1">
+                                      <div className="absolute right-0 top-full mt-1 z-10 bg-surface border border-border rounded-lg p-2 shadow-xl min-w-[160px]">
+                                        <p className="text-[10px] text-muted-2 uppercase tracking-wider px-2 pb-1">
                                           Inputs
                                         </p>
                                         {INPUT_TYPES.map((it) => (
                                           <button
                                             key={it.value}
-                                            className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-[#8888A0] hover:text-[#E8E8F0] hover:bg-[#1A1A26] rounded transition-colors"
+                                            className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-muted hover:text-foreground hover:bg-surface-2 rounded transition-colors"
                                             onClick={() =>
                                               addInput(
                                                 section.id,
@@ -854,7 +854,7 @@ export function ChecklistBuilder({
                               {step.inputs.map((input) => (
                                 <div
                                   key={input.id}
-                                  className="flex items-start gap-2 p-2 rounded border border-[#1A1A26] bg-[#0D0D14]"
+                                  className="flex items-start gap-2 p-2 rounded border border-surface-2 bg-surface-3"
                                 >
                                   <div className="flex items-center justify-center w-6 h-6 rounded bg-blue-500/10 text-blue-400 shrink-0 mt-0.5">
                                     {(() => {
@@ -880,9 +880,9 @@ export function ChecklistBuilder({
                                               )
                                             }
                                             placeholder="Field label..."
-                                            className="bg-transparent border-[#2A2A3A] h-7 text-xs flex-1"
+                                            className="bg-transparent border-border h-7 text-xs flex-1"
                                           />
-                                          <label className="flex items-center gap-1 text-[10px] text-[#8888A0] shrink-0 cursor-pointer">
+                                          <label className="flex items-center gap-1 text-[10px] text-muted shrink-0 cursor-pointer">
                                             <input
                                               type="checkbox"
                                               checked={input.required}
@@ -904,7 +904,7 @@ export function ChecklistBuilder({
                                         {(input.type === "dropdown" ||
                                           input.type === "multichoice") && (
                                           <div className="space-y-1">
-                                            <Label className="text-[10px] text-[#6B6B80]">
+                                            <Label className="text-[10px] text-muted-2">
                                               Options (one per line)
                                             </Label>
                                             <Textarea
@@ -925,7 +925,7 @@ export function ChecklistBuilder({
                                                 )
                                               }
                                               rows={3}
-                                              className="bg-transparent border-[#2A2A3A] text-xs"
+                                              className="bg-transparent border-border text-xs"
                                             />
                                           </div>
                                         )}
@@ -935,7 +935,7 @@ export function ChecklistBuilder({
                                         <span className="text-xs">
                                           {input.label}
                                         </span>
-                                        <span className="text-[10px] text-[#6B6B80]">
+                                        <span className="text-[10px] text-muted-2">
                                           ({INPUT_TYPES.find((t) => t.value === input.type)?.label})
                                         </span>
                                         {input.required && (
@@ -978,7 +978,7 @@ export function ChecklistBuilder({
                     variant="ghost"
                     size="sm"
                     onClick={() => addStep(section.id)}
-                    className="w-full border border-dashed border-[#2A2A3A] text-[#8888A0] hover:text-[#E8E8F0] gap-1.5"
+                    className="w-full border border-dashed border-border text-muted hover:text-foreground gap-1.5"
                   >
                     <Plus size={14} /> Add Step
                   </Button>

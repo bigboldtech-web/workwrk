@@ -110,7 +110,7 @@ function getAlertStyle(type: string) {
 }
 
 function SkeletonBlock({ className }: { className?: string }) {
-  return <div className={`animate-pulse rounded bg-[#1A1A26] ${className ?? ""}`} />;
+  return <div className={`animate-pulse rounded bg-surface-2 ${className ?? ""}`} />;
 }
 
 export default function DashboardPage() {
@@ -139,7 +139,7 @@ export default function DashboardPage() {
       <div className="space-y-6 animate-fade-in">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-[#8888A0] text-sm mt-1">
+          <p className="text-muted text-sm mt-1">
             Overview of your business operating system
           </p>
         </div>
@@ -184,7 +184,7 @@ export default function DashboardPage() {
       <div className="space-y-6 animate-fade-in">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-[#8888A0] text-sm mt-1">
+          <p className="text-muted text-sm mt-1">
             Overview of your business operating system
           </p>
         </div>
@@ -244,7 +244,7 @@ export default function DashboardPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-[#8888A0] text-sm mt-1">
+        <p className="text-muted text-sm mt-1">
           Overview of your business operating system
         </p>
       </div>
@@ -255,7 +255,7 @@ export default function DashboardPage() {
       {/* Stats Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
-          <Card key={stat.title} className="hover:border-[#3A3A4A] transition-colors">
+          <Card key={stat.title} className="hover:border-muted-2 transition-colors">
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div className={`rounded-lg p-2.5 ${stat.bgColor}`}>
@@ -274,9 +274,9 @@ export default function DashboardPage() {
               </div>
               <div className="mt-3">
                 <p className="text-2xl font-bold">{stat.value}</p>
-                <p className="text-xs text-[#8888A0] mt-0.5">{stat.change}</p>
+                <p className="text-xs text-muted mt-0.5">{stat.change}</p>
               </div>
-              <p className="text-xs text-[#8888A0] mt-2 font-medium">{stat.title}</p>
+              <p className="text-xs text-muted mt-2 font-medium">{stat.title}</p>
             </CardContent>
           </Card>
         ))}
@@ -296,14 +296,14 @@ export default function DashboardPage() {
             {topPerformers.map((person, i) => (
               <div
                 key={person.id}
-                className="flex items-center gap-3 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F]/50 p-3"
+                className="flex items-center gap-3 rounded-lg border border-border bg-background/50 p-3"
               >
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-600/20 text-xs font-bold text-purple-400">
                   {i + 1}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{person.name}</p>
-                  <p className="text-xs text-[#8888A0]">{person.role}</p>
+                  <p className="text-xs text-muted">{person.role}</p>
                 </div>
                 <div className="text-right">
                   <p className={`text-sm font-bold font-mono ${getScoreColor(person.score)}`}>
@@ -313,7 +313,7 @@ export default function DashboardPage() {
               </div>
             ))}
             {topPerformers.length === 0 && (
-              <p className="text-xs text-[#8888A0] text-center py-6">No KPI data yet. Set up KRAs and track KPI scores to see top performers here.</p>
+              <p className="text-xs text-muted text-center py-6">No KPI data yet. Set up KRAs and track KPI scores to see top performers here.</p>
             )}
           </CardContent>
         </Card>
@@ -336,13 +336,13 @@ export default function DashboardPage() {
               return (
                 <div
                   key={record.id}
-                  className="flex items-start gap-3 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F]/50 p-3"
+                  className="flex items-start gap-3 rounded-lg border border-border bg-background/50 p-3"
                 >
                   <Target size={14} className="text-purple-400 mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{record.kpiName}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-[#8888A0]">{record.userName}</span>
+                      <span className="text-[10px] text-muted">{record.userName}</span>
                       {achievement != null && (
                         <span className={`text-[10px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-purple-400" : "text-orange-400"}`}>
                           {achievement}%
@@ -354,7 +354,7 @@ export default function DashboardPage() {
               );
             })}
             {(!recentKpiRecords || recentKpiRecords.length === 0) && (
-              <p className="text-xs text-[#8888A0] text-center py-6">No KPI records yet. Start tracking KPIs to see updates here.</p>
+              <p className="text-xs text-muted text-center py-6">No KPI records yet. Start tracking KPIs to see updates here.</p>
             )}
           </CardContent>
         </Card>
@@ -376,11 +376,11 @@ export default function DashboardPage() {
                 className={`rounded-lg border-l-2 p-3 ${getAlertStyle(alert.type)}`}
               >
                 <p className="text-sm">{alert.message}</p>
-                <p className="text-[10px] text-[#8888A0] mt-1">{alert.time}</p>
+                <p className="text-[10px] text-muted mt-1">{alert.time}</p>
               </div>
             ))}
             {alerts.length === 0 && (
-              <p className="text-xs text-[#8888A0] text-center py-6">No alerts right now. Everything looks good!</p>
+              <p className="text-xs text-muted text-center py-6">No alerts right now. Everything looks good!</p>
             )}
           </CardContent>
         </Card>
@@ -397,7 +397,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {(!recentActivity || recentActivity.length === 0) ? (
-              <p className="text-xs text-[#8888A0] text-center py-4">No recent activity</p>
+              <p className="text-xs text-muted text-center py-4">No recent activity</p>
             ) : (
               recentActivity.slice(0, 6).map((item) => {
                 const IconMap: Record<string, any> = {
@@ -417,11 +417,11 @@ export default function DashboardPage() {
                 const timeAgo = seconds < 60 ? "just now" : seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` : seconds < 86400 ? `${Math.floor(seconds / 3600)}h ago` : `${Math.floor(seconds / 86400)}d ago`;
 
                 return (
-                  <div key={item.id} className="flex items-start gap-2.5 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F]/50 p-2.5">
+                  <div key={item.id} className="flex items-start gap-2.5 rounded-lg border border-border bg-background/50 p-2.5">
                     <Icon size={12} className="text-purple-400 mt-0.5 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs leading-snug line-clamp-2">{item.description}</p>
-                      <p className="text-[10px] text-[#8888A0] mt-0.5">
+                      <p className="text-[10px] text-muted mt-0.5">
                         {item.actor?.firstName} {item.actor?.lastName} · {timeAgo}
                       </p>
                     </div>
@@ -455,13 +455,13 @@ export default function DashboardPage() {
                   return `${Math.floor(seconds / 86400)}d ago`;
                 })();
                 return (
-                  <div key={k.id} className="rounded-lg border border-[#2A2A3A] bg-[#0A0A0F]/50 p-4">
+                  <div key={k.id} className="rounded-lg border border-border bg-background/50 p-4">
                     <div className="flex items-start gap-3">
                       <Heart size={14} className="text-pink-400 mt-0.5 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs">
                           <span className="font-medium">{k.giver.firstName} {k.giver.lastName}</span>
-                          <span className="text-[#8888A0]"> recognized </span>
+                          <span className="text-muted"> recognized </span>
                           <span className="font-medium">{k.receiver.firstName} {k.receiver.lastName}</span>
                         </p>
                         <p className="text-sm mt-1.5 text-[#C0C0D0] leading-relaxed">&ldquo;{k.message}&rdquo;</p>
@@ -469,7 +469,7 @@ export default function DashboardPage() {
                           {k.companyValue && (
                             <Badge variant="secondary" className="text-[10px]">{k.companyValue}</Badge>
                           )}
-                          <span className="text-[10px] text-[#8888A0]">{timeAgo}</span>
+                          <span className="text-[10px] text-muted">{timeAgo}</span>
                         </div>
                       </div>
                     </div>
@@ -504,13 +504,13 @@ export default function DashboardPage() {
                 <div className={`w-12 text-right text-sm font-bold font-mono ${getScoreColor(dept.score)}`}>
                   {dept.score}
                 </div>
-                <div className="w-20 text-right text-xs text-[#8888A0]">
+                <div className="w-20 text-right text-xs text-muted">
                   {dept.members} people
                 </div>
               </div>
             ))}
             {departmentPerformance.length === 0 && (
-              <p className="text-xs text-[#8888A0] text-center py-6">No departments set up yet. Create departments in Organization settings.</p>
+              <p className="text-xs text-muted text-center py-6">No departments set up yet. Create departments in Organization settings.</p>
             )}
           </div>
         </CardContent>

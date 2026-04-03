@@ -41,10 +41,10 @@ export default function DashboardLayout({
 
   if (status === "loading" || (status === "authenticated" && !setupChecked)) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#0A0A0F]">
+      <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
-          <span className="text-sm text-[#8888A0]">Loading...</span>
+          <span className="text-sm text-muted">Loading...</span>
         </div>
       </div>
     );

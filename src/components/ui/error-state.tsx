@@ -33,8 +33,8 @@ export function ErrorState({ status, message, onRetry }: ErrorStateProps) {
       <div className="h-16 w-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-5">
         <Icon size={28} className="text-red-400" />
       </div>
-      <h3 className="text-lg font-semibold text-[#E8E8F0] mb-1">{title}</h3>
-      <p className="text-sm text-[#8888A0] text-center max-w-sm mb-6">{desc}</p>
+      <h3 className="text-lg font-semibold text-foreground mb-1">{title}</h3>
+      <p className="text-sm text-muted text-center max-w-sm mb-6">{desc}</p>
       {onRetry && (
         <Button onClick={onRetry} variant="outline" className="gap-2">
           <RefreshCw size={14} /> Try again

@@ -45,7 +45,7 @@ export function ConfirmDialog({
             )}
             <div>
               <DialogTitle>{title}</DialogTitle>
-              <p className="text-sm text-[#8888A0] mt-1">{description}</p>
+              <p className="text-sm text-muted mt-1">{description}</p>
             </div>
           </div>
         </DialogHeader>

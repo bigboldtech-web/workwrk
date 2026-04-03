@@ -313,9 +313,9 @@ export default function ReviewCycleDetailPage() {
   if (loading) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="h-8 w-48 bg-[#1A1A26] rounded animate-pulse" />
-        <div className="h-32 bg-[#12121A] rounded-lg border border-[#2A2A3A] animate-pulse" />
-        <div className="h-64 bg-[#12121A] rounded-lg border border-[#2A2A3A] animate-pulse" />
+        <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
+        <div className="h-32 bg-surface rounded-lg border border-border animate-pulse" />
+        <div className="h-64 bg-surface rounded-lg border border-border animate-pulse" />
       </div>
     );
   }
@@ -323,7 +323,7 @@ export default function ReviewCycleDetailPage() {
   if (!cycle) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <p className="text-[#8888A0]">Review cycle not found</p>
+        <p className="text-muted">Review cycle not found</p>
         <Button variant="ghost" className="mt-2" onClick={() => router.push("/reviews")}>Back to Reviews</Button>
       </div>
     );
@@ -348,7 +348,7 @@ export default function ReviewCycleDetailPage() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <h1 className="text-xl font-bold">{cycle.name}</h1>
-              <p className="text-xs text-[#8888A0]">
+              <p className="text-xs text-muted">
                 {new Date(cycle.startDate).toLocaleDateString()} — {new Date(cycle.endDate).toLocaleDateString()}
                 <span className="mx-2">&middot;</span>
                 {cycle.type.replace(/_/g, " ")}
@@ -360,7 +360,7 @@ export default function ReviewCycleDetailPage() {
             <Progress value={stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0} className="h-2 flex-1" indicatorClassName="bg-purple-500" />
             <span className="text-sm font-mono text-purple-400">{stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%</span>
           </div>
-          <div className="flex items-center gap-4 text-xs text-[#8888A0]">
+          <div className="flex items-center gap-4 text-xs text-muted">
             <span className="flex items-center gap-1"><Users size={12} /> {stats.total} total</span>
             <span className="flex items-center gap-1"><CheckCircle size={12} className="text-blue-400" /> {stats.selfDone} self done</span>
             <span className="flex items-center gap-1"><Star size={12} className="text-purple-400" /> {stats.managerDone} mgr done</span>
@@ -383,14 +383,14 @@ export default function ReviewCycleDetailPage() {
         {/* ===== SELF-ASSESSMENT TAB ===== */}
         <TabsContent value="self-assessment" className="mt-4 space-y-4">
           {loadingSelf ? (
-            <Card><CardContent className="p-8 text-center text-[#8888A0]">Loading...</CardContent></Card>
+            <Card><CardContent className="p-8 text-center text-muted">Loading...</CardContent></Card>
           ) : !selfData ? (
-            <Card><CardContent className="p-8 text-center text-[#8888A0]">No review found for you in this cycle.</CardContent></Card>
+            <Card><CardContent className="p-8 text-center text-muted">No review found for you in this cycle.</CardContent></Card>
           ) : (
             <>
               {/* Status */}
               <div className="flex items-center gap-2">
-                <span className="text-sm text-[#8888A0]">Your review status:</span>
+                <span className="text-sm text-muted">Your review status:</span>
                 {getStatusBadge(myReview.status)}
                 {myReview.status !== "PENDING" && myReview.status !== "SELF_ASSESSMENT" && (
                   <span className="text-xs text-green-400">Self-assessment submitted</span>
@@ -402,17 +402,17 @@ export default function ReviewCycleDetailPage() {
                 <CardHeader className="pb-2"><CardTitle className="text-sm">Auto-Populated Metrics</CardTitle></CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-3 gap-4">
-                    <div className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3 text-center">
-                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgKpiScore != null ? getScoreColor(selfData.metrics.avgKpiScore) : "text-[#8888A0]"}`}>
+                    <div className="rounded-lg border border-border bg-surface p-3 text-center">
+                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgKpiScore != null ? getScoreColor(selfData.metrics.avgKpiScore) : "text-muted"}`}>
                         {selfData.metrics.avgKpiScore ?? "N/A"}
                       </p>
-                      <p className="text-[10px] text-[#8888A0]">Avg KPI Score</p>
+                      <p className="text-[10px] text-muted">Avg KPI Score</p>
                     </div>
-                    <div className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3 text-center">
-                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgSopScore != null ? getScoreColor(selfData.metrics.avgSopScore) : "text-[#8888A0]"}`}>
+                    <div className="rounded-lg border border-border bg-surface p-3 text-center">
+                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgSopScore != null ? getScoreColor(selfData.metrics.avgSopScore) : "text-muted"}`}>
                         {selfData.metrics.avgSopScore ?? "N/A"}
                       </p>
-                      <p className="text-[10px] text-[#8888A0]">SOP Compliance</p>
+                      <p className="text-[10px] text-muted">SOP Compliance</p>
                     </div>
                   </div>
                 </CardContent>
@@ -424,13 +424,13 @@ export default function ReviewCycleDetailPage() {
                   <CardHeader className="pb-2"><CardTitle className="text-sm">Rate Your KRA Performance</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     {selfData.kraAssignments.map((a: any) => (
-                      <div key={a.kra.id} className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-4">
+                      <div key={a.kra.id} className="rounded-lg border border-border bg-surface p-4">
                         <div className="flex items-center justify-between mb-2">
                           <div>
                             <p className="text-sm font-medium">{a.kra.name}</p>
                             <Badge variant="outline" className="text-[10px]">{a.kra.category}</Badge>
                           </div>
-                          <span className="text-sm text-[#8888A0]">{a.weightage}% weightage</span>
+                          <span className="text-sm text-muted">{a.weightage}% weightage</span>
                         </div>
                         <div className="space-y-2 mt-3">
                           <Label className="text-xs">Self Rating (1-5)</Label>
@@ -443,7 +443,7 @@ export default function ReviewCycleDetailPage() {
                                 className={`h-8 w-8 rounded text-sm font-bold transition-colors ${
                                   kraRatings[a.kra.id]?.rating === n
                                     ? "bg-purple-600 text-white"
-                                    : "bg-[#2A2A3A] text-[#8888A0] hover:bg-[#3A3A4A]"
+                                    : "bg-border text-muted hover:bg-border"
                                 } ${!canSelfAssess ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                               >
                                 {n}
@@ -503,17 +503,17 @@ export default function ReviewCycleDetailPage() {
                     <h3 className="font-semibold mb-2">Your Review Results</h3>
                     <div className="flex items-center gap-4">
                       <div>
-                        <p className="text-xs text-[#8888A0]">Overall Score</p>
+                        <p className="text-xs text-muted">Overall Score</p>
                         <p className={`text-2xl font-bold font-mono ${getScoreColor(myReview.overallScore || 0)}`}>{myReview.overallScore ?? "—"}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-[#8888A0]">Outcome</p>
+                        <p className="text-xs text-muted">Outcome</p>
                         {getOutcomeBadge(myReview.outcome)}
                       </div>
                     </div>
                     {myReview.managerComments && (
-                      <div className="mt-3 border-t border-[#2A2A3A] pt-3">
-                        <p className="text-xs text-[#8888A0] mb-1">Manager Comments</p>
+                      <div className="mt-3 border-t border-border pt-3">
+                        <p className="text-xs text-muted mb-1">Manager Comments</p>
                         <p className="text-sm">{myReview.managerComments}</p>
                       </div>
                     )}
@@ -527,9 +527,9 @@ export default function ReviewCycleDetailPage() {
         {/* ===== MANAGER REVIEW TAB ===== */}
         <TabsContent value="manager-review" className="mt-4 space-y-4">
           {loadingTeam ? (
-            <Card><CardContent className="p-8 text-center text-[#8888A0]">Loading team reviews...</CardContent></Card>
+            <Card><CardContent className="p-8 text-center text-muted">Loading team reviews...</CardContent></Card>
           ) : teamReviews.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-[#8888A0]">No team members to review in this cycle.</CardContent></Card>
+            <Card><CardContent className="p-8 text-center text-muted">No team members to review in this cycle.</CardContent></Card>
           ) : !selectedReview ? (
             /* Team list */
             <Card>
@@ -538,7 +538,7 @@ export default function ReviewCycleDetailPage() {
                 {teamReviews.map((review: any) => (
                   <div
                     key={review.id}
-                    className="flex items-center gap-3 rounded-lg border border-[#2A2A3A] p-3 hover:bg-[#1A1A26]/50 cursor-pointer transition-colors"
+                    className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-surface-2/50 cursor-pointer transition-colors"
                     onClick={() => {
                       setSelectedReview(review);
                       // Pre-fill if existing manager assessment
@@ -563,12 +563,12 @@ export default function ReviewCycleDetailPage() {
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium">{review.subject.firstName} {review.subject.lastName}</p>
-                      <p className="text-xs text-[#8888A0]">{review.subject.role?.title || ""} {review.subject.department ? `· ${review.subject.department.name}` : ""}</p>
+                      <p className="text-xs text-muted">{review.subject.role?.title || ""} {review.subject.department ? `· ${review.subject.department.name}` : ""}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       {getStatusBadge(review.status)}
                       <Button variant="ghost" size="sm" className="h-7 px-2" onClick={(e) => { e.stopPropagation(); setShowAssignPeersDialog(review); }}>
-                        <UserPlus size={14} className="text-[#8888A0]" />
+                        <UserPlus size={14} className="text-muted" />
                       </Button>
                     </div>
                   </div>
@@ -592,28 +592,28 @@ export default function ReviewCycleDetailPage() {
                   <div className="flex items-center gap-2 mb-4">
                     {getStatusBadge(selectedReview.status)}
                     {selectedReview.kpiScore != null && (
-                      <span className="text-xs text-[#8888A0]">KPI Score: <span className={`font-mono ${getScoreColor(selectedReview.kpiScore)}`}>{selectedReview.kpiScore}</span></span>
+                      <span className="text-xs text-muted">KPI Score: <span className={`font-mono ${getScoreColor(selectedReview.kpiScore)}`}>{selectedReview.kpiScore}</span></span>
                     )}
                     {selectedReview.sopComplianceScore != null && (
-                      <span className="text-xs text-[#8888A0]">SOP: <span className="font-mono">{selectedReview.sopComplianceScore}%</span></span>
+                      <span className="text-xs text-muted">SOP: <span className="font-mono">{selectedReview.sopComplianceScore}%</span></span>
                     )}
                   </div>
 
                   {/* Self-assessment preview */}
                   {selectedReview.selfRatings && (
-                    <div className="mb-4 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] p-3">
-                      <p className="text-xs font-medium text-[#8888A0] mb-2">Employee&apos;s Self-Assessment</p>
+                    <div className="mb-4 rounded-lg border border-border bg-background p-3">
+                      <p className="text-xs font-medium text-muted mb-2">Employee&apos;s Self-Assessment</p>
                       {(selectedReview.selfRatings.kraRatings || []).map((r: any) => (
                         <div key={r.kraId} className="mb-2">
                           <div className="flex items-center gap-2">
                             <span className="text-xs">{r.kraName}</span>
                             <span className="text-xs font-mono text-purple-400">{r.rating}/5</span>
                           </div>
-                          {r.achievements && <p className="text-[10px] text-[#8888A0] ml-2">{r.achievements}</p>}
+                          {r.achievements && <p className="text-[10px] text-muted ml-2">{r.achievements}</p>}
                         </div>
                       ))}
                       {selectedReview.selfRatings.reflection && (
-                        <div className="mt-2 space-y-1 border-t border-[#2A2A3A] pt-2">
+                        <div className="mt-2 space-y-1 border-t border-border pt-2">
                           {selectedReview.selfRatings.reflection.wentWell && <p className="text-[10px] text-green-400">Went well: {selectedReview.selfRatings.reflection.wentWell}</p>}
                           {selectedReview.selfRatings.reflection.couldImprove && <p className="text-[10px] text-orange-400">Could improve: {selectedReview.selfRatings.reflection.couldImprove}</p>}
                         </div>
@@ -623,14 +623,14 @@ export default function ReviewCycleDetailPage() {
 
                   {/* Peer feedback preview */}
                   {selectedReview.peerFeedback?.length > 0 && (
-                    <div className="mb-4 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] p-3">
-                      <p className="text-xs font-medium text-[#8888A0] mb-2">Peer Feedback ({selectedReview.peerFeedback.length})</p>
+                    <div className="mb-4 rounded-lg border border-border bg-background p-3">
+                      <p className="text-xs font-medium text-muted mb-2">Peer Feedback ({selectedReview.peerFeedback.length})</p>
                       {selectedReview.peerFeedback.map((pf: any, i: number) => (
                         <div key={i} className="mb-2 text-[10px]">
                           {!pf.anonymous && <span className="text-purple-400">{pf.giver.firstName} {pf.giver.lastName}: </span>}
                           {pf.strengths && <p className="text-green-400">Strengths: {pf.strengths}</p>}
                           {pf.improvements && <p className="text-orange-400">Improvements: {pf.improvements}</p>}
-                          {pf.collaborationRating && <span className="text-[#8888A0]">Collaboration: {pf.collaborationRating}/5</span>}
+                          {pf.collaborationRating && <span className="text-muted">Collaboration: {pf.collaborationRating}/5</span>}
                         </div>
                       ))}
                     </div>
@@ -653,7 +653,7 @@ export default function ReviewCycleDetailPage() {
                             className={`flex-1 h-9 rounded text-xs transition-colors ${
                               behavioral[key] === n
                                 ? "bg-purple-600 text-white"
-                                : "bg-[#2A2A3A] text-[#8888A0] hover:bg-[#3A3A4A]"
+                                : "bg-border text-muted hover:bg-border"
                             }`}
                             title={anchors[n - 1]}
                           >
@@ -661,7 +661,7 @@ export default function ReviewCycleDetailPage() {
                           </button>
                         ))}
                       </div>
-                      <p className="text-[10px] text-[#8888A0] mt-0.5">{behavioral[key] ? anchors[(behavioral[key] || 1) - 1] : "Select rating"}</p>
+                      <p className="text-[10px] text-muted mt-0.5">{behavioral[key] ? anchors[(behavioral[key] || 1) - 1] : "Select rating"}</p>
                     </div>
                   ))}
                 </CardContent>
@@ -704,21 +704,21 @@ export default function ReviewCycleDetailPage() {
         {/* ===== PEER FEEDBACK TAB ===== */}
         <TabsContent value="peer-feedback" className="mt-4 space-y-4">
           {loadingPeer ? (
-            <Card><CardContent className="p-8 text-center text-[#8888A0]">Loading...</CardContent></Card>
+            <Card><CardContent className="p-8 text-center text-muted">Loading...</CardContent></Card>
           ) : peerRequests.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-[#8888A0]">No peer feedback requests for you in this cycle.</CardContent></Card>
+            <Card><CardContent className="p-8 text-center text-muted">No peer feedback requests for you in this cycle.</CardContent></Card>
           ) : (
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm">Peer Feedback Requests</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {peerRequests.map((pf: any) => (
-                  <div key={pf.id} className="flex items-center gap-3 rounded-lg border border-[#2A2A3A] p-3">
+                  <div key={pf.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
                     <Avatar className="h-9 w-9">
                       <AvatarFallback className="text-xs">{pf.receiver.firstName[0]}{pf.receiver.lastName[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium">Feedback for: {pf.receiver.firstName} {pf.receiver.lastName}</p>
-                      <p className="text-xs text-[#8888A0]">{pf.review?.cycle?.name || ""}</p>
+                      <p className="text-xs text-muted">{pf.review?.cycle?.name || ""}</p>
                     </div>
                     {pf.status === "SUBMITTED" ? (
                       <Badge variant="success" className="text-[10px]">Submitted</Badge>
@@ -735,9 +735,9 @@ export default function ReviewCycleDetailPage() {
         {/* ===== CALIBRATION TAB ===== */}
         <TabsContent value="calibration" className="mt-4 space-y-4">
           {loadingCalib ? (
-            <Card><CardContent className="p-8 text-center text-[#8888A0]">Loading calibration data...</CardContent></Card>
+            <Card><CardContent className="p-8 text-center text-muted">Loading calibration data...</CardContent></Card>
           ) : !calibrationData ? (
-            <Card><CardContent className="p-8 text-center text-[#8888A0]">Calibration data not available. You may not have manager access.</CardContent></Card>
+            <Card><CardContent className="p-8 text-center text-muted">Calibration data not available. You may not have manager access.</CardContent></Card>
           ) : (
             <>
               {calibrationData.warning && (
@@ -765,7 +765,7 @@ export default function ReviewCycleDetailPage() {
                         <div key={band.label} className="flex-1 flex flex-col items-center gap-1">
                           <span className="text-[10px] font-mono">{band.count}</span>
                           <div className={`w-full rounded-t ${band.color}`} style={{ height: `${Math.max(height, 4)}%` }} />
-                          <span className="text-[10px] text-[#8888A0]">{band.label}</span>
+                          <span className="text-[10px] text-muted">{band.label}</span>
                         </div>
                       );
                     })}
@@ -778,24 +778,24 @@ export default function ReviewCycleDetailPage() {
                 <CardContent className="p-0">
                   <table className="w-full">
                     <thead>
-                      <tr className="border-b border-[#2A2A3A]">
-                        <th className="text-left p-3 text-xs font-medium text-[#8888A0] uppercase">Person</th>
-                        <th className="text-center p-3 text-xs font-medium text-[#8888A0] uppercase">KPI</th>
-                        <th className="text-center p-3 text-xs font-medium text-[#8888A0] uppercase">Self</th>
-                        <th className="text-center p-3 text-xs font-medium text-[#8888A0] uppercase">Mgr</th>
-                        <th className="text-center p-3 text-xs font-medium text-[#8888A0] uppercase">Peer</th>
-                        <th className="text-center p-3 text-xs font-medium text-[#8888A0] uppercase">Composite</th>
-                        <th className="text-center p-3 text-xs font-medium text-[#8888A0] uppercase">Calibrated</th>
-                        <th className="text-center p-3 text-xs font-medium text-[#8888A0] uppercase">Outcome</th>
-                        <th className="text-right p-3 text-xs font-medium text-[#8888A0] uppercase">Actions</th>
+                      <tr className="border-b border-border">
+                        <th className="text-left p-3 text-xs font-medium text-muted uppercase">Person</th>
+                        <th className="text-center p-3 text-xs font-medium text-muted uppercase">KPI</th>
+                        <th className="text-center p-3 text-xs font-medium text-muted uppercase">Self</th>
+                        <th className="text-center p-3 text-xs font-medium text-muted uppercase">Mgr</th>
+                        <th className="text-center p-3 text-xs font-medium text-muted uppercase">Peer</th>
+                        <th className="text-center p-3 text-xs font-medium text-muted uppercase">Composite</th>
+                        <th className="text-center p-3 text-xs font-medium text-muted uppercase">Calibrated</th>
+                        <th className="text-center p-3 text-xs font-medium text-muted uppercase">Outcome</th>
+                        <th className="text-right p-3 text-xs font-medium text-muted uppercase">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {calibrationData.calibrationData.map((d: any) => (
-                        <tr key={d.reviewId} className="border-b border-[#2A2A3A]/50 hover:bg-[#1A1A26]/50">
+                        <tr key={d.reviewId} className="border-b border-border/50 hover:bg-surface-2/50">
                           <td className="p-3">
                             <p className="text-sm font-medium">{d.subject.firstName} {d.subject.lastName}</p>
-                            <p className="text-[10px] text-[#8888A0]">{d.subject.department?.name}</p>
+                            <p className="text-[10px] text-muted">{d.subject.department?.name}</p>
                           </td>
                           <td className={`p-3 text-center font-mono text-sm ${getScoreColor(d.kpiScore)}`}>{d.kpiScore}</td>
                           <td className={`p-3 text-center font-mono text-sm ${getScoreColor(d.selfRating)}`}>{d.selfRating}</td>
@@ -806,10 +806,10 @@ export default function ReviewCycleDetailPage() {
                             {d.calibratedScore != null ? (
                               <span className={`font-mono text-sm font-bold ${getScoreColor(d.calibratedScore)}`}>{d.calibratedScore}</span>
                             ) : (
-                              <span className="text-xs text-[#8888A0]">—</span>
+                              <span className="text-xs text-muted">—</span>
                             )}
                           </td>
-                          <td className="p-3 text-center">{d.outcome ? getOutcomeBadge(d.outcome) : <span className="text-xs text-[#8888A0]">—</span>}</td>
+                          <td className="p-3 text-center">{d.outcome ? getOutcomeBadge(d.outcome) : <span className="text-xs text-muted">—</span>}</td>
                           <td className="p-3 text-right">
                             <Button
                               variant="ghost"
@@ -847,16 +847,16 @@ export default function ReviewCycleDetailPage() {
             <CardContent>
               <div className="grid grid-cols-5 gap-3">
                 {[
-                  { label: "Total Reviews", value: stats.total, icon: Users, color: "text-[#8888A0]" },
+                  { label: "Total Reviews", value: stats.total, icon: Users, color: "text-muted" },
                   { label: "Self-Assessment Done", value: stats.selfDone, icon: Star, color: "text-blue-400" },
                   { label: "Manager Review Done", value: stats.managerDone, icon: CheckCircle, color: "text-purple-400" },
                   { label: "Calibrated", value: stats.calibrated, icon: BarChart3, color: "text-orange-400" },
                   { label: "Completed", value: stats.completed, icon: CheckCircle, color: "text-green-400" },
                 ].map((stat) => (
-                  <div key={stat.label} className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3 text-center">
+                  <div key={stat.label} className="rounded-lg border border-border bg-surface p-3 text-center">
                     <stat.icon size={16} className={`mx-auto mb-1 ${stat.color}`} />
                     <p className="text-xl font-bold font-mono">{stat.value}</p>
-                    <p className="text-[10px] text-[#8888A0]">{stat.label}</p>
+                    <p className="text-[10px] text-muted">{stat.label}</p>
                   </div>
                 ))}
               </div>
@@ -868,10 +868,10 @@ export default function ReviewCycleDetailPage() {
             <CardHeader className="pb-2"><CardTitle className="text-sm">Pending Actions</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {cycle.reviews?.filter((r: any) => r.status === "PENDING").length === 0 ? (
-                <p className="text-sm text-[#8888A0] text-center py-4">Everyone has started their reviews!</p>
+                <p className="text-sm text-muted text-center py-4">Everyone has started their reviews!</p>
               ) : (
                 cycle.reviews?.filter((r: any) => r.status === "PENDING").map((r: any) => (
-                  <div key={r.id} className="flex items-center gap-3 rounded-lg border border-[#2A2A3A] p-2">
+                  <div key={r.id} className="flex items-center gap-3 rounded-lg border border-border p-2">
                     <Avatar className="h-7 w-7">
                       <AvatarFallback className="text-[10px]">{r.subject.firstName[0]}{r.subject.lastName[0]}</AvatarFallback>
                     </Avatar>
@@ -912,7 +912,7 @@ export default function ReviewCycleDetailPage() {
                     key={n}
                     onClick={() => setPeerCollabRating(n)}
                     className={`h-9 w-9 rounded text-sm font-bold transition-colors ${
-                      peerCollabRating === n ? "bg-purple-600 text-white" : "bg-[#2A2A3A] text-[#8888A0] hover:bg-[#3A3A4A]"
+                      peerCollabRating === n ? "bg-purple-600 text-white" : "bg-border text-muted hover:bg-border"
                     }`}
                   >
                     {n}
@@ -941,12 +941,12 @@ export default function ReviewCycleDetailPage() {
             <DialogTitle>Assign Peer Reviewers for {showAssignPeersDialog?.subject?.firstName} {showAssignPeersDialog?.subject?.lastName}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <p className="text-xs text-[#8888A0]">Select 2-3 peers to provide feedback. They will be notified.</p>
+            <p className="text-xs text-muted">Select 2-3 peers to provide feedback. They will be notified.</p>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {allUsers
                 .filter((u: any) => u.id !== showAssignPeersDialog?.subject?.id)
                 .map((u: any) => (
-                  <label key={u.id} className="flex items-center gap-2 rounded-lg border border-[#2A2A3A] p-2 cursor-pointer hover:bg-[#1A1A26]/50">
+                  <label key={u.id} className="flex items-center gap-2 rounded-lg border border-border p-2 cursor-pointer hover:bg-surface-2/50">
                     <input
                       type="checkbox"
                       checked={peerUserIds.includes(u.id)}

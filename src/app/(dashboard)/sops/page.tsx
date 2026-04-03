@@ -94,17 +94,17 @@ function SkeletonCard() {
       <CardContent className="p-5 space-y-3">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-[#1A1A26] p-2 h-8 w-8 animate-pulse" />
-            <div className="h-5 w-16 bg-[#1A1A26] rounded animate-pulse" />
+            <div className="rounded-lg bg-surface-2 p-2 h-8 w-8 animate-pulse" />
+            <div className="h-5 w-16 bg-surface-2 rounded animate-pulse" />
           </div>
-          <div className="h-5 w-10 bg-[#1A1A26] rounded animate-pulse" />
+          <div className="h-5 w-10 bg-surface-2 rounded animate-pulse" />
         </div>
-        <div className="h-4 w-3/4 bg-[#1A1A26] rounded animate-pulse" />
-        <div className="h-3 w-16 bg-[#1A1A26] rounded animate-pulse" />
-        <div className="h-1.5 w-full bg-[#1A1A26] rounded animate-pulse mt-3" />
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#2A2A3A]">
-          <div className="h-3 w-24 bg-[#1A1A26] rounded animate-pulse" />
-          <div className="h-3 w-16 bg-[#1A1A26] rounded animate-pulse" />
+        <div className="h-4 w-3/4 bg-surface-2 rounded animate-pulse" />
+        <div className="h-3 w-16 bg-surface-2 rounded animate-pulse" />
+        <div className="h-1.5 w-full bg-surface-2 rounded animate-pulse mt-3" />
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+          <div className="h-3 w-24 bg-surface-2 rounded animate-pulse" />
+          <div className="h-3 w-16 bg-surface-2 rounded animate-pulse" />
         </div>
       </CardContent>
     </Card>
@@ -229,7 +229,7 @@ export default function SOPsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">SOPs</h1>
-          <p className="text-[#8888A0] text-sm mt-1">{total} standard operating procedures &middot; {avgCompliance}% avg compliance</p>
+          <p className="text-muted text-sm mt-1">{total} standard operating procedures &middot; {avgCompliance}% avg compliance</p>
         </div>
         <div className="flex items-center gap-2">
           <Link href="/sops/my-sops">
@@ -261,7 +261,7 @@ export default function SOPsPage() {
                       className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-all text-center ${
                         sopType === opt.value
                           ? "border-purple-500 bg-purple-500/10 text-purple-400"
-                          : "border-[#2A2A3A] hover:border-[#3A3A4A] text-[#8888A0]"
+                          : "border-border hover:border-muted-2 text-muted"
                       }`}
                     >
                       <opt.icon size={20} />
@@ -298,8 +298,8 @@ export default function SOPsPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Card key={i}><CardContent className="p-4 text-center">
-              <div className="h-8 w-12 bg-[#1A1A26] rounded animate-pulse mx-auto mb-1" />
-              <div className="h-3 w-16 bg-[#1A1A26] rounded animate-pulse mx-auto" />
+              <div className="h-8 w-12 bg-surface-2 rounded animate-pulse mx-auto mb-1" />
+              <div className="h-3 w-16 bg-surface-2 rounded animate-pulse mx-auto" />
             </CardContent></Card>
           ))}
         </div>
@@ -307,19 +307,19 @@ export default function SOPsPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           <Card><CardContent className="p-4 text-center">
             <p className="text-2xl font-bold">{sops.length}</p>
-            <p className="text-xs text-[#8888A0]">Total SOPs</p>
+            <p className="text-xs text-muted">Total SOPs</p>
           </CardContent></Card>
           <Card><CardContent className="p-4 text-center">
             <p className="text-2xl font-bold text-green-400">{publishedSops.length}</p>
-            <p className="text-xs text-[#8888A0]">Published</p>
+            <p className="text-xs text-muted">Published</p>
           </CardContent></Card>
           <Card><CardContent className="p-4 text-center">
             <p className={`text-2xl font-bold ${getComplianceText(avgCompliance)}`}>{avgCompliance}%</p>
-            <p className="text-xs text-[#8888A0]">Avg Compliance</p>
+            <p className="text-xs text-muted">Avg Compliance</p>
           </CardContent></Card>
           <Card><CardContent className="p-4 text-center">
             <p className="text-2xl font-bold text-red-400">{publishedSops.filter(s => getComplianceScore(s) < 70).length}</p>
-            <p className="text-xs text-[#8888A0]">Below Target</p>
+            <p className="text-xs text-muted">Below Target</p>
           </CardContent></Card>
         </div>
       )}
@@ -327,7 +327,7 @@ export default function SOPsPage() {
       {/* Filters */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8888A0]" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input placeholder="Search SOPs..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -358,7 +358,7 @@ export default function SOPsPage() {
               const steps = getStepsCount(sop);
               const assigned = getAssignedCount(sop);
               return (
-                <Link key={sop.id} href={`/sops/${sop.id}`}><Card className="hover:border-[#3A3A4A] transition-all cursor-pointer group">
+                <Link key={sop.id} href={`/sops/${sop.id}`}><Card className="hover:border-muted-2 transition-all cursor-pointer group">
                   <CardContent className="p-5">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-2">
@@ -376,14 +376,14 @@ export default function SOPsPage() {
                     {sop.status === "PUBLISHED" && (
                       <div className="space-y-2 mt-3">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-[#8888A0]">Compliance</span>
+                          <span className="text-muted">Compliance</span>
                           <span className={`font-mono font-bold ${getComplianceText(compliance)}`}>{compliance}%</span>
                         </div>
                         <Progress value={compliance} className="h-1.5" indicatorClassName={getComplianceColor(compliance)} />
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#2A2A3A] text-[10px] text-[#8888A0]">
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-border text-[10px] text-muted">
                       <div className="flex items-center gap-3">
                         <span className="flex items-center gap-1"><CheckCircle size={10} /> {steps} steps</span>
                         {assigned > 0 && <span className="flex items-center gap-1"><Users size={10} /> {assigned}</span>}

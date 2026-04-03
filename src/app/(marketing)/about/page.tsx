@@ -156,7 +156,7 @@ export default function AboutPage() {
             </h1>
           </FadeIn>
           <FadeIn delay={0.2}>
-            <p className="mx-auto mb-8 max-w-[560px] text-lg text-[#8888A0]">
+            <p className="mx-auto mb-8 max-w-[560px] text-lg text-muted">
               One platform to replace chaos with clarity, guesswork with data,
               and disconnected tools with unified intelligence.
             </p>
@@ -183,7 +183,7 @@ export default function AboutPage() {
               <h2 className="mkt-title mx-auto mb-6 max-w-[800px] text-[clamp(1.6rem,3vw,2.4rem)]">
                 To replace chaos with clarity. To replace guesswork with data.
               </h2>
-              <p className="mx-auto max-w-[640px] text-base leading-relaxed text-[#8888A0]">
+              <p className="mx-auto max-w-[640px] text-base leading-relaxed text-muted">
                 To give every business — from a 10-person agency to a 500-person
                 enterprise — the tools to operate at their best. We believe that
                 great businesses aren&apos;t built on gut feelings. They&apos;re built on
@@ -204,7 +204,7 @@ export default function AboutPage() {
                 Born from watching businesses{" "}
                 <span className="text-gradient">struggle.</span>
               </h2>
-              <div className="flex flex-col gap-5 text-[15px] leading-relaxed text-[#8888A0]">
+              <div className="flex flex-col gap-5 text-[15px] leading-relaxed text-muted">
                 <p>
                   WorkwrK was born from watching businesses drown in 15+
                   disconnected tools. HR data in one system, KPIs in a
@@ -253,7 +253,7 @@ export default function AboutPage() {
               ].map((block) => (
                 <div
                   key={block.label}
-                  className="rounded-2xl border border-[#2A2A3A] bg-[#12121A] p-6"
+                  className="rounded-2xl border border-border bg-surface p-6"
                 >
                   <h3 className="mb-4 font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-[#A29BFE]">
                     {block.label}
@@ -262,7 +262,7 @@ export default function AboutPage() {
                     {block.items.map((item) => (
                       <li
                         key={item}
-                        className="flex items-start gap-3 text-sm text-[#8888A0]"
+                        className="flex items-start gap-3 text-sm text-muted"
                       >
                         <span
                           className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full"
@@ -340,14 +340,14 @@ export default function AboutPage() {
                           : "md:ml-auto md:pl-0 md:text-left"
                       }`}
                     >
-                      <div className="rounded-2xl border border-[#2A2A3A] bg-[#12121A] p-5">
+                      <div className="rounded-2xl border border-border bg-surface p-5">
                         <span
                           className="mb-2 inline-block font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider"
                           style={{ color: ms.color }}
                         >
                           {ms.period}
                         </span>
-                        <p className="text-sm leading-relaxed text-[#E8E8F0]">
+                        <p className="text-sm leading-relaxed text-foreground">
                           {ms.title}
                         </p>
                       </div>
@@ -391,7 +391,7 @@ export default function AboutPage() {
                 >
                   {value.title}
                 </h3>
-                <p className="text-sm leading-relaxed text-[#8888A0]">
+                <p className="text-sm leading-relaxed text-muted">
                   {value.desc}
                 </p>
               </StaggerItem>
@@ -427,7 +427,7 @@ export default function AboutPage() {
                   {member.initials}
                 </div>
                 <h3
-                  className="mb-1 text-base font-semibold text-[#E8E8F0]"
+                  className="mb-1 text-base font-semibold text-foreground"
                   style={{ fontFamily: "var(--font-syne), 'Syne', sans-serif" }}
                 >
                   {member.name}
@@ -438,7 +438,7 @@ export default function AboutPage() {
                 >
                   {member.role}
                 </p>
-                <p className="text-sm leading-relaxed text-[#8888A0]">
+                <p className="text-sm leading-relaxed text-muted">
                   {member.bio}
                 </p>
               </StaggerItem>
@@ -472,19 +472,19 @@ export default function AboutPage() {
                 >
                   <Quote size={16} />
                 </div>
-                <p className="mb-6 text-[15px] leading-relaxed text-[#E8E8F0]">
+                <p className="mb-6 text-[15px] leading-relaxed text-foreground">
                   &ldquo;{t.quote}&rdquo;
                 </p>
-                <div className="mt-auto border-t border-[#2A2A3A] pt-4">
+                <div className="mt-auto border-t border-border pt-4">
                   <p
-                    className="text-sm font-semibold text-[#E8E8F0]"
+                    className="text-sm font-semibold text-foreground"
                     style={{
                       fontFamily: "var(--font-syne), 'Syne', sans-serif",
                     }}
                   >
                     {t.name}
                   </p>
-                  <p className="text-xs text-[#8888A0]">
+                  <p className="text-xs text-muted">
                     {t.role}, {t.company}
                   </p>
                 </div>
@@ -503,7 +503,7 @@ export default function AboutPage() {
               <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
                 Ready to run your business better?
               </h2>
-              <p className="mx-auto mb-8 max-w-[480px] text-base text-[#8888A0]">
+              <p className="mx-auto mb-8 max-w-[480px] text-base text-muted">
                 Join the businesses replacing chaos with clarity. Start your free
                 trial and experience every module working together.
               </p>

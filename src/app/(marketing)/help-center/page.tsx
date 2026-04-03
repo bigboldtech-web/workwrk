@@ -156,7 +156,7 @@ export default function DocsPage() {
               Documentation &<br />
               <span className="text-gradient">guides.</span>
             </h1>
-            <p className="mb-8 max-w-[560px] text-lg text-[#8888A0]">
+            <p className="mb-8 max-w-[560px] text-lg text-muted">
               Everything you need to get the most out of WorkwrK. Browse by
               topic or search for what you need.
             </p>
@@ -180,7 +180,7 @@ export default function DocsPage() {
                   >
                     {cat.icon}
                   </div>
-                  <h3 className="mb-3 text-lg font-semibold text-[#E8E8F0]">
+                  <h3 className="mb-3 text-lg font-semibold text-foreground">
                     {cat.title}
                   </h3>
                   <ul className="flex flex-col gap-2">
@@ -188,7 +188,7 @@ export default function DocsPage() {
                       <li key={linkText}>
                         <Link
                           href="#"
-                          className="text-sm text-[#8888A0] transition-colors hover:text-[#E8E8F0]"
+                          className="text-sm text-muted transition-colors hover:text-foreground"
                         >
                           {linkText}
                         </Link>
@@ -213,7 +213,7 @@ export default function DocsPage() {
               <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
                 Need help?
               </h2>
-              <p className="mx-auto mb-8 max-w-[440px] text-base text-[#8888A0]">
+              <p className="mx-auto mb-8 max-w-[440px] text-base text-muted">
                 Can&apos;t find what you&apos;re looking for? Our support team
                 is ready to help you out.
               </p>

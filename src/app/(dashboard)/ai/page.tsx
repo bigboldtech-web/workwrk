@@ -84,7 +84,7 @@ function renderMarkdown(text: string) {
 function boldify(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')
-    .replace(/`(.+?)`/g, '<code class="bg-[#2A2A3A] px-1 py-0.5 rounded text-purple-300 text-xs font-mono">$1</code>');
+    .replace(/`(.+?)`/g, '<code class="bg-border px-1 py-0.5 rounded text-purple-300 text-xs font-mono">$1</code>');
 }
 
 export default function AIPage() {
@@ -223,11 +223,11 @@ export default function AIPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">AI Assistant</h1>
-            <p className="text-[#8888A0] text-sm">Ask anything about your organization in plain English</p>
+            <p className="text-muted text-sm">Ask anything about your organization in plain English</p>
           </div>
         </div>
         {hasConversation && (
-          <Button variant="outline" size="sm" onClick={handleClearHistory} className="gap-2 text-[#8888A0]">
+          <Button variant="outline" size="sm" onClick={handleClearHistory} className="gap-2 text-muted">
             <Trash2 size={14} /> Clear Chat
           </Button>
         )}
@@ -246,7 +246,7 @@ export default function AIPage() {
               {digest.highlights.map((h, i) => (
                 <div key={i} className="text-center">
                   <p className="text-lg font-bold font-mono">{h.value}</p>
-                  <p className="text-[10px] text-[#8888A0]">{h.label}</p>
+                  <p className="text-[10px] text-muted">{h.label}</p>
                 </div>
               ))}
             </div>
@@ -280,7 +280,7 @@ export default function AIPage() {
                 className={`max-w-[70%] rounded-xl px-4 py-3 ${
                   msg.role === "user"
                     ? "bg-purple-600 text-white"
-                    : "bg-[#1A1A26] border border-[#2A2A3A] text-[#E8E8F0]"
+                    : "bg-surface-2 border border-border text-foreground"
                 }`}
               >
                 {msg.role === "assistant" && (
@@ -291,7 +291,7 @@ export default function AIPage() {
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
                 </div>
-                <p className={`text-[10px] mt-1 ${msg.role === "user" ? "text-purple-200" : "text-[#8888A0]"}`}>
+                <p className={`text-[10px] mt-1 ${msg.role === "user" ? "text-purple-200" : "text-muted"}`}>
                   {msg.timestamp.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
@@ -308,8 +308,8 @@ export default function AIPage() {
               <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
                 <Sparkles size={16} className="text-purple-400" />
               </div>
-              <div className="bg-[#1A1A26] border border-[#2A2A3A] rounded-xl px-4 py-3">
-                <div className="flex items-center gap-2 text-sm text-[#8888A0]">
+              <div className="bg-surface-2 border border-border rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2 text-sm text-muted">
                   <Loader2 size={14} className="animate-spin" />
                   Analyzing your data...
                 </div>
@@ -322,8 +322,8 @@ export default function AIPage() {
 
         {/* Suggested Queries */}
         {messages.length <= 1 && (
-          <div className="border-t border-[#2A2A3A] p-4">
-            <p className="text-xs text-[#8888A0] mb-2">Quick queries:</p>
+          <div className="border-t border-border p-4">
+            <p className="text-xs text-muted mb-2">Quick queries:</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {suggestedQueries.map((q) => {
                 const Icon = q.icon;
@@ -331,7 +331,7 @@ export default function AIPage() {
                   <button
                     key={q.text}
                     onClick={() => handleSend(q.text)}
-                    className="flex items-center gap-2 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] px-3 py-2 text-xs text-[#8888A0] hover:border-purple-500/40 hover:text-purple-400 transition-colors text-left"
+                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted hover:border-purple-500/40 hover:text-purple-400 transition-colors text-left"
                   >
                     <Icon size={12} className="flex-shrink-0" />
                     <span className="line-clamp-2">{q.text}</span>
@@ -343,7 +343,7 @@ export default function AIPage() {
         )}
 
         {/* Input */}
-        <div className="border-t border-[#2A2A3A] p-4">
+        <div className="border-t border-border p-4">
           <form
             onSubmit={(e) => {
               e.preventDefault();

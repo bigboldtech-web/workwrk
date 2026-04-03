@@ -33,15 +33,15 @@ export function MarketingNav() {
       transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
       className={`fixed top-0 left-0 right-0 z-[100] border-b backdrop-blur-xl transition-all duration-300 ${
         scrolled
-          ? "border-[#2A2A3A]/80 bg-[#0A0A0F]/90 shadow-lg shadow-black/20"
-          : "border-transparent bg-[#0A0A0F]/50"
+          ? "border-border/80 bg-background/90 shadow-lg shadow-black/20"
+          : "border-transparent bg-background/50"
       }`}
       aria-label="Main navigation"
     >
       <div className="mx-auto flex max-w-[1200px] items-center justify-between px-6 py-4">
         <Link href="/" className="flex flex-col items-center" aria-label="WorkwrK Home">
           <span className="mkt-logo leading-none">workwrk<span style={{ opacity: 0.5 }}>.</span></span>
-          <span className="text-[9px] font-medium tracking-wide text-[#8888A0]" style={{ fontFamily: "var(--font-mono)" }}>great teams aren't guesswork</span>
+          <span className="text-[9px] font-medium tracking-wide text-muted" style={{ fontFamily: "var(--font-mono)" }}>great teams aren't guesswork</span>
         </Link>
 
         {/* Desktop nav */}
@@ -50,8 +50,8 @@ export function MarketingNav() {
             <Link
               key={link.href}
               href={link.href}
-              className={`relative text-sm font-medium transition-colors hover:text-[#E8E8F0] ${
-                pathname === link.href ? "text-[#E8E8F0]" : "text-[#8888A0]"
+              className={`relative text-sm font-medium transition-colors hover:text-foreground ${
+                pathname === link.href ? "text-foreground" : "text-muted"
               }`}
             >
               {link.label}
@@ -74,7 +74,7 @@ export function MarketingNav() {
 
         {/* Mobile toggle */}
         <button
-          className="text-[#8888A0] md:hidden"
+          className="text-muted md:hidden"
           onClick={() => setMobileOpen(!mobileOpen)}
           aria-label="Toggle menu"
         >
@@ -112,7 +112,7 @@ export function MarketingNav() {
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            className="overflow-hidden border-t border-[#2A2A3A] bg-[#0A0A0F] md:hidden"
+            className="overflow-hidden border-t border-border bg-background md:hidden"
           >
             <div className="px-6 py-6">
               <div className="flex flex-col gap-4">
@@ -127,7 +127,7 @@ export function MarketingNav() {
                       href={link.href}
                       onClick={() => setMobileOpen(false)}
                       className={`text-sm font-medium ${
-                        pathname === link.href ? "text-[#E8E8F0]" : "text-[#8888A0]"
+                        pathname === link.href ? "text-foreground" : "text-muted"
                       }`}
                     >
                       {link.label}

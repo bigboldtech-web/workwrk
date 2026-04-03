@@ -104,7 +104,7 @@ export default function AdminDashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-6 w-6 animate-spin text-[#8888A0]" />
+        <RefreshCw className="h-6 w-6 animate-spin text-muted" />
       </div>
     );
   }
@@ -149,7 +149,7 @@ export default function AdminDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Admin Dashboard</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Platform overview and subscriber management</p>
+          <p className="text-muted text-sm mt-1">Platform overview and subscriber management</p>
         </div>
         <Button variant="outline" size="sm" onClick={fetchData}>
           <RefreshCw size={14} className="mr-2" /> Refresh
@@ -167,8 +167,8 @@ export default function AdminDashboard() {
                 </div>
               </div>
               <p className="text-2xl font-bold">{stat.value}</p>
-              <p className="text-xs text-[#8888A0] mt-0.5">{stat.change}</p>
-              <p className="text-xs text-[#8888A0] mt-1 font-medium">{stat.title}</p>
+              <p className="text-xs text-muted mt-0.5">{stat.change}</p>
+              <p className="text-xs text-muted mt-1 font-medium">{stat.title}</p>
             </CardContent>
           </Card>
         ))}
@@ -203,44 +203,44 @@ export default function AdminDashboard() {
         </CardHeader>
         <CardContent className="p-0">
           {companies.length === 0 ? (
-            <div className="p-8 text-center text-sm text-[#8888A0]">
+            <div className="p-8 text-center text-sm text-muted">
               No companies registered yet. Share your registration page to get started.
             </div>
           ) : (
             <table className="w-full">
               <thead>
-                <tr className="border-b border-[#2A2A3A]">
-                  <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Company</th>
-                  <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Users</th>
-                  <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Status</th>
-                  <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Usage</th>
-                  <th className="text-right p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Joined</th>
+                <tr className="border-b border-border">
+                  <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Company</th>
+                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Plan</th>
+                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Users</th>
+                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Status</th>
+                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Usage</th>
+                  <th className="text-right p-4 text-xs font-medium text-muted uppercase tracking-wider">Joined</th>
                 </tr>
               </thead>
               <tbody>
                 {companies.map((company) => (
-                  <tr key={company.id} className="border-b border-[#2A2A3A]/50 hover:bg-[#1A1A26]/50 transition-colors">
+                  <tr key={company.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
                     <td className="p-4">
                       <div className="flex items-center gap-2">
                         <Building2 size={14} className="text-purple-400" />
                         <div>
                           <span className="text-sm font-medium">{company.name}</span>
-                          <p className="text-[10px] text-[#8888A0]">{company.slug}</p>
+                          <p className="text-[10px] text-muted">{company.slug}</p>
                         </div>
                       </div>
                     </td>
                     <td className="p-4 text-center">{getPlanBadge(company.plan)}</td>
-                    <td className="p-4 text-center text-sm text-[#8888A0]">{company._count.users}</td>
+                    <td className="p-4 text-center text-sm text-muted">{company._count.users}</td>
                     <td className="p-4 text-center">{getStatusBadge(company.status)}</td>
                     <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-[10px] text-[#8888A0]">
+                      <div className="flex items-center justify-center gap-3 text-[10px] text-muted">
                         <span>{company._count.tasks} tasks</span>
                         <span>{company._count.kras} KRAs</span>
                         <span>{company._count.sops} SOPs</span>
                       </div>
                     </td>
-                    <td className="p-4 text-right text-xs text-[#8888A0]">
+                    <td className="p-4 text-right text-xs text-muted">
                       {new Date(company.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
                   </tr>
@@ -258,22 +258,22 @@ export default function AdminDashboard() {
             <Activity size={16} className="text-purple-400" /> System Info
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-[#8888A0]">
+        <CardContent className="space-y-2 text-sm text-muted">
           <div className="flex justify-between">
             <span>Platform</span>
-            <span className="text-[#E8E8F0] font-medium">WorkwrK v1.0</span>
+            <span className="text-foreground font-medium">WorkwrK v1.0</span>
           </div>
           <div className="flex justify-between">
             <span>Environment</span>
-            <span className="text-[#E8E8F0] font-medium">{process.env.NODE_ENV === "production" ? "Production" : "Development"}</span>
+            <span className="text-foreground font-medium">{process.env.NODE_ENV === "production" ? "Production" : "Development"}</span>
           </div>
           <div className="flex justify-between">
             <span>Total Organizations</span>
-            <span className="text-[#E8E8F0] font-medium">{stats?.totalOrgs ?? 0}</span>
+            <span className="text-foreground font-medium">{stats?.totalOrgs ?? 0}</span>
           </div>
           <div className="flex justify-between">
             <span>Total Users</span>
-            <span className="text-[#E8E8F0] font-medium">{stats?.totalUsers ?? 0}</span>
+            <span className="text-foreground font-medium">{stats?.totalUsers ?? 0}</span>
           </div>
         </CardContent>
       </Card>

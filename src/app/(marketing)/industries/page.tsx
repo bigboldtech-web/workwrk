@@ -261,7 +261,7 @@ export default function IndustriesPage() {
             </h1>
           </FadeIn>
           <FadeIn delay={0.2}>
-            <p className="mb-8 max-w-[600px] text-lg text-[#8888A0]">
+            <p className="mb-8 max-w-[600px] text-lg text-muted">
               WorkwrK adapts to the workflows, KPIs, and compliance needs of your
               sector. One platform — configured for professional services,
               manufacturing, healthcare, SaaS, and everything in between.
@@ -279,7 +279,7 @@ export default function IndustriesPage() {
       <section className="pb-20">
         <div className="mx-auto max-w-[1200px] px-6">
           <StaggerContainer
-            className="grid grid-cols-2 gap-4 sm:grid-cols-4 rounded-2xl border border-[#2A2A3A] bg-[#12121A] p-6 sm:p-8"
+            className="grid grid-cols-2 gap-4 sm:grid-cols-4 rounded-2xl border border-border bg-surface p-6 sm:p-8"
           >
             {stats.map((stat) => (
               <StaggerItem key={stat.label} className="text-center">
@@ -293,7 +293,7 @@ export default function IndustriesPage() {
                   {stat.value}
                 </p>
                 <p
-                  className="mt-1 text-sm text-[#8888A0]"
+                  className="mt-1 text-sm text-muted"
                   style={{ fontFamily: "var(--font-mono), monospace" }}
                 >
                   {stat.label}
@@ -323,13 +323,13 @@ export default function IndustriesPage() {
                 </div>
 
                 <h2
-                  className="mb-2 text-lg font-semibold text-[#E8E8F0]"
+                  className="mb-2 text-lg font-semibold text-foreground"
                   style={{ fontFamily: "var(--font-syne), sans-serif" }}
                 >
                   {ind.title}
                 </h2>
 
-                <p className="mb-4 text-sm leading-relaxed text-[#8888A0]">
+                <p className="mb-4 text-sm leading-relaxed text-muted">
                   {ind.description}
                 </p>
 
@@ -337,7 +337,7 @@ export default function IndustriesPage() {
                   {ind.useCases.map((uc) => (
                     <li
                       key={uc}
-                      className="flex items-start gap-2 text-xs text-[#8888A0]"
+                      className="flex items-start gap-2 text-xs text-muted"
                     >
                       <CheckCircle2
                         size={14}
@@ -364,7 +364,7 @@ export default function IndustriesPage() {
               Trusted by leaders across{" "}
               <span className="text-gradient">every sector.</span>
             </h2>
-            <p className="mx-auto mb-12 max-w-[520px] text-base text-[#8888A0]">
+            <p className="mx-auto mb-12 max-w-[520px] text-base text-muted">
               Hear from founders, partners, and operations heads who transformed
               their businesses with WorkwrK.
             </p>
@@ -395,18 +395,18 @@ export default function IndustriesPage() {
                   {t.industry}
                 </span>
 
-                <p className="mb-6 flex-1 text-sm leading-relaxed text-[#E8E8F0]">
+                <p className="mb-6 flex-1 text-sm leading-relaxed text-foreground">
                   &ldquo;{t.quote}&rdquo;
                 </p>
 
-                <div className="border-t border-[#2A2A3A] pt-4">
+                <div className="border-t border-border pt-4">
                   <p
-                    className="text-sm font-semibold text-[#E8E8F0]"
+                    className="text-sm font-semibold text-foreground"
                     style={{ fontFamily: "var(--font-syne), sans-serif" }}
                   >
                     {t.name}
                   </p>
-                  <p className="text-xs text-[#8888A0]">{t.title}</p>
+                  <p className="text-xs text-muted">{t.title}</p>
                 </div>
               </div>
               </StaggerItem>
@@ -424,7 +424,7 @@ export default function IndustriesPage() {
               Powering businesses across{" "}
               <span className="text-gradient">four continents.</span>
             </h2>
-            <p className="mx-auto mb-12 max-w-[520px] text-base text-[#8888A0]">
+            <p className="mx-auto mb-12 max-w-[520px] text-base text-muted">
               From Mumbai to Dubai, Singapore to San Francisco — WorkwrK runs
               wherever your teams operate.
             </p>
@@ -520,7 +520,7 @@ export default function IndustriesPage() {
                 }}
               />
               {/* Center icon */}
-              <Globe size={32} className="relative z-10 text-[#8888A0] opacity-30" />
+              <Globe size={32} className="relative z-10 text-muted opacity-30" />
             </div>
           </div>
 
@@ -546,7 +546,7 @@ export default function IndustriesPage() {
                 </div>
 
                 <h3
-                  className="mb-1 text-lg font-semibold text-[#E8E8F0]"
+                  className="mb-1 text-lg font-semibold text-foreground"
                   style={{ fontFamily: "var(--font-syne), sans-serif" }}
                 >
                   {geo.region}
@@ -566,7 +566,7 @@ export default function IndustriesPage() {
                   {geo.cities.map((city) => (
                     <span
                       key={city}
-                      className="rounded-full border border-[#2A2A3A] bg-[#0A0A0F] px-3 py-1 font-[family-name:var(--font-mono)] text-xs text-[#8888A0]"
+                      className="rounded-full border border-border bg-background px-3 py-1 font-[family-name:var(--font-mono)] text-xs text-muted"
                     >
                       {city}
                     </span>
@@ -588,7 +588,7 @@ export default function IndustriesPage() {
               Your industry. Your workflows.{" "}
               <span className="text-gradient">Your OS.</span>
             </h2>
-            <p className="mx-auto mb-8 max-w-[480px] text-base text-[#8888A0]">
+            <p className="mx-auto mb-8 max-w-[480px] text-base text-muted">
               Start your free trial and configure WorkwrK for your industry in
               minutes — not months.
             </p>

@@ -29,7 +29,7 @@ export default function BlogPage() {
             Insights for growing<br />
             <span className="text-gradient">businesses.</span>
           </h1>
-          <p className="max-w-[520px] text-lg text-[#8888A0]">
+          <p className="max-w-[520px] text-lg text-muted">
             Practical guides on performance management, business operations,
             KPIs, SOPs, and building data-driven organizations.
           </p>
@@ -43,7 +43,7 @@ export default function BlogPage() {
             {categories.map((cat) => (
               <span
                 key={cat}
-                className="rounded-full border border-[#2A2A3A] bg-[#12121A] px-4 py-1.5 text-xs text-[#8888A0]"
+                className="rounded-full border border-border bg-surface px-4 py-1.5 text-xs text-muted"
               >
                 {cat}
               </span>
@@ -57,7 +57,7 @@ export default function BlogPage() {
         <div className="mx-auto max-w-[1200px] px-6">
           <Link href={`/blog/${featured.slug}`} className="group block">
             <article className="blog-card grid gap-8 p-8 md:grid-cols-2 md:items-center">
-              <div className="flex aspect-[16/10] items-center justify-center rounded-xl border border-[#2A2A3A] bg-[#1A1A26]">
+              <div className="flex aspect-[16/10] items-center justify-center rounded-xl border border-border bg-surface-2">
                 <span className="text-gradient font-[family-name:var(--font-syne)] text-4xl font-extrabold">
                   Featured
                 </span>
@@ -67,14 +67,14 @@ export default function BlogPage() {
                   <span className="rounded-full bg-[#6C5CE7]/10 px-3 py-1 text-xs font-medium text-[#A29BFE]">
                     {featured.category}
                   </span>
-                  <span className="flex items-center gap-1 text-xs text-[#8888A0]">
+                  <span className="flex items-center gap-1 text-xs text-muted">
                     <Clock size={12} /> {featured.readTime}
                   </span>
                 </div>
-                <h2 className="mb-3 font-[family-name:var(--font-syne)] text-2xl font-bold leading-tight text-[#E8E8F0] transition-colors group-hover:text-[#A29BFE]">
+                <h2 className="mb-3 font-[family-name:var(--font-syne)] text-2xl font-bold leading-tight text-foreground transition-colors group-hover:text-[#A29BFE]">
                   {featured.title}
                 </h2>
-                <p className="mb-4 text-sm leading-relaxed text-[#8888A0]">
+                <p className="mb-4 text-sm leading-relaxed text-muted">
                   {featured.excerpt}
                 </p>
                 <div className="flex items-center gap-2 text-sm font-semibold text-[#A29BFE]">
@@ -93,25 +93,25 @@ export default function BlogPage() {
             {rest.map((post) => (
               <Link key={post.slug} href={`/blog/${post.slug}`} className="group block">
                 <article className="blog-card flex h-full flex-col">
-                  <div className="flex aspect-[16/9] items-center justify-center border-b border-[#2A2A3A] bg-[#1A1A26]">
-                    <Tag size={32} className="text-[#2A2A3A]" />
+                  <div className="flex aspect-[16/9] items-center justify-center border-b border-border bg-surface-2">
+                    <Tag size={32} className="text-border" />
                   </div>
                   <div className="flex flex-1 flex-col p-6">
                     <div className="mb-3 flex items-center gap-3">
                       <span className="rounded-full bg-[#6C5CE7]/10 px-3 py-1 text-xs font-medium text-[#A29BFE]">
                         {post.category}
                       </span>
-                      <span className="flex items-center gap-1 text-xs text-[#8888A0]">
+                      <span className="flex items-center gap-1 text-xs text-muted">
                         <Clock size={12} /> {post.readTime}
                       </span>
                     </div>
-                    <h3 className="mb-2 font-[family-name:var(--font-syne)] text-lg font-bold leading-snug text-[#E8E8F0] transition-colors group-hover:text-[#A29BFE]">
+                    <h3 className="mb-2 font-[family-name:var(--font-syne)] text-lg font-bold leading-snug text-foreground transition-colors group-hover:text-[#A29BFE]">
                       {post.title}
                     </h3>
-                    <p className="mb-4 flex-1 text-sm leading-relaxed text-[#8888A0]">
+                    <p className="mb-4 flex-1 text-sm leading-relaxed text-muted">
                       {post.excerpt}
                     </p>
-                    <div className="flex items-center justify-between text-xs text-[#8888A0]">
+                    <div className="flex items-center justify-between text-xs text-muted">
                       <span>{post.date}</span>
                       <span className="font-semibold text-[#A29BFE]">Read →</span>
                     </div>
@@ -130,7 +130,7 @@ export default function BlogPage() {
             <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
               Ready to put these ideas into practice?
             </h2>
-            <p className="mx-auto mb-8 max-w-[440px] text-base text-[#8888A0]">
+            <p className="mx-auto mb-8 max-w-[440px] text-base text-muted">
               Start your free trial and experience the business operating system.
             </p>
             <Link href="/register" className="btn-primary px-8 py-3.5">

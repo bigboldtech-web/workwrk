@@ -26,7 +26,7 @@ export function FaqAccordion({ categories }: { categories: FaqCategory[] }) {
         <div key={cat.label}>
           <p className="mkt-label mb-6">{cat.label}</p>
 
-          <div className="rounded-2xl border border-[#2A2A3A] bg-[#12121A] px-6 sm:px-8">
+          <div className="rounded-2xl border border-border bg-surface px-6 sm:px-8">
             {cat.items.map((item, i) => {
               const key = `${cat.label}-${i}`;
               const isOpen = openIndex === key;
@@ -47,7 +47,7 @@ export function FaqAccordion({ categories }: { categories: FaqCategory[] }) {
                     <span itemProp="name">{item.question}</span>
                     <ChevronDown
                       size={20}
-                      className="flex-shrink-0 text-[#8888A0] transition-transform duration-300"
+                      className="flex-shrink-0 text-muted transition-transform duration-300"
                       style={{
                         transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
                       }}
@@ -61,7 +61,7 @@ export function FaqAccordion({ categories }: { categories: FaqCategory[] }) {
                     itemType="https://schema.org/Answer"
                   >
                     <p
-                      className="text-sm leading-relaxed text-[#8888A0]"
+                      className="text-sm leading-relaxed text-muted"
                       itemProp="text"
                     >
                       {item.answer}

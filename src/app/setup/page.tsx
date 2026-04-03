@@ -258,7 +258,7 @@ export default function SetupPage() {
             {currentStep < STEPS.length - 1 ? "Set up your workspace" : ""}
           </h1>
           {currentStep < STEPS.length - 1 && (
-            <span className="text-sm text-[#8888A0]">
+            <span className="text-sm text-muted">
               Step {currentStep + 1} of {STEPS.length - 1}
             </span>
           )}
@@ -270,7 +270,7 @@ export default function SetupPage() {
               <div
                 key={step.id}
                 className={`h-1.5 flex-1 rounded-full transition-colors ${
-                  i <= currentStep ? "bg-purple-500" : "bg-[#2A2A3A]"
+                  i <= currentStep ? "bg-purple-500" : "bg-border"
                 }`}
               />
             ))}
@@ -292,7 +292,7 @@ export default function SetupPage() {
                       ? "bg-purple-600/20 text-purple-400 border border-purple-600/30"
                       : i < currentStep
                         ? "bg-green-600/10 text-green-400 cursor-pointer hover:bg-green-600/20"
-                        : "bg-[#1A1A26] text-[#8888A0]"
+                        : "bg-surface-2 text-muted"
                   }`}
                 >
                   {i < currentStep ? (
@@ -315,7 +315,7 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">What type of business are you?</h2>
-              <p className="mt-1 text-sm text-[#8888A0]">
+              <p className="mt-1 text-sm text-muted">
                 This helps us tailor the experience for your organization
               </p>
             </div>
@@ -327,7 +327,7 @@ export default function SetupPage() {
                   className={`flex flex-col items-start rounded-xl border p-5 text-left transition-all ${
                     setupData.businessType === type.value
                       ? "border-purple-500 bg-purple-600/10"
-                      : "border-[#2A2A3A] bg-[#12121A] hover:border-[#3A3A4A]"
+                      : "border-border bg-surface hover:border-muted-2"
                   }`}
                 >
                   <div className="flex w-full items-center justify-between">
@@ -338,7 +338,7 @@ export default function SetupPage() {
                       </div>
                     )}
                   </div>
-                  <span className="mt-1 text-sm text-[#8888A0]">{type.desc}</span>
+                  <span className="mt-1 text-sm text-muted">{type.desc}</span>
                 </button>
               ))}
             </div>
@@ -350,7 +350,7 @@ export default function SetupPage() {
           <div className="space-y-8">
             <div>
               <h2 className="text-xl font-semibold">What industry are you in?</h2>
-              <p className="mt-1 text-sm text-[#8888A0]">
+              <p className="mt-1 text-sm text-muted">
                 We&apos;ll set up templates and best practices for your industry
               </p>
             </div>
@@ -362,7 +362,7 @@ export default function SetupPage() {
                   className={`rounded-full border px-4 py-2 text-sm font-medium transition-all ${
                     setupData.industry === industry
                       ? "border-purple-500 bg-purple-600/20 text-purple-300"
-                      : "border-[#2A2A3A] bg-[#12121A] text-[#8888A0] hover:border-[#3A3A4A] hover:text-[#E8E8F0]"
+                      : "border-border bg-surface text-muted hover:border-muted-2 hover:text-foreground"
                   }`}
                 >
                   {industry}
@@ -372,7 +372,7 @@ export default function SetupPage() {
 
             <div>
               <h2 className="text-xl font-semibold">How will you primarily use workwrk?</h2>
-              <p className="mt-1 text-sm text-[#8888A0]">
+              <p className="mt-1 text-sm text-muted">
                 Select the area that matters most to you right now
               </p>
             </div>
@@ -384,11 +384,11 @@ export default function SetupPage() {
                   className={`flex flex-col items-start rounded-xl border p-4 text-left transition-all ${
                     setupData.useCase === uc.value
                       ? "border-purple-500 bg-purple-600/10"
-                      : "border-[#2A2A3A] bg-[#12121A] hover:border-[#3A3A4A]"
+                      : "border-border bg-surface hover:border-muted-2"
                   }`}
                 >
                   <span className="text-sm font-semibold">{uc.label}</span>
-                  <span className="mt-1 text-xs text-[#8888A0]">{uc.desc}</span>
+                  <span className="mt-1 text-xs text-muted">{uc.desc}</span>
                 </button>
               ))}
             </div>
@@ -400,7 +400,7 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">Choose your modules</h2>
-              <p className="mt-1 text-sm text-[#8888A0]">
+              <p className="mt-1 text-sm text-muted">
                 Enable the modules you need. You can always change this later in Settings.
               </p>
             </div>
@@ -416,11 +416,11 @@ export default function SetupPage() {
                     className={`flex items-start gap-3 rounded-xl border p-4 text-left transition-all ${
                       enabled
                         ? "border-purple-500/50 bg-purple-600/10"
-                        : "border-[#2A2A3A] bg-[#12121A] hover:border-[#3A3A4A]"
+                        : "border-border bg-surface hover:border-muted-2"
                     } ${mod.default ? "opacity-80" : ""}`}
                   >
-                    <div className={`rounded-lg p-2 ${enabled ? "bg-purple-500/20" : "bg-[#1A1A26]"}`}>
-                      <Icon size={18} className={enabled ? "text-purple-400" : "text-[#8888A0]"} />
+                    <div className={`rounded-lg p-2 ${enabled ? "bg-purple-500/20" : "bg-surface-2"}`}>
+                      <Icon size={18} className={enabled ? "text-purple-400" : "text-muted"} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -429,10 +429,10 @@ export default function SetupPage() {
                           <Badge variant="secondary" className="text-[10px]">Required</Badge>
                         )}
                       </div>
-                      <span className="text-xs text-[#8888A0] mt-0.5 block">{mod.desc}</span>
+                      <span className="text-xs text-muted mt-0.5 block">{mod.desc}</span>
                     </div>
                     <div className={`mt-1 h-4 w-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                      enabled ? "border-purple-500 bg-purple-500" : "border-[#3A3A4A]"
+                      enabled ? "border-purple-500 bg-purple-500" : "border-muted-2"
                     }`}>
                       {enabled && <Check size={10} className="text-white" />}
                     </div>
@@ -448,7 +448,7 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">How large is your team?</h2>
-              <p className="mt-1 text-sm text-[#8888A0]">
+              <p className="mt-1 text-sm text-muted">
                 This helps us optimize the workspace for your team&apos;s needs
               </p>
             </div>
@@ -460,12 +460,12 @@ export default function SetupPage() {
                   className={`flex flex-col items-center rounded-xl border p-6 text-center transition-all ${
                     setupData.teamSize === size.value
                       ? "border-purple-500 bg-purple-600/10"
-                      : "border-[#2A2A3A] bg-[#12121A] hover:border-[#3A3A4A]"
+                      : "border-border bg-surface hover:border-muted-2"
                   }`}
                 >
-                  <Users size={24} className={setupData.teamSize === size.value ? "text-purple-400" : "text-[#8888A0]"} />
+                  <Users size={24} className={setupData.teamSize === size.value ? "text-purple-400" : "text-muted"} />
                   <span className="mt-3 text-lg font-bold">{size.label}</span>
-                  <span className="mt-1 text-xs text-[#8888A0]">{size.desc}</span>
+                  <span className="mt-1 text-xs text-muted">{size.desc}</span>
                 </button>
               ))}
             </div>
@@ -477,13 +477,13 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">Set up your departments</h2>
-              <p className="mt-1 text-sm text-[#8888A0]">
+              <p className="mt-1 text-sm text-muted">
                 Toggle the departments that apply to your organization, or add your own
               </p>
             </div>
 
             <div className="space-y-3">
-              <h3 className="text-sm font-medium text-[#8888A0] uppercase tracking-wider">Default Departments</h3>
+              <h3 className="text-sm font-medium text-muted uppercase tracking-wider">Default Departments</h3>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {setupData.departments.map((dept, i) => (
                   <button
@@ -492,18 +492,18 @@ export default function SetupPage() {
                     className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-all ${
                       dept.enabled
                         ? "border-purple-500/50 bg-purple-600/5"
-                        : "border-[#2A2A3A] bg-[#12121A] opacity-60"
+                        : "border-border bg-surface opacity-60"
                     }`}
                   >
                     <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: dept.color }} />
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium">{dept.name}</span>
                       {dept.description && (
-                        <span className="text-xs text-[#8888A0] block mt-0.5 truncate">{dept.description}</span>
+                        <span className="text-xs text-muted block mt-0.5 truncate">{dept.description}</span>
                       )}
                     </div>
                     <div className={`h-4 w-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                      dept.enabled ? "border-purple-500 bg-purple-500" : "border-[#3A3A4A]"
+                      dept.enabled ? "border-purple-500 bg-purple-500" : "border-muted-2"
                     }`}>
                       {dept.enabled && <Check size={10} className="text-white" />}
                     </div>
@@ -514,7 +514,7 @@ export default function SetupPage() {
 
             {/* Custom departments */}
             <div className="space-y-3">
-              <h3 className="text-sm font-medium text-[#8888A0] uppercase tracking-wider">Custom Departments</h3>
+              <h3 className="text-sm font-medium text-muted uppercase tracking-wider">Custom Departments</h3>
               {setupData.customDepartments.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {setupData.customDepartments.map((dept, i) => (
@@ -524,7 +524,7 @@ export default function SetupPage() {
                     >
                       <div className="h-2 w-2 rounded-full" style={{ backgroundColor: dept.color }} />
                       <span className="text-sm font-medium">{dept.name}</span>
-                      <button onClick={() => removeCustomDepartment(i)} className="text-[#8888A0] hover:text-red-400">
+                      <button onClick={() => removeCustomDepartment(i)} className="text-muted hover:text-red-400">
                         <X size={14} />
                       </button>
                     </div>
@@ -552,12 +552,12 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">Invite your team</h2>
-              <p className="mt-1 text-sm text-[#8888A0]">
+              <p className="mt-1 text-sm text-muted">
                 Add team members to get started. You can always invite more later.
               </p>
             </div>
 
-            <Card className="border-[#2A2A3A] bg-[#12121A]">
+            <Card className="border-border bg-surface">
               <CardContent className="p-5 space-y-3">
                 {setupData.invites.map((invite, i) => (
                   <div key={i} className="flex items-center gap-3">
@@ -571,7 +571,7 @@ export default function SetupPage() {
                     <select
                       value={invite.role}
                       onChange={(e) => updateInvite(i, "role", e.target.value)}
-                      className="h-10 appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="h-10 appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500"
                     >
                       <option value="EMPLOYEE">Employee</option>
                       <option value="TEAM_LEAD">Team Lead</option>
@@ -583,7 +583,7 @@ export default function SetupPage() {
                       <option value="COMPANY_ADMIN">Admin</option>
                     </select>
                     {setupData.invites.length > 1 && (
-                      <button onClick={() => removeInvite(i)} className="text-[#8888A0] hover:text-red-400">
+                      <button onClick={() => removeInvite(i)} className="text-muted hover:text-red-400">
                         <X size={18} />
                       </button>
                     )}
@@ -595,7 +595,7 @@ export default function SetupPage() {
               </CardContent>
             </Card>
 
-            <p className="text-xs text-[#8888A0]">
+            <p className="text-xs text-muted">
               Invitations will be sent via email. You can skip this step and invite people later from the People page.
             </p>
           </div>
@@ -608,7 +608,7 @@ export default function SetupPage() {
               <Sparkles size={40} className="text-purple-400" />
             </div>
             <h2 className="text-3xl font-bold">You&apos;re all set!</h2>
-            <p className="mt-2 max-w-md text-[#8888A0]">
+            <p className="mt-2 max-w-md text-muted">
               Your workspace is ready. Start managing your team, tracking performance, and running your business like a pro.
             </p>
 
@@ -618,15 +618,15 @@ export default function SetupPage() {
                 if (!mod) return null;
                 const Icon = mod.icon;
                 return (
-                  <div key={modId} className="flex items-center gap-2 rounded-full border border-[#2A2A3A] bg-[#12121A] px-4 py-2">
+                  <div key={modId} className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2">
                     <Icon size={14} className="text-purple-400" />
                     <span className="text-sm">{mod.name}</span>
                   </div>
                 );
               })}
               {setupData.enabledModules.length > 5 && (
-                <div className="flex items-center rounded-full border border-[#2A2A3A] bg-[#12121A] px-4 py-2">
-                  <span className="text-sm text-[#8888A0]">+{setupData.enabledModules.length - 5} more</span>
+                <div className="flex items-center rounded-full border border-border bg-surface px-4 py-2">
+                  <span className="text-sm text-muted">+{setupData.enabledModules.length - 5} more</span>
                 </div>
               )}
             </div>
@@ -644,7 +644,7 @@ export default function SetupPage() {
 
       {/* Navigation Buttons */}
       {currentStep < STEPS.length - 1 && (
-        <div className="flex items-center justify-between border-t border-[#2A2A3A] pt-6">
+        <div className="flex items-center justify-between border-t border-border pt-6">
           <Button
             variant="outline"
             onClick={handleBack}
@@ -660,7 +660,7 @@ export default function SetupPage() {
                 variant="ghost"
                 onClick={handleComplete}
                 disabled={saving}
-                className="text-[#8888A0]"
+                className="text-muted"
               >
                 Skip for now
               </Button>

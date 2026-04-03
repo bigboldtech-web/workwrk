@@ -109,7 +109,7 @@ function getStatusStyle(status: string) {
     case "ACTIVE": return "bg-green-500/20 text-green-400";
     case "ERROR": return "bg-red-500/20 text-red-400";
     case "SYNCING": return "bg-blue-500/20 text-blue-400";
-    default: return "bg-[#2A2A3A] text-[#8888A0]";
+    default: return "bg-border text-muted";
   }
 }
 
@@ -118,7 +118,7 @@ function getStatusDot(status: string) {
     case "ACTIVE": return "bg-green-400";
     case "ERROR": return "bg-red-400";
     case "SYNCING": return "bg-blue-400 animate-pulse";
-    default: return "bg-[#8888A0]";
+    default: return "bg-muted";
   }
 }
 
@@ -130,7 +130,7 @@ function getLogStatusIcon(status: string) {
     case "failed":
       return <XCircle size={12} className="text-red-400" />;
     default:
-      return <Clock size={12} className="text-[#8888A0]" />;
+      return <Clock size={12} className="text-muted" />;
   }
 }
 
@@ -281,7 +281,7 @@ export default function IntegrationsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Integrations</h1>
-          <p className="text-[#8888A0] text-sm mt-1">
+          <p className="text-muted text-sm mt-1">
             Connect your existing tools to pull data into WorkwrK for performance intelligence
           </p>
         </div>
@@ -295,7 +295,7 @@ export default function IntegrationsPage() {
           </div>
           <div>
             <h3 className="text-sm font-semibold">WorkwrK connects, it doesn&apos;t replace</h3>
-            <p className="text-xs text-[#8888A0] mt-1">
+            <p className="text-xs text-muted mt-1">
               Your HRMS handles attendance, payroll, and leave. WorkwrK pulls that data to power
               performance scoring, review decisions, and AI insights. We sit on top of your existing tools.
             </p>
@@ -315,22 +315,22 @@ export default function IntegrationsPage() {
       )}
       {integrations.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-medium text-[#8888A0] uppercase tracking-wider">Connected</h2>
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wider">Connected</h2>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {integrations.map((integration) => (
-              <Card key={integration.id} className="hover:border-[#3A3A4A] transition-colors cursor-pointer" onClick={() => openDetail(integration)}>
+              <Card key={integration.id} className="hover:border-muted-2 transition-colors cursor-pointer" onClick={() => openDetail(integration)}>
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
                       <div className="relative">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1A1A26] text-lg">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-2 text-lg">
                           {AVAILABLE_INTEGRATIONS.find((a) => a.type === integration.type)?.icon || "\u{1F517}"}
                         </div>
-                        <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-[#12121A] ${getStatusDot(integration.status)}`} />
+                        <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface ${getStatusDot(integration.status)}`} />
                       </div>
                       <div>
                         <h3 className="text-sm font-semibold">{integration.name}</h3>
-                        <p className="text-xs text-[#8888A0]">{integration.type.replace(/_/g, " ")}</p>
+                        <p className="text-xs text-muted">{integration.type.replace(/_/g, " ")}</p>
                       </div>
                     </div>
                     <Badge className={getStatusStyle(integration.status)}>
@@ -344,7 +344,7 @@ export default function IntegrationsPage() {
                     </Badge>
                   </div>
 
-                  <div className="mt-4 flex items-center gap-4 text-xs text-[#8888A0]">
+                  <div className="mt-4 flex items-center gap-4 text-xs text-muted">
                     <span className="flex items-center gap-1">
                       <Clock size={12} />
                       {integration.lastSyncAt
@@ -396,7 +396,7 @@ export default function IntegrationsPage() {
 
       {/* Available integrations */}
       <div className="space-y-3">
-        <h2 className="text-sm font-medium text-[#8888A0] uppercase tracking-wider">
+        <h2 className="text-sm font-medium text-muted uppercase tracking-wider">
           Available Integrations
         </h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -405,7 +405,7 @@ export default function IntegrationsPage() {
             return (
               <Card
                 key={integration.type}
-                className={isConnected ? "border-green-500/20 opacity-70" : "hover:border-[#3A3A4A] transition-colors"}
+                className={isConnected ? "border-green-500/20 opacity-70" : "hover:border-muted-2 transition-colors"}
               >
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
@@ -415,12 +415,12 @@ export default function IntegrationsPage() {
                     )}
                   </div>
                   <h3 className="mt-3 text-sm font-semibold">{integration.name}</h3>
-                  <p className="mt-1 text-xs text-[#8888A0] line-clamp-2">{integration.description}</p>
-                  <p className="mt-2 text-[10px] text-[#8888A0]">{integration.examples}</p>
+                  <p className="mt-1 text-xs text-muted line-clamp-2">{integration.description}</p>
+                  <p className="mt-2 text-[10px] text-muted">{integration.examples}</p>
 
                   <div className="mt-3 space-y-1">
                     {integration.dataTypes.map((dt) => (
-                      <div key={dt} className="flex items-center gap-1.5 text-[11px] text-[#8888A0]">
+                      <div key={dt} className="flex items-center gap-1.5 text-[11px] text-muted">
                         <ArrowRight size={10} className="text-purple-400 flex-shrink-0" />
                         <span>{dt}</span>
                       </div>
@@ -458,7 +458,7 @@ export default function IntegrationsPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <p className="text-sm text-[#8888A0]">{selectedType?.description}</p>
+            <p className="text-sm text-muted">{selectedType?.description}</p>
             {selectedType?.fields.map((field) => (
               <div key={field.key} className="space-y-2">
                 <Label>{field.label}</Label>
@@ -476,10 +476,10 @@ export default function IntegrationsPage() {
               </div>
             ))}
 
-            <div className="rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] p-3">
-              <p className="text-xs font-medium text-[#8888A0] mb-2">Data that will be imported:</p>
+            <div className="rounded-lg border border-border bg-background p-3">
+              <p className="text-xs font-medium text-muted mb-2">Data that will be imported:</p>
               {selectedType?.dataTypes.map((dt) => (
-                <div key={dt} className="flex items-center gap-1.5 text-xs text-[#8888A0] py-0.5">
+                <div key={dt} className="flex items-center gap-1.5 text-xs text-muted py-0.5">
                   <Check size={12} className="text-green-400" />
                   <span>{dt}</span>
                 </div>
@@ -527,16 +527,16 @@ export default function IntegrationsPage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             {/* Connection info */}
-            <div className="rounded-lg border border-[#2A2A3A] p-3 space-y-2">
-              <p className="text-xs font-medium text-[#8888A0]">Connection Details</p>
+            <div className="rounded-lg border border-border p-3 space-y-2">
+              <p className="text-xs font-medium text-muted">Connection Details</p>
               <div className="grid grid-cols-2 gap-2 text-xs">
-                <span className="text-[#8888A0]">Type:</span>
+                <span className="text-muted">Type:</span>
                 <span>{detailIntegration?.type?.replace(/_/g, " ")}</span>
-                <span className="text-[#8888A0]">Frequency:</span>
+                <span className="text-muted">Frequency:</span>
                 <span>{detailIntegration?.syncFrequency || "Manual"}</span>
-                <span className="text-[#8888A0]">Last Sync:</span>
+                <span className="text-muted">Last Sync:</span>
                 <span>{detailIntegration?.lastSyncAt ? new Date(detailIntegration.lastSyncAt).toLocaleString() : "Never"}</span>
-                <span className="text-[#8888A0]">Webhook URL:</span>
+                <span className="text-muted">Webhook URL:</span>
                 <span className="truncate">{(detailIntegration?.config as any)?.webhookUrl ? "Configured" : "Not set"}</span>
               </div>
             </div>
@@ -572,31 +572,31 @@ export default function IntegrationsPage() {
 
             {/* Webhook Logs */}
             <div className="space-y-2">
-              <p className="text-xs font-medium text-[#8888A0]">Recent Webhook Events</p>
+              <p className="text-xs font-medium text-muted">Recent Webhook Events</p>
               {loadingLogs ? (
                 <div className="space-y-2">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-8 animate-pulse rounded bg-[#1A1A26]" />
+                    <div key={i} className="h-8 animate-pulse rounded bg-surface-2" />
                   ))}
                 </div>
               ) : webhookLogs.length === 0 ? (
-                <p className="text-xs text-[#8888A0] text-center py-4">No webhook events yet</p>
+                <p className="text-xs text-muted text-center py-4">No webhook events yet</p>
               ) : (
                 <div className="max-h-60 overflow-y-auto space-y-1">
                   {webhookLogs.map((log) => (
-                    <div key={log.id} className="flex items-center gap-2 rounded border border-[#2A2A3A] px-3 py-2 text-xs">
+                    <div key={log.id} className="flex items-center gap-2 rounded border border-border px-3 py-2 text-xs">
                       {getLogStatusIcon(log.status)}
                       <Badge variant="outline" className="text-[9px] px-1.5">
                         {log.direction === "incoming" ? "IN" : "OUT"}
                       </Badge>
                       <span className="flex-1 truncate">{log.event || "unknown"}</span>
-                      <span className={`font-mono ${log.status === "sent" || log.status === "processed" ? "text-green-400" : log.status === "failed" ? "text-red-400" : "text-[#8888A0]"}`}>
+                      <span className={`font-mono ${log.status === "sent" || log.status === "processed" ? "text-green-400" : log.status === "failed" ? "text-red-400" : "text-muted"}`}>
                         {log.status}
                       </span>
                       {log.responseCode && (
-                        <span className="text-[#8888A0] font-mono">{log.responseCode}</span>
+                        <span className="text-muted font-mono">{log.responseCode}</span>
                       )}
-                      <span className="text-[#8888A0]">
+                      <span className="text-muted">
                         {new Date(log.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                       </span>
                     </div>
@@ -606,12 +606,12 @@ export default function IntegrationsPage() {
             </div>
 
             {/* Incoming webhook URL */}
-            <div className="rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] p-3">
-              <p className="text-xs font-medium text-[#8888A0] mb-1">Incoming Webhook URL</p>
+            <div className="rounded-lg border border-border bg-background p-3">
+              <p className="text-xs font-medium text-muted mb-1">Incoming Webhook URL</p>
               <code className="text-[10px] text-purple-300 break-all">
                 {typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/{detailIntegration?.id}
               </code>
-              <p className="text-[10px] text-[#8888A0] mt-1">Use this URL to send data to WorkwrK from external services.</p>
+              <p className="text-[10px] text-muted mt-1">Use this URL to send data to WorkwrK from external services.</p>
             </div>
           </div>
           <DialogFooter>

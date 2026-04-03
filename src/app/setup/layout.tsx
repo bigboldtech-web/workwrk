@@ -20,10 +20,10 @@ export default function SetupLayout({
 
   if (status === "loading") {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#0A0A0F]">
+      <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
-          <span className="text-sm text-[#8888A0]">Loading...</span>
+          <span className="text-sm text-muted">Loading...</span>
         </div>
       </div>
     );
@@ -32,7 +32,7 @@ export default function SetupLayout({
   if (status === "unauthenticated") return null;
 
   return (
-    <div className="min-h-screen bg-[#0A0A0F]">
+    <div className="min-h-screen bg-background">
       {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 left-1/4 h-96 w-96 rounded-full bg-purple-600/5 blur-3xl" />
@@ -40,7 +40,7 @@ export default function SetupLayout({
       </div>
 
       {/* Header */}
-      <div className="relative border-b border-[#2A2A3A] bg-[#0A0A0F]/80 backdrop-blur-xl">
+      <div className="relative border-b border-border bg-background/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-4xl items-center px-6">
           <span
             className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-xl font-extrabold tracking-tight text-transparent"
@@ -48,8 +48,8 @@ export default function SetupLayout({
           >
             workwrk
           </span>
-          <span className="text-[#8888A0] opacity-50 text-xl font-extrabold">.</span>
-          <span className="ml-4 text-sm text-[#8888A0]">Setup your workspace</span>
+          <span className="text-muted opacity-50 text-xl font-extrabold">.</span>
+          <span className="ml-4 text-sm text-muted">Setup your workspace</span>
         </div>
       </div>
 

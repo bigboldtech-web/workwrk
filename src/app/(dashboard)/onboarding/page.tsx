@@ -155,10 +155,10 @@ export default function OnboardingPage() {
   if (loading) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="h-8 w-64 bg-[#1A1A26] rounded animate-pulse" />
+        <div className="h-8 w-64 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-28 bg-[#12121A] rounded-lg border border-[#2A2A3A] animate-pulse" />
+            <div key={i} className="h-28 bg-surface rounded-lg border border-border animate-pulse" />
           ))}
         </div>
       </div>
@@ -171,7 +171,7 @@ export default function OnboardingPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Onboarding & Training</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Manage employee onboarding and training programs</p>
+          <p className="text-muted text-sm mt-1">Manage employee onboarding and training programs</p>
         </div>
         <div className="flex gap-2">
           <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
@@ -211,21 +211,21 @@ export default function OnboardingPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Template</Label>
-                  <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.templateId} onChange={(e) => setAssignForm({ ...assignForm, templateId: e.target.value })}>
+                  <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.templateId} onChange={(e) => setAssignForm({ ...assignForm, templateId: e.target.value })}>
                     <option value="">Select template...</option>
                     {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
                   <Label>New Employee</Label>
-                  <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.userId} onChange={(e) => setAssignForm({ ...assignForm, userId: e.target.value })}>
+                  <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.userId} onChange={(e) => setAssignForm({ ...assignForm, userId: e.target.value })}>
                     <option value="">Select person...</option>
                     {users.map((u: any) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
                   <Label>Buddy (optional)</Label>
-                  <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.buddyId} onChange={(e) => setAssignForm({ ...assignForm, buddyId: e.target.value })}>
+                  <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={assignForm.buddyId} onChange={(e) => setAssignForm({ ...assignForm, buddyId: e.target.value })}>
                     <option value="">No buddy</option>
                     {users.map((u: any) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
                   </select>
@@ -245,7 +245,7 @@ export default function OnboardingPage() {
               <div className="rounded-lg p-2.5 bg-blue-500/10"><Users className="h-5 w-5 text-blue-400" /></div>
               <div>
                 <p className="text-2xl font-bold">{activeOnboarding.length}</p>
-                <p className="text-xs text-[#8888A0]">Active Onboardings</p>
+                <p className="text-xs text-muted">Active Onboardings</p>
               </div>
             </div>
           </CardContent>
@@ -256,7 +256,7 @@ export default function OnboardingPage() {
               <div className="rounded-lg p-2.5 bg-green-500/10"><CheckCircle className="h-5 w-5 text-green-400" /></div>
               <div>
                 <p className="text-2xl font-bold">{completedOnboarding.length}</p>
-                <p className="text-xs text-[#8888A0]">Completed</p>
+                <p className="text-xs text-muted">Completed</p>
               </div>
             </div>
           </CardContent>
@@ -267,7 +267,7 @@ export default function OnboardingPage() {
               <div className="rounded-lg p-2.5 bg-purple-500/10"><BookOpen className="h-5 w-5 text-purple-400" /></div>
               <div>
                 <p className="text-2xl font-bold">{templates.length}</p>
-                <p className="text-xs text-[#8888A0]">Templates</p>
+                <p className="text-xs text-muted">Templates</p>
               </div>
             </div>
           </CardContent>
@@ -278,7 +278,7 @@ export default function OnboardingPage() {
               <div className="rounded-lg p-2.5 bg-orange-500/10"><GraduationCap className="h-5 w-5 text-orange-400" /></div>
               <div>
                 <p className="text-2xl font-bold">{courses.length}</p>
-                <p className="text-xs text-[#8888A0]">Training Courses</p>
+                <p className="text-xs text-muted">Training Courses</p>
               </div>
             </div>
           </CardContent>
@@ -328,12 +328,12 @@ export default function OnboardingPage() {
                           <Badge className={getStatusStyle(inst.status)}>{inst.status.replace(/_/g, " ")}</Badge>
                           {isOverdue && <Badge className="bg-red-500/20 text-red-400"><AlertTriangle size={10} className="mr-1" /> Overdue</Badge>}
                         </div>
-                        <p className="text-xs text-[#8888A0]">{inst.template?.name} · {inst.user?.department?.name || "No dept"}</p>
-                        {inst.buddy && <p className="text-xs text-[#8888A0]">Buddy: {inst.buddy.firstName} {inst.buddy.lastName}</p>}
+                        <p className="text-xs text-muted">{inst.template?.name} · {inst.user?.department?.name || "No dept"}</p>
+                        {inst.buddy && <p className="text-xs text-muted">Buddy: {inst.buddy.firstName} {inst.buddy.lastName}</p>}
                       </div>
                       <div className="text-right mr-2">
                         <p className="text-sm font-mono font-bold">{completedSteps}/{steps.length}</p>
-                        <p className="text-xs text-[#8888A0]">{progressPct}%</p>
+                        <p className="text-xs text-muted">{progressPct}%</p>
                       </div>
                       <Button
                         variant="ghost"
@@ -345,14 +345,14 @@ export default function OnboardingPage() {
                     </div>
                     <Progress value={progressPct} className="h-1.5 mt-3" indicatorClassName={progressPct >= 80 ? "bg-green-500" : progressPct >= 50 ? "bg-blue-500" : "bg-orange-500"} />
                     {inst.targetDate && (
-                      <p className="text-[10px] text-[#8888A0] mt-2 flex items-center gap-1">
+                      <p className="text-[10px] text-muted mt-2 flex items-center gap-1">
                         <Clock size={10} /> Target: {new Date(inst.targetDate).toLocaleDateString()}
                       </p>
                     )}
 
                     {/* Expandable step checklist */}
                     {isExpanded && steps.length > 0 && (
-                      <div className="mt-4 border-t border-[#2A2A3A] pt-3 space-y-2">
+                      <div className="mt-4 border-t border-border pt-3 space-y-2">
                         {steps.map((step: any, i: number) => {
                           const p = progressArr.find((pr: any) => pr.stepIndex === i);
                           const isCompleted = p?.completed || false;
@@ -363,18 +363,18 @@ export default function OnboardingPage() {
                               key={i}
                               onClick={() => toggleStep(inst.id, i, isCompleted)}
                               disabled={isToggling}
-                              className="flex items-center gap-3 w-full text-left rounded-lg p-2.5 hover:bg-[#1A1A26] transition-colors disabled:opacity-50"
+                              className="flex items-center gap-3 w-full text-left rounded-lg p-2.5 hover:bg-surface-2 transition-colors disabled:opacity-50"
                             >
                               {isCompleted ? (
                                 <CheckCircle2 size={18} className="text-green-400 flex-shrink-0" />
                               ) : (
-                                <Circle size={18} className="text-[#8888A0] flex-shrink-0" />
+                                <Circle size={18} className="text-muted flex-shrink-0" />
                               )}
                               <div className="flex-1 min-w-0">
-                                <p className={`text-sm ${isCompleted ? "line-through text-[#8888A0]" : ""}`}>
+                                <p className={`text-sm ${isCompleted ? "line-through text-muted" : ""}`}>
                                   {step.title || step}
                                 </p>
-                                {step.description && <p className="text-[10px] text-[#8888A0]">{step.description}</p>}
+                                {step.description && <p className="text-[10px] text-muted">{step.description}</p>}
                               </div>
                               {p?.completedAt && (
                                 <span className="text-[10px] text-green-400/70 flex-shrink-0">
@@ -417,7 +417,7 @@ export default function OnboardingPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-[#2A2A3A] text-[#8888A0] text-xs">
+                      <tr className="border-b border-border text-muted text-xs">
                         <th className="text-left pb-3 font-medium">Employee</th>
                         <th className="text-left pb-3 font-medium">Workflow</th>
                         <th className="text-left pb-3 font-medium">Start Date</th>
@@ -427,7 +427,7 @@ export default function OnboardingPage() {
                         <th className="text-left pb-3 font-medium">Buddy</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#2A2A3A]">
+                    <tbody className="divide-y divide-border">
                       {instances.map((inst) => {
                         const steps = Array.isArray(inst.template?.steps) ? inst.template.steps : [];
                         const progressArr = Array.isArray(inst.progress) ? inst.progress : [];
@@ -448,12 +448,12 @@ export default function OnboardingPage() {
                                 </Avatar>
                                 <div>
                                   <p className="font-medium text-xs">{inst.user?.firstName} {inst.user?.lastName}</p>
-                                  <p className="text-[10px] text-[#8888A0]">{inst.user?.department?.name || "—"}</p>
+                                  <p className="text-[10px] text-muted">{inst.user?.department?.name || "—"}</p>
                                 </div>
                               </div>
                             </td>
                             <td className="py-3 text-xs">{inst.template?.name}</td>
-                            <td className="py-3 text-xs text-[#8888A0]">{new Date(inst.createdAt).toLocaleDateString()}</td>
+                            <td className="py-3 text-xs text-muted">{new Date(inst.createdAt).toLocaleDateString()}</td>
                             <td className="py-3">
                               <div className="flex items-center gap-2">
                                 <Progress value={progressPct} className="h-1.5 w-20" indicatorClassName={progressPct >= 80 ? "bg-green-500" : progressPct >= 50 ? "bg-blue-500" : "bg-orange-500"} />
@@ -461,7 +461,7 @@ export default function OnboardingPage() {
                               </div>
                             </td>
                             <td className="py-3">
-                              <span className={`text-xs font-mono ${daysSinceStart > durationDays ? "text-red-400" : "text-[#8888A0]"}`}>
+                              <span className={`text-xs font-mono ${daysSinceStart > durationDays ? "text-red-400" : "text-muted"}`}>
                                 {daysSinceStart}d / {durationDays}d
                               </span>
                             </td>
@@ -470,7 +470,7 @@ export default function OnboardingPage() {
                                 {inst.status.replace(/_/g, " ")}
                               </Badge>
                             </td>
-                            <td className="py-3 text-xs text-[#8888A0]">
+                            <td className="py-3 text-xs text-muted">
                               {inst.buddy ? `${inst.buddy.firstName} ${inst.buddy.lastName}` : "—"}
                             </td>
                           </tr>
@@ -503,20 +503,20 @@ export default function OnboardingPage() {
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="font-medium">{t.name}</p>
-                          {t.description && <p className="text-xs text-[#8888A0] mt-1">{t.description}</p>}
+                          {t.description && <p className="text-xs text-muted mt-1">{t.description}</p>}
                         </div>
                         <Badge variant="secondary">{t._count?.instances || 0} assigned</Badge>
                       </div>
                       <div className="mt-3 space-y-1">
                         {steps.slice(0, 5).map((s: any, i: number) => (
-                          <div key={i} className="flex items-center gap-2 text-xs text-[#8888A0]">
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1A1A26] text-[10px] font-mono">{i + 1}</span>
+                          <div key={i} className="flex items-center gap-2 text-xs text-muted">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface-2 text-[10px] font-mono">{i + 1}</span>
                             {s.title || s}
                           </div>
                         ))}
-                        {steps.length > 5 && <p className="text-[10px] text-[#8888A0] pl-7">+{steps.length - 5} more steps</p>}
+                        {steps.length > 5 && <p className="text-[10px] text-muted pl-7">+{steps.length - 5} more steps</p>}
                       </div>
-                      <div className="flex items-center gap-3 mt-3 text-xs text-[#8888A0]">
+                      <div className="flex items-center gap-3 mt-3 text-xs text-muted">
                         <span className="flex items-center gap-1"><Clock size={10} /> {t.durationDays} days</span>
                         <span>{steps.length} steps</span>
                       </div>
@@ -578,21 +578,21 @@ export default function OnboardingPage() {
                 const enrolled = c._count?.enrollments || 0;
                 const completions = c.enrollments?.filter((e: any) => e.completedAt).length || 0;
                 return (
-                  <Card key={c.id} className="hover:border-[#3A3A4A] transition-colors">
+                  <Card key={c.id} className="hover:border-muted-2 transition-colors">
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <p className="font-medium">{c.title}</p>
-                          {c.description && <p className="text-xs text-[#8888A0] mt-1 line-clamp-2">{c.description}</p>}
+                          {c.description && <p className="text-xs text-muted mt-1 line-clamp-2">{c.description}</p>}
                         </div>
                         {c.mandatory && <Badge variant="destructive" className="text-[10px] ml-2">Required</Badge>}
                       </div>
-                      <div className="flex items-center gap-3 mt-3 text-xs text-[#8888A0]">
+                      <div className="flex items-center gap-3 mt-3 text-xs text-muted">
                         {c.category && <Badge variant="secondary" className="text-[10px]">{c.category}</Badge>}
                         {c.duration && <span className="flex items-center gap-1"><Clock size={10} /> {c.duration} min</span>}
                       </div>
                       <div className="mt-3 flex items-center justify-between text-xs">
-                        <span className="text-[#8888A0]">{enrolled} enrolled</span>
+                        <span className="text-muted">{enrolled} enrolled</span>
                         <span className="text-green-400">{completions} completed</span>
                       </div>
                     </CardContent>

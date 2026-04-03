@@ -312,10 +312,10 @@ export default function MeetingDetailPage() {
     return (
       <div className="space-y-6 animate-fade-in">
         <div className="flex items-center gap-4">
-          <div className="h-8 w-8 bg-[#1A1A26] rounded animate-pulse" />
-          <div className="h-6 w-64 bg-[#1A1A26] rounded animate-pulse" />
+          <div className="h-8 w-8 bg-surface-2 rounded animate-pulse" />
+          <div className="h-6 w-64 bg-surface-2 rounded animate-pulse" />
         </div>
-        <div className="h-96 bg-[#1A1A26] rounded-lg animate-pulse" />
+        <div className="h-96 bg-surface-2 rounded-lg animate-pulse" />
       </div>
     );
   }
@@ -323,7 +323,7 @@ export default function MeetingDetailPage() {
   if (!meeting) {
     return (
       <div className="text-center py-20">
-        <p className="text-[#8888A0]">Meeting not found</p>
+        <p className="text-muted">Meeting not found</p>
         <Button variant="outline" className="mt-4" onClick={() => router.push("/meetings")}>Back to Meetings</Button>
       </div>
     );
@@ -347,7 +347,7 @@ export default function MeetingDetailPage() {
                 {getMeetingTypeLabel(meeting.type)}
               </Badge>
             </div>
-            <p className="text-sm text-[#8888A0] flex items-center gap-3 mt-0.5">
+            <p className="text-sm text-muted flex items-center gap-3 mt-0.5">
               <span className="flex items-center gap-1"><Calendar size={12} /> {formatDateTime(meeting.scheduledAt)}</span>
               <span className="flex items-center gap-1"><Clock size={12} /> {meeting.duration} min</span>
               <span className="flex items-center gap-1"><Users size={12} /> {meeting.attendees.length} attendees</span>
@@ -370,7 +370,7 @@ export default function MeetingDetailPage() {
             </p>
             <div className="space-y-1">
               {prevIncomplete.map((ai) => (
-                <div key={ai.id} className="flex items-center gap-2 text-xs text-[#8888A0]">
+                <div key={ai.id} className="flex items-center gap-2 text-xs text-muted">
                   <Square size={12} className="text-orange-400 shrink-0" />
                   <span>{ai.title}</span>
                   <span className="ml-auto">{ai.assignee.firstName} {ai.assignee.lastName}</span>
@@ -411,7 +411,7 @@ export default function MeetingDetailPage() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">Title</Label>
+                  <Label className="text-[10px] text-muted uppercase tracking-wider">Title</Label>
                   {editing ? (
                     <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="mt-1" />
                   ) : (
@@ -419,24 +419,24 @@ export default function MeetingDetailPage() {
                   )}
                 </div>
                 <div>
-                  <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">Type</Label>
+                  <Label className="text-[10px] text-muted uppercase tracking-wider">Type</Label>
                   <p className="text-sm mt-1">{getMeetingTypeLabel(meeting.type)}</p>
                 </div>
                 <div>
-                  <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">Scheduled</Label>
+                  <Label className="text-[10px] text-muted uppercase tracking-wider">Scheduled</Label>
                   <p className="text-sm mt-1">{formatDateTime(meeting.scheduledAt)}</p>
                 </div>
                 <div>
-                  <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">Duration</Label>
+                  <Label className="text-[10px] text-muted uppercase tracking-wider">Duration</Label>
                   <p className="text-sm mt-1">{meeting.duration} minutes</p>
                 </div>
               </div>
               <div>
-                <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">Agenda</Label>
+                <Label className="text-[10px] text-muted uppercase tracking-wider">Agenda</Label>
                 {editing ? (
                   <Textarea value={editAgenda} onChange={(e) => setEditAgenda(e.target.value)} className="mt-1" rows={4} />
                 ) : (
-                  <p className="text-sm mt-1 text-[#8888A0] whitespace-pre-wrap">{meeting.agenda || "No agenda set."}</p>
+                  <p className="text-sm mt-1 text-muted whitespace-pre-wrap">{meeting.agenda || "No agenda set."}</p>
                 )}
               </div>
             </CardContent>
@@ -450,7 +450,7 @@ export default function MeetingDetailPage() {
             <CardContent>
               <div className="flex flex-wrap gap-3">
                 {meeting.attendees.map((a) => (
-                  <div key={a.id} className="flex items-center gap-2 p-2 rounded-lg border border-[#2A2A3A] bg-[#0D0D14]">
+                  <div key={a.id} className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface-3">
                     <Avatar className="h-7 w-7">
                       <AvatarFallback className="text-[10px]">
                         {a.user.firstName[0]}{a.user.lastName[0]}
@@ -484,7 +484,7 @@ export default function MeetingDetailPage() {
                 onChange={(e) => { setNotes(e.target.value); setNotesDirty(true); }}
                 placeholder="Write meeting notes here... (auto-saves every 30 seconds)"
                 rows={16}
-                className="bg-[#0D0D14] border-[#2A2A3A] font-mono text-sm"
+                className="bg-surface-3 border-border font-mono text-sm"
               />
             </CardContent>
           </Card>
@@ -503,17 +503,17 @@ export default function MeetingDetailPage() {
             </CardHeader>
             <CardContent>
               {decisions.length === 0 ? (
-                <div className="text-center py-8 text-[#8888A0] text-sm">No decisions recorded yet.</div>
+                <div className="text-center py-8 text-muted text-sm">No decisions recorded yet.</div>
               ) : (
                 <div className="space-y-2">
                   {decisions.map((d, i) => (
-                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-[#2A2A3A] bg-[#0D0D14] group">
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-border bg-surface-3 group">
                       <div className="rounded-full bg-purple-500/10 p-1.5 mt-0.5 shrink-0">
                         <MessageSquare size={12} className="text-purple-400" />
                       </div>
                       <div className="flex-1">
                         <p className="text-sm">{d.text}</p>
-                        <p className="text-[10px] text-[#8888A0] mt-1">{d.date ? formatDate(d.date) : ""}</p>
+                        <p className="text-[10px] text-muted mt-1">{d.date ? formatDate(d.date) : ""}</p>
                       </div>
                       <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 text-red-400" onClick={() => removeDecision(i)}>
                         <X size={12} />
@@ -541,25 +541,25 @@ export default function MeetingDetailPage() {
             </CardHeader>
             <CardContent>
               {meeting.actionItems.length === 0 ? (
-                <div className="text-center py-8 text-[#8888A0] text-sm">No action items yet.</div>
+                <div className="text-center py-8 text-muted text-sm">No action items yet.</div>
               ) : (
                 <div className="space-y-2">
                   {meeting.actionItems.map((item) => (
                     <div key={item.id} className={`flex items-start gap-3 p-3 rounded-lg border transition-all group ${
-                      item.status === "COMPLETED" ? "border-green-500/20 bg-green-500/5" : "border-[#2A2A3A] bg-[#0D0D14]"
+                      item.status === "COMPLETED" ? "border-green-500/20 bg-green-500/5" : "border-border bg-surface-3"
                     }`}>
                       <button onClick={() => toggleActionItem(item)} className="mt-0.5 shrink-0">
                         {item.status === "COMPLETED" ? (
                           <CheckCircle size={18} className="text-green-400" />
                         ) : (
-                          <Square size={18} className="text-[#8888A0] hover:text-purple-400" />
+                          <Square size={18} className="text-muted hover:text-purple-400" />
                         )}
                       </button>
                       <div className="flex-1 min-w-0">
-                        <p className={`text-sm font-medium ${item.status === "COMPLETED" ? "line-through text-[#8888A0]" : ""}`}>
+                        <p className={`text-sm font-medium ${item.status === "COMPLETED" ? "line-through text-muted" : ""}`}>
                           {item.title}
                         </p>
-                        <div className="flex items-center gap-3 mt-1 text-[10px] text-[#8888A0]">
+                        <div className="flex items-center gap-3 mt-1 text-[10px] text-muted">
                           <span>{item.assignee.firstName} {item.assignee.lastName}</span>
                           {item.deadline && <span>Due {formatDate(item.deadline)}</span>}
                         </div>
@@ -639,7 +639,7 @@ export default function MeetingDetailPage() {
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader><DialogTitle>Delete Meeting</DialogTitle></DialogHeader>
-          <p className="text-sm text-[#8888A0] py-4">
+          <p className="text-sm text-muted py-4">
             Are you sure you want to delete &ldquo;{meeting.title}&rdquo;? This will also delete all notes, decisions, and action items.
           </p>
           <DialogFooter>

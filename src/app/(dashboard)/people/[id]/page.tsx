@@ -78,7 +78,7 @@ function getScoreBg(score: number) {
 
 function ScoreTrendChart({ history }: { history: Array<{ period: string; score: number }> }) {
   if (!history || history.length === 0) {
-    return <p className="text-xs text-[#8888A0] text-center py-4">No score history yet</p>;
+    return <p className="text-xs text-muted text-center py-4">No score history yet</p>;
   }
 
   const maxScore = Math.max(...history.map((h) => h.score), 100);
@@ -95,13 +95,13 @@ function ScoreTrendChart({ history }: { history: Array<{ period: string; score: 
             <span className={`text-[10px] font-mono font-bold ${getScoreColor(h.score)}`}>
               {h.score}
             </span>
-            <div className="w-full bg-[#2A2A3A] rounded-t-md relative" style={{ height: "100%" }}>
+            <div className="w-full bg-border rounded-t-md relative" style={{ height: "100%" }}>
               <div
                 className={`absolute bottom-0 w-full rounded-t-md transition-all ${getScoreBg(h.score)}`}
                 style={{ height: `${height}%` }}
               />
             </div>
-            <span className="text-[9px] text-[#8888A0]">{label}</span>
+            <span className="text-[9px] text-muted">{label}</span>
           </div>
         );
       })}
@@ -131,10 +131,10 @@ function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | nu
         if (value == null) return null;
         return (
           <div key={key} className="flex items-center gap-3">
-            <Icon size={12} className="text-[#8888A0] flex-shrink-0" />
+            <Icon size={12} className="text-muted flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-[#8888A0]">{label} ({weight}%)</span>
+                <span className="text-muted">{label} ({weight}%)</span>
                 <span className={`font-mono font-bold ${getScoreColor(value)}`}>{value}</span>
               </div>
               <Progress value={value} className="h-1" indicatorClassName={getScoreBg(value)} />
@@ -147,7 +147,7 @@ function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | nu
           <Heart size={12} className="text-pink-400 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-[#8888A0]">Kudos Bonus</span>
+              <span className="text-muted">Kudos Bonus</span>
               <span className="font-mono font-bold text-pink-400">+{breakdown.kudosBonus as number}</span>
             </div>
           </div>
@@ -177,20 +177,20 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
     return (
       <div className="space-y-3">
         {[1,2,3].map((i) => (
-          <div key={i} className="h-16 bg-[#12121A] rounded-lg border border-[#2A2A3A] animate-pulse" />
+          <div key={i} className="h-16 bg-surface rounded-lg border border-border animate-pulse" />
         ))}
       </div>
     );
   }
 
   if (assignments.length === 0) {
-    return <p className="text-[#8888A0] text-sm py-8 text-center">No KRA assignments yet</p>;
+    return <p className="text-muted text-sm py-8 text-center">No KRA assignments yet</p>;
   }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs text-[#8888A0]">
+        <p className="text-xs text-muted">
           Total weightage: <span className={totalWeightage === 100 ? "text-green-400 font-medium" : "text-orange-400 font-medium"}>{totalWeightage}%</span>
         </p>
         <Progress
@@ -208,7 +208,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
         }).filter(Boolean) ?? [];
 
         return (
-          <div key={a.id} className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-4">
+          <div key={a.id} className="rounded-lg border border-border bg-surface p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Target size={14} className="text-purple-400" />
@@ -216,7 +216,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                   <p className="text-sm font-medium">{a.kra?.name}</p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <Badge variant="outline" className="text-[10px]">{a.kra?.category}</Badge>
-                    <span className="text-[10px] text-[#8888A0]">{a.period}</span>
+                    <span className="text-[10px] text-muted">{a.period}</span>
                     <Badge className={`text-[10px] ${a.status === "ACTIVE" ? "bg-green-500/20 text-green-400" : "bg-slate-500/20 text-slate-400"}`}>{a.status}</Badge>
                   </div>
                 </div>
@@ -226,11 +226,11 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
               </div>
             </div>
             {kpiProgress.length > 0 && (
-              <div className="mt-3 space-y-2 border-t border-[#2A2A3A] pt-3">
+              <div className="mt-3 space-y-2 border-t border-border pt-3">
                 {kpiProgress.map((kpi: any, i: number) => (
                   <div key={i}>
                     <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="text-[#8888A0]">{kpi.name}</span>
+                      <span className="text-muted">{kpi.name}</span>
                       <span className={getScoreColor(kpi.pct)}>{kpi.actual}/{kpi.target} {kpi.unit} ({kpi.pct}%)</span>
                     </div>
                     <Progress value={Math.min(kpi.pct, 100)} className="h-1" indicatorClassName={getProgressColor(kpi.pct)} />
@@ -321,13 +321,13 @@ export default function UserProfilePage() {
   if (loading) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="h-8 w-48 bg-[#1A1A26] rounded animate-pulse" />
+        <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-28 bg-[#12121A] rounded-lg border border-[#2A2A3A] animate-pulse" />
+            <div key={i} className="h-28 bg-surface rounded-lg border border-border animate-pulse" />
           ))}
         </div>
-        <div className="h-64 bg-[#12121A] rounded-lg border border-[#2A2A3A] animate-pulse" />
+        <div className="h-64 bg-surface rounded-lg border border-border animate-pulse" />
       </div>
     );
   }
@@ -335,7 +335,7 @@ export default function UserProfilePage() {
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <p className="text-[#8888A0]">User not found</p>
+        <p className="text-muted">User not found</p>
         <Button variant="ghost" className="mt-2" onClick={() => router.push("/people")}>Back to People</Button>
       </div>
     );
@@ -373,8 +373,8 @@ export default function UserProfilePage() {
                   <Edit3 size={14} /> Edit
                 </Button>
               </div>
-              <p className="text-[#8888A0] mt-1">{user.role?.title || "No role assigned"}</p>
-              <div className="flex items-center gap-6 mt-3 text-sm text-[#8888A0]">
+              <p className="text-muted mt-1">{user.role?.title || "No role assigned"}</p>
+              <div className="flex items-center gap-6 mt-3 text-sm text-muted">
                 <span className="flex items-center gap-1"><Mail size={14} /> {user.email}</span>
                 {user.phone && <span className="flex items-center gap-1"><Phone size={14} /> {user.phone}</span>}
                 {user.department && (
@@ -466,10 +466,10 @@ export default function UserProfilePage() {
                 <p className={`text-4xl font-bold font-mono ${getScoreColor(perf.compositeScore)}`}>
                   {perf.compositeScore}
                 </p>
-                <p className="text-xs text-[#8888A0] mt-1">Composite Score</p>
+                <p className="text-xs text-muted mt-1">Composite Score</p>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-[#8888A0] font-medium mb-2">Score Breakdown</p>
+                <p className="text-xs text-muted font-medium mb-2">Score Breakdown</p>
                 <ScoreBreakdown breakdown={perf.scoreBreakdown} />
               </div>
             </div>
@@ -494,33 +494,33 @@ export default function UserProfilePage() {
         <Card>
           <CardContent className="p-4 text-center">
             <Target size={20} className="mx-auto text-purple-400 mb-1" />
-            <p className={`text-2xl font-bold font-mono ${perf.avgKPI ? getScoreColor(perf.avgKPI) : "text-[#8888A0]"}`}>
+            <p className={`text-2xl font-bold font-mono ${perf.avgKPI ? getScoreColor(perf.avgKPI) : "text-muted"}`}>
               {perf.avgKPI ?? "N/A"}
             </p>
-            <p className="text-xs text-[#8888A0]">Avg KPI Score</p>
+            <p className="text-xs text-muted">Avg KPI Score</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Target size={20} className="mx-auto text-blue-400 mb-1" />
             <p className="text-2xl font-bold font-mono">{perf.activeKRAs ?? 0}</p>
-            <p className="text-xs text-[#8888A0]">Active KRAs</p>
+            <p className="text-xs text-muted">Active KRAs</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Smile size={20} className="mx-auto text-green-400 mb-1" />
             <p className="text-2xl font-bold font-mono">{perf.avgMood ?? "N/A"}</p>
-            <p className="text-xs text-[#8888A0]">Avg Mood</p>
+            <p className="text-xs text-muted">Avg Mood</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Star size={20} className="mx-auto text-orange-400 mb-1" />
-            <p className={`text-2xl font-bold font-mono ${perf.latestReviewScore ? getScoreColor(perf.latestReviewScore) : "text-[#8888A0]"}`}>
+            <p className={`text-2xl font-bold font-mono ${perf.latestReviewScore ? getScoreColor(perf.latestReviewScore) : "text-muted"}`}>
               {perf.latestReviewScore ?? "N/A"}
             </p>
-            <p className="text-xs text-[#8888A0]">Review Score</p>
+            <p className="text-xs text-muted">Review Score</p>
           </CardContent>
         </Card>
       </div>
@@ -545,19 +545,19 @@ export default function UserProfilePage() {
 
         <TabsContent value="calendar" className="mt-4 space-y-2">
           {!user.tasks || user.tasks.length === 0 ? (
-            <p className="text-[#8888A0] text-sm py-8 text-center">No calendar entries yet</p>
+            <p className="text-muted text-sm py-8 text-center">No calendar entries yet</p>
           ) : (
             user.tasks.map((t: any) => (
-              <div key={t.id} className="flex items-center gap-3 rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3">
+              <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3">
                 <div className={`h-2 w-2 rounded-full flex-shrink-0 ${
                   t.status === "COMPLETED" ? "bg-green-500" : t.status === "IN_PROGRESS" ? "bg-amber-500" : "bg-blue-500"
                 }`} />
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm ${t.status === "COMPLETED" ? "line-through text-[#8888A0]" : ""}`}>{t.title}</p>
+                  <p className={`text-sm ${t.status === "COMPLETED" ? "line-through text-muted" : ""}`}>{t.title}</p>
                   <div className="flex items-center gap-2 mt-1">
                     <Badge className="text-[10px]">{t.status.replace(/_/g, " ")}</Badge>
                     {t.date && (
-                      <span className="text-[10px] text-[#8888A0] flex items-center gap-0.5">
+                      <span className="text-[10px] text-muted flex items-center gap-0.5">
                         <Clock size={8} /> {new Date(t.date).toLocaleDateString()}
                       </span>
                     )}
@@ -577,20 +577,20 @@ export default function UserProfilePage() {
 
         <TabsContent value="kpis" className="mt-4 space-y-2">
           {user.kpiRecords.length === 0 ? (
-            <p className="text-[#8888A0] text-sm py-8 text-center">No KPI records yet</p>
+            <p className="text-muted text-sm py-8 text-center">No KPI records yet</p>
           ) : (
             user.kpiRecords.map((r: any) => (
-              <div key={r.id} className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3">
+              <div key={r.id} className="rounded-lg border border-border bg-surface p-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">{r.kpi.name}</p>
-                    <p className="text-xs text-[#8888A0]">Period: {r.period} · {r.kpi.unit || ""}</p>
+                    <p className="text-xs text-muted">Period: {r.period} · {r.kpi.unit || ""}</p>
                   </div>
                   <div className="text-right">
-                    <p className={`text-lg font-bold font-mono ${r.score != null ? getScoreColor(r.score) : "text-[#8888A0]"}`}>
+                    <p className={`text-lg font-bold font-mono ${r.score != null ? getScoreColor(r.score) : "text-muted"}`}>
                       {r.score ?? "Pending"}
                     </p>
-                    <p className="text-xs text-[#8888A0]">
+                    <p className="text-xs text-muted">
                       {r.actualValue ?? "?"}/{r.targetValue}
                     </p>
                   </div>
@@ -605,18 +605,18 @@ export default function UserProfilePage() {
 
         <TabsContent value="skills" className="mt-4">
           {user.skills.length === 0 ? (
-            <p className="text-[#8888A0] text-sm py-8 text-center">No skills added yet</p>
+            <p className="text-muted text-sm py-8 text-center">No skills added yet</p>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               {user.skills.map((s: any) => (
-                <div key={s.id} className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3">
+                <div key={s.id} className="rounded-lg border border-border bg-surface p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-medium">{s.name}</p>
-                    <span className="text-xs text-[#8888A0]">{s.selfRating}/10</span>
+                    <span className="text-xs text-muted">{s.selfRating}/10</span>
                   </div>
                   <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-purple-500" />
                   {s.managerRating && (
-                    <p className="text-[10px] text-[#8888A0] mt-1">Manager rating: {s.managerRating}/10</p>
+                    <p className="text-[10px] text-muted mt-1">Manager rating: {s.managerRating}/10</p>
                   )}
                 </div>
               ))}
@@ -626,14 +626,14 @@ export default function UserProfilePage() {
 
         <TabsContent value="reviews" className="mt-4 space-y-2">
           {user.reviewsAsSubject.length === 0 ? (
-            <p className="text-[#8888A0] text-sm py-8 text-center">No reviews yet</p>
+            <p className="text-muted text-sm py-8 text-center">No reviews yet</p>
           ) : (
             user.reviewsAsSubject.map((r: any) => (
-              <div key={r.id} className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-4">
+              <div key={r.id} className="rounded-lg border border-border bg-surface p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">{r.cycle.name}</p>
-                    <p className="text-xs text-[#8888A0]">
+                    <p className="text-xs text-muted">
                       Reviewed by {r.reviewer.firstName} {r.reviewer.lastName}
                     </p>
                   </div>
@@ -656,14 +656,14 @@ export default function UserProfilePage() {
 
         <TabsContent value="kudos" className="mt-4 space-y-2">
           {(!user.kudosReceived || user.kudosReceived.length === 0) ? (
-            <p className="text-[#8888A0] text-sm py-8 text-center">No kudos received yet</p>
+            <p className="text-muted text-sm py-8 text-center">No kudos received yet</p>
           ) : (
             user.kudosReceived.map((k: any) => (
-              <div key={k.id} className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-4">
+              <div key={k.id} className="rounded-lg border border-border bg-surface p-4">
                 <div className="flex items-start gap-3">
                   <Heart size={14} className="text-pink-400 mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-[#8888A0]">
+                    <p className="text-xs text-muted">
                       From <span className="text-white font-medium">{k.giver.firstName} {k.giver.lastName}</span>
                     </p>
                     <p className="text-sm mt-1 text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
@@ -671,7 +671,7 @@ export default function UserProfilePage() {
                       {k.companyValue && (
                         <Badge variant="secondary" className="text-[10px]">{k.companyValue}</Badge>
                       )}
-                      <span className="text-[10px] text-[#8888A0]">{new Date(k.createdAt).toLocaleDateString()}</span>
+                      <span className="text-[10px] text-muted">{new Date(k.createdAt).toLocaleDateString()}</span>
                     </div>
                   </div>
                 </div>
@@ -682,13 +682,13 @@ export default function UserProfilePage() {
 
         <TabsContent value="checkins" className="mt-4 space-y-2">
           {user.checkIns.length === 0 ? (
-            <p className="text-[#8888A0] text-sm py-8 text-center">No check-ins yet</p>
+            <p className="text-muted text-sm py-8 text-center">No check-ins yet</p>
           ) : (
             user.checkIns.map((c: any) => (
-              <div key={c.id} className="rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3">
+              <div key={c.id} className="rounded-lg border border-border bg-surface p-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-2xl">{moodEmojis[c.mood] || "😐"}</span>
-                  <span className="text-xs text-[#8888A0]">{new Date(c.createdAt).toLocaleDateString()}</span>
+                  <span className="text-xs text-muted">{new Date(c.createdAt).toLocaleDateString()}</span>
                 </div>
                 {c.wentWell && <p className="text-xs text-green-400 mb-1">✓ {c.wentWell}</p>}
                 {c.challenges && <p className="text-xs text-orange-400 mb-1">⚠ {c.challenges}</p>}
@@ -700,13 +700,13 @@ export default function UserProfilePage() {
 
         <TabsContent value="reports" className="mt-4">
           {user.directReports.length === 0 ? (
-            <p className="text-[#8888A0] text-sm py-8 text-center">No direct reports</p>
+            <p className="text-muted text-sm py-8 text-center">No direct reports</p>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               {user.directReports.map((r: any) => (
                 <div
                   key={r.id}
-                  className="flex items-center gap-3 rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3 cursor-pointer hover:border-[#3A3A4A] transition-colors"
+                  className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3 cursor-pointer hover:border-muted-2 transition-colors"
                   onClick={() => router.push(`/people/${r.id}`)}
                 >
                   <Avatar className="h-10 w-10">
@@ -716,7 +716,7 @@ export default function UserProfilePage() {
                   </Avatar>
                   <div>
                     <p className="text-sm font-medium">{r.firstName} {r.lastName}</p>
-                    <p className="text-xs text-[#8888A0]">{r.role?.title || "No role"}</p>
+                    <p className="text-xs text-muted">{r.role?.title || "No role"}</p>
                   </div>
                 </div>
               ))}

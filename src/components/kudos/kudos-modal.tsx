@@ -141,7 +141,7 @@ export function KudosModal({
         {step === "select" && (
           <div className="space-y-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8888A0]" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
               <Input
                 placeholder="Search people..."
                 className="pl-10"
@@ -152,14 +152,14 @@ export function KudosModal({
             </div>
             <div className="max-h-64 overflow-y-auto space-y-1">
               {loadingPeople ? (
-                <div className="py-8 text-center text-sm text-[#8888A0]">Loading...</div>
+                <div className="py-8 text-center text-sm text-muted">Loading...</div>
               ) : filtered.length === 0 ? (
-                <div className="py-8 text-center text-sm text-[#8888A0]">No people found</div>
+                <div className="py-8 text-center text-sm text-muted">No people found</div>
               ) : (
                 filtered.slice(0, 20).map((person) => (
                   <button
                     key={person.id}
-                    className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-[#1A1A26] transition-colors text-left"
+                    className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface-2 transition-colors text-left"
                     onClick={() => handleSelectPerson(person)}
                   >
                     <Avatar className="h-8 w-8">
@@ -169,7 +169,7 @@ export function KudosModal({
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium">{person.firstName} {person.lastName}</p>
-                      <p className="text-[10px] text-[#8888A0]">
+                      <p className="text-[10px] text-muted">
                         {person.role?.title || "No role"}{person.department?.name ? ` · ${person.department.name}` : ""}
                       </p>
                     </div>
@@ -183,7 +183,7 @@ export function KudosModal({
         {step === "compose" && selectedPerson && (
           <div className="space-y-4">
             {/* Selected person */}
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-[#1A1A26] border border-[#2A2A3A]">
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-surface-2 border border-border">
               <Avatar className="h-10 w-10">
                 <AvatarFallback className="bg-purple-600/20 text-purple-400 text-sm">
                   {selectedPerson.firstName[0]}{selectedPerson.lastName[0]}
@@ -191,7 +191,7 @@ export function KudosModal({
               </Avatar>
               <div className="flex-1">
                 <p className="text-sm font-medium">{selectedPerson.firstName} {selectedPerson.lastName}</p>
-                <p className="text-xs text-[#8888A0]">{selectedPerson.role?.title || "No role"}</p>
+                <p className="text-xs text-muted">{selectedPerson.role?.title || "No role"}</p>
               </div>
               {!preselectedUserId && (
                 <Button variant="ghost" size="sm" onClick={() => setStep("select")}>
@@ -214,7 +214,7 @@ export function KudosModal({
 
             {/* Company values */}
             <div className="space-y-2">
-              <Label>Company Value <span className="text-[#8888A0] text-xs font-normal">(optional)</span></Label>
+              <Label>Company Value <span className="text-muted text-xs font-normal">(optional)</span></Label>
               <div className="flex flex-wrap gap-2">
                 {COMPANY_VALUES.map((value) => (
                   <Badge
@@ -223,7 +223,7 @@ export function KudosModal({
                     className={`cursor-pointer transition-colors ${
                       selectedValue === value
                         ? "bg-purple-600 hover:bg-purple-700"
-                        : "hover:bg-[#1A1A26]"
+                        : "hover:bg-surface-2"
                     }`}
                     onClick={() => setSelectedValue(selectedValue === value ? null : value)}
                   >

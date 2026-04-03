@@ -39,7 +39,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <Card className="border-[#2A2A3A] bg-[#12121A]/80 backdrop-blur">
+    <Card className="border-border bg-surface/80 backdrop-blur">
       <CardHeader className="text-center">
         <div className="mb-4">
           <span
@@ -48,7 +48,7 @@ export default function ForgotPasswordPage() {
           >
             workwrk
           </span>
-          <span className="text-[#8888A0] opacity-50 text-3xl font-extrabold">.</span>
+          <span className="text-muted opacity-50 text-3xl font-extrabold">.</span>
         </div>
         <CardTitle className="text-xl">Reset your password</CardTitle>
         <CardDescription>
@@ -63,7 +63,7 @@ export default function ForgotPasswordPage() {
             <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-4 text-sm text-green-400">
               If an account with that email exists, we've sent a password reset link. Check your inbox (and spam folder).
             </div>
-            <p className="text-center text-sm text-[#8888A0]">
+            <p className="text-center text-sm text-muted">
               <Link href="/login" className="text-purple-400 hover:text-purple-300">
                 Back to Sign In
               </Link>
@@ -97,7 +97,7 @@ export default function ForgotPasswordPage() {
                 "Send Reset Link"
               )}
             </Button>
-            <p className="text-center text-sm text-[#8888A0]">
+            <p className="text-center text-sm text-muted">
               Remember your password?{" "}
               <Link href="/login" className="text-purple-400 hover:text-purple-300">
                 Sign In

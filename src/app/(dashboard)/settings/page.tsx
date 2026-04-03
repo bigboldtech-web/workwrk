@@ -420,7 +420,7 @@ export default function SettingsPage() {
     return (
       <button
         onClick={onChange}
-        className={`h-6 w-11 rounded-full transition-colors ${checked ? "bg-purple-600" : "bg-[#2A2A3A]"}`}
+        className={`h-6 w-11 rounded-full transition-colors ${checked ? "bg-purple-600" : "bg-border"}`}
       >
         <span className={`block h-5 w-5 rounded-full bg-white transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`} />
       </button>
@@ -450,11 +450,11 @@ export default function SettingsPage() {
       <div className="space-y-6 animate-fade-in">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Manage your organization settings</p>
+          <p className="text-muted text-sm mt-1">Manage your organization settings</p>
         </div>
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-48 animate-pulse rounded-xl bg-[#1A1A26]" />
+            <div key={i} className="h-48 animate-pulse rounded-xl bg-surface-2" />
           ))}
         </div>
       </div>
@@ -467,7 +467,7 @@ export default function SettingsPage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-[#8888A0] text-sm mt-1">Manage your organization settings and preferences</p>
+        <p className="text-muted text-sm mt-1">Manage your organization settings and preferences</p>
       </div>
 
       <Tabs defaultValue="general">
@@ -492,11 +492,11 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               {/* Logo Upload */}
               <div className="flex items-center gap-4">
-                <div className="h-16 w-16 rounded-lg border border-[#2A2A3A] bg-[#1A1A26] flex items-center justify-center overflow-hidden">
+                <div className="h-16 w-16 rounded-lg border border-border bg-surface-2 flex items-center justify-center overflow-hidden">
                   {logoUrl ? (
                     <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
                   ) : (
-                    <Building2 size={28} className="text-[#8888A0]" />
+                    <Building2 size={28} className="text-muted" />
                   )}
                 </div>
                 <div className="space-y-1">
@@ -515,12 +515,12 @@ export default function SettingsPage() {
                       </span>
                     </label>
                     {logoUrl && (
-                      <Button variant="ghost" size="sm" onClick={handleLogoRemove} disabled={uploadingLogo} className="h-8 text-xs text-[#8888A0] hover:text-red-400">
+                      <Button variant="ghost" size="sm" onClick={handleLogoRemove} disabled={uploadingLogo} className="h-8 text-xs text-muted hover:text-red-400">
                         Remove
                       </Button>
                     )}
                   </div>
-                  <p className="text-xs text-[#8888A0]">PNG, JPEG, WebP, or SVG. Max 2MB.</p>
+                  <p className="text-xs text-muted">PNG, JPEG, WebP, or SVG. Max 2MB.</p>
                 </div>
               </div>
 
@@ -547,7 +547,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Timezone</Label>
-                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
+                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
                     <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
                     <option value="America/New_York">America/New_York (EST)</option>
                     <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
@@ -558,7 +558,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Currency</Label>
-                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
+                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
                     <option value="INR">INR (&#8377;)</option>
                     <option value="USD">USD ($)</option>
                     <option value="EUR">EUR (&euro;)</option>
@@ -569,7 +569,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Fiscal Year Start</Label>
-                  <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(parseInt(e.target.value))} className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
+                  <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(parseInt(e.target.value))} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
                     {MONTH_NAMES.map((name, i) => (
                       <option key={i} value={i + 1}>{name}</option>
                     ))}
@@ -588,7 +588,7 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Default Review Frequency</Label>
-                <select value={reviewFrequency} onChange={(e) => setReviewFrequency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
+                <select value={reviewFrequency} onChange={(e) => setReviewFrequency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
                   <option value="MONTHLY">Monthly</option>
                   <option value="QUARTERLY">Quarterly</option>
                   <option value="ANNUALLY">Annually</option>
@@ -606,7 +606,7 @@ export default function SettingsPage() {
                     { key: "self", label: "Self Rating %" },
                   ] as const).map(({ key, label }) => (
                     <div key={key} className="space-y-1">
-                      <Label className="text-xs text-[#8888A0]">{label}</Label>
+                      <Label className="text-xs text-muted">{label}</Label>
                       <Input
                         type="number"
                         min={0}
@@ -646,7 +646,7 @@ export default function SettingsPage() {
                           setScoringBands(updated);
                         }}
                       />
-                      <span className="text-[#8888A0] text-xs">to</span>
+                      <span className="text-muted text-xs">to</span>
                       <Input
                         type="number"
                         className="w-20"
@@ -679,10 +679,10 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {ALL_MODULES.map((mod) => (
-                <div key={mod.key} className="flex items-center justify-between rounded-lg border border-[#2A2A3A] p-3">
+                <div key={mod.key} className="flex items-center justify-between rounded-lg border border-border p-3">
                   <div>
                     <span className="text-sm font-medium">{mod.label}</span>
-                    <p className="text-xs text-[#8888A0]">{mod.description}</p>
+                    <p className="text-xs text-muted">{mod.description}</p>
                   </div>
                   <Toggle
                     checked={enabledModules.includes(mod.key)}
@@ -717,7 +717,7 @@ export default function SettingsPage() {
                 <select
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value)}
-                  className="h-9 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] px-3 text-sm text-[#E8E8F0]"
+                  className="h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground"
                 >
                   <option value="EMPLOYEE">Employee</option>
                   <option value="TEAM_LEAD">Team Lead</option>
@@ -732,19 +732,19 @@ export default function SettingsPage() {
               </div>
 
               <div className="mt-4">
-                <p className="text-xs text-[#8888A0] mb-3">
+                <p className="text-xs text-muted mb-3">
                   Team size: {data?.usage.users || 0} members
                   {limits.users < 99999 && ` (limit: ${limits.users})`}
                 </p>
 
                 {pendingInvites.length > 0 && (
                   <div className="space-y-2">
-                    <h4 className="text-sm font-medium text-[#8888A0]">Pending Invitations</h4>
+                    <h4 className="text-sm font-medium text-muted">Pending Invitations</h4>
                     {pendingInvites.filter(inv => !inv.accepted).map((inv) => (
-                      <div key={inv.id} className="flex items-center justify-between rounded-lg border border-[#2A2A3A] p-3">
+                      <div key={inv.id} className="flex items-center justify-between rounded-lg border border-border p-3">
                         <div>
                           <p className="text-sm">{inv.email}</p>
-                          <p className="text-xs text-[#8888A0]">
+                          <p className="text-xs text-muted">
                             {inv.accessLevel} &middot; Expires {new Date(inv.expiresAt).toLocaleDateString()}
                           </p>
                         </div>
@@ -796,7 +796,7 @@ export default function SettingsPage() {
                   { key: "requireNumbers", label: "Require numbers" },
                   { key: "twoFactorEnabled", label: "Require two-factor authentication" },
                 ].map((item) => (
-                  <div key={item.key} className="flex items-center justify-between rounded-lg border border-[#2A2A3A] p-3">
+                  <div key={item.key} className="flex items-center justify-between rounded-lg border border-border p-3">
                     <span className="text-sm">{item.label}</span>
                     <Toggle
                       checked={!!security[item.key as keyof typeof security]}
@@ -823,7 +823,7 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
                 <div>
                   <span className="text-sm font-medium">Enable email notifications globally</span>
-                  <p className="text-xs text-[#8888A0]">Turn off to disable all email notifications for the company</p>
+                  <p className="text-xs text-muted">Turn off to disable all email notifications for the company</p>
                 </div>
                 <Toggle
                   checked={!!notifPrefs.emailEnabled}
@@ -832,21 +832,21 @@ export default function SettingsPage() {
               </div>
 
               {Object.entries(notifLabels).map(([key, label]) => (
-                <div key={key} className="flex items-center justify-between rounded-lg border border-[#2A2A3A] p-3">
+                <div key={key} className="flex items-center justify-between rounded-lg border border-border p-3">
                   <span className="text-sm">{label}</span>
                   <Toggle checked={!!notifPrefs[key]} onChange={() => toggleNotif(key)} />
                 </div>
               ))}
 
-              <div className="flex items-center justify-between rounded-lg border border-[#2A2A3A] p-3">
+              <div className="flex items-center justify-between rounded-lg border border-border p-3">
                 <div>
                   <span className="text-sm">Overdue item reminder frequency</span>
-                  <p className="text-xs text-[#8888A0]">How often to remind about overdue tasks and SOPs</p>
+                  <p className="text-xs text-muted">How often to remind about overdue tasks and SOPs</p>
                 </div>
                 <select
                   value={notifPrefs.reminderFrequency || "daily"}
                   onChange={(e) => setNotifPrefs((prev) => ({ ...prev, reminderFrequency: e.target.value }))}
-                  className="h-8 rounded-lg border border-[#2A2A3A] bg-[#0A0A0F] px-2 text-xs text-[#E8E8F0]"
+                  className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground"
                 >
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
@@ -873,7 +873,7 @@ export default function SettingsPage() {
                 { key: "kudosNotifications", label: "Recognition & kudos emails" },
                 { key: "dailyDigest", label: "Daily digest summary" },
               ].map((item) => (
-                <div key={item.key} className="flex items-center justify-between rounded-lg border border-[#2A2A3A] p-3">
+                <div key={item.key} className="flex items-center justify-between rounded-lg border border-border p-3">
                   <span className="text-sm">{item.label}</span>
                   <Toggle
                     checked={!!emailPrefs[item.key as keyof typeof emailPrefs]}
@@ -907,15 +907,15 @@ export default function SettingsPage() {
               {loadingRemoved ? (
                 <div className="space-y-3">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-14 animate-pulse rounded-lg bg-[#1A1A26]" />
+                    <div key={i} className="h-14 animate-pulse rounded-lg bg-surface-2" />
                   ))}
                 </div>
               ) : removedPeople.length === 0 ? (
-                <p className="text-sm text-[#8888A0] text-center py-8">No removed people found.</p>
+                <p className="text-sm text-muted text-center py-8">No removed people found.</p>
               ) : (
                 <div className="space-y-2">
                   {removedPeople.map((user) => (
-                    <div key={user.id} className="flex items-center justify-between rounded-lg border border-[#2A2A3A] p-3">
+                    <div key={user.id} className="flex items-center justify-between rounded-lg border border-border p-3">
                       <div className="flex items-center gap-3">
                         <Avatar className="h-8 w-8">
                           <AvatarFallback className="text-xs">
@@ -924,7 +924,7 @@ export default function SettingsPage() {
                         </Avatar>
                         <div>
                           <p className="text-sm font-medium">{user.firstName} {user.lastName}</p>
-                          <p className="text-xs text-[#8888A0]">{user.email}{user.department?.name ? ` · ${user.department.name}` : ""}{user.role?.title ? ` · ${user.role.title}` : ""}</p>
+                          <p className="text-xs text-muted">{user.email}{user.department?.name ? ` · ${user.department.name}` : ""}{user.role?.title ? ` · ${user.role.title}` : ""}</p>
                         </div>
                       </div>
                       <Button
@@ -958,7 +958,7 @@ export default function SettingsPage() {
                     <h3 className="font-semibold text-lg">{plan}</h3>
                     <Badge variant="default">{data?.organization.status || "Active"}</Badge>
                   </div>
-                  <p className="text-sm text-[#8888A0] mt-1">Current billing period</p>
+                  <p className="text-sm text-muted mt-1">Current billing period</p>
                 </div>
                 <Button>Upgrade Plan</Button>
               </div>
@@ -972,12 +972,12 @@ export default function SettingsPage() {
                   const pct = item.limit === 99999 ? 10 : (item.value / item.limit) * 100;
                   const isOver = item.value > item.limit && item.limit < 99999;
                   return (
-                    <div key={item.label} className="rounded-lg border border-[#2A2A3A] p-4">
+                    <div key={item.label} className="rounded-lg border border-border p-4">
                       <p className="text-2xl font-bold">{item.value}</p>
-                      <p className="text-xs text-[#8888A0]">
+                      <p className="text-xs text-muted">
                         of {item.limit === 99999 ? "Unlimited" : item.limit} {item.label.toLowerCase()}
                       </p>
-                      <div className="mt-2 h-1.5 w-full rounded-full bg-[#2A2A3A]">
+                      <div className="mt-2 h-1.5 w-full rounded-full bg-border">
                         <div
                           className={`h-full rounded-full transition-all ${isOver ? "bg-red-500" : "bg-purple-500"}`}
                           style={{ width: `${Math.min(pct, 100)}%` }}
@@ -1004,7 +1004,7 @@ export default function SettingsPage() {
               <CardDescription>Download all your organization data as CSV</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-[#8888A0] mb-4">
+              <p className="text-sm text-muted mb-4">
                 Export includes: People, Departments, Tasks, SOPs, Reviews, Meetings, KRAs, and Activity logs.
               </p>
               <Button
@@ -1027,7 +1027,7 @@ export default function SettingsPage() {
             <CardContent>
               <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4">
                 <h4 className="text-sm font-medium text-red-400">Delete Organization</h4>
-                <p className="text-xs text-[#8888A0] mt-1">
+                <p className="text-xs text-muted mt-1">
                   Permanently delete this organization and all associated data. This action cannot be undone.
                 </p>
                 <Button
@@ -1054,7 +1054,7 @@ export default function SettingsPage() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <p className="text-sm">This will permanently delete <strong>{data?.organization.name}</strong> and all associated data including:</p>
-            <ul className="text-sm text-[#8888A0] list-disc list-inside space-y-1">
+            <ul className="text-sm text-muted list-disc list-inside space-y-1">
               <li>All users and their data</li>
               <li>All tasks, SOPs, KRAs, and reviews</li>
               <li>All meetings, check-ins, and activity logs</li>

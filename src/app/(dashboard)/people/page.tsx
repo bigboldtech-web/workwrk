@@ -361,7 +361,7 @@ export default function PeoplePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">People</h1>
-          <p className="text-[#8888A0] text-sm mt-1">{total} team members across your organization</p>
+          <p className="text-muted text-sm mt-1">{total} team members across your organization</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleExport} className="gap-2">
@@ -373,7 +373,7 @@ export default function PeoplePage() {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>Invite Team Member</DialogTitle></DialogHeader>
-              <p className="text-xs text-[#8888A0]">They&apos;ll receive an email invite to join your organization.</p>
+              <p className="text-xs text-muted">They&apos;ll receive an email invite to join your organization.</p>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
                   <Label>Email <span className="text-red-400">*</span></Label>
@@ -472,12 +472,12 @@ export default function PeoplePage() {
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8888A0]" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input placeholder="Search people..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
         <Select value={deptFilter} onValueChange={setDeptFilter}>
           <SelectTrigger className="w-[160px]">
-            <Building2 size={14} className="mr-2 text-[#8888A0]" />
+            <Building2 size={14} className="mr-2 text-muted" />
             <SelectValue placeholder="Department" />
           </SelectTrigger>
           <SelectContent>
@@ -487,7 +487,7 @@ export default function PeoplePage() {
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[140px]">
-            <UserCheck size={14} className="mr-2 text-[#8888A0]" />
+            <UserCheck size={14} className="mr-2 text-muted" />
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
@@ -499,7 +499,7 @@ export default function PeoplePage() {
           </SelectContent>
         </Select>
         {filtered.length > 0 && canManagePeople && (
-          <Button variant="ghost" size="sm" onClick={toggleSelectAll} className="text-xs text-[#8888A0]">
+          <Button variant="ghost" size="sm" onClick={toggleSelectAll} className="text-xs text-muted">
             {selectedIds.size === filtered.length ? "Deselect All" : "Select All"}
           </Button>
         )}
@@ -514,7 +514,7 @@ export default function PeoplePage() {
       {loading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Card key={i}><CardContent className="p-5"><div className="flex items-start gap-4"><div className="h-12 w-12 rounded-full animate-pulse bg-[#1A1A26]" /><div className="flex-1 space-y-2"><div className="h-4 w-32 animate-pulse rounded bg-[#1A1A26]" /><div className="h-3 w-24 animate-pulse rounded bg-[#1A1A26]" /></div></div></CardContent></Card>
+            <Card key={i}><CardContent className="p-5"><div className="flex items-start gap-4"><div className="h-12 w-12 rounded-full animate-pulse bg-surface-2" /><div className="flex-1 space-y-2"><div className="h-4 w-32 animate-pulse rounded bg-surface-2" /><div className="h-3 w-24 animate-pulse rounded bg-surface-2" /></div></div></CardContent></Card>
           ))}
         </div>
       ) : (
@@ -522,13 +522,13 @@ export default function PeoplePage() {
           {filtered.map((person) => {
             const isSelected = selectedIds.has(person.id);
             return (
-              <Card key={person.id} className={`hover:border-[#3A3A4A] transition-all group cursor-pointer ${isSelected ? "border-purple-500/50 bg-purple-500/5" : ""}`} onClick={() => router.push(`/people/${person.id}`)}>
+              <Card key={person.id} className={`hover:border-muted-2 transition-all group cursor-pointer ${isSelected ? "border-purple-500/50 bg-purple-500/5" : ""}`} onClick={() => router.push(`/people/${person.id}`)}>
                 <CardContent className="p-5">
                   <div className="flex items-start gap-3">
                     {canManagePeople && <button
                       onClick={(e) => { e.stopPropagation(); toggleSelect(person.id); }}
                       className={`mt-1 h-5 w-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-                        isSelected ? "border-purple-500 bg-purple-500" : "border-[#2A2A3A] hover:border-[#8888A0]"
+                        isSelected ? "border-purple-500 bg-purple-500" : "border-border hover:border-muted"
                       }`}
                     >
                       {isSelected && <span className="text-white text-xs font-bold">&#10003;</span>}
@@ -541,8 +541,8 @@ export default function PeoplePage() {
                         <h3 className="font-semibold truncate">{person.firstName} {person.lastName}</h3>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <button className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-[#1A1A26]">
-                              <MoreHorizontal size={16} className="text-[#8888A0]" />
+                            <button className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-surface-2">
+                              <MoreHorizontal size={16} className="text-muted" />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
@@ -559,26 +559,26 @@ export default function PeoplePage() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      {person.role && <p className="text-sm text-[#8888A0]">{person.role.title}</p>}
+                      {person.role && <p className="text-sm text-muted">{person.role.title}</p>}
                       <div className="flex items-center gap-2 mt-1">
                         {person.department && <Badge variant="outline" className="text-[10px]">{person.department.name}</Badge>}
                         {getStatusBadge(person.status)}
                       </div>
                     </div>
                   </div>
-                  <div className="mt-4 flex items-center justify-between border-t border-[#2A2A3A] pt-3">
-                    <div className="flex items-center gap-3 text-xs text-[#8888A0]">
+                  <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+                    <div className="flex items-center gap-3 text-xs text-muted">
                       <span className="flex items-center gap-1"><Mail size={12} /> {person.email}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-lg font-bold font-mono ${getScoreColor(person.score)}`}>{person.score}</span>
                       {person.trend === "up" && <TrendingUp size={14} className="text-green-400" />}
                       {person.trend === "down" && <TrendingDown size={14} className="text-red-400" />}
-                      {person.trend === "stable" && <Minus size={14} className="text-[#8888A0]" />}
+                      {person.trend === "stable" && <Minus size={14} className="text-muted" />}
                     </div>
                   </div>
                   {(person._count?.directReports ?? 0) > 0 && (
-                    <div className="mt-2 text-xs text-[#8888A0] flex items-center gap-1"><Users size={12} /> {person._count?.directReports} direct reports</div>
+                    <div className="mt-2 text-xs text-muted flex items-center gap-1"><Users size={12} /> {person._count?.directReports} direct reports</div>
                   )}
                 </CardContent>
               </Card>
@@ -601,10 +601,10 @@ export default function PeoplePage() {
       {/* Pending Invitations */}
       {pendingInvitations.length > 0 && (
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-[#8888A0]">Pending Invitations ({pendingInvitations.length})</h3>
+          <h3 className="text-sm font-medium text-muted">Pending Invitations ({pendingInvitations.length})</h3>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {pendingInvitations.map((inv: any) => (
-              <Card key={inv.id} className="border-dashed border-[#2A2A3A]">
+              <Card key={inv.id} className="border-dashed border-border">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400 text-xs font-bold shrink-0">
@@ -614,7 +614,7 @@ export default function PeoplePage() {
                       <p className="text-sm font-medium truncate">{inv.email}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <Badge variant="warning" className="text-[10px]">Invited</Badge>
-                        <span className="text-[10px] text-[#6B6B80]">
+                        <span className="text-[10px] text-muted-2">
                           Expires {new Date(inv.expiresAt).toLocaleDateString()}
                         </span>
                       </div>
@@ -649,9 +649,9 @@ export default function PeoplePage() {
 
       {/* Floating Bulk Action Bar */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-[#2A2A3A] bg-[#12121A] px-5 py-3 shadow-2xl">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-surface px-5 py-3 shadow-2xl">
           <span className="text-sm font-medium text-purple-400">{selectedIds.size} selected</span>
-          <div className="h-5 w-px bg-[#2A2A3A]" />
+          <div className="h-5 w-px bg-border" />
           <Button variant="outline" size="sm" onClick={() => { setBulkAction("change_department"); setBulkPayload({}); }}>
             <Building2 size={14} className="mr-1" /> Department
           </Button>
@@ -664,8 +664,8 @@ export default function PeoplePage() {
           <Button variant="outline" size="sm" onClick={() => { setBulkAction("assign_sop"); setBulkPayload({ mandatory: true }); }}>
             <BookOpen size={14} className="mr-1" /> SOP
           </Button>
-          <div className="h-5 w-px bg-[#2A2A3A]" />
-          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())} className="text-[#8888A0]">Cancel</Button>
+          <div className="h-5 w-px bg-border" />
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())} className="text-muted">Cancel</Button>
         </div>
       )}
 
@@ -681,7 +681,7 @@ export default function PeoplePage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <p className="text-sm text-[#8888A0]">Applying to {selectedIds.size} selected people</p>
+            <p className="text-sm text-muted">Applying to {selectedIds.size} selected people</p>
             {bulkAction === "change_department" && (
               <div className="space-y-2">
                 <Label>Department</Label>

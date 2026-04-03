@@ -174,7 +174,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
         <CardContent className="p-8 text-center">
           <Target size={40} className="mx-auto text-purple-400 mb-4" />
           <h3 className="text-lg font-semibold mb-2">Record Monthly KPIs</h3>
-          <p className="text-sm text-[#8888A0] mb-6">
+          <p className="text-sm text-muted mb-6">
             Select a period to record or update KPI scores
           </p>
           <div className="flex items-center justify-center gap-3">
@@ -198,7 +198,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
       <Card>
         <CardContent className="p-8 text-center">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent mx-auto" />
-          <p className="text-sm text-[#8888A0] mt-3">Loading KPIs...</p>
+          <p className="text-sm text-muted mt-3">Loading KPIs...</p>
         </CardContent>
       </Card>
     );
@@ -209,9 +209,9 @@ export function MonthlyKpiRecorder({ userId }: Props) {
     return (
       <Card>
         <CardContent className="p-8 text-center">
-          <Target size={40} className="mx-auto text-[#8888A0] mb-4" />
+          <Target size={40} className="mx-auto text-muted mb-4" />
           <h3 className="text-lg font-semibold mb-2">No KPIs Assigned</h3>
-          <p className="text-sm text-[#8888A0]">
+          <p className="text-sm text-muted">
             Assign KRAs with KPIs to this person first, then come back to record scores.
           </p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => setSelectedPeriod(null)}>
@@ -238,7 +238,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
               </Button>
               <div>
                 <h3 className="text-sm font-semibold">{formatPeriodLabel(selectedPeriod)}</h3>
-                <p className="text-xs text-[#8888A0]">
+                <p className="text-xs text-muted">
                   {filledCount} of {totalKpis} KPIs recorded
                 </p>
               </div>
@@ -265,20 +265,20 @@ export function MonthlyKpiRecorder({ userId }: Props) {
           <Card key={kra.kraId} className="overflow-hidden">
             <button
               onClick={() => toggleKra(kra.kraId)}
-              className="w-full flex items-center justify-between p-4 hover:bg-[#1A1A26] transition-colors"
+              className="w-full flex items-center justify-between p-4 hover:bg-surface-2 transition-colors"
             >
               <div className="flex items-center gap-3">
-                {isExpanded ? <ChevronDown size={16} className="text-[#8888A0]" /> : <ChevronRight size={16} className="text-[#8888A0]" />}
+                {isExpanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />}
                 <div className="text-left">
                   <p className="text-sm font-medium">{kra.kraName}</p>
-                  <p className="text-xs text-[#6B6B80]">{kraFilled}/{kra.kpis.length} KPIs filled</p>
+                  <p className="text-xs text-muted-2">{kraFilled}/{kra.kpis.length} KPIs filled</p>
                 </div>
               </div>
               <Badge variant="outline" className="text-[10px]">{kra.kpis.length} KPIs</Badge>
             </button>
 
             {isExpanded && (
-              <div className="border-t border-[#2A2A3A]">
+              <div className="border-t border-border">
                 {kra.kpis.map((kpi) => {
                   const fd = formData[kpi.kpiId] || { actualValue: "", managerNotes: "" };
                   const actual = fd.actualValue ? Number(fd.actualValue) : null;
@@ -287,7 +287,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                   const hasExisting = kpi.existingRecord?.actualValue != null;
 
                   return (
-                    <div key={kpi.kpiId} className="border-b border-[#1A1A26] last:border-b-0 px-4 py-3">
+                    <div key={kpi.kpiId} className="border-b border-surface-2 last:border-b-0 px-4 py-3">
                       <div className="flex items-center gap-4">
                         {/* KPI Name */}
                         <div className="flex-1 min-w-0">
@@ -299,7 +299,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                           </div>
                           <div className="flex items-center gap-2">
                             {kpi.unit && (
-                              <span className="text-[10px] text-[#6B6B80]">Unit: {kpi.unit}</span>
+                              <span className="text-[10px] text-muted-2">Unit: {kpi.unit}</span>
                             )}
                             {kpi.lowerIsBetter && (
                               <span className="text-[10px] text-amber-400">Lower is better</span>
@@ -309,7 +309,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
 
                         {/* Target */}
                         <div className="text-center min-w-[80px]">
-                          <p className="text-[10px] text-[#6B6B80] uppercase">Target</p>
+                          <p className="text-[10px] text-muted-2 uppercase">Target</p>
                           <p className="text-sm font-mono font-bold">
                             {kpi.targetValue != null ? kpi.targetValue : "—"}
                           </p>
@@ -317,21 +317,21 @@ export function MonthlyKpiRecorder({ userId }: Props) {
 
                         {/* Actual Value Input */}
                         <div className="min-w-[100px]">
-                          <p className="text-[10px] text-[#6B6B80] uppercase">Actual</p>
+                          <p className="text-[10px] text-muted-2 uppercase">Actual</p>
                           <Input
                             type="number"
                             value={fd.actualValue}
                             onChange={(e) => updateField(kpi.kpiId, "actualValue", e.target.value)}
                             placeholder="0"
-                            className="h-8 text-sm bg-transparent border-[#2A2A3A] w-full"
+                            className="h-8 text-sm bg-transparent border-border w-full"
                           />
                         </div>
 
                         {/* Score */}
                         <div className="text-center min-w-[60px]">
-                          <p className="text-[10px] text-[#6B6B80] uppercase">Score</p>
+                          <p className="text-[10px] text-muted-2 uppercase">Score</p>
                           <p className={`text-sm font-mono font-bold ${
-                            score == null ? "text-[#6B6B80]"
+                            score == null ? "text-muted-2"
                             : score >= 90 ? "text-green-400"
                             : score >= 70 ? "text-purple-400"
                             : score >= 50 ? "text-orange-400"
@@ -345,7 +345,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-[#8888A0] hover:text-[#E8E8F0] shrink-0"
+                          className="h-7 w-7 text-muted hover:text-foreground shrink-0"
                           onClick={() => toggleNotes(kpi.kpiId)}
                           title="Manager feedback"
                         >
@@ -361,7 +361,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                             onChange={(e) => updateField(kpi.kpiId, "managerNotes", e.target.value)}
                             placeholder="Manager feedback / notes..."
                             rows={2}
-                            className="bg-transparent border-[#2A2A3A] text-xs"
+                            className="bg-transparent border-border text-xs"
                           />
                         </div>
                       )}

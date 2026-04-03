@@ -174,7 +174,7 @@ export default function ReviewsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Performance Reviews</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Manage review cycles, assessments, and outcomes</p>
+          <p className="text-muted text-sm mt-1">Manage review cycles, assessments, and outcomes</p>
         </div>
         <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
           <DialogTrigger asChild>
@@ -220,11 +220,11 @@ export default function ReviewsPage() {
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h3 className="font-semibold">{activeCycle.name}</h3>
-                <p className="text-xs text-[#8888A0]">{formatDate(activeCycle.startDate)} to {formatDate(activeCycle.endDate)}</p>
+                <p className="text-xs text-muted">{formatDate(activeCycle.startDate)} to {formatDate(activeCycle.endDate)}</p>
               </div>
               <div className="flex items-center gap-2">
                 {getCycleStatusBadge(activeCycle.status)}
-                <ChevronRight size={16} className="text-[#8888A0]" />
+                <ChevronRight size={16} className="text-muted" />
               </div>
             </div>
             {(() => {
@@ -238,7 +238,7 @@ export default function ReviewsPage() {
                     <Progress value={pct} className="h-2 flex-1" indicatorClassName="bg-purple-500" />
                     <span className="text-sm font-mono text-purple-400">{pct}%</span>
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-[#8888A0]">
+                  <div className="flex items-center gap-4 text-xs text-muted">
                     <span className="flex items-center gap-1"><Users size={12} /> {total} total</span>
                     <span className="flex items-center gap-1"><CheckCircle size={12} className="text-blue-400" /> {selfDone} self done</span>
                     <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-400" /> {completed} completed</span>
@@ -256,25 +256,25 @@ export default function ReviewsPage() {
         <CardContent className="p-0">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-[#2A2A3A]">
-                <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Cycle</th>
-                <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Type</th>
-                <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Period</th>
-                <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Reviews</th>
-                <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Status</th>
-                <th className="text-right p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Actions</th>
+              <tr className="border-b border-border">
+                <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Cycle</th>
+                <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Type</th>
+                <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Period</th>
+                <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Reviews</th>
+                <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Status</th>
+                <th className="text-right p-4 text-xs font-medium text-muted uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 [1, 2, 3].map((i) => (
-                  <tr key={i} className="border-b border-[#2A2A3A]/50">
-                    <td className="p-4"><div className="h-4 w-40 bg-[#1A1A26] rounded animate-pulse" /></td>
-                    <td className="p-4"><div className="h-5 w-24 bg-[#1A1A26] rounded animate-pulse" /></td>
-                    <td className="p-4"><div className="h-4 w-36 bg-[#1A1A26] rounded animate-pulse" /></td>
-                    <td className="p-4"><div className="h-4 w-12 bg-[#1A1A26] rounded animate-pulse mx-auto" /></td>
-                    <td className="p-4"><div className="h-5 w-16 bg-[#1A1A26] rounded animate-pulse mx-auto" /></td>
-                    <td className="p-4"><div className="h-5 w-24 bg-[#1A1A26] rounded animate-pulse ml-auto" /></td>
+                  <tr key={i} className="border-b border-border/50">
+                    <td className="p-4"><div className="h-4 w-40 bg-surface-2 rounded animate-pulse" /></td>
+                    <td className="p-4"><div className="h-5 w-24 bg-surface-2 rounded animate-pulse" /></td>
+                    <td className="p-4"><div className="h-4 w-36 bg-surface-2 rounded animate-pulse" /></td>
+                    <td className="p-4"><div className="h-4 w-12 bg-surface-2 rounded animate-pulse mx-auto" /></td>
+                    <td className="p-4"><div className="h-5 w-16 bg-surface-2 rounded animate-pulse mx-auto" /></td>
+                    <td className="p-4"><div className="h-5 w-24 bg-surface-2 rounded animate-pulse ml-auto" /></td>
                   </tr>
                 ))
               ) : cycles.length === 0 ? (
@@ -296,12 +296,12 @@ export default function ReviewsPage() {
                   return (
                     <tr
                       key={cycle.id}
-                      className="border-b border-[#2A2A3A]/50 hover:bg-[#1A1A26]/50 transition-colors cursor-pointer"
+                      className="border-b border-border/50 hover:bg-surface-2/50 transition-colors cursor-pointer"
                       onClick={() => router.push(`/reviews/${cycle.id}`)}
                     >
                       <td className="p-4 text-sm font-medium">{cycle.name}</td>
                       <td className="p-4"><Badge variant="outline" className="text-xs">{cycle.type.replace(/_/g, " ")}</Badge></td>
-                      <td className="p-4 text-sm text-[#8888A0]">{formatDate(cycle.startDate)} — {formatDate(cycle.endDate)}</td>
+                      <td className="p-4 text-sm text-muted">{formatDate(cycle.startDate)} — {formatDate(cycle.endDate)}</td>
                       <td className="p-4 text-center text-sm font-mono">{completed}/{total}</td>
                       <td className="p-4 text-center">{getCycleStatusBadge(cycle.status)}</td>
                       <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -325,10 +325,10 @@ export default function ReviewsPage() {
                             onClick={() => window.open(`/api/export/reviews/${cycle.id}`, "_blank")}
                             title="Export CSV"
                           >
-                            <Download size={14} className="text-[#8888A0]" />
+                            <Download size={14} className="text-muted" />
                           </Button>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(cycle)} title="Edit">
-                            <Pencil size={14} className="text-[#8888A0]" />
+                            <Pencil size={14} className="text-muted" />
                           </Button>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowDeleteConfirm(cycle.id)} title="Delete">
                             <Trash2 size={14} className="text-red-400" />

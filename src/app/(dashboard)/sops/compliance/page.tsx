@@ -58,19 +58,19 @@ export default function SOPCompliancePage() {
   if (loading) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="h-8 w-64 bg-[#1A1A26] rounded animate-pulse" />
+        <div className="h-8 w-64 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Card key={i}><CardContent className="p-4"><div className="h-16 bg-[#1A1A26] rounded animate-pulse" /></CardContent></Card>
+            <Card key={i}><CardContent className="p-4"><div className="h-16 bg-surface-2 rounded animate-pulse" /></CardContent></Card>
           ))}
         </div>
-        <div className="h-64 bg-[#1A1A26] rounded-lg animate-pulse" />
+        <div className="h-64 bg-surface-2 rounded-lg animate-pulse" />
       </div>
     );
   }
 
   if (!data) {
-    return <div className="text-center py-20 text-[#8888A0]">Failed to load compliance data.</div>;
+    return <div className="text-center py-20 text-muted">Failed to load compliance data.</div>;
   }
 
   const { overview, departmentCompliance, personScores, sopCompliance, overdueList } = data;
@@ -83,7 +83,7 @@ export default function SOPCompliancePage() {
         </Button>
         <div>
           <h1 className="text-2xl font-bold tracking-tight">SOP Compliance Dashboard</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Organization-wide SOP compliance tracking</p>
+          <p className="text-muted text-sm mt-1">Organization-wide SOP compliance tracking</p>
         </div>
       </div>
 
@@ -91,23 +91,23 @@ export default function SOPCompliancePage() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
         <Card><CardContent className="p-4 text-center">
           <p className="text-2xl font-bold">{overview.total}</p>
-          <p className="text-xs text-[#8888A0]">Total Assignments</p>
+          <p className="text-xs text-muted">Total Assignments</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
           <p className="text-2xl font-bold text-green-400">{overview.completed}</p>
-          <p className="text-xs text-[#8888A0]">Completed</p>
+          <p className="text-xs text-muted">Completed</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
           <p className="text-2xl font-bold text-orange-400">{overview.inProgress}</p>
-          <p className="text-xs text-[#8888A0]">In Progress</p>
+          <p className="text-xs text-muted">In Progress</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
-          <p className={`text-2xl font-bold ${overview.overdue > 0 ? "text-red-400" : "text-[#8888A0]"}`}>{overview.overdue}</p>
-          <p className="text-xs text-[#8888A0]">Overdue</p>
+          <p className={`text-2xl font-bold ${overview.overdue > 0 ? "text-red-400" : "text-muted"}`}>{overview.overdue}</p>
+          <p className="text-xs text-muted">Overdue</p>
         </CardContent></Card>
         <Card className="border-purple-500/20 bg-purple-500/5"><CardContent className="p-4 text-center">
           <p className={`text-2xl font-bold ${rateColor(overview.overallRate)}`}>{overview.overallRate}%</p>
-          <p className="text-xs text-[#8888A0]">Overall Rate</p>
+          <p className="text-xs text-muted">Overall Rate</p>
         </CardContent></Card>
       </div>
 
@@ -125,7 +125,7 @@ export default function SOPCompliancePage() {
         {/* Department Compliance */}
         <TabsContent value="overview" className="mt-4 space-y-3">
           {departmentCompliance.length === 0 ? (
-            <div className="text-center py-12 text-[#8888A0]">No department data available.</div>
+            <div className="text-center py-12 text-muted">No department data available.</div>
           ) : (
             departmentCompliance.map((dept: any) => (
               <Card key={dept.departmentId}>
@@ -137,7 +137,7 @@ export default function SOPCompliancePage() {
                       </div>
                       <div>
                         <h3 className="font-semibold text-sm">{dept.name}</h3>
-                        <p className="text-xs text-[#8888A0]">{dept.completed}/{dept.total} completed</p>
+                        <p className="text-xs text-muted">{dept.completed}/{dept.total} completed</p>
                       </div>
                     </div>
                     <div className="text-right">
@@ -161,7 +161,7 @@ export default function SOPCompliancePage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-[#2A2A3A] text-[#8888A0]">
+                    <tr className="border-b border-border text-muted">
                       <th className="text-left py-3 px-4 font-medium">Person</th>
                       <th className="text-left py-3 px-4 font-medium">Department</th>
                       <th className="text-center py-3 px-4 font-medium">Assigned</th>
@@ -173,9 +173,9 @@ export default function SOPCompliancePage() {
                   </thead>
                   <tbody>
                     {personScores.map((p: any) => (
-                      <tr key={p.userId} className="border-b border-[#2A2A3A]/50 hover:bg-[#1A1A26]/50">
+                      <tr key={p.userId} className="border-b border-border/50 hover:bg-surface-2/50">
                         <td className="py-3 px-4 font-medium">{p.name}</td>
-                        <td className="py-3 px-4 text-[#8888A0]">{p.department}</td>
+                        <td className="py-3 px-4 text-muted">{p.department}</td>
                         <td className="py-3 px-4 text-center font-mono">{p.total}</td>
                         <td className="py-3 px-4 text-center font-mono">{p.completed}</td>
                         <td className="py-3 px-4 text-center">
@@ -186,7 +186,7 @@ export default function SOPCompliancePage() {
                           {p.overdue > 0 ? (
                             <Badge variant="destructive" className="text-[10px]">{p.overdue}</Badge>
                           ) : (
-                            <span className="text-[#8888A0]">0</span>
+                            <span className="text-muted">0</span>
                           )}
                         </td>
                       </tr>
@@ -195,7 +195,7 @@ export default function SOPCompliancePage() {
                 </table>
               </div>
               {personScores.length === 0 && (
-                <div className="text-center py-12 text-[#8888A0]">No person data available.</div>
+                <div className="text-center py-12 text-muted">No person data available.</div>
               )}
             </CardContent>
           </Card>
@@ -204,17 +204,17 @@ export default function SOPCompliancePage() {
         {/* Per-SOP Compliance */}
         <TabsContent value="sops" className="mt-4 space-y-3">
           {sopCompliance.length === 0 ? (
-            <div className="text-center py-12 text-[#8888A0]">No SOP compliance data available.</div>
+            <div className="text-center py-12 text-muted">No SOP compliance data available.</div>
           ) : (
             sopCompliance.map((s: any) => (
-              <Card key={s.sopId} className="hover:border-[#3A3A4A] transition-all cursor-pointer" onClick={() => router.push(`/sops/${s.sopId}`)}>
+              <Card key={s.sopId} className="hover:border-muted-2 transition-all cursor-pointer" onClick={() => router.push(`/sops/${s.sopId}`)}>
                 <CardContent className="p-4 flex items-center gap-4">
                   <div className="rounded-lg bg-purple-500/10 p-2 shrink-0">
                     <FileText size={16} className="text-purple-400" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-sm truncate">{s.title}</h3>
-                    <div className="flex items-center gap-3 text-xs text-[#8888A0]">
+                    <div className="flex items-center gap-3 text-xs text-muted">
                       {s.category && <span>{s.category}</span>}
                       <span>{s.completed}/{s.total} completed</span>
                     </div>
@@ -234,13 +234,13 @@ export default function SOPCompliancePage() {
               {overdueList.length === 0 ? (
                 <div className="text-center py-12">
                   <CheckCircle size={32} className="mx-auto text-green-400 mb-2" />
-                  <p className="text-sm text-[#8888A0]">No overdue assignments. Great job!</p>
+                  <p className="text-sm text-muted">No overdue assignments. Great job!</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-[#2A2A3A] text-[#8888A0]">
+                      <tr className="border-b border-border text-muted">
                         <th className="text-left py-3 px-4 font-medium">SOP</th>
                         <th className="text-left py-3 px-4 font-medium">Assigned To</th>
                         <th className="text-left py-3 px-4 font-medium">Department</th>
@@ -252,10 +252,10 @@ export default function SOPCompliancePage() {
                       {overdueList.map((item: any) => {
                         const daysPast = Math.ceil((Date.now() - new Date(item.dueDate).getTime()) / (1000 * 60 * 60 * 24));
                         return (
-                          <tr key={item.id} className="border-b border-[#2A2A3A]/50">
+                          <tr key={item.id} className="border-b border-border/50">
                             <td className="py-3 px-4 font-medium">{item.sopTitle}</td>
                             <td className="py-3 px-4">{item.userName}</td>
-                            <td className="py-3 px-4 text-[#8888A0]">{item.department}</td>
+                            <td className="py-3 px-4 text-muted">{item.department}</td>
                             <td className="py-3 px-4">
                               <span className="text-red-400">{formatDate(item.dueDate)}</span>
                               <span className="text-[10px] text-red-400 ml-1">({daysPast}d overdue)</span>

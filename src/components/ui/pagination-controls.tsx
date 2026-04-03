@@ -45,7 +45,7 @@ export function PaginationControls({
 
   return (
     <div className="flex items-center justify-between pt-4">
-      <p className="text-xs text-[#8888A0]">
+      <p className="text-xs text-muted">
         Showing {start}–{end} of {total}
       </p>
 
@@ -73,7 +73,7 @@ export function PaginationControls({
 
         {getPageNumbers().map((p, i) =>
           p === "..." ? (
-            <span key={`ellipsis-${i}`} className="text-xs text-[#8888A0] px-1">...</span>
+            <span key={`ellipsis-${i}`} className="text-xs text-muted px-1">...</span>
           ) : (
             <Button
               key={p}

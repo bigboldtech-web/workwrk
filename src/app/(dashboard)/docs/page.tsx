@@ -739,11 +739,11 @@ export default function DocsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Documentation</h1>
-        <p className="text-[#8888A0]">Learn how to use every feature in WorkwrK</p>
+        <p className="text-muted">Learn how to use every feature in WorkwrK</p>
       </div>
 
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8888A0]" size={18} />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
         <Input
           placeholder="Search documentation..."
           value={searchQuery}
@@ -783,7 +783,7 @@ export default function DocsPage() {
                 className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left transition-colors ${
                   selectedSection === section.id
                     ? "bg-purple-500/10 text-purple-400"
-                    : "text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0]"
+                    : "text-muted hover:bg-surface-2 hover:text-foreground"
                 }`}
               >
                 <span style={{ color: section.color }}>{section.icon}</span>
@@ -798,7 +798,7 @@ export default function DocsPage() {
                       className={`w-full text-left text-xs rounded px-2 py-1.5 transition-colors ${
                         selectedArticle === idx
                           ? "text-purple-300 bg-purple-500/5"
-                          : "text-[#6B6B80] hover:text-[#8888A0]"
+                          : "text-muted-2 hover:text-muted"
                       }`}
                     >
                       {article.title}
@@ -812,20 +812,20 @@ export default function DocsPage() {
 
         {/* Content */}
         <div className="col-span-9">
-          <Card className="border-[#2A2A3A] bg-[#12121A]">
+          <Card className="border-border bg-surface">
             <CardContent className="p-8">
-              <div className="flex items-center gap-2 text-xs text-[#6B6B80] mb-4">
+              <div className="flex items-center gap-2 text-xs text-muted-2 mb-4">
                 <span style={{ color: currentSection.color }}>{currentSection.icon}</span>
                 <span>{currentSection.title}</span>
                 <ChevronRight size={12} />
-                <span className="text-[#8888A0]">{currentArticle.title}</span>
+                <span className="text-muted">{currentArticle.title}</span>
               </div>
               <h2 className="text-xl font-semibold mb-6">{currentArticle.title}</h2>
               <div className="prose prose-invert prose-sm max-w-none">
                 {currentArticle.content.split("\n").map((line, i) => {
                   if (line.startsWith("**") && line.endsWith("**")) {
                     return (
-                      <h3 key={i} className="text-base font-semibold text-[#E8E8F0] mt-6 mb-3">
+                      <h3 key={i} className="text-base font-semibold text-foreground mt-6 mb-3">
                         {line.replace(/\*\*/g, "")}
                       </h3>
                     );
@@ -835,9 +835,9 @@ export default function DocsPage() {
                     if (cells.every((c) => c.match(/^[-:]+$/))) return null;
                     const isHeader = i > 0 && currentArticle.content.split("\n")[i + 1]?.match(/^\|[\s-:|]+\|$/);
                     return (
-                      <div key={i} className="flex border-b border-[#2A2A3A] text-sm">
+                      <div key={i} className="flex border-b border-border text-sm">
                         {cells.map((cell, j) => (
-                          <div key={j} className={`flex-1 px-3 py-2 ${isHeader ? "font-semibold text-[#E8E8F0]" : "text-[#8888A0]"}`}>
+                          <div key={j} className={`flex-1 px-3 py-2 ${isHeader ? "font-semibold text-foreground" : "text-muted"}`}>
                             {cell.replace(/\*\*/g, "")}
                           </div>
                         ))}
@@ -846,11 +846,11 @@ export default function DocsPage() {
                   }
                   if (line.match(/^\d+\.\s/)) {
                     return (
-                      <div key={i} className="flex gap-2 text-sm text-[#8888A0] ml-2 mb-1">
+                      <div key={i} className="flex gap-2 text-sm text-muted ml-2 mb-1">
                         <span className="text-purple-400 font-mono text-xs mt-0.5">{line.match(/^(\d+)\./)?.[1]}.</span>
                         <span dangerouslySetInnerHTML={{
                           __html: line.replace(/^\d+\.\s/, "")
-                            .replace(/\*\*(.+?)\*\*/g, '<strong class="text-[#E8E8F0]">$1</strong>')
+                            .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
                             .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-purple-400 hover:text-purple-300">$1</a>'),
                         }} />
                       </div>
@@ -859,11 +859,11 @@ export default function DocsPage() {
                   if (line.startsWith("- ") || line.startsWith("   - ")) {
                     const indent = line.startsWith("   - ");
                     return (
-                      <div key={i} className={`flex gap-2 text-sm text-[#8888A0] mb-1 ${indent ? "ml-6" : "ml-2"}`}>
+                      <div key={i} className={`flex gap-2 text-sm text-muted mb-1 ${indent ? "ml-6" : "ml-2"}`}>
                         <span className="text-purple-400 mt-1.5"><div className="w-1 h-1 rounded-full bg-current" /></span>
                         <span dangerouslySetInnerHTML={{
                           __html: line.replace(/^-\s+/, "").replace(/^\s+-\s+/, "")
-                            .replace(/\*\*(.+?)\*\*/g, '<strong class="text-[#E8E8F0]">$1</strong>')
+                            .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
                             .replace(/`(.+?)`/g, '<code class="text-purple-300 bg-purple-500/10 px-1 rounded text-xs">$1</code>'),
                         }} />
                       </div>
@@ -871,9 +871,9 @@ export default function DocsPage() {
                   }
                   if (line.trim()) {
                     return (
-                      <p key={i} className="text-sm text-[#8888A0] mb-3 leading-relaxed" dangerouslySetInnerHTML={{
+                      <p key={i} className="text-sm text-muted mb-3 leading-relaxed" dangerouslySetInnerHTML={{
                         __html: line
-                          .replace(/\*\*(.+?)\*\*/g, '<strong class="text-[#E8E8F0]">$1</strong>')
+                          .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
                           .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-purple-400 hover:text-purple-300">$1</a>')
                           .replace(/`(.+?)`/g, '<code class="text-purple-300 bg-purple-500/10 px-1 rounded text-xs">$1</code>'),
                       }} />

@@ -77,7 +77,7 @@ export default async function BlogPostPage({
           {/* Back */}
           <Link
             href="/blog"
-            className="mb-8 inline-flex items-center gap-2 text-sm text-[#8888A0] transition-colors hover:text-[#E8E8F0]"
+            className="mb-8 inline-flex items-center gap-2 text-sm text-muted transition-colors hover:text-foreground"
           >
             <ArrowLeft size={14} /> Back to blog
           </Link>
@@ -87,25 +87,25 @@ export default async function BlogPostPage({
             <span className="rounded-full bg-[#6C5CE7]/10 px-3 py-1 text-xs font-medium text-[#A29BFE]">
               {post.category}
             </span>
-            <span className="flex items-center gap-1 text-xs text-[#8888A0]">
+            <span className="flex items-center gap-1 text-xs text-muted">
               <Clock size={12} /> {post.readTime}
             </span>
-            <span className="text-xs text-[#8888A0]">{post.date}</span>
+            <span className="text-xs text-muted">{post.date}</span>
           </div>
 
           {/* Title */}
-          <h1 className="mb-6 font-[family-name:var(--font-syne)] text-[clamp(2rem,4vw,3rem)] font-bold leading-tight tracking-tight text-[#E8E8F0]">
+          <h1 className="mb-6 font-[family-name:var(--font-syne)] text-[clamp(2rem,4vw,3rem)] font-bold leading-tight tracking-tight text-foreground">
             {post.title}
           </h1>
 
           {/* Author */}
-          <div className="mb-10 flex items-center gap-3 border-b border-[#2A2A3A] pb-8">
+          <div className="mb-10 flex items-center gap-3 border-b border-border pb-8">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#6C5CE7]/20 text-sm font-bold text-[#A29BFE]">
               {post.author.charAt(0)}
             </div>
             <div>
-              <div className="text-sm font-medium text-[#E8E8F0]">{post.author}</div>
-              <div className="text-xs text-[#8888A0]">{post.authorRole}</div>
+              <div className="text-sm font-medium text-foreground">{post.author}</div>
+              <div className="text-xs text-muted">{post.authorRole}</div>
             </div>
           </div>
 
@@ -116,11 +116,11 @@ export default async function BlogPostPage({
           />
 
           {/* Tags */}
-          <div className="mt-12 flex flex-wrap gap-2 border-t border-[#2A2A3A] pt-8">
+          <div className="mt-12 flex flex-wrap gap-2 border-t border-border pt-8">
             {post.tags.map((tag) => (
               <span
                 key={tag}
-                className="rounded-full border border-[#2A2A3A] bg-[#12121A] px-3 py-1 text-xs text-[#8888A0]"
+                className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted"
               >
                 {tag}
               </span>
@@ -130,7 +130,7 @@ export default async function BlogPostPage({
       </article>
 
       {/* Related posts */}
-      <section className="border-t border-[#2A2A3A] pb-28 pt-16">
+      <section className="border-t border-border pb-28 pt-16">
         <div className="mx-auto max-w-[1200px] px-6">
           <h2 className="mkt-title mb-8 text-2xl">More articles</h2>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -138,10 +138,10 @@ export default async function BlogPostPage({
               <Link key={r.slug} href={`/blog/${r.slug}`} className="group block">
                 <div className="blog-card flex flex-col p-6">
                   <span className="mb-3 text-xs text-[#A29BFE]">{r.category}</span>
-                  <h3 className="mb-2 font-[family-name:var(--font-syne)] text-base font-bold text-[#E8E8F0] transition-colors group-hover:text-[#A29BFE]">
+                  <h3 className="mb-2 font-[family-name:var(--font-syne)] text-base font-bold text-foreground transition-colors group-hover:text-[#A29BFE]">
                     {r.title}
                   </h3>
-                  <p className="flex-1 text-sm text-[#8888A0]">{r.excerpt.slice(0, 100)}...</p>
+                  <p className="flex-1 text-sm text-muted">{r.excerpt.slice(0, 100)}...</p>
                   <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-[#A29BFE]">
                     Read <ArrowRight size={12} />
                   </div>

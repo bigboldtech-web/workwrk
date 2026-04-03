@@ -109,13 +109,13 @@ function LoadingSkeleton() {
           <CardContent className="p-4">
             <div className="flex items-center gap-4 animate-pulse">
               <div className="min-w-[60px] space-y-1">
-                <div className="h-3 w-10 bg-[#2A2A3A] rounded mx-auto" />
-                <div className="h-4 w-14 bg-[#2A2A3A] rounded mx-auto" />
+                <div className="h-3 w-10 bg-border rounded mx-auto" />
+                <div className="h-4 w-14 bg-border rounded mx-auto" />
               </div>
-              <div className="h-10 w-px bg-[#2A2A3A]" />
+              <div className="h-10 w-px bg-border" />
               <div className="flex-1 space-y-2">
-                <div className="h-4 w-48 bg-[#2A2A3A] rounded" />
-                <div className="h-3 w-32 bg-[#2A2A3A] rounded" />
+                <div className="h-4 w-48 bg-border rounded" />
+                <div className="h-3 w-32 bg-border rounded" />
               </div>
             </div>
           </CardContent>
@@ -270,7 +270,7 @@ export default function MeetingsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Meetings & Check-ins</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Structured meeting cadences and daily check-ins</p>
+          <p className="text-muted text-sm mt-1">Structured meeting cadences and daily check-ins</p>
         </div>
         <Dialog open={showAddDialog} onOpenChange={(open) => { setShowAddDialog(open); if (!open) resetMeetingForm(); }}>
           <DialogTrigger asChild>
@@ -311,7 +311,7 @@ export default function MeetingsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Attendees</Label>
-                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-[#2A2A3A] rounded-md">
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border border-border rounded-md">
                   {users.map((user) => (
                     <Badge
                       key={user.id}
@@ -322,7 +322,7 @@ export default function MeetingsPage() {
                       {user.firstName} {user.lastName}
                     </Badge>
                   ))}
-                  {users.length === 0 && <span className="text-xs text-[#8888A0]">No users available</span>}
+                  {users.length === 0 && <span className="text-xs text-muted">No users available</span>}
                 </div>
               </div>
             </div>
@@ -354,14 +354,14 @@ export default function MeetingsPage() {
             />
           ) : upcomingMeetings.map((meeting) => (
             <Link key={meeting.id} href={`/meetings/${meeting.id}`}>
-              <Card className="hover:border-[#3A3A4A] transition-all cursor-pointer">
+              <Card className="hover:border-muted-2 transition-all cursor-pointer">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
                     <div className="text-center min-w-[60px]">
-                      <p className="text-xs text-[#8888A0]">{formatDate(meeting.scheduledAt)}</p>
+                      <p className="text-xs text-muted">{formatDate(meeting.scheduledAt)}</p>
                       <p className="text-sm font-bold font-mono">{formatTime(meeting.scheduledAt)}</p>
                     </div>
-                    <div className="h-10 w-px bg-[#2A2A3A]" />
+                    <div className="h-10 w-px bg-border" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <h3 className="text-sm font-medium">{meeting.title}</h3>
@@ -369,13 +369,13 @@ export default function MeetingsPage() {
                           {meeting.type.replace(/_/g, " ")}
                         </Badge>
                       </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-[#8888A0]">
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted">
                         <span className="flex items-center gap-1"><Clock size={10} /> {meeting.duration} min</span>
                         <div className="flex items-center gap-1">
                           <Users size={10} />
                           <div className="flex -space-x-1.5">
                             {meeting.attendees.slice(0, 4).map((a, i) => (
-                              <Avatar key={i} className="h-5 w-5 border border-[#12121A]">
+                              <Avatar key={i} className="h-5 w-5 border border-surface">
                                 <AvatarFallback className="text-[8px]">{getInitials(a.user.firstName, a.user.lastName)}</AvatarFallback>
                               </Avatar>
                             ))}
@@ -401,14 +401,14 @@ export default function MeetingsPage() {
             />
           ) : pastMeetings.map((meeting) => (
             <Link key={meeting.id} href={`/meetings/${meeting.id}`}>
-              <Card className="hover:border-[#3A3A4A] transition-all cursor-pointer">
+              <Card className="hover:border-muted-2 transition-all cursor-pointer">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
                     <div className="text-center min-w-[60px]">
-                      <p className="text-xs text-[#8888A0]">{formatDate(meeting.scheduledAt)}</p>
-                      <p className="text-sm font-mono text-[#8888A0]">{formatTime(meeting.scheduledAt)}</p>
+                      <p className="text-xs text-muted">{formatDate(meeting.scheduledAt)}</p>
+                      <p className="text-sm font-mono text-muted">{formatTime(meeting.scheduledAt)}</p>
                     </div>
-                    <div className="h-10 w-px bg-[#2A2A3A]" />
+                    <div className="h-10 w-px bg-border" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <h3 className="text-sm font-medium">{meeting.title}</h3>
@@ -416,12 +416,12 @@ export default function MeetingsPage() {
                           {meeting.type.replace(/_/g, " ")}
                         </Badge>
                       </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-[#8888A0]">
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted">
                         <div className="flex items-center gap-1">
                           <Users size={10} />
                           <div className="flex -space-x-1.5">
                             {meeting.attendees.slice(0, 4).map((a, i) => (
-                              <Avatar key={i} className="h-5 w-5 border border-[#12121A]">
+                              <Avatar key={i} className="h-5 w-5 border border-surface">
                                 <AvatarFallback className="text-[8px]">{getInitials(a.user.firstName, a.user.lastName)}</AvatarFallback>
                               </Avatar>
                             ))}
@@ -450,7 +450,7 @@ export default function MeetingsPage() {
 
         <TabsContent value="checkins" className="space-y-3 mt-4">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-[#8888A0]">Recent check-ins</p>
+            <p className="text-sm text-muted">Recent check-ins</p>
             <Dialog open={showCheckInDialog} onOpenChange={setShowCheckInDialog}>
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-2"><Plus size={14} /> New Check-in</Button>
@@ -505,21 +505,21 @@ export default function MeetingsPage() {
               onAction={() => setShowCheckInDialog(true)}
             />
           ) : checkIns.map((checkin) => (
-            <Card key={checkin.id} className="hover:border-[#3A3A4A] transition-colors">
+            <Card key={checkin.id} className="hover:border-muted-2 transition-colors">
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
                   <span className="text-2xl">{getMoodEmoji(checkin.mood)}</span>
                   <div className="flex-1">
                     <p className="text-sm font-medium">{checkin.user.firstName} {checkin.user.lastName}</p>
                     <div className="mt-2 space-y-1 text-xs">
-                      <p><span className="text-green-400">What went well:</span> <span className="text-[#8888A0]">{checkin.wentWell}</span></p>
-                      <p><span className="text-orange-400">Challenges:</span> <span className="text-[#8888A0]">{checkin.challenges}</span></p>
+                      <p><span className="text-green-400">What went well:</span> <span className="text-muted">{checkin.wentWell}</span></p>
+                      <p><span className="text-orange-400">Challenges:</span> <span className="text-muted">{checkin.challenges}</span></p>
                       {checkin.tomorrow && (
-                        <p><span className="text-blue-400">Tomorrow:</span> <span className="text-[#8888A0]">{checkin.tomorrow}</span></p>
+                        <p><span className="text-blue-400">Tomorrow:</span> <span className="text-muted">{checkin.tomorrow}</span></p>
                       )}
                     </div>
                   </div>
-                  <span className="text-[10px] text-[#8888A0]">{formatCheckInDate(checkin.createdAt)}</span>
+                  <span className="text-[10px] text-muted">{formatCheckInDate(checkin.createdAt)}</span>
                 </div>
               </CardContent>
             </Card>

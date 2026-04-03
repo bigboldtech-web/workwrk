@@ -33,8 +33,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${outfit.variable} ${jetbrainsMono.variable} ${syne.variable} dark`}>
-      <body className="min-h-screen bg-[#0A0A0F] font-sans text-[#E8E8F0] antialiased">
+    <html lang="en" className={`${outfit.variable} ${jetbrainsMono.variable} ${syne.variable}`} suppressHydrationWarning>
+      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>

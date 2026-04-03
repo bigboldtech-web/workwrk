@@ -580,7 +580,7 @@ export default function FeaturesPage() {
             </h1>
           </FadeIn>
           <FadeIn delay={0.35}>
-            <p className="mb-8 max-w-[560px] text-lg text-[#8888A0]">
+            <p className="mb-8 max-w-[560px] text-lg text-muted">
               Every module works together. Data flows between them.
               Your entire business — visible, measurable, and manageable.
             </p>
@@ -618,14 +618,14 @@ export default function FeaturesPage() {
                           style={{ color: mod.color }}>
                           Module {String(i + 1).padStart(2, "0")}
                         </p>
-                        <h2 className="mb-3 text-3xl font-bold tracking-tight text-[#E8E8F0]"
+                        <h2 className="mb-3 text-3xl font-bold tracking-tight text-foreground"
                           style={{ fontFamily: "var(--font-syne)" }}>
                           {mod.title}
                         </h2>
                         <p className="mb-4 text-base font-medium text-[#A29BFE]">
                           {mod.subtitle}
                         </p>
-                        <p className="text-[15px] leading-relaxed text-[#8888A0]">
+                        <p className="text-[15px] leading-relaxed text-muted">
                           {mod.desc}
                         </p>
                       </div>
@@ -633,7 +633,7 @@ export default function FeaturesPage() {
 
                     {/* Demo panel */}
                     <FadeIn direction="right" delay={0.25}>
-                      <div className="overflow-hidden rounded-2xl bg-[#12121A] shadow-2xl shadow-black/40 transition-transform duration-500 hover:scale-[1.02]">
+                      <div className="overflow-hidden rounded-2xl bg-surface shadow-2xl shadow-black/40 transition-transform duration-500 hover:scale-[1.02]">
                         <div className="flex items-center gap-2 bg-[#0A0A12] px-4 py-3">
                           <div className="flex gap-1.5">
                             <div className="h-2.5 w-2.5 rounded-full bg-[#FF5F57]" />
@@ -670,7 +670,7 @@ export default function FeaturesPage() {
                     <FadeIn delay={0.2}>
                     <div className="mx-auto mt-20 max-w-2xl text-center">
                       <Quote size={28} className="mx-auto mb-4" style={{ color: "#6C5CE740" }} />
-                      <p className="mb-5 text-lg italic leading-relaxed text-[#E8E8F0]">
+                      <p className="mb-5 text-lg italic leading-relaxed text-foreground">
                         &ldquo;{(showTestimonial as typeof testimonials[0]).quote}&rdquo;
                       </p>
                       <div className="flex items-center justify-center gap-3">
@@ -681,10 +681,10 @@ export default function FeaturesPage() {
                           {(showTestimonial as typeof testimonials[0]).name.split(" ").map((n) => n[0]).join("")}
                         </div>
                         <div className="text-left">
-                          <div className="text-sm font-semibold text-[#E8E8F0]">
+                          <div className="text-sm font-semibold text-foreground">
                             {(showTestimonial as typeof testimonials[0]).name}
                           </div>
-                          <div className="text-xs text-[#8888A0]">
+                          <div className="text-xs text-muted">
                             {(showTestimonial as typeof testimonials[0]).role}, {(showTestimonial as typeof testimonials[0]).company}
                           </div>
                         </div>
@@ -707,7 +707,7 @@ export default function FeaturesPage() {
             <h2 className="mkt-title mb-4 text-[clamp(1.6rem,3vw,2.4rem)]">
               The Platform <span className="text-gradient">Effect</span>
             </h2>
-            <p className="mx-auto mb-12 max-w-[480px] text-sm text-[#8888A0]">
+            <p className="mx-auto mb-12 max-w-[480px] text-sm text-muted">
               When every module works together, the results compound. Here is what our customers report.
             </p>
           </FadeIn>
@@ -744,12 +744,12 @@ export default function FeaturesPage() {
                     {stat.value}
                   </div>
                   <div
-                    className="mb-2 text-sm font-semibold text-[#E8E8F0]"
+                    className="mb-2 text-sm font-semibold text-foreground"
                     style={{ fontFamily: "var(--font-outfit)" }}
                   >
                     {stat.label}
                   </div>
-                  <p className="text-xs leading-relaxed text-[#8888A0]">
+                  <p className="text-xs leading-relaxed text-muted">
                     {stat.desc}
                   </p>
                 </div>
@@ -768,7 +768,7 @@ export default function FeaturesPage() {
                 <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
                   Ready to see it in action?
                 </h2>
-                <p className="mx-auto mb-8 max-w-[440px] text-base text-[#8888A0]">
+                <p className="mx-auto mb-8 max-w-[440px] text-base text-muted">
                   Start your free trial and experience all 12 modules working together.
                 </p>
                 <div className="flex items-center justify-center gap-4">

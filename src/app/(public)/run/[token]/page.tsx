@@ -186,7 +186,7 @@ export default function ProcessRunPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0A0A0F] flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
       </div>
     );
@@ -194,12 +194,12 @@ export default function ProcessRunPage() {
 
   if (error || !data) {
     return (
-      <div className="min-h-screen bg-[#0A0A0F] flex items-center justify-center px-4">
-        <Card className="max-w-md w-full border-[#2A2A3A] bg-[#12121A]">
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <Card className="max-w-md w-full border-border bg-surface">
           <CardContent className="p-8 text-center">
             <AlertCircle size={40} className="mx-auto text-red-400 mb-4" />
             <h1 className="text-lg font-semibold mb-2">Process Not Found</h1>
-            <p className="text-sm text-[#8888A0]">{error || "This link may have expired or been removed."}</p>
+            <p className="text-sm text-muted">{error || "This link may have expired or been removed."}</p>
           </CardContent>
         </Card>
       </div>
@@ -218,7 +218,7 @@ export default function ProcessRunPage() {
 
     const common = {
       disabled,
-      className: `bg-transparent border-[#2A2A3A] text-sm ${disabled ? "opacity-50" : ""}`,
+      className: `bg-transparent border-border text-sm ${disabled ? "opacity-50" : ""}`,
     };
 
     switch (input.type) {
@@ -299,7 +299,7 @@ export default function ProcessRunPage() {
             disabled={disabled}
             value={value as string}
             onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            className={`w-full rounded-md border px-3 py-2 text-sm bg-transparent border-[#2A2A3A] ${disabled ? "opacity-50" : ""}`}
+            className={`w-full rounded-md border px-3 py-2 text-sm bg-transparent border-border ${disabled ? "opacity-50" : ""}`}
           >
             <option value="">Select...</option>
             {(input.options || []).map((opt) => (
@@ -335,9 +335,9 @@ export default function ProcessRunPage() {
       }
       case "file_upload":
         return (
-          <div className={`flex items-center gap-2 p-3 rounded border border-dashed border-[#2A2A3A] ${disabled ? "opacity-50" : ""}`}>
-            <Upload size={16} className="text-[#8888A0]" />
-            <span className="text-xs text-[#8888A0]">File upload (coming soon)</span>
+          <div className={`flex items-center gap-2 p-3 rounded border border-dashed border-border ${disabled ? "opacity-50" : ""}`}>
+            <Upload size={16} className="text-muted" />
+            <span className="text-xs text-muted">File upload (coming soon)</span>
           </div>
         );
       default:
@@ -357,20 +357,20 @@ export default function ProcessRunPage() {
   // ============================================
 
   return (
-    <div className="min-h-screen bg-[#0A0A0F] text-[#E8E8F0]">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <div className="border-b border-[#2A2A3A] bg-[#12121A]">
+      <div className="border-b border-border bg-surface">
         <div className="mx-auto max-w-3xl px-6 py-6">
-          <div className="flex items-center gap-2 text-xs text-[#8888A0] mb-2">
+          <div className="flex items-center gap-2 text-xs text-muted mb-2">
             <span className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-transparent font-bold text-sm">
               WorkwrK
             </span>
             <span>/</span>
             <span>{data.sopTitle}</span>
           </div>
-          <h1 className="text-xl font-bold text-[#E8E8F0]">{data.title}</h1>
+          <h1 className="text-xl font-bold text-foreground">{data.title}</h1>
           {data.description && (
-            <p className="text-sm text-[#8888A0] mt-1">{data.description}</p>
+            <p className="text-sm text-muted mt-1">{data.description}</p>
           )}
           <div className="flex items-center gap-4 mt-4">
             <div className="flex-1">
@@ -379,7 +379,7 @@ export default function ProcessRunPage() {
             <span className="text-sm font-bold text-purple-400">{data.progress}%</span>
           </div>
           {data.dueDate && (
-            <div className="flex items-center gap-1 mt-2 text-xs text-[#8888A0]">
+            <div className="flex items-center gap-1 mt-2 text-xs text-muted">
               <Clock size={12} />
               Due: {new Date(data.dueDate).toLocaleDateString()}
             </div>
@@ -408,33 +408,33 @@ export default function ProcessRunPage() {
           const isExpanded = expandedSections.has(section.id);
 
           return (
-            <Card key={section.id} className="border-[#2A2A3A] bg-[#12121A] overflow-hidden">
+            <Card key={section.id} className="border-border bg-surface overflow-hidden">
               <button
                 onClick={() => toggleSection(section.id)}
-                className="w-full flex items-center justify-between p-4 hover:bg-[#1A1A26] transition-colors"
+                className="w-full flex items-center justify-between p-4 hover:bg-surface-2 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   {sectionCompleted ? (
                     <CheckCircle2 size={20} className="text-green-400" />
                   ) : (
-                    <div className="h-5 w-5 rounded-full border-2 border-[#3A3A4A] flex items-center justify-center">
-                      <span className="text-[10px] text-[#8888A0]">{sectionProgress}%</span>
+                    <div className="h-5 w-5 rounded-full border-2 border-muted-2 flex items-center justify-center">
+                      <span className="text-[10px] text-muted">{sectionProgress}%</span>
                     </div>
                   )}
                   <span className="font-medium text-sm">{section.title}</span>
-                  <span className="text-xs text-[#6B6B80]">
+                  <span className="text-xs text-muted-2">
                     {completedCount}/{section.steps.length}
                   </span>
                 </div>
                 {isExpanded ? (
-                  <ChevronDown size={16} className="text-[#8888A0]" />
+                  <ChevronDown size={16} className="text-muted" />
                 ) : (
-                  <ChevronRight size={16} className="text-[#8888A0]" />
+                  <ChevronRight size={16} className="text-muted" />
                 )}
               </button>
 
               {isExpanded && (
-                <div className="border-t border-[#2A2A3A]">
+                <div className="border-t border-border">
                   {section.steps.map((step, idx) => {
                     const isStepComplete = data.completedSteps.includes(step.id);
                     const isApproval = step.type === "approval";
@@ -446,8 +446,8 @@ export default function ProcessRunPage() {
                     return (
                       <div
                         key={step.id}
-                        className={`border-b border-[#1A1A26] last:border-b-0 ${
-                          isStepComplete ? "bg-[#0D0D14]/50" : ""
+                        className={`border-b border-surface-2 last:border-b-0 ${
+                          isStepComplete ? "bg-surface-3/50" : ""
                         }`}
                       >
                         {/* Step header */}
@@ -473,8 +473,8 @@ export default function ProcessRunPage() {
                                 size={20}
                                 className={`transition-colors ${
                                   canComplete
-                                    ? "text-[#3A3A4A] hover:text-purple-400"
-                                    : "text-[#2A2A3A]"
+                                    ? "text-border hover:text-purple-400"
+                                    : "text-border"
                                 }`}
                               />
                             )}
@@ -484,8 +484,8 @@ export default function ProcessRunPage() {
                               <p
                                 className={`text-sm ${
                                   isStepComplete
-                                    ? "line-through text-[#6B6B80]"
-                                    : "text-[#E8E8F0]"
+                                    ? "line-through text-muted-2"
+                                    : "text-foreground"
                                 }`}
                               >
                                 {step.title}
@@ -502,12 +502,12 @@ export default function ProcessRunPage() {
                               )}
                             </div>
                             {step.description && (
-                              <p className="text-xs text-[#6B6B80] mt-0.5">
+                              <p className="text-xs text-muted-2 mt-0.5">
                                 {step.description}
                               </p>
                             )}
                           </div>
-                          <span className="text-xs text-[#6B6B80] mt-0.5 shrink-0">
+                          <span className="text-xs text-muted-2 mt-0.5 shrink-0">
                             {idx + 1}
                           </span>
                         </div>
@@ -520,7 +520,7 @@ export default function ProcessRunPage() {
                                 return (
                                   <hr
                                     key={cb.id}
-                                    className="border-[#2A2A3A]"
+                                    className="border-border"
                                   />
                                 );
                               }
@@ -528,7 +528,7 @@ export default function ProcessRunPage() {
                                 return (
                                   <p
                                     key={cb.id}
-                                    className="text-xs text-[#8888A0] whitespace-pre-wrap"
+                                    className="text-xs text-muted whitespace-pre-wrap"
                                   >
                                     {cb.content}
                                   </p>
@@ -540,7 +540,7 @@ export default function ProcessRunPage() {
                                     key={cb.id}
                                     src={cb.content}
                                     alt=""
-                                    className="max-w-full rounded border border-[#2A2A3A]"
+                                    className="max-w-full rounded border border-border"
                                   />
                                 );
                               }
@@ -565,7 +565,7 @@ export default function ProcessRunPage() {
                             {step.inputs!.map((input) => (
                               <div key={input.id} className="space-y-1">
                                 {input.type !== "checkbox" && (
-                                  <Label className="text-xs text-[#8888A0]">
+                                  <Label className="text-xs text-muted">
                                     {input.label}
                                     {input.required && (
                                       <span className="text-red-400 ml-0.5">*</span>

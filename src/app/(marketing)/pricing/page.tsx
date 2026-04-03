@@ -323,9 +323,9 @@ function CellValue({ value }: { value: boolean | string }) {
   if (value === true)
     return <Check size={18} className="mx-auto text-[#00D68F]" />;
   if (value === false)
-    return <X size={18} className="mx-auto text-[#3A3A4A]" />;
+    return <X size={18} className="mx-auto text-border" />;
   return (
-    <span className="text-sm text-[#E8E8F0]">{value}</span>
+    <span className="text-sm text-foreground">{value}</span>
   );
 }
 
@@ -347,7 +347,7 @@ export default function PricingPage() {
             </h1>
           </FadeIn>
           <FadeIn delay={0.2}>
-            <p className="mx-auto mb-2 max-w-[560px] text-lg text-[#8888A0] animate-fade-in-2">
+            <p className="mx-auto mb-2 max-w-[560px] text-lg text-muted animate-fade-in-2">
               Start free for 14 days. Pick the plan that fits your team size and
               upgrade as you grow.
             </p>
@@ -362,10 +362,10 @@ export default function PricingPage() {
             {trustBadges.map((badge) => (
               <StaggerItem key={badge.label}>
                 <div
-                  className="flex items-center gap-2.5 rounded-full border border-[#2A2A3A] bg-[#12121A] px-5 py-2.5"
+                  className="flex items-center gap-2.5 rounded-full border border-border bg-surface px-5 py-2.5"
                 >
                   <span className="text-[#00D68F]">{badge.icon}</span>
-                  <span className="font-[family-name:var(--font-mono)] text-xs tracking-wide text-[#E8E8F0]">
+                  <span className="font-[family-name:var(--font-mono)] text-xs tracking-wide text-foreground">
                     {badge.label}
                   </span>
                 </div>
@@ -414,25 +414,25 @@ export default function PricingPage() {
                   >
                     {tier.icon}
                   </div>
-                  <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold text-[#E8E8F0]">
+                  <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold text-foreground">
                     {tier.name}
                   </h3>
                 </div>
 
                 <div className="mb-2">
                   {tier.price === "Custom" ? (
-                    <span className="font-[family-name:var(--font-syne)] text-3xl font-bold text-[#E8E8F0]">
+                    <span className="font-[family-name:var(--font-syne)] text-3xl font-bold text-foreground">
                       Custom
                     </span>
                   ) : (
                     <div className="flex items-baseline gap-1">
-                      <span className="font-[family-name:var(--font-mono)] text-sm text-[#8888A0]">
+                      <span className="font-[family-name:var(--font-mono)] text-sm text-muted">
                         ₹
                       </span>
-                      <span className="font-[family-name:var(--font-syne)] text-3xl font-bold text-[#E8E8F0]">
+                      <span className="font-[family-name:var(--font-syne)] text-3xl font-bold text-foreground">
                         {tier.price}
                       </span>
-                      <span className="text-sm text-[#8888A0]">
+                      <span className="text-sm text-muted">
                         {tier.period}
                       </span>
                     </div>
@@ -443,7 +443,7 @@ export default function PricingPage() {
                   {tier.users}
                 </p>
 
-                <p className="mb-6 text-sm leading-relaxed text-[#8888A0]">
+                <p className="mb-6 text-sm leading-relaxed text-muted">
                   {tier.description}
                 </p>
 
@@ -455,15 +455,15 @@ export default function PricingPage() {
                   <ArrowUpRight size={15} />
                 </Link>
 
-                <div className="mt-auto border-t border-[#2A2A3A] pt-6">
-                  <p className="mb-3 font-[family-name:var(--font-mono)] text-[0.65rem] uppercase tracking-widest text-[#8888A0]">
+                <div className="mt-auto border-t border-border pt-6">
+                  <p className="mb-3 font-[family-name:var(--font-mono)] text-[0.65rem] uppercase tracking-widest text-muted">
                     What&apos;s included
                   </p>
                   <ul className="flex flex-col gap-2.5">
                     {tier.features.map((feature) => (
                       <li
                         key={feature}
-                        className="flex items-start gap-2.5 text-sm text-[#8888A0]"
+                        className="flex items-start gap-2.5 text-sm text-muted"
                       >
                         <Check
                           size={15}
@@ -492,23 +492,23 @@ export default function PricingPage() {
           </div>
 
           <FadeIn>
-          <div className="overflow-x-auto rounded-2xl border border-[#2A2A3A] bg-[#12121A]">
+          <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
             <table className="w-full min-w-[700px] text-left">
               <thead>
-                <tr className="border-b border-[#2A2A3A]">
-                  <th className="px-6 py-5 font-[family-name:var(--font-syne)] text-sm font-bold text-[#E8E8F0]">
+                <tr className="border-b border-border">
+                  <th className="px-6 py-5 font-[family-name:var(--font-syne)] text-sm font-bold text-foreground">
                     Feature
                   </th>
-                  <th className="px-4 py-5 text-center font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-[#8888A0]">
+                  <th className="px-4 py-5 text-center font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-muted">
                     Starter
                   </th>
                   <th className="px-4 py-5 text-center font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-[#6C5CE7]">
                     Growth
                   </th>
-                  <th className="px-4 py-5 text-center font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-[#8888A0]">
+                  <th className="px-4 py-5 text-center font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-muted">
                     Scale
                   </th>
-                  <th className="px-4 py-5 text-center font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-[#8888A0]">
+                  <th className="px-4 py-5 text-center font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-muted">
                     Enterprise
                   </th>
                 </tr>
@@ -527,9 +527,9 @@ export default function PricingPage() {
                     {category.features.map((feature) => (
                       <tr
                         key={feature.name}
-                        className="border-b border-[#2A2A3A]/40 transition-colors hover:bg-[#16161F]"
+                        className="border-b border-border/40 transition-colors hover:bg-[#16161F]"
                       >
-                        <td className="px-6 py-3.5 text-sm text-[#E8E8F0]">
+                        <td className="px-6 py-3.5 text-sm text-foreground">
                           {feature.name}
                         </td>
                         <td className="px-4 py-3.5 text-center">
@@ -571,11 +571,11 @@ export default function PricingPage() {
             {faqItems.map((item) => (
               <StaggerItem key={item.question}>
                 <details
-                  className="group rounded-xl border border-[#2A2A3A] bg-[#12121A] transition-colors open:border-[#6C5CE7]/30"
+                  className="group rounded-xl border border-border bg-surface transition-colors open:border-[#6C5CE7]/30"
                 >
-                  <summary className="flex cursor-pointer items-center justify-between px-6 py-5 font-[family-name:var(--font-syne)] text-base font-semibold text-[#E8E8F0] marker:[font-size:0] [&::-webkit-details-marker]:hidden">
+                  <summary className="flex cursor-pointer items-center justify-between px-6 py-5 font-[family-name:var(--font-syne)] text-base font-semibold text-foreground marker:[font-size:0] [&::-webkit-details-marker]:hidden">
                     <span>{item.question}</span>
-                    <span className="ml-4 flex-shrink-0 text-[#8888A0] transition-transform group-open:rotate-45">
+                    <span className="ml-4 flex-shrink-0 text-muted transition-transform group-open:rotate-45">
                       <svg
                         width="20"
                         height="20"
@@ -592,7 +592,7 @@ export default function PricingPage() {
                       </svg>
                     </span>
                   </summary>
-                  <div className="px-6 pb-5 text-sm leading-relaxed text-[#8888A0]">
+                  <div className="px-6 pb-5 text-sm leading-relaxed text-muted">
                     {item.answer}
                   </div>
                 </details>
@@ -611,7 +611,7 @@ export default function PricingPage() {
                 <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
                   Not sure which plan is right?
                 </h2>
-                <p className="mx-auto mb-8 max-w-[480px] text-base text-[#8888A0]">
+                <p className="mx-auto mb-8 max-w-[480px] text-base text-muted">
                   Start with a 14-day free trial on any plan. No credit card
                   required. Upgrade, downgrade, or cancel anytime.
                 </p>

@@ -86,7 +86,7 @@ export default function AdminAnalyticsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-6 w-6 animate-spin text-[#8888A0]" />
+        <RefreshCw className="h-6 w-6 animate-spin text-muted" />
       </div>
     );
   }
@@ -118,7 +118,7 @@ export default function AdminAnalyticsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Platform Analytics</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Revenue, usage, and growth metrics</p>
+          <p className="text-muted text-sm mt-1">Revenue, usage, and growth metrics</p>
         </div>
         <Button variant="outline" size="sm" onClick={fetchData}>
           <RefreshCw size={14} className="mr-2" /> Refresh
@@ -129,32 +129,32 @@ export default function AdminAnalyticsPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="p-5">
-            <p className="text-xs text-[#8888A0] mb-1">Monthly Recurring Revenue</p>
+            <p className="text-xs text-muted mb-1">Monthly Recurring Revenue</p>
             <p className="text-2xl font-bold text-green-400">{formatCurrency(stats?.mrr ?? 0)}</p>
-            <p className="text-[10px] text-[#8888A0] mt-1">From {stats?.activeOrgs ?? 0} paying organizations</p>
+            <p className="text-[10px] text-muted mt-1">From {stats?.activeOrgs ?? 0} paying organizations</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="text-xs text-[#8888A0] mb-1">Avg. Revenue Per Org</p>
+            <p className="text-xs text-muted mb-1">Avg. Revenue Per Org</p>
             <p className="text-2xl font-bold text-purple-400">
               {stats && stats.activeOrgs > 0 ? formatCurrency(Math.round((stats.mrr) / stats.activeOrgs)) : "—"}
             </p>
-            <p className="text-[10px] text-[#8888A0] mt-1">ARPU across all plans</p>
+            <p className="text-[10px] text-muted mt-1">ARPU across all plans</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="text-xs text-[#8888A0] mb-1">Avg. Users Per Org</p>
+            <p className="text-xs text-muted mb-1">Avg. Users Per Org</p>
             <p className="text-2xl font-bold text-blue-400">{avgUsers}</p>
-            <p className="text-[10px] text-[#8888A0] mt-1">{stats?.totalUsers ?? 0} users across {stats?.totalOrgs ?? 0} orgs</p>
+            <p className="text-[10px] text-muted mt-1">{stats?.totalUsers ?? 0} users across {stats?.totalOrgs ?? 0} orgs</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="text-xs text-[#8888A0] mb-1">Trial Conversion Pipeline</p>
+            <p className="text-xs text-muted mb-1">Trial Conversion Pipeline</p>
             <p className="text-2xl font-bold text-orange-400">{stats?.trialOrgs ?? 0}</p>
-            <p className="text-[10px] text-[#8888A0] mt-1">Organizations currently on trial</p>
+            <p className="text-[10px] text-muted mt-1">Organizations currently on trial</p>
           </CardContent>
         </Card>
       </div>
@@ -168,7 +168,7 @@ export default function AdminAnalyticsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {revenueByPlan.length === 0 ? (
-            <p className="text-sm text-[#8888A0]">No revenue data yet.</p>
+            <p className="text-sm text-muted">No revenue data yet.</p>
           ) : (
             revenueByPlan.map((p) => (
               <div key={p.plan} className="space-y-1">
@@ -176,7 +176,7 @@ export default function AdminAnalyticsPage() {
                   <div className="flex items-center gap-2">
                     <div className={`h-2.5 w-2.5 rounded-full ${planColors[p.plan] || "bg-gray-500"}`} />
                     <span className="font-medium">{p.plan}</span>
-                    <span className="text-[#8888A0] text-xs">({p.count} orgs)</span>
+                    <span className="text-muted text-xs">({p.count} orgs)</span>
                   </div>
                   <span className="font-mono text-sm">{formatCurrency(p.revenue)}</span>
                 </div>
@@ -198,11 +198,11 @@ export default function AdminAnalyticsPage() {
           <CardContent className="space-y-3">
             {topByUsers.map((c, i) => (
               <div key={c.id} className="flex items-center gap-3">
-                <span className="text-xs font-bold text-[#8888A0] w-4">{i + 1}</span>
+                <span className="text-xs font-bold text-muted w-4">{i + 1}</span>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm font-medium">{c.name}</span>
-                    <span className="text-xs text-[#8888A0]">{c._count.users} users</span>
+                    <span className="text-xs text-muted">{c._count.users} users</span>
                   </div>
                   <Progress value={(c._count.users / maxUsers) * 100} className="h-1.5" />
                 </div>
@@ -221,11 +221,11 @@ export default function AdminAnalyticsPage() {
           <CardContent className="space-y-3">
             {topByActivity.map((c, i) => (
               <div key={c.id} className="flex items-center gap-3">
-                <span className="text-xs font-bold text-[#8888A0] w-4">{i + 1}</span>
+                <span className="text-xs font-bold text-muted w-4">{i + 1}</span>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm font-medium">{c.name}</span>
-                    <span className="text-xs text-[#8888A0]">{c.totalActivity} items</span>
+                    <span className="text-xs text-muted">{c.totalActivity} items</span>
                   </div>
                   <Progress value={(c.totalActivity / maxActivity) * 100} className="h-1.5" />
                 </div>
@@ -244,21 +244,21 @@ export default function AdminAnalyticsPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div className="rounded-lg bg-[#1A1A26] p-4 text-center">
+            <div className="rounded-lg bg-surface-2 p-4 text-center">
               <p className="text-2xl font-bold text-purple-400">+{stats?.newOrgsThisMonth ?? 0}</p>
-              <p className="text-[10px] text-[#8888A0] mt-1">New orgs this month</p>
+              <p className="text-[10px] text-muted mt-1">New orgs this month</p>
             </div>
-            <div className="rounded-lg bg-[#1A1A26] p-4 text-center">
+            <div className="rounded-lg bg-surface-2 p-4 text-center">
               <p className="text-2xl font-bold text-blue-400">+{stats?.newUsersThisMonth ?? 0}</p>
-              <p className="text-[10px] text-[#8888A0] mt-1">New users this month</p>
+              <p className="text-[10px] text-muted mt-1">New users this month</p>
             </div>
-            <div className="rounded-lg bg-[#1A1A26] p-4 text-center">
+            <div className="rounded-lg bg-surface-2 p-4 text-center">
               <p className="text-2xl font-bold text-green-400">{stats?.activeRate ?? 0}%</p>
-              <p className="text-[10px] text-[#8888A0] mt-1">Active rate</p>
+              <p className="text-[10px] text-muted mt-1">Active rate</p>
             </div>
-            <div className="rounded-lg bg-[#1A1A26] p-4 text-center">
+            <div className="rounded-lg bg-surface-2 p-4 text-center">
               <p className="text-2xl font-bold text-amber-400">{formatCurrency((stats?.mrr ?? 0) * 12)}</p>
-              <p className="text-[10px] text-[#8888A0] mt-1">Projected ARR</p>
+              <p className="text-[10px] text-muted mt-1">Projected ARR</p>
             </div>
           </div>
         </CardContent>

@@ -34,20 +34,20 @@ function getAccessLabel(level: string) {
 
 function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[]; depth?: number }) {
   const directReports = allUsers.filter((u) => u.manager?.id === user.id);
-  const borderColor = depth === 0 ? "border-purple-500/30" : "border-[#2A2A3A]";
-  const bgColor = depth === 0 ? "bg-purple-500/10" : "bg-[#12121A]";
+  const borderColor = depth === 0 ? "border-purple-500/30" : "border-border";
+  const bgColor = depth === 0 ? "bg-purple-500/10" : "bg-surface";
 
   return (
     <div className="flex flex-col items-center">
       {/* Node */}
       <div className={`rounded-xl border ${borderColor} ${bgColor} p-4 min-w-[180px] max-w-[220px] text-center`}>
         <Avatar className="h-10 w-10 mx-auto mb-2">
-          <AvatarFallback className={`text-sm font-bold ${depth === 0 ? "bg-purple-600/20 text-purple-400" : "bg-[#2A2A3A] text-[#8888A0]"}`}>
+          <AvatarFallback className={`text-sm font-bold ${depth === 0 ? "bg-purple-600/20 text-purple-400" : "bg-border text-muted"}`}>
             {user.firstName?.[0]}{user.lastName?.[0]}
           </AvatarFallback>
         </Avatar>
         <p className="font-semibold text-sm">{user.firstName} {user.lastName}</p>
-        <p className="text-xs text-[#8888A0]">{user.role?.title || getAccessLabel(user.accessLevel)}</p>
+        <p className="text-xs text-muted">{user.role?.title || getAccessLabel(user.accessLevel)}</p>
         {user.department && (
           <Badge variant="outline" className="text-[9px] mt-1.5">{user.department.name}</Badge>
         )}
@@ -59,13 +59,13 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
       {/* Children */}
       {directReports.length > 0 && (
         <>
-          <div className="h-6 w-px bg-[#2A2A3A]" />
+          <div className="h-6 w-px bg-border" />
           {directReports.length === 1 ? (
             <OrgChartNode user={directReports[0]} allUsers={allUsers} depth={depth + 1} />
           ) : (
             <div className="relative">
               {/* Horizontal connector line */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 h-px bg-[#2A2A3A]" style={{
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 h-px bg-border" style={{
                 width: `${Math.min(directReports.length * 200, 900)}px`,
               }} />
               <div className="flex gap-6 pt-0">
@@ -73,7 +73,7 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
                   .sort((a: any, b: any) => (ACCESS_LEVEL_ORDER[a.accessLevel] ?? 7) - (ACCESS_LEVEL_ORDER[b.accessLevel] ?? 7))
                   .map((report: any) => (
                     <div key={report.id} className="flex flex-col items-center">
-                      <div className="h-6 w-px bg-[#2A2A3A]" />
+                      <div className="h-6 w-px bg-border" />
                       <OrgChartNode user={report} allUsers={allUsers} depth={depth + 1} />
                     </div>
                   ))}
@@ -90,8 +90,8 @@ function OrgChart({ users, departments }: { users: any[]; departments: any[] }) 
   if (users.length === 0) {
     return (
       <div className="text-center py-12">
-        <Users size={40} className="mx-auto text-[#8888A0] mb-3" />
-        <p className="text-sm text-[#8888A0]">Add team members to see the org chart</p>
+        <Users size={40} className="mx-auto text-muted mb-3" />
+        <p className="text-sm text-muted">Add team members to see the org chart</p>
       </div>
     );
   }
@@ -133,22 +133,22 @@ function OrgChart({ users, departments }: { users: any[]; departments: any[] }) 
 
       {/* Unlinked users — no manager assigned */}
       {unlinked.length > 0 && (
-        <div className="border-t border-[#2A2A3A] pt-6">
-          <p className="text-xs text-[#8888A0] mb-3 text-center">
+        <div className="border-t border-border pt-6">
+          <p className="text-xs text-muted mb-3 text-center">
             Not in hierarchy — assign a manager to link them
           </p>
           <div className="flex flex-wrap gap-3 justify-center">
             {unlinked.map((u) => (
-              <div key={u.id} className="rounded-lg border border-dashed border-[#2A2A3A] bg-[#0D0D14] p-3 min-w-[140px] text-center">
+              <div key={u.id} className="rounded-lg border border-dashed border-border bg-surface-3 p-3 min-w-[140px] text-center">
                 <Avatar className="h-8 w-8 mx-auto mb-1">
-                  <AvatarFallback className="text-xs bg-[#2A2A3A] text-[#8888A0]">
+                  <AvatarFallback className="text-xs bg-border text-muted">
                     {u.firstName?.[0]}{u.lastName?.[0]}
                   </AvatarFallback>
                 </Avatar>
                 <p className="text-xs font-medium">{u.firstName} {u.lastName}</p>
-                <p className="text-[10px] text-[#6B6B80]">{u.role?.title || u.accessLevel?.replace(/_/g, " ")}</p>
+                <p className="text-[10px] text-muted-2">{u.role?.title || u.accessLevel?.replace(/_/g, " ")}</p>
                 {u.department && (
-                  <p className="text-[10px] text-[#6B6B80]">{u.department.name}</p>
+                  <p className="text-[10px] text-muted-2">{u.department.name}</p>
                 )}
               </div>
             ))}
@@ -329,10 +329,10 @@ export default function OrganizationPage() {
   if (loading) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="h-8 w-48 bg-[#1A1A26] rounded animate-pulse" />
+        <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-40 bg-[#12121A] rounded-lg border border-[#2A2A3A] animate-pulse" />
+            <div key={i} className="h-40 bg-surface rounded-lg border border-border animate-pulse" />
           ))}
         </div>
       </div>
@@ -343,7 +343,7 @@ export default function OrganizationPage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Organization</h1>
-        <p className="text-[#8888A0] text-sm mt-1">Manage your company structure, departments, and roles</p>
+        <p className="text-muted text-sm mt-1">Manage your company structure, departments, and roles</p>
       </div>
 
       <Tabs defaultValue="departments">
@@ -397,7 +397,7 @@ export default function OrganizationPage() {
               const memberCount = dept._count?.members ?? dept.members?.length ?? 0;
               const headName = dept.head ? `${dept.head.firstName} ${dept.head.lastName}` : null;
               return (
-                <Card key={dept.id} className="hover:border-[#3A3A4A] transition-all cursor-pointer group">
+                <Card key={dept.id} className="hover:border-muted-2 transition-all cursor-pointer group">
                   <CardContent className="p-5">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
@@ -406,12 +406,12 @@ export default function OrganizationPage() {
                         </div>
                         <div>
                           <h3 className="font-semibold">{dept.name}</h3>
-                          <p className="text-xs text-[#8888A0]">{dept.description || "No description"}</p>
+                          <p className="text-xs text-muted">{dept.description || "No description"}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); openEditDept(dept); }}>
-                          <Edit3 size={13} className="text-[#8888A0]" />
+                          <Edit3 size={13} className="text-muted" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); confirmDelete("dept", dept); }}>
                           <Trash2 size={13} className="text-red-400" />
@@ -420,18 +420,18 @@ export default function OrganizationPage() {
                     </div>
 
                     <div className="mt-4 grid grid-cols-2 gap-3">
-                      <div className="rounded-lg bg-[#0A0A0F] p-2.5 text-center">
+                      <div className="rounded-lg bg-background p-2.5 text-center">
                         <p className="text-lg font-bold">{memberCount}</p>
-                        <p className="text-[10px] text-[#8888A0]">Members</p>
+                        <p className="text-[10px] text-muted">Members</p>
                       </div>
-                      <div className="rounded-lg bg-[#0A0A0F] p-2.5 text-center">
+                      <div className="rounded-lg bg-background p-2.5 text-center">
                         <p className="text-lg font-bold">{dept.roles?.length || 0}</p>
-                        <p className="text-[10px] text-[#8888A0]">Roles</p>
+                        <p className="text-[10px] text-muted">Roles</p>
                       </div>
                     </div>
 
                     {headName && (
-                      <div className="mt-3 flex items-center gap-2 text-xs text-[#8888A0] border-t border-[#2A2A3A] pt-3">
+                      <div className="mt-3 flex items-center gap-2 text-xs text-muted border-t border-border pt-3">
                         <Avatar className="h-5 w-5">
                           <AvatarFallback className="text-[8px]">{headName.split(" ").map((n: string) => n[0]).join("")}</AvatarFallback>
                         </Avatar>
@@ -465,14 +465,14 @@ export default function OrganizationPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Department</Label>
-                    <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.departmentId} onChange={(e) => setRoleForm({ ...roleForm, departmentId: e.target.value })}>
+                    <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.departmentId} onChange={(e) => setRoleForm({ ...roleForm, departmentId: e.target.value })}>
                       <option value="">Select department...</option>
                       {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   </div>
                   <div className="space-y-2">
                     <Label>Level</Label>
-                    <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
+                    <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
                       {levels.map((l) => <option key={l} value={l}>{l.replace(/_/g, " ")}</option>)}
                     </select>
                   </div>
@@ -498,17 +498,17 @@ export default function OrganizationPage() {
             <CardContent className="p-0">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-[#2A2A3A]">
-                    <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Role</th>
-                    <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Department</th>
-                    <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Level</th>
-                    <th className="text-right p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">People</th>
-                    <th className="text-right p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Actions</th>
+                  <tr className="border-b border-border">
+                    <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Role</th>
+                    <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Department</th>
+                    <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Level</th>
+                    <th className="text-right p-4 text-xs font-medium text-muted uppercase tracking-wider">People</th>
+                    <th className="text-right p-4 text-xs font-medium text-muted uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {roles.map((role) => (
-                    <tr key={role.id} className="border-b border-[#2A2A3A]/50 hover:bg-[#1A1A26]/50 transition-colors cursor-pointer">
+                    <tr key={role.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors cursor-pointer">
                       <td className="p-4">
                         <div className="flex items-center gap-2">
                           <Briefcase size={14} className="text-purple-400" />
@@ -517,11 +517,11 @@ export default function OrganizationPage() {
                       </td>
                       <td className="p-4"><Badge variant="outline" className="text-xs">{role.department?.name || "—"}</Badge></td>
                       <td className="p-4"><Badge variant="secondary" className="text-xs">{(role.level || "EMPLOYEE").replace(/_/g, " ")}</Badge></td>
-                      <td className="p-4 text-right text-sm text-[#8888A0]">{role._count?.users ?? role.users?.length ?? 0}</td>
+                      <td className="p-4 text-right text-sm text-muted">{role._count?.users ?? role.users?.length ?? 0}</td>
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditRole(role)}>
-                            <Edit3 size={13} className="text-[#8888A0]" />
+                            <Edit3 size={13} className="text-muted" />
                           </Button>
                           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => confirmDelete("role", role)}>
                             <Trash2 size={13} className="text-red-400" />
@@ -586,14 +586,14 @@ export default function OrganizationPage() {
             </div>
             <div className="space-y-2">
               <Label>Department</Label>
-              <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.departmentId} onChange={(e) => setRoleForm({ ...roleForm, departmentId: e.target.value })}>
+              <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.departmentId} onChange={(e) => setRoleForm({ ...roleForm, departmentId: e.target.value })}>
                 <option value="">Select department...</option>
                 {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
             <div className="space-y-2">
               <Label>Level</Label>
-              <select className="h-10 w-full appearance-none rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-3 pr-8 text-sm text-[#E8E8F0] bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
+              <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
                 {levels.map((l) => <option key={l} value={l}>{l.replace(/_/g, " ")}</option>)}
               </select>
             </div>

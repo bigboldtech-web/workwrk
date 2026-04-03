@@ -132,15 +132,15 @@ export default function MySOPsPage() {
   if (loading) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="h-8 w-48 bg-[#1A1A26] rounded animate-pulse" />
+        <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i}><CardContent className="p-4"><div className="h-12 bg-[#1A1A26] rounded animate-pulse" /></CardContent></Card>
+            <Card key={i}><CardContent className="p-4"><div className="h-12 bg-surface-2 rounded animate-pulse" /></CardContent></Card>
           ))}
         </div>
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-20 bg-[#1A1A26] rounded-lg animate-pulse" />
+            <div key={i} className="h-20 bg-surface-2 rounded-lg animate-pulse" />
           ))}
         </div>
       </div>
@@ -151,7 +151,7 @@ export default function MySOPsPage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">My SOPs</h1>
-        <p className="text-[#8888A0] text-sm mt-1">
+        <p className="text-muted text-sm mt-1">
           {assignments.length} assigned &middot; {pending.length} pending &middot; {completed.length} completed
         </p>
       </div>
@@ -160,19 +160,19 @@ export default function MySOPsPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <Card><CardContent className="p-4 text-center">
           <p className="text-2xl font-bold">{assignments.length}</p>
-          <p className="text-xs text-[#8888A0]">Total Assigned</p>
+          <p className="text-xs text-muted">Total Assigned</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
           <p className="text-2xl font-bold text-orange-400">{pending.length}</p>
-          <p className="text-xs text-[#8888A0]">Pending</p>
+          <p className="text-xs text-muted">Pending</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
           <p className="text-2xl font-bold text-green-400">{completed.length}</p>
-          <p className="text-xs text-[#8888A0]">Completed</p>
+          <p className="text-xs text-muted">Completed</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
-          <p className={`text-2xl font-bold ${overdue.length > 0 ? "text-red-400" : "text-[#8888A0]"}`}>{overdue.length}</p>
-          <p className="text-xs text-[#8888A0]">Overdue</p>
+          <p className={`text-2xl font-bold ${overdue.length > 0 ? "text-red-400" : "text-muted"}`}>{overdue.length}</p>
+          <p className="text-xs text-muted">Overdue</p>
         </CardContent></Card>
       </div>
 
@@ -183,7 +183,7 @@ export default function MySOPsPage() {
             <AlertTriangle size={18} className="text-red-400 shrink-0" />
             <div>
               <p className="text-sm font-medium text-red-400">You have {overdue.length} overdue SOP{overdue.length > 1 ? "s" : ""}</p>
-              <p className="text-xs text-[#8888A0]">Please complete them as soon as possible.</p>
+              <p className="text-xs text-muted">Please complete them as soon as possible.</p>
             </div>
           </CardContent>
         </Card>
@@ -192,12 +192,12 @@ export default function MySOPsPage() {
       {/* Pending SOPs */}
       {pending.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-[#8888A0] uppercase tracking-wider">Pending</h2>
+          <h2 className="text-sm font-semibold text-muted uppercase tracking-wider">Pending</h2>
           {pending.map((a) => {
             const pct = a.stepsTotal > 0 ? Math.round((a.stepsCompleted / a.stepsTotal) * 100) : 0;
             const isOverdue = a.dueDate && new Date(a.dueDate) < new Date();
             return (
-              <Card key={a.id} className="hover:border-[#3A3A4A] transition-all cursor-pointer" onClick={() => setActiveAssignment(a)}>
+              <Card key={a.id} className="hover:border-muted-2 transition-all cursor-pointer" onClick={() => setActiveAssignment(a)}>
                 <CardContent className="p-4 flex items-center gap-4">
                   <div className="rounded-lg bg-purple-500/10 p-2.5 shrink-0">
                     <FileText size={18} className="text-purple-400" />
@@ -208,7 +208,7 @@ export default function MySOPsPage() {
                       {a.mandatory && <Badge variant="outline" className="text-[10px] shrink-0">Required</Badge>}
                       {isOverdue && <Badge variant="destructive" className="text-[10px] shrink-0">Overdue</Badge>}
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-[#8888A0]">
+                    <div className="flex items-center gap-3 text-xs text-muted">
                       {a.sop.category && <span>{a.sop.category}</span>}
                       <span>{a.stepsCompleted}/{a.stepsTotal} steps</span>
                       {a.dueDate && (
@@ -220,7 +220,7 @@ export default function MySOPsPage() {
                   <div className="text-right shrink-0">
                     <p className="text-lg font-bold font-mono">{pct}%</p>
                   </div>
-                  <ChevronRight size={16} className="text-[#8888A0] shrink-0" />
+                  <ChevronRight size={16} className="text-muted shrink-0" />
                 </CardContent>
               </Card>
             );
@@ -231,7 +231,7 @@ export default function MySOPsPage() {
       {/* Completed SOPs */}
       {completed.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-[#8888A0] uppercase tracking-wider">Completed</h2>
+          <h2 className="text-sm font-semibold text-muted uppercase tracking-wider">Completed</h2>
           {completed.map((a) => (
             <Card key={a.id} className="opacity-70 hover:opacity-100 transition-all cursor-pointer" onClick={() => setActiveAssignment(a)}>
               <CardContent className="p-4 flex items-center gap-4">
@@ -240,13 +240,13 @@ export default function MySOPsPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="font-semibold text-sm truncate">{a.sop.title}</h3>
-                  <div className="flex items-center gap-3 text-xs text-[#8888A0]">
+                  <div className="flex items-center gap-3 text-xs text-muted">
                     {a.sop.category && <span>{a.sop.category}</span>}
                     <span>Completed {formatDate(a.completedAt)}</span>
                     {a.score != null && <span>Score: {a.score}%</span>}
                   </div>
                 </div>
-                <ChevronRight size={16} className="text-[#8888A0] shrink-0" />
+                <ChevronRight size={16} className="text-muted shrink-0" />
               </CardContent>
             </Card>
           ))}
@@ -255,8 +255,8 @@ export default function MySOPsPage() {
 
       {assignments.length === 0 && (
         <div className="text-center py-20">
-          <BookOpen size={48} className="mx-auto text-[#8888A0] mb-3" />
-          <p className="text-[#8888A0]">No SOPs assigned to you yet.</p>
+          <BookOpen size={48} className="mx-auto text-muted mb-3" />
+          <p className="text-muted">No SOPs assigned to you yet.</p>
         </div>
       )}
 
@@ -276,7 +276,7 @@ export default function MySOPsPage() {
                 {/* Progress bar */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-[#8888A0]">
+                    <span className="text-muted">
                       {activeAssignment.stepsCompleted}/{activeAssignment.stepsTotal} steps completed
                     </span>
                     <span className="font-mono font-bold">
@@ -312,7 +312,7 @@ export default function MySOPsPage() {
                         className={`flex items-start gap-3 p-3 rounded-lg border transition-all ${
                           isComplete
                             ? "border-green-500/20 bg-green-500/5"
-                            : "border-[#2A2A3A] bg-[#0D0D14] hover:border-[#3A3A4A]"
+                            : "border-border bg-surface-3 hover:border-muted-2"
                         }`}
                       >
                         <button
@@ -323,15 +323,15 @@ export default function MySOPsPage() {
                           {isComplete ? (
                             <CheckSquare size={18} className="text-green-400" />
                           ) : (
-                            <Square size={18} className="text-[#8888A0] hover:text-purple-400" />
+                            <Square size={18} className="text-muted hover:text-purple-400" />
                           )}
                         </button>
                         <div className="flex-1">
-                          <p className={`text-sm font-medium ${isComplete ? "line-through text-[#8888A0]" : ""}`}>
+                          <p className={`text-sm font-medium ${isComplete ? "line-through text-muted" : ""}`}>
                             {index + 1}. {step.title}
                           </p>
                           {step.description && (
-                            <p className="text-xs text-[#8888A0] mt-0.5">{step.description}</p>
+                            <p className="text-xs text-muted mt-0.5">{step.description}</p>
                           )}
                         </div>
                       </div>
@@ -341,7 +341,7 @@ export default function MySOPsPage() {
 
                 {/* Quiz section */}
                 {activeAssignment.sop.content?.quiz && activeAssignment.sop.content.quiz.length > 0 && (
-                  <div className="space-y-3 border-t border-[#2A2A3A] pt-4">
+                  <div className="space-y-3 border-t border-border pt-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-sm font-semibold flex items-center gap-2">
                         <Award size={14} className="text-purple-400" /> Knowledge Quiz
@@ -367,11 +367,11 @@ export default function MySOPsPage() {
                     {quizOpen && !quizResult && (
                       <div className="space-y-4">
                         {activeAssignment.sop.content.quiz.map((q: any, qi: number) => (
-                          <div key={qi} className="p-3 rounded-lg border border-[#2A2A3A] bg-[#0D0D14]">
+                          <div key={qi} className="p-3 rounded-lg border border-border bg-surface-3">
                             <p className="text-sm font-medium mb-2">{qi + 1}. {q.question}</p>
                             <div className="space-y-1.5">
                               {(q.options || []).map((opt: string, oi: number) => (
-                                <label key={oi} className="flex items-center gap-2 p-2 rounded hover:bg-[#1A1A26] cursor-pointer text-sm">
+                                <label key={oi} className="flex items-center gap-2 p-2 rounded hover:bg-surface-2 cursor-pointer text-sm">
                                   <input
                                     type="radio"
                                     name={`q-${qi}`}
@@ -397,7 +397,7 @@ export default function MySOPsPage() {
                         <p className="text-sm font-semibold">
                           {quizResult.quizScore >= 70 ? "Passed!" : "Not passed"} — {quizResult.correct}/{quizResult.total} correct ({quizResult.quizScore}%)
                         </p>
-                        <p className="text-xs text-[#8888A0] mt-1">Overall score: {quizResult.overallScore}%</p>
+                        <p className="text-xs text-muted mt-1">Overall score: {quizResult.overallScore}%</p>
                       </div>
                     )}
                   </div>

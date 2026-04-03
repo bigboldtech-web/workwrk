@@ -33,8 +33,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   if (status === "loading") {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#0A0A0F]">
-        <RefreshCw className="h-6 w-6 animate-spin text-[#8888A0]" />
+      <div className="flex h-screen items-center justify-center bg-background">
+        <RefreshCw className="h-6 w-6 animate-spin text-muted" />
       </div>
     );
   }
@@ -44,10 +44,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="flex h-screen bg-[#0A0A0F] text-[#E8E8F0]">
+    <div className="flex h-screen bg-background text-foreground">
       {/* Sidebar */}
-      <aside className="w-[240px] border-r border-[#2A2A3A] bg-[#0A0A0F] flex flex-col">
-        <div className="h-16 flex items-center px-4 border-b border-[#2A2A3A]">
+      <aside className="w-[240px] border-r border-border bg-background flex flex-col">
+        <div className="h-16 flex items-center px-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Shield size={20} className="text-red-400" />
             <span className="font-bold text-sm">WorkwrK Admin</span>
@@ -64,7 +64,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
                   isActive
                     ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                    : "text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0]"
+                    : "text-muted hover:bg-surface-2 hover:text-foreground"
                 )}
               >
                 <item.icon size={18} />
@@ -73,10 +73,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             );
           })}
         </nav>
-        <div className="px-3 py-4 border-t border-[#2A2A3A]">
+        <div className="px-3 py-4 border-t border-border">
           <Link
             href="/dashboard"
-            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0] transition-all"
+            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-muted hover:bg-surface-2 hover:text-foreground transition-all"
           >
             <ArrowLeft size={16} />
             <span>Back to Dashboard</span>
@@ -86,9 +86,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 border-b border-[#2A2A3A] flex items-center justify-between px-6 bg-[#0A0A0F]/80 backdrop-blur">
-          <h1 className="text-sm font-medium text-[#8888A0]">Super Admin Panel</h1>
-          <div className="flex items-center gap-2 text-xs text-[#8888A0]">
+        <header className="h-16 border-b border-border flex items-center justify-between px-6 bg-background/80 backdrop-blur">
+          <h1 className="text-sm font-medium text-muted">Super Admin Panel</h1>
+          <div className="flex items-center gap-2 text-xs text-muted">
             <Shield size={12} className="text-red-400" />
             {(session.user as any)?.email}
           </div>

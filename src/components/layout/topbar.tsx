@@ -123,10 +123,10 @@ export function Topbar() {
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#2A2A3A] bg-[#0A0A0F]/80 px-6 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur-xl">
       {/* Search */}
       <div className="relative flex-1 max-w-md" ref={searchRef}>
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8888A0]" />
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
         <input
           id="global-search"
           type="text"
@@ -134,19 +134,19 @@ export function Topbar() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onFocus={() => searchResults.length > 0 && setShowSearch(true)}
-          className="h-9 w-full rounded-lg border border-[#2A2A3A] bg-[#12121A] pl-10 pr-4 text-sm text-[#E8E8F0] placeholder:text-[#8888A0] focus:border-purple-500 focus:outline-none transition-colors"
+          className="h-9 w-full rounded-lg border border-border bg-surface pl-10 pr-4 text-sm text-foreground placeholder:text-muted focus:border-purple-500 focus:outline-none transition-colors"
         />
-        <kbd className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-[#2A2A3A] bg-[#1A1A26] px-1.5 py-0.5 text-[10px] text-[#8888A0] font-mono">
+        <kbd className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted font-mono">
           ⌘K
         </kbd>
 
         {/* Search Results Dropdown */}
         {showSearch && (
-          <div className="absolute left-0 right-0 top-full mt-1 rounded-lg border border-[#2A2A3A] bg-[#12121A] shadow-xl overflow-hidden z-50">
+          <div className="absolute left-0 right-0 top-full mt-1 rounded-lg border border-border bg-surface shadow-xl overflow-hidden z-50">
             {searching ? (
-              <div className="px-4 py-3 text-sm text-[#8888A0]">Searching...</div>
+              <div className="px-4 py-3 text-sm text-muted">Searching...</div>
             ) : searchResults.length === 0 ? (
-              <div className="px-4 py-3 text-sm text-[#8888A0]">No results found</div>
+              <div className="px-4 py-3 text-sm text-muted">No results found</div>
             ) : (
               <div className="max-h-80 overflow-y-auto">
                 {searchResults.map((result) => {
@@ -159,14 +159,14 @@ export function Topbar() {
                         setShowSearch(false);
                         setSearchQuery("");
                       }}
-                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#1A1A26] transition-colors"
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2 transition-colors"
                     >
-                      <Icon size={16} className="text-[#8888A0] flex-shrink-0" />
+                      <Icon size={16} className="text-muted flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{result.title}</p>
-                        <p className="text-xs text-[#8888A0] truncate">{result.subtitle}</p>
+                        <p className="text-xs text-muted truncate">{result.subtitle}</p>
                       </div>
-                      <span className="text-[10px] text-[#8888A0] uppercase tracking-wider flex-shrink-0">
+                      <span className="text-[10px] text-muted uppercase tracking-wider flex-shrink-0">
                         {result.type}
                       </span>
                     </Link>
@@ -188,7 +188,7 @@ export function Topbar() {
         {/* Notifications */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="relative rounded-lg p-2 text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0] transition-colors">
+            <button className="relative rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-foreground transition-colors">
               <Bell size={20} />
               {unreadCount > 0 && (
                 <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
@@ -206,7 +206,7 @@ export function Topbar() {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {notifications.length === 0 ? (
-              <div className="px-3 py-6 text-center text-sm text-[#8888A0]">
+              <div className="px-3 py-6 text-center text-sm text-muted">
                 No notifications yet
               </div>
             ) : (
@@ -216,7 +216,7 @@ export function Topbar() {
                     {!notif.read && <span className="h-2 w-2 rounded-full bg-purple-500 flex-shrink-0" />}
                     <span className="text-sm font-medium truncate">{notif.title}</span>
                   </div>
-                  <span className="text-xs text-[#8888A0] line-clamp-1">{notif.message}</span>
+                  <span className="text-xs text-muted line-clamp-1">{notif.message}</span>
                 </DropdownMenuItem>
               ))
             )}
@@ -226,7 +226,7 @@ export function Topbar() {
         {/* User Menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-3 rounded-lg p-1.5 hover:bg-[#1A1A26] transition-colors">
+            <button className="flex items-center gap-3 rounded-lg p-1.5 hover:bg-surface-2 transition-colors">
               <Avatar className="h-8 w-8">
                 <AvatarImage src={(user as any)?.avatar || undefined} />
                 <AvatarFallback>
@@ -234,10 +234,10 @@ export function Topbar() {
                 </AvatarFallback>
               </Avatar>
               <div className="hidden text-left md:block">
-                <p className="text-sm font-medium text-[#E8E8F0]">
+                <p className="text-sm font-medium text-foreground">
                   {user?.name || "User"}
                 </p>
-                <p className="text-xs text-[#8888A0]">
+                <p className="text-xs text-muted">
                   {(user as any)?.organizationName || "Organization"}
                 </p>
               </div>

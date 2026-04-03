@@ -102,10 +102,10 @@ function getProgressColor(pct: number) {
 function SkeletonRow() {
   return (
     <div className="flex items-center gap-4 p-4 animate-pulse">
-      <div className="h-4 bg-[#2A2A3A] rounded w-1/4" />
-      <div className="h-4 bg-[#2A2A3A] rounded w-1/6" />
-      <div className="h-4 bg-[#2A2A3A] rounded w-1/6" />
-      <div className="h-4 bg-[#2A2A3A] rounded w-1/12" />
+      <div className="h-4 bg-border rounded w-1/4" />
+      <div className="h-4 bg-border rounded w-1/6" />
+      <div className="h-4 bg-border rounded w-1/6" />
+      <div className="h-4 bg-border rounded w-1/12" />
     </div>
   );
 }
@@ -115,10 +115,10 @@ function SkeletonKpiCard() {
     <Card>
       <CardContent className="p-4 animate-pulse">
         <div className="space-y-3">
-          <div className="h-4 bg-[#2A2A3A] rounded w-2/3" />
-          <div className="h-3 bg-[#2A2A3A] rounded w-1/3" />
-          <div className="h-6 bg-[#2A2A3A] rounded w-1/4" />
-          <div className="h-1.5 bg-[#2A2A3A] rounded w-full" />
+          <div className="h-4 bg-border rounded w-2/3" />
+          <div className="h-3 bg-border rounded w-1/3" />
+          <div className="h-6 bg-border rounded w-1/4" />
+          <div className="h-1.5 bg-border rounded w-full" />
         </div>
       </CardContent>
     </Card>
@@ -588,7 +588,7 @@ export default function KraKpiPage() {
 
       {/* Inline KPIs — only on create */}
       {isCreate && (
-        <div className="space-y-3 pt-2 border-t border-[#2A2A3A]">
+        <div className="space-y-3 pt-2 border-t border-border">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-medium">KPIs</Label>
             <Button variant="ghost" size="sm" className="text-xs text-purple-400 h-6 gap-1" onClick={addInlineKpi}>
@@ -596,12 +596,12 @@ export default function KraKpiPage() {
             </Button>
           </div>
           {inlineKpis.length === 0 && (
-            <p className="text-xs text-[#6B6B80] text-center py-2">Add KPIs to measure this KRA</p>
+            <p className="text-xs text-muted-2 text-center py-2">Add KPIs to measure this KRA</p>
           )}
           {inlineKpis.map((kpi, idx) => (
-            <div key={kpi.id} className="rounded-lg border border-[#2A2A3A] bg-[#0D0D14] p-3 space-y-2">
+            <div key={kpi.id} className="rounded-lg border border-border bg-surface-3 p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-[#6B6B80]">KPI {idx + 1}</span>
+                <span className="text-[10px] text-muted-2">KPI {idx + 1}</span>
                 <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400" onClick={() => removeInlineKpi(kpi.id)}>
                   <Trash2 size={10} />
                 </Button>
@@ -610,7 +610,7 @@ export default function KraKpiPage() {
                 placeholder="KPI name"
                 value={kpi.name}
                 onChange={(e) => updateInlineKpi(kpi.id, "name", e.target.value)}
-                className="h-8 text-sm bg-transparent border-[#2A2A3A]"
+                className="h-8 text-sm bg-transparent border-border"
               />
               <div className="grid grid-cols-3 gap-2">
                 <Select value={kpi.unit} onValueChange={(v) => updateInlineKpi(kpi.id, "unit", v)}>
@@ -629,7 +629,7 @@ export default function KraKpiPage() {
                   placeholder="Target"
                   value={kpi.targetValue}
                   onChange={(e) => updateInlineKpi(kpi.id, "targetValue", e.target.value)}
-                  className="h-8 text-xs bg-transparent border-[#2A2A3A]"
+                  className="h-8 text-xs bg-transparent border-border"
                 />
                 <Select value={kpi.frequency} onValueChange={(v) => updateInlineKpi(kpi.id, "frequency", v)}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Freq" /></SelectTrigger>
@@ -714,7 +714,7 @@ export default function KraKpiPage() {
       <label className="flex items-center gap-2 cursor-pointer">
         <input type="checkbox" checked={kpiLowerIsBetter} onChange={(e) => setKpiLowerIsBetter(e.target.checked)} className="rounded" />
         <span className="text-sm">Lower is better</span>
-        <span className="text-[10px] text-[#6B6B80]">(e.g., errors, complaints, response time)</span>
+        <span className="text-[10px] text-muted-2">(e.g., errors, complaints, response time)</span>
       </label>
       <div className="space-y-2">
         <Label>Description</Label>
@@ -728,7 +728,7 @@ export default function KraKpiPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">KRA & KPIs</h1>
-          <p className="text-[#8888A0] text-sm mt-1">Define, track, and score performance across your organization</p>
+          <p className="text-muted text-sm mt-1">Define, track, and score performance across your organization</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" className="gap-2" onClick={() => setShowRecordKpiDialog(true)}>
@@ -762,24 +762,24 @@ export default function KraKpiPage() {
             ) : overviewRecords.length === 0 ? (
               <Card className="col-span-2">
                 <CardContent className="p-8 text-center">
-                  <p className="text-[#8888A0] text-sm">No KPI records found. Use &quot;Record KPI&quot; to add data.</p>
+                  <p className="text-muted text-sm">No KPI records found. Use &quot;Record KPI&quot; to add data.</p>
                 </CardContent>
               </Card>
             ) : (
               overviewRecords.map((kpi, idx) => (
-                <Card key={idx} className="hover:border-[#3A3A4A] transition-colors">
+                <Card key={idx} className="hover:border-muted-2 transition-colors">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <p className="text-sm font-medium">{kpi.name}</p>
-                        <p className="text-[10px] text-[#8888A0]">{kpi.kraName} &middot; {kpi.period}</p>
+                        <p className="text-[10px] text-muted">{kpi.kraName} &middot; {kpi.period}</p>
                       </div>
                     </div>
                     <div className="flex items-end gap-2 mb-2">
                       <span className={`text-xl font-bold font-mono ${getScoreColor(kpi.achievement)}`}>
                         {kpi.actual.toLocaleString()}
                       </span>
-                      <span className="text-xs text-[#8888A0] mb-0.5">/ {kpi.target.toLocaleString()} {kpi.unit}</span>
+                      <span className="text-xs text-muted mb-0.5">/ {kpi.target.toLocaleString()} {kpi.unit}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Progress value={Math.min(kpi.achievement, 100)} className="h-1.5" indicatorClassName={getProgressColor(kpi.achievement)} />
@@ -795,7 +795,7 @@ export default function KraKpiPage() {
         {/* KRAs Tab */}
         <TabsContent value="kras" className="mt-4 space-y-3">
           {loadingKras ? (
-            <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-12 bg-[#1A1A26] rounded animate-pulse" /></CardContent></Card>)}</div>
+            <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-12 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>
           ) : kras.length === 0 ? (
             <Card><CardContent className="p-0">
               <EmptyState
@@ -812,8 +812,8 @@ export default function KraKpiPage() {
               return (
                 <Card key={kra.id} className="overflow-hidden">
                   {/* KRA Header */}
-                  <div className="flex items-center gap-3 p-4 hover:bg-[#1A1A26]/50 transition-colors">
-                    <button onClick={() => toggleExpandKra(kra.id)} className="shrink-0 text-[#8888A0] hover:text-[#E8E8F0]">
+                  <div className="flex items-center gap-3 p-4 hover:bg-surface-2/50 transition-colors">
+                    <button onClick={() => toggleExpandKra(kra.id)} className="shrink-0 text-muted hover:text-foreground">
                       {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </button>
                     <Target size={16} className="text-purple-400 shrink-0" />
@@ -821,52 +821,52 @@ export default function KraKpiPage() {
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold">{kra.name}</span>
                         <Badge variant="outline" className="text-[10px]">{kra.category}</Badge>
-                        {kra.role?.title && <span className="text-[10px] text-[#6B6B80]">{kra.role.title}</span>}
+                        {kra.role?.title && <span className="text-[10px] text-muted-2">{kra.role.title}</span>}
                       </div>
-                      {kra.description && <p className="text-xs text-[#8888A0] truncate">{kra.description}</p>}
+                      {kra.description && <p className="text-xs text-muted truncate">{kra.description}</p>}
                     </div>
                     <Badge variant="secondary" className="text-[10px] shrink-0">{kra.kpis?.length ?? 0} KPIs</Badge>
-                    <span className="text-xs text-[#6B6B80] shrink-0">{kra._count?.assignments ?? 0} assigned</span>
+                    <span className="text-xs text-muted-2 shrink-0">{kra._count?.assignments ?? 0} assigned</span>
                     <div className="flex items-center gap-1 shrink-0">
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openAssignForKra(kra.id)} title="Assign"><UserPlus size={14} className="text-purple-400" /></Button>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditKra(kra)} title="Edit"><Pencil size={14} className="text-[#8888A0]" /></Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditKra(kra)} title="Edit"><Pencil size={14} className="text-muted" /></Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowDeleteConfirm({ type: "kra", id: kra.id })} title="Delete"><Trash2 size={14} className="text-red-400" /></Button>
                     </div>
                   </div>
 
                   {/* Expanded KPIs */}
                   {isExpanded && (
-                    <div className="border-t border-[#2A2A3A] bg-[#0D0D14]">
+                    <div className="border-t border-border bg-surface-3">
                       {(!kra.kpis || kra.kpis.length === 0) ? (
-                        <div className="p-4 text-center text-xs text-[#8888A0]">
+                        <div className="p-4 text-center text-xs text-muted">
                           No KPIs under this KRA yet.
                         </div>
                       ) : (
                         <table className="w-full">
                           <thead>
-                            <tr className="border-b border-[#1A1A26]">
-                              <th className="text-left px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">KPI Name</th>
-                              <th className="text-center px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Type</th>
-                              <th className="text-center px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Unit</th>
-                              <th className="text-center px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Target</th>
-                              <th className="text-center px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Frequency</th>
-                              <th className="text-right px-4 py-2 text-[10px] font-medium text-[#6B6B80] uppercase">Actions</th>
+                            <tr className="border-b border-surface-2">
+                              <th className="text-left px-4 py-2 text-[10px] font-medium text-muted-2 uppercase">KPI Name</th>
+                              <th className="text-center px-4 py-2 text-[10px] font-medium text-muted-2 uppercase">Type</th>
+                              <th className="text-center px-4 py-2 text-[10px] font-medium text-muted-2 uppercase">Unit</th>
+                              <th className="text-center px-4 py-2 text-[10px] font-medium text-muted-2 uppercase">Target</th>
+                              <th className="text-center px-4 py-2 text-[10px] font-medium text-muted-2 uppercase">Frequency</th>
+                              <th className="text-right px-4 py-2 text-[10px] font-medium text-muted-2 uppercase">Actions</th>
                             </tr>
                           </thead>
                           <tbody>
                             {kra.kpis.map((kpi) => (
-                              <tr key={kpi.id} className="border-b border-[#1A1A26] last:border-b-0 hover:bg-[#12121A] transition-colors">
+                              <tr key={kpi.id} className="border-b border-surface-2 last:border-b-0 hover:bg-surface transition-colors">
                                 <td className="px-4 py-2.5">
                                   <span className="text-sm">{kpi.name}</span>
-                                  {kpi.description && <p className="text-[10px] text-[#6B6B80] truncate max-w-xs">{kpi.description}</p>}
+                                  {kpi.description && <p className="text-[10px] text-muted-2 truncate max-w-xs">{kpi.description}</p>}
                                 </td>
                                 <td className="px-4 py-2.5 text-center"><Badge variant="outline" className="text-[9px]">{kpi.type}</Badge></td>
-                                <td className="px-4 py-2.5 text-center text-xs text-[#8888A0]">{kpi.unit || "—"}</td>
+                                <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.unit || "—"}</td>
                                 <td className="px-4 py-2.5 text-center text-xs font-mono text-purple-400">{kpi.targetValue != null ? kpi.targetValue : "—"}</td>
-                                <td className="px-4 py-2.5 text-center text-xs text-[#8888A0]">{kpi.frequency}</td>
+                                <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.frequency}</td>
                                 <td className="px-4 py-2.5 text-right">
                                   <div className="flex items-center justify-end gap-1">
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEditKpi(kpi)} title="Edit"><Pencil size={12} className="text-[#8888A0]" /></Button>
+                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEditKpi(kpi)} title="Edit"><Pencil size={12} className="text-muted" /></Button>
                                     <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setShowDeleteConfirm({ type: "kpi", id: kpi.id })} title="Delete"><Trash2 size={12} className="text-red-400" /></Button>
                                   </div>
                                 </td>
@@ -875,8 +875,8 @@ export default function KraKpiPage() {
                           </tbody>
                         </table>
                       )}
-                      <div className="p-3 border-t border-[#1A1A26]">
-                        <Button variant="ghost" size="sm" className="w-full text-xs text-[#8888A0] hover:text-purple-400 gap-1 border border-dashed border-[#2A2A3A]"
+                      <div className="p-3 border-t border-surface-2">
+                        <Button variant="ghost" size="sm" className="w-full text-xs text-muted hover:text-purple-400 gap-1 border border-dashed border-border"
                           onClick={() => { resetKpiForm(); setKpiKraId(kra.id); setShowAddKpiDialog(true); }}>
                           <Plus size={12} /> Add KPI to {kra.name}
                         </Button>
@@ -896,8 +896,8 @@ export default function KraKpiPage() {
           ) : assignments.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center">
-                <Users size={32} className="mx-auto text-[#8888A0] mb-2" />
-                <p className="text-[#8888A0] text-sm">No KRA assignments yet. Click &quot;Assign KRA&quot; to get started.</p>
+                <Users size={32} className="mx-auto text-muted mb-2" />
+                <p className="text-muted text-sm">No KRA assignments yet. Click &quot;Assign KRA&quot; to get started.</p>
               </CardContent>
             </Card>
           ) : (
@@ -911,7 +911,7 @@ export default function KraKpiPage() {
                       </div>
                       <div>
                         <p className="text-sm font-medium">{group.user.firstName} {group.user.lastName}</p>
-                        <p className="text-[10px] text-[#8888A0]">
+                        <p className="text-[10px] text-muted">
                           Total weightage: <span className={group.totalWeightage === 100 ? "text-green-400" : group.totalWeightage > 100 ? "text-red-400" : "text-orange-400"}>
                             {group.totalWeightage}%
                           </span>
@@ -933,7 +933,7 @@ export default function KraKpiPage() {
                 <CardContent className="pt-0">
                   <div className="space-y-2">
                     {group.assignments.map((a) => (
-                      <div key={a.id} className="flex items-center justify-between rounded-lg border border-[#2A2A3A] bg-[#12121A] p-3">
+                      <div key={a.id} className="flex items-center justify-between rounded-lg border border-border bg-surface p-3">
                         <div className="flex items-center gap-3">
                           <Target size={14} className="text-purple-400 flex-shrink-0" />
                           <div>
@@ -949,7 +949,7 @@ export default function KraKpiPage() {
                         <div className="flex items-center gap-3">
                           <div className="text-right">
                             <p className="text-lg font-bold font-mono text-purple-400">{a.weightage}%</p>
-                            <p className="text-[10px] text-[#8888A0]">weightage</p>
+                            <p className="text-[10px] text-muted">weightage</p>
                           </div>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowDeleteConfirm({ type: "assignment", id: a.id })} title="Remove">
                             <Trash2 size={14} className="text-red-400" />
@@ -982,23 +982,23 @@ export default function KraKpiPage() {
                 <div className="space-y-0">{[1,2,3,4].map((i) => <SkeletonRow key={i} />)}</div>
               ) : teamScores.length === 0 ? (
                 <div className="p-8 text-center">
-                  <p className="text-[#8888A0] text-sm">No score data available yet.</p>
+                  <p className="text-muted text-sm">No score data available yet.</p>
                 </div>
               ) : (
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-[#2A2A3A]">
-                      <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Person</th>
-                      <th className="text-left p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Department</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">KRA Score</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">KPI Score</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Overall</th>
-                      <th className="text-center p-4 text-xs font-medium text-[#8888A0] uppercase tracking-wider">Status</th>
+                    <tr className="border-b border-border">
+                      <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Person</th>
+                      <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Department</th>
+                      <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">KRA Score</th>
+                      <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">KPI Score</th>
+                      <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Overall</th>
+                      <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {teamScores.map((person) => (
-                      <tr key={person.name} className="border-b border-[#2A2A3A]/50 hover:bg-[#1A1A26]/50 transition-colors">
+                      <tr key={person.name} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
                         <td className="p-4 text-sm font-medium">{person.name}</td>
                         <td className="p-4"><Badge variant="outline" className="text-xs">{person.department}</Badge></td>
                         <td className={`p-4 text-center font-mono text-sm ${getScoreColor(person.kraScore)}`}>{person.kraScore}</td>
@@ -1100,8 +1100,8 @@ export default function KraKpiPage() {
                 </Button>
               </div>
               {multiAssignKras.length === 0 && (
-                <div className="text-center py-4 border border-dashed border-[#2A2A3A] rounded-lg">
-                  <p className="text-xs text-[#8888A0] mb-2">No KRAs added yet</p>
+                <div className="text-center py-4 border border-dashed border-border rounded-lg">
+                  <p className="text-xs text-muted mb-2">No KRAs added yet</p>
                   <Button variant="outline" size="sm" className="text-xs gap-1" onClick={() => setMultiAssignKras([{ kraId: "", weightage: "" }])}>
                     <Plus size={12} /> Add KRA
                   </Button>
@@ -1148,9 +1148,9 @@ export default function KraKpiPage() {
                 const isOver = total > 100;
                 const isExact = total === 100;
                 return (
-                  <div className={`flex items-center justify-between p-2 rounded-lg border ${isOver ? "border-red-500/30 bg-red-500/5" : isExact ? "border-green-500/30 bg-green-500/5" : "border-[#2A2A3A]"}`}>
-                    <span className="text-xs text-[#8888A0]">Total Weightage</span>
-                    <span className={`text-sm font-mono font-bold ${isOver ? "text-red-400" : isExact ? "text-green-400" : "text-[#E8E8F0]"}`}>
+                  <div className={`flex items-center justify-between p-2 rounded-lg border ${isOver ? "border-red-500/30 bg-red-500/5" : isExact ? "border-green-500/30 bg-green-500/5" : "border-border"}`}>
+                    <span className="text-xs text-muted">Total Weightage</span>
+                    <span className={`text-sm font-mono font-bold ${isOver ? "text-red-400" : isExact ? "text-green-400" : "text-foreground"}`}>
                       {total}%
                       {isOver && <span className="text-[10px] ml-1">(exceeds 100%)</span>}
                     </span>

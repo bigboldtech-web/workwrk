@@ -59,12 +59,12 @@ function ResetPasswordForm() {
 
   if (!token) {
     return (
-      <Card className="border-[#2A2A3A] bg-[#12121A]/80 backdrop-blur">
+      <Card className="border-border bg-surface/80 backdrop-blur">
         <CardContent className="pt-6">
           <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-4 text-sm text-red-400">
             Invalid reset link. Please request a new one.
           </div>
-          <p className="text-center text-sm text-[#8888A0] mt-4">
+          <p className="text-center text-sm text-muted mt-4">
             <Link href="/forgot-password" className="text-purple-400 hover:text-purple-300">
               Request New Reset Link
             </Link>
@@ -75,7 +75,7 @@ function ResetPasswordForm() {
   }
 
   return (
-    <Card className="border-[#2A2A3A] bg-[#12121A]/80 backdrop-blur">
+    <Card className="border-border bg-surface/80 backdrop-blur">
       <CardHeader className="text-center">
         <div className="mb-4">
           <span
@@ -84,7 +84,7 @@ function ResetPasswordForm() {
           >
             workwrk
           </span>
-          <span className="text-[#8888A0] opacity-50 text-3xl font-extrabold">.</span>
+          <span className="text-muted opacity-50 text-3xl font-extrabold">.</span>
         </div>
         <CardTitle className="text-xl">Set new password</CardTitle>
         <CardDescription>Enter your new password below</CardDescription>

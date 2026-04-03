@@ -70,9 +70,9 @@ function getStatusIcon(status: string) {
     case "OVERDUE":
       return <AlertCircle size={14} className="text-red-400" />;
     case "CANCELLED":
-      return <XCircle size={14} className="text-[#8888A0]" />;
+      return <XCircle size={14} className="text-muted" />;
     default:
-      return <Clock size={14} className="text-[#8888A0]" />;
+      return <Clock size={14} className="text-muted" />;
   }
 }
 
@@ -143,7 +143,7 @@ export default function ProcessRunsPage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Process Runs</h1>
-        <p className="text-[#8888A0] text-sm mt-1">
+        <p className="text-muted text-sm mt-1">
           Track active and completed checklist executions
         </p>
       </div>
@@ -153,25 +153,25 @@ export default function ProcessRunsPage() {
         <Card>
           <CardContent className="p-4 text-center">
             <p className="text-2xl font-bold">{runs.length}</p>
-            <p className="text-xs text-[#8888A0]">Total Runs</p>
+            <p className="text-xs text-muted">Total Runs</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <p className="text-2xl font-bold text-amber-400">{activeCount}</p>
-            <p className="text-xs text-[#8888A0]">Active</p>
+            <p className="text-xs text-muted">Active</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <p className="text-2xl font-bold text-green-400">{completedCount}</p>
-            <p className="text-xs text-[#8888A0]">Completed</p>
+            <p className="text-xs text-muted">Completed</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <p className="text-2xl font-bold text-red-400">{overdueCount}</p>
-            <p className="text-xs text-[#8888A0]">Overdue</p>
+            <p className="text-xs text-muted">Overdue</p>
           </CardContent>
         </Card>
       </div>
@@ -179,7 +179,7 @@ export default function ProcessRunsPage() {
       {/* Filters */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8888A0]" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input
             placeholder="Search runs..."
             className="pl-10"
@@ -207,7 +207,7 @@ export default function ProcessRunsPage() {
           {Array.from({ length: 4 }).map((_, i) => (
             <Card key={i}>
               <CardContent className="p-4">
-                <div className="h-12 bg-[#1A1A26] rounded animate-pulse" />
+                <div className="h-12 bg-surface-2 rounded animate-pulse" />
               </CardContent>
             </Card>
           ))}
@@ -231,7 +231,7 @@ export default function ProcessRunsPage() {
             return (
               <Card
                 key={run.id}
-                className="hover:border-[#3A3A4A] transition-all"
+                className="hover:border-muted-2 transition-all"
               >
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
@@ -248,7 +248,7 @@ export default function ProcessRunsPage() {
                         </p>
                         {getStatusBadge(isOverdue ? "OVERDUE" : run.status)}
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-[#8888A0]">
+                      <div className="flex items-center gap-3 text-xs text-muted">
                         <Link
                           href={`/sops/${run.sop.id}`}
                           className="hover:text-purple-400 transition-colors"
@@ -288,7 +288,7 @@ export default function ProcessRunsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-[#8888A0] hover:text-[#E8E8F0]"
+                            className="h-8 w-8 text-muted hover:text-foreground"
                             onClick={() => copyLink(run.shareToken!)}
                             title="Copy share link"
                           >
@@ -297,7 +297,7 @@ export default function ProcessRunsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-[#8888A0] hover:text-[#E8E8F0]"
+                            className="h-8 w-8 text-muted hover:text-foreground"
                             onClick={() =>
                               window.open(
                                 `/run/${run.shareToken}`,

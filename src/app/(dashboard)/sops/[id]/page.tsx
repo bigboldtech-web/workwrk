@@ -446,15 +446,15 @@ export default function SOPDetailPage() {
     return (
       <div className="space-y-6 animate-fade-in">
         <div className="flex items-center gap-4">
-          <div className="h-8 w-8 bg-[#1A1A26] rounded animate-pulse" />
-          <div className="h-6 w-64 bg-[#1A1A26] rounded animate-pulse" />
+          <div className="h-8 w-8 bg-surface-2 rounded animate-pulse" />
+          <div className="h-6 w-64 bg-surface-2 rounded animate-pulse" />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
-            <div className="h-64 bg-[#1A1A26] rounded-lg animate-pulse" />
-            <div className="h-48 bg-[#1A1A26] rounded-lg animate-pulse" />
+            <div className="h-64 bg-surface-2 rounded-lg animate-pulse" />
+            <div className="h-48 bg-surface-2 rounded-lg animate-pulse" />
           </div>
-          <div className="h-80 bg-[#1A1A26] rounded-lg animate-pulse" />
+          <div className="h-80 bg-surface-2 rounded-lg animate-pulse" />
         </div>
       </div>
     );
@@ -463,8 +463,8 @@ export default function SOPDetailPage() {
   if (!sop) {
     return (
       <div className="flex flex-col items-center justify-center py-20 space-y-4">
-        <AlertCircle size={48} className="text-[#8888A0]" />
-        <p className="text-[#8888A0]">SOP not found</p>
+        <AlertCircle size={48} className="text-muted" />
+        <p className="text-muted">SOP not found</p>
         <Button variant="outline" onClick={() => router.push("/sops")}>
           Back to SOPs
         </Button>
@@ -499,7 +499,7 @@ export default function SOPDetailPage() {
                 <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="text-lg font-bold bg-transparent border-[#2A2A3A] h-auto py-1"
+                  className="text-lg font-bold bg-transparent border-border h-auto py-1"
                 />
               ) : (
                 <h1 className="text-xl font-bold tracking-tight truncate">
@@ -568,10 +568,10 @@ export default function SOPDetailPage() {
                 <DialogHeader><DialogTitle>{shareLink ? "Process Started!" : "Start Process Run"}</DialogTitle></DialogHeader>
                 {shareLink ? (
                   <div className="space-y-4 py-4">
-                    <p className="text-sm text-[#8888A0]">
+                    <p className="text-sm text-muted">
                       Share this link with anyone who needs to complete this process:
                     </p>
-                    <div className="flex items-center gap-2 p-3 rounded-lg bg-[#0D0D14] border border-[#2A2A3A]">
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-surface-3 border border-border">
                       <Link2 size={14} className="text-purple-400 shrink-0" />
                       <code className="text-xs text-purple-300 flex-1 break-all">{shareLink}</code>
                       <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copyShareLink}>
@@ -654,11 +654,11 @@ export default function SOPDetailPage() {
                   {/* Individual user selection */}
                   <div className="space-y-2">
                     <Label>Or Select Individuals</Label>
-                    <div className="max-h-48 overflow-y-auto border border-[#2A2A3A] rounded-md p-2 space-y-1">
+                    <div className="max-h-48 overflow-y-auto border border-border rounded-md p-2 space-y-1">
                       {orgUsers.map((u: any) => {
                         const alreadyAssigned = assignments.some((a: any) => a.userId === u.id);
                         return (
-                          <label key={u.id} className={`flex items-center gap-2 p-1.5 rounded hover:bg-[#1A1A26] text-sm ${alreadyAssigned ? "opacity-40" : "cursor-pointer"}`}>
+                          <label key={u.id} className={`flex items-center gap-2 p-1.5 rounded hover:bg-surface-2 text-sm ${alreadyAssigned ? "opacity-40" : "cursor-pointer"}`}>
                             <input
                               type="checkbox"
                               disabled={alreadyAssigned}
@@ -670,8 +670,8 @@ export default function SOPDetailPage() {
                               className="rounded"
                             />
                             {u.firstName} {u.lastName}
-                            {u.department?.name && <span className="text-[#8888A0] text-xs ml-auto">{u.department.name}</span>}
-                            {alreadyAssigned && <span className="text-[10px] text-[#8888A0] ml-auto">Already assigned</span>}
+                            {u.department?.name && <span className="text-muted text-xs ml-auto">{u.department.name}</span>}
+                            {alreadyAssigned && <span className="text-[10px] text-muted ml-auto">Already assigned</span>}
                           </label>
                         );
                       })}
@@ -717,7 +717,7 @@ export default function SOPDetailPage() {
                 <DialogHeader>
                   <DialogTitle>Publish SOP</DialogTitle>
                 </DialogHeader>
-                <p className="text-sm text-[#8888A0] py-4">
+                <p className="text-sm text-muted py-4">
                   Publishing will increment the version to v{sop.version + 1} and
                   make this SOP available to all team members. Are you sure?
                 </p>
@@ -748,7 +748,7 @@ export default function SOPDetailPage() {
                 <DialogHeader>
                   <DialogTitle>Archive SOP</DialogTitle>
                 </DialogHeader>
-                <p className="text-sm text-[#8888A0] py-4">
+                <p className="text-sm text-muted py-4">
                   Archiving will hide this SOP from active lists. You can
                   restore it later. Are you sure?
                 </p>
@@ -807,10 +807,10 @@ export default function SOPDetailPage() {
                       onChange={(e) => setDescription(e.target.value)}
                       placeholder="Describe what this SOP covers..."
                       rows={3}
-                      className="bg-transparent border-[#2A2A3A]"
+                      className="bg-transparent border-border"
                     />
                   ) : (
-                    <p className="text-sm text-[#8888A0]">
+                    <p className="text-sm text-muted">
                       {sop.description || "No description provided."}
                     </p>
                   )}
@@ -857,9 +857,9 @@ export default function SOPDetailPage() {
                     <div className="text-center py-8">
                       <FileText
                         size={32}
-                        className="mx-auto text-[#8888A0] mb-2"
+                        className="mx-auto text-muted mb-2"
                       />
-                      <p className="text-sm text-[#8888A0]">
+                      <p className="text-sm text-muted">
                         No steps defined yet.
                       </p>
                       {editing && (
@@ -878,7 +878,7 @@ export default function SOPDetailPage() {
                     ((sop.content.steps || []) as RecordedStep[]).map((step, index) => (
                       <div
                         key={index}
-                        className="rounded-lg border border-[#2A2A3A] bg-[#0D0D14] overflow-hidden"
+                        className="rounded-lg border border-border bg-surface-3 overflow-hidden"
                       >
                         <div className="flex items-center gap-3 p-4">
                           <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 text-sm font-bold shrink-0">
@@ -887,7 +887,7 @@ export default function SOPDetailPage() {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium">{step.description}</p>
                             {step.url && (
-                              <p className="text-xs text-[#6B6B80] mt-0.5 truncate">{step.url}</p>
+                              <p className="text-xs text-muted-2 mt-0.5 truncate">{step.url}</p>
                             )}
                           </div>
                         </div>
@@ -896,7 +896,7 @@ export default function SOPDetailPage() {
                             <img
                               src={step.screenshot}
                               alt={`Step ${step.order || index + 1}: ${step.description}`}
-                              className="w-full rounded-lg border border-[#2A2A3A]"
+                              className="w-full rounded-lg border border-border"
                             />
                           </div>
                         )}
@@ -906,9 +906,9 @@ export default function SOPDetailPage() {
                     steps.map((step, index) => (
                       <div
                         key={step.id}
-                        className="flex items-start gap-3 p-3 rounded-lg border border-[#2A2A3A] bg-[#0D0D14] group"
+                        className="flex items-start gap-3 p-3 rounded-lg border border-border bg-surface-3 group"
                       >
-                        <div className="pt-0.5 text-[#8888A0] opacity-30">
+                        <div className="pt-0.5 text-muted opacity-30">
                           <GripVertical size={16} />
                         </div>
                         <div className="flex items-center justify-center w-6 h-6 rounded-full bg-purple-500/10 text-purple-400 text-xs font-bold shrink-0 mt-0.5">
@@ -923,7 +923,7 @@ export default function SOPDetailPage() {
                                   updateStep(step.id, "title", e.target.value)
                                 }
                                 placeholder="Step title..."
-                                className="bg-transparent border-[#2A2A3A] h-8 text-sm"
+                                className="bg-transparent border-border h-8 text-sm"
                                 autoFocus
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") setEditingStepId(null);
@@ -936,7 +936,7 @@ export default function SOPDetailPage() {
                                 }
                                 placeholder="Step description (optional)..."
                                 rows={2}
-                                className="bg-transparent border-[#2A2A3A] text-sm"
+                                className="bg-transparent border-border text-sm"
                               />
                               <Button
                                 variant="ghost"
@@ -954,11 +954,11 @@ export default function SOPDetailPage() {
                             >
                               <p className="text-sm font-medium">
                                 {step.title || (
-                                  <span className="text-[#8888A0] italic">Untitled step</span>
+                                  <span className="text-muted italic">Untitled step</span>
                                 )}
                               </p>
                               {step.description && (
-                                <p className="text-xs text-[#8888A0] mt-0.5">{step.description}</p>
+                                <p className="text-xs text-muted mt-0.5">{step.description}</p>
                               )}
                             </div>
                           )}
@@ -994,9 +994,9 @@ export default function SOPDetailPage() {
                     <div className="text-center py-8">
                       <Users
                         size={32}
-                        className="mx-auto text-[#8888A0] mb-2"
+                        className="mx-auto text-muted mb-2"
                       />
-                      <p className="text-sm text-[#8888A0]">
+                      <p className="text-sm text-muted">
                         No compliance records yet.
                       </p>
                     </div>
@@ -1004,7 +1004,7 @@ export default function SOPDetailPage() {
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="border-b border-[#2A2A3A] text-[#8888A0]">
+                          <tr className="border-b border-border text-muted">
                             <th className="text-left py-2 pr-4 font-medium">
                               User
                             </th>
@@ -1036,7 +1036,7 @@ export default function SOPDetailPage() {
                             return (
                               <tr
                                 key={record.id}
-                                className="border-b border-[#2A2A3A]/50"
+                                className="border-b border-border/50"
                               >
                                 <td className="py-3 pr-4">
                                   <div className="flex items-center gap-2">
@@ -1049,7 +1049,7 @@ export default function SOPDetailPage() {
                                         {record.user.firstName}{" "}
                                         {record.user.lastName}
                                       </p>
-                                      <p className="text-[10px] text-[#8888A0]">
+                                      <p className="text-[10px] text-muted">
                                         {record.user.email}
                                       </p>
                                     </div>
@@ -1080,7 +1080,7 @@ export default function SOPDetailPage() {
                                   </span>
                                 </td>
                                 <td className="py-3">
-                                  <span className="text-xs text-[#8888A0]">
+                                  <span className="text-xs text-muted">
                                     {formatDate(record.completedAt)}
                                   </span>
                                 </td>
@@ -1111,8 +1111,8 @@ export default function SOPDetailPage() {
                 <CardContent>
                   {assignments.length === 0 ? (
                     <div className="text-center py-8">
-                      <Users size={32} className="mx-auto text-[#8888A0] mb-2" />
-                      <p className="text-sm text-[#8888A0]">No one assigned yet.</p>
+                      <Users size={32} className="mx-auto text-muted mb-2" />
+                      <p className="text-sm text-muted">No one assigned yet.</p>
                       {sop.status === "PUBLISHED" && (
                         <Button variant="outline" size="sm" className="mt-3 gap-1.5" onClick={() => setShowAssignDialog(true)}>
                           <UserPlus size={14} /> Assign People
@@ -1123,7 +1123,7 @@ export default function SOPDetailPage() {
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="border-b border-[#2A2A3A] text-[#8888A0]">
+                          <tr className="border-b border-border text-muted">
                             <th className="text-left py-2 pr-4 font-medium">Person</th>
                             <th className="text-left py-2 pr-4 font-medium">Status</th>
                             <th className="text-left py-2 pr-4 font-medium">Progress</th>
@@ -1136,7 +1136,7 @@ export default function SOPDetailPage() {
                             const pct = a.stepsTotal > 0 ? Math.round((a.stepsCompleted / a.stepsTotal) * 100) : 0;
                             const isOverdue = a.status !== "COMPLETED" && a.dueDate && new Date(a.dueDate) < new Date();
                             return (
-                              <tr key={a.id} className="border-b border-[#2A2A3A]/50">
+                              <tr key={a.id} className="border-b border-border/50">
                                 <td className="py-3 pr-4">
                                   <div className="flex items-center gap-2">
                                     <div className="w-7 h-7 rounded-full bg-purple-500/10 flex items-center justify-center text-xs font-bold text-purple-400">
@@ -1144,7 +1144,7 @@ export default function SOPDetailPage() {
                                     </div>
                                     <div>
                                       <p className="font-medium text-xs">{a.user.firstName} {a.user.lastName}</p>
-                                      <p className="text-[10px] text-[#8888A0]">{a.user.department?.name || "—"}</p>
+                                      <p className="text-[10px] text-muted">{a.user.department?.name || "—"}</p>
                                     </div>
                                   </div>
                                 </td>
@@ -1163,11 +1163,11 @@ export default function SOPDetailPage() {
                                 <td className="py-3 pr-4 min-w-[120px]">
                                   <div className="flex items-center gap-2">
                                     <Progress value={pct} className="h-1.5 flex-1" />
-                                    <span className="text-xs font-mono text-[#8888A0]">{pct}%</span>
+                                    <span className="text-xs font-mono text-muted">{pct}%</span>
                                   </div>
                                 </td>
                                 <td className="py-3 pr-4">
-                                  <span className={`text-xs ${isOverdue ? "text-red-400 font-medium" : "text-[#8888A0]"}`}>
+                                  <span className={`text-xs ${isOverdue ? "text-red-400 font-medium" : "text-muted"}`}>
                                     {a.dueDate ? formatDate(a.dueDate) : "—"}
                                   </span>
                                 </td>
@@ -1201,13 +1201,13 @@ export default function SOPDetailPage() {
                       return (
                         <div
                           key={ver}
-                          className="flex items-center gap-3 p-3 rounded-lg border border-[#2A2A3A] bg-[#0D0D14]"
+                          className="flex items-center gap-3 p-3 rounded-lg border border-border bg-surface-3"
                         >
                           <div
                             className={`flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
                               isCurrent
                                 ? "bg-purple-500/20 text-purple-400"
-                                : "bg-[#1A1A26] text-[#8888A0]"
+                                : "bg-surface-2 text-muted"
                             }`}
                           >
                             v{ver}
@@ -1221,7 +1221,7 @@ export default function SOPDetailPage() {
                                 </span>
                               )}
                             </p>
-                            <p className="text-xs text-[#8888A0]">
+                            <p className="text-xs text-muted">
                               {isCurrent
                                 ? formatDate(sop.updatedAt)
                                 : formatDate(sop.createdAt)}
@@ -1250,9 +1250,9 @@ export default function SOPDetailPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-3">
-                <Tag size={14} className="text-[#8888A0] shrink-0" />
+                <Tag size={14} className="text-muted shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                  <Label className="text-[10px] text-muted uppercase tracking-wider">
                     Category
                   </Label>
                   <p className="text-sm">{sop.category || "Uncategorized"}</p>
@@ -1260,9 +1260,9 @@ export default function SOPDetailPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <Activity size={14} className="text-[#8888A0] shrink-0" />
+                <Activity size={14} className="text-muted shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                  <Label className="text-[10px] text-muted uppercase tracking-wider">
                     Status
                   </Label>
                   <div className="mt-0.5">{getStatusBadge(sop.status)}</div>
@@ -1270,20 +1270,20 @@ export default function SOPDetailPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <Hash size={14} className="text-[#8888A0] shrink-0" />
+                <Hash size={14} className="text-muted shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                  <Label className="text-[10px] text-muted uppercase tracking-wider">
                     Version
                   </Label>
                   <p className="text-sm font-mono">v{sop.version}</p>
                 </div>
               </div>
 
-              <div className="border-t border-[#2A2A3A] pt-4 space-y-3">
+              <div className="border-t border-border pt-4 space-y-3">
                 <div className="flex items-center gap-3">
-                  <Calendar size={14} className="text-[#8888A0] shrink-0" />
+                  <Calendar size={14} className="text-muted shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                    <Label className="text-[10px] text-muted uppercase tracking-wider">
                       Created
                     </Label>
                     <p className="text-sm">{formatDate(sop.createdAt)}</p>
@@ -1291,9 +1291,9 @@ export default function SOPDetailPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <Calendar size={14} className="text-[#8888A0] shrink-0" />
+                  <Calendar size={14} className="text-muted shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                    <Label className="text-[10px] text-muted uppercase tracking-wider">
                       Published
                     </Label>
                     <p className="text-sm">{formatDate(sop.publishedAt)}</p>
@@ -1301,9 +1301,9 @@ export default function SOPDetailPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <Clock size={14} className="text-[#8888A0] shrink-0" />
+                  <Clock size={14} className="text-muted shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-[#8888A0] uppercase tracking-wider">
+                    <Label className="text-[10px] text-muted uppercase tracking-wider">
                       Last Updated
                     </Label>
                     <p className="text-sm">{formatDate(sop.updatedAt)}</p>
@@ -1320,13 +1320,13 @@ export default function SOPDetailPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-[#8888A0]">Total Assigned</span>
+                <span className="text-xs text-muted">Total Assigned</span>
                 <span className="text-sm font-mono font-bold">
                   {sop.compliance.length}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-[#8888A0] flex items-center gap-1">
+                <span className="text-xs text-muted flex items-center gap-1">
                   <CheckCircle size={12} className="text-green-400" /> Completed
                 </span>
                 <span className="text-sm font-mono font-bold text-green-400">
@@ -1334,7 +1334,7 @@ export default function SOPDetailPage() {
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-[#8888A0] flex items-center gap-1">
+                <span className="text-xs text-muted flex items-center gap-1">
                   <AlertCircle size={12} className="text-orange-400" /> Pending
                 </span>
                 <span className="text-sm font-mono font-bold text-orange-400">
@@ -1342,9 +1342,9 @@ export default function SOPDetailPage() {
                 </span>
               </div>
               {sop.compliance.length > 0 && (
-                <div className="pt-2 border-t border-[#2A2A3A]">
+                <div className="pt-2 border-t border-border">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-[#8888A0]">
+                    <span className="text-xs text-muted">
                       Completion Rate
                     </span>
                     <span className="text-sm font-mono font-bold text-purple-400">

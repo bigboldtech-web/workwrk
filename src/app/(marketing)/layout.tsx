@@ -8,7 +8,7 @@ export default function MarketingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="marketing-page relative min-h-screen bg-[#0A0A0F] font-[family-name:var(--font-outfit)]">
+    <div className="marketing-page relative min-h-screen bg-background font-[family-name:var(--font-outfit)]">
       <MarketingNav />
       <main className="relative z-[1]">{children}</main>
       <MarketingFooter />

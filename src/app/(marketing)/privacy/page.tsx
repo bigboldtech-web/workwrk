@@ -32,7 +32,7 @@ export default function PrivacyPage() {
             </h1>
           </FadeIn>
           <FadeIn delay={0.2}>
-            <p className="mx-auto mb-4 max-w-[560px] text-lg text-[#8888A0]">
+            <p className="mx-auto mb-4 max-w-[560px] text-lg text-muted">
               Effective Date: March 28, 2026
             </p>
           </FadeIn>

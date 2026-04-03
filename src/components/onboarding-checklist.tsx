@@ -63,7 +63,7 @@ export function OnboardingChecklist() {
   if (loading || dismissed || !data || data.allDone) return null;
 
   return (
-    <Card className="border-purple-500/20 bg-gradient-to-br from-[#12121A] to-[#1A1024]">
+    <Card className="border-purple-500/20 bg-gradient-to-br from-surface to-purple-950">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -72,7 +72,7 @@ export function OnboardingChecklist() {
             </div>
             <div>
               <CardTitle className="text-sm font-semibold">Get Started</CardTitle>
-              <p className="text-xs text-[#8888A0] mt-0.5">
+              <p className="text-xs text-muted mt-0.5">
                 {data.completedCount} of {data.totalCount} completed
               </p>
             </div>
@@ -81,7 +81,7 @@ export function OnboardingChecklist() {
             <span className="text-sm font-bold text-purple-400">{data.percentage}%</span>
             <button
               onClick={() => setExpanded(!expanded)}
-              className="rounded-md p-1 text-[#8888A0] hover:bg-[#1A1A26] hover:text-[#E8E8F0]"
+              className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-foreground"
             >
               {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
@@ -90,7 +90,7 @@ export function OnboardingChecklist() {
                 setDismissed(true);
                 localStorage.setItem("twrk-checklist-dismissed", "true");
               }}
-              className="rounded-md p-1 text-[#6B6B80] hover:bg-[#1A1A26] hover:text-[#8888A0]"
+              className="rounded-md p-1 text-muted-2 hover:bg-surface-2 hover:text-muted"
               title="Dismiss"
             >
               <X size={14} />
@@ -116,13 +116,13 @@ export function OnboardingChecklist() {
                 {step.completed ? (
                   <CheckCircle2 size={18} className="text-green-400 shrink-0" />
                 ) : (
-                  <Circle size={18} className="text-[#3A3A4A] shrink-0" />
+                  <Circle size={18} className="text-border shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm ${step.completed ? "line-through text-[#6B6B80]" : "text-[#E8E8F0]"}`}>
+                  <p className={`text-sm ${step.completed ? "line-through text-muted-2" : "text-foreground"}`}>
                     {step.label}
                   </p>
-                  <p className="text-xs text-[#6B6B80]">{step.description}</p>
+                  <p className="text-xs text-muted-2">{step.description}</p>
                 </div>
                 {!step.completed && (
                   <span className="text-xs text-purple-400 shrink-0">Start</span>

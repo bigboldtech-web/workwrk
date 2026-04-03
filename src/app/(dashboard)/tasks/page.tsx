@@ -186,12 +186,12 @@ export default function TasksPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Work Calendar</h1>
-          <p className="text-[#8888A0]">Plan and track daily work activities</p>
+          <p className="text-muted">Plan and track daily work activities</p>
         </div>
         <div className="flex items-center gap-3">
           <Select value={selectedUser} onValueChange={setSelectedUser}>
             <SelectTrigger className="w-[180px]">
-              <User size={14} className="text-[#8888A0]" />
+              <User size={14} className="text-muted" />
               <SelectValue placeholder="View" />
             </SelectTrigger>
             <SelectContent>
@@ -295,7 +295,7 @@ export default function TasksPage() {
       </div>
 
       {/* Week Navigation */}
-      <Card className="border-[#2A2A3A] bg-[#12121A]">
+      <Card className="border-border bg-surface">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -326,19 +326,19 @@ export default function TasksPage() {
                   className={`min-h-[200px] rounded-lg border p-3 transition-colors ${
                     isToday
                       ? "border-purple-500/40 bg-purple-500/5"
-                      : "border-[#2A2A3A] bg-[#0A0A0F] hover:border-[#3A3A4A]"
+                      : "border-border bg-background hover:border-muted-2"
                   }`}
                 >
                   <div className="mb-3 flex items-center justify-between">
                     <div>
-                      <span className="text-xs text-[#8888A0]">{DAYS[i]}</span>
+                      <span className="text-xs text-muted">{DAYS[i]}</span>
                       <p className={`text-lg font-semibold ${isToday ? "text-purple-400" : ""}`}>
                         {date.getDate()}
                       </p>
                     </div>
                     <button
                       onClick={() => openAddForDate(dateStr)}
-                      className="rounded-md p-1 text-[#6B6B80] hover:bg-[#1A1A26] hover:text-[#E8E8F0]"
+                      className="rounded-md p-1 text-muted-2 hover:bg-surface-2 hover:text-foreground"
                     >
                       <Plus size={14} />
                     </button>
