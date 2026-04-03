@@ -114,7 +114,7 @@ export async function PATCH(req: Request) {
 
     const orgId = (session.user as any).organizationId;
     const body = await req.json();
-    const { section, data } = body;
+    const { section, data, companyProfile } = body;
 
     // Get current org and settings
     const org = await prisma.organization.findUnique({
@@ -126,6 +126,17 @@ export async function PATCH(req: Request) {
     }
 
     const currentSettings = (org.settings as any) || {};
+
+    // Handle company profile update directly
+    if (companyProfile) {
+      await prisma.organization.update({
+        where: { id: orgId },
+        data: {
+          settings: { ...currentSettings, companyProfile },
+        },
+      });
+      return NextResponse.json({ success: true });
+    }
 
     switch (section) {
       case "general": {

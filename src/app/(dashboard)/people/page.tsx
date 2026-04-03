@@ -476,8 +476,8 @@ export default function PeoplePage() {
           <Input placeholder="Search people..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
         <Select value={deptFilter} onValueChange={setDeptFilter}>
-          <SelectTrigger className="w-[160px]">
-            <Building2 size={14} className="mr-2 text-muted" />
+          <SelectTrigger className="w-[200px]">
+            <Building2 size={14} className="mr-2 text-muted shrink-0" />
             <SelectValue placeholder="Department" />
           </SelectTrigger>
           <SelectContent>

@@ -12,8 +12,10 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Building2, Plus, Users, ChevronRight, Briefcase, Edit3, Trash2,
+  Heart, Target, Eye, Globe, Calendar, Sparkles, Save, X,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -171,6 +173,24 @@ export default function OrganizationPage() {
 
   const { success: toastSuccess, error: toastError } = useToast();
 
+  // Company profile
+  interface CompanyProfile {
+    mission: string;
+    vision: string;
+    about: string;
+    values: string[];
+    website: string;
+    industry: string;
+    founded: string;
+  }
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>({
+    mission: "", vision: "", about: "", values: [], website: "", industry: "", founded: "",
+  });
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [newValue, setNewValue] = useState("");
+  const [orgName, setOrgName] = useState("");
+
   // Edit/delete state
   const [editingDept, setEditingDept] = useState<any>(null);
   const [editingRole, setEditingRole] = useState<any>(null);
@@ -185,22 +205,54 @@ export default function OrganizationPage() {
 
   async function fetchData() {
     try {
-      const [deptRes, roleRes, userRes] = await Promise.all([
+      const [deptRes, roleRes, userRes, settingsRes] = await Promise.all([
         fetch("/api/departments"),
         fetch("/api/roles"),
         fetch("/api/users?limit=500"),
+        fetch("/api/settings"),
       ]);
-      const [deptData, roleData, userData] = await Promise.all([
-        deptRes.json(), roleRes.json(), userRes.json(),
+      const [deptData, roleData, userData, settingsData] = await Promise.all([
+        deptRes.json(), roleRes.json(), userRes.json(), settingsRes.json(),
       ]);
       setDepartments(Array.isArray(deptData) ? deptData : []);
       setRoles(Array.isArray(roleData) ? roleData : []);
       setUsers(Array.isArray(userData) ? userData : userData?.data || []);
+      if (settingsData?.settings?.companyProfile) {
+        setCompanyProfile({ mission: "", vision: "", about: "", values: [], website: "", industry: "", founded: "", ...settingsData.settings.companyProfile });
+      }
+      if (settingsData?.organization?.name) {
+        setOrgName(settingsData.organization.name);
+      }
     } catch (err) {
       console.error("Failed to fetch org data:", err);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function saveCompanyProfile() {
+    setSavingProfile(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyProfile }),
+      });
+      if (res.ok) {
+        setEditingProfile(false);
+        toastSuccess("Company profile saved");
+      }
+    } catch { toastError("Failed to save profile"); } finally { setSavingProfile(false); }
+  }
+
+  function addValue() {
+    if (!newValue.trim()) return;
+    setCompanyProfile({ ...companyProfile, values: [...companyProfile.values, newValue.trim()] });
+    setNewValue("");
+  }
+
+  function removeValue(index: number) {
+    setCompanyProfile({ ...companyProfile, values: companyProfile.values.filter((_, i) => i !== index) });
   }
 
   async function createDepartment() {
@@ -346,12 +398,238 @@ export default function OrganizationPage() {
         <p className="text-muted text-sm mt-1">Manage your company structure, departments, and roles</p>
       </div>
 
-      <Tabs defaultValue="departments">
+      <Tabs defaultValue="about">
         <TabsList>
+          <TabsTrigger value="about" className="gap-2"><Heart size={14} /> About</TabsTrigger>
           <TabsTrigger value="departments" className="gap-2"><Building2 size={14} /> Departments</TabsTrigger>
           <TabsTrigger value="roles" className="gap-2"><Briefcase size={14} /> Roles</TabsTrigger>
           <TabsTrigger value="orgchart" className="gap-2"><Users size={14} /> Org Chart</TabsTrigger>
         </TabsList>
+
+        {/* About Tab */}
+        <TabsContent value="about" className="mt-4 space-y-4">
+          {/* Header with edit button */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-bold">{orgName || "Your Company"}</h2>
+              <p className="text-xs text-muted">Company culture, mission, and values</p>
+            </div>
+            {editingProfile ? (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => { setEditingProfile(false); fetchData(); }}>
+                  <X size={14} className="mr-1" /> Cancel
+                </Button>
+                <Button size="sm" onClick={saveCompanyProfile} disabled={savingProfile}>
+                  <Save size={14} className="mr-1" /> {savingProfile ? "Saving..." : "Save"}
+                </Button>
+              </div>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => setEditingProfile(true)}>
+                <Edit3 size={14} className="mr-1" /> Edit
+              </Button>
+            )}
+          </div>
+
+          {/* Mission & Vision */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Target size={14} className="text-purple-400" /> Mission
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {editingProfile ? (
+                  <Textarea
+                    value={companyProfile.mission}
+                    onChange={(e) => setCompanyProfile({ ...companyProfile, mission: e.target.value })}
+                    placeholder="What is your company's mission?"
+                    rows={3}
+                    className="text-sm"
+                  />
+                ) : (
+                  <p className="text-sm text-muted">{companyProfile.mission || "No mission statement set yet."}</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Eye size={14} className="text-purple-400" /> Vision
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {editingProfile ? (
+                  <Textarea
+                    value={companyProfile.vision}
+                    onChange={(e) => setCompanyProfile({ ...companyProfile, vision: e.target.value })}
+                    placeholder="What is your company's vision?"
+                    rows={3}
+                    className="text-sm"
+                  />
+                ) : (
+                  <p className="text-sm text-muted">{companyProfile.vision || "No vision statement set yet."}</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* About */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Building2 size={14} className="text-purple-400" /> About the Company
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {editingProfile ? (
+                <Textarea
+                  value={companyProfile.about}
+                  onChange={(e) => setCompanyProfile({ ...companyProfile, about: e.target.value })}
+                  placeholder="Tell your team about the company — history, purpose, what you do..."
+                  rows={4}
+                  className="text-sm"
+                />
+              ) : (
+                <p className="text-sm text-muted whitespace-pre-wrap">{companyProfile.about || "No company description added yet."}</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Company Values */}
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Heart size={14} className="text-purple-400" /> Our Values
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {companyProfile.values.length === 0 && !editingProfile ? (
+                <p className="text-sm text-muted">No company values defined yet.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {companyProfile.values.map((value, i) => (
+                    <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20">
+                      <Sparkles size={12} className="text-purple-400" />
+                      <span className="text-sm">{value}</span>
+                      {editingProfile && (
+                        <button onClick={() => removeValue(i)} className="ml-1 text-red-400 hover:text-red-300">
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {editingProfile && (
+                <div className="flex items-center gap-2 mt-3">
+                  <Input
+                    value={newValue}
+                    onChange={(e) => setNewValue(e.target.value)}
+                    placeholder="Add a value (e.g., Integrity, Innovation)"
+                    className="text-sm"
+                    onKeyDown={(e) => e.key === "Enter" && addValue()}
+                  />
+                  <Button size="sm" variant="outline" onClick={addValue}>Add</Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Company Details */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Globe size={14} className="text-muted" /> Website
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {editingProfile ? (
+                  <Input
+                    value={companyProfile.website}
+                    onChange={(e) => setCompanyProfile({ ...companyProfile, website: e.target.value })}
+                    placeholder="https://yourcompany.com"
+                    className="text-sm"
+                  />
+                ) : (
+                  <p className="text-sm text-muted">{companyProfile.website || "—"}</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Briefcase size={14} className="text-muted" /> Industry
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {editingProfile ? (
+                  <Input
+                    value={companyProfile.industry}
+                    onChange={(e) => setCompanyProfile({ ...companyProfile, industry: e.target.value })}
+                    placeholder="e.g., Technology, Finance"
+                    className="text-sm"
+                  />
+                ) : (
+                  <p className="text-sm text-muted">{companyProfile.industry || "—"}</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Calendar size={14} className="text-muted" /> Founded
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {editingProfile ? (
+                  <Input
+                    value={companyProfile.founded}
+                    onChange={(e) => setCompanyProfile({ ...companyProfile, founded: e.target.value })}
+                    placeholder="e.g., 2020"
+                    className="text-sm"
+                  />
+                ) : (
+                  <p className="text-sm text-muted">{companyProfile.founded || "—"}</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Quick Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4 text-center">
+                <p className="text-2xl font-bold">{departments.length}</p>
+                <p className="text-xs text-muted">Departments</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4 text-center">
+                <p className="text-2xl font-bold">{roles.length}</p>
+                <p className="text-xs text-muted">Roles</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4 text-center">
+                <p className="text-2xl font-bold">{users.length}</p>
+                <p className="text-xs text-muted">Team Members</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4 text-center">
+                <p className="text-2xl font-bold text-purple-400">{companyProfile.values.length}</p>
+                <p className="text-xs text-muted">Core Values</p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
         <TabsContent value="departments" className="space-y-4 mt-4">
           <div className="flex justify-end">
