@@ -99,3 +99,16 @@ body {
 .animate-pulse-glow {
   animation: pulse-glow 2s infinite;
 }
+
+/* Security: prevent printing */
+@media print {
+  body { display: none !important; }
+}
+
+/* Security: prevent text selection on sensitive areas */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}

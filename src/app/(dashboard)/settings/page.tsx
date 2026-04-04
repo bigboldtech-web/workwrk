@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Building2, Users, Shield, Bell, CreditCard, Check, Loader2, Send, Trash2,
-  UserX, RotateCcw, Download, AlertTriangle, Sliders, ToggleLeft,
+  UserX, RotateCcw, Download, AlertTriangle, Sliders, ToggleLeft, Key,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/components/ui/toast";
@@ -476,6 +476,7 @@ export default function SettingsPage() {
           <TabsTrigger value="modules" className="gap-2"><ToggleLeft size={14} /> Modules</TabsTrigger>
           <TabsTrigger value="team" className="gap-2"><Users size={14} /> Team</TabsTrigger>
           <TabsTrigger value="security" className="gap-2"><Shield size={14} /> Security</TabsTrigger>
+          <TabsTrigger value="sso" className="gap-2"><Key size={14} /> SSO</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2"><Bell size={14} /> Notifications</TabsTrigger>
           <TabsTrigger value="removed" className="gap-2" onClick={() => { if (removedPeople.length === 0) fetchRemovedPeople(); }}><UserX size={14} /> Removed People</TabsTrigger>
           <TabsTrigger value="billing" className="gap-2"><CreditCard size={14} /> Billing</TabsTrigger>
@@ -997,6 +998,57 @@ export default function SettingsPage() {
         </TabsContent>
 
         {/* Data Management */}
+        {/* SSO Tab */}
+        <TabsContent value="sso" className="space-y-6 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Single Sign-On (SSO)</CardTitle>
+              <p className="text-sm text-muted">Configure enterprise authentication with your identity provider.</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  { name: "Okta", desc: "SAML 2.0 / OIDC", color: "bg-blue-500/10 border-blue-500/20" },
+                  { name: "Azure AD", desc: "Microsoft Entra ID", color: "bg-sky-500/10 border-sky-500/20" },
+                  { name: "Google Workspace", desc: "Google OIDC", color: "bg-red-500/10 border-red-500/20" },
+                ].map((provider) => (
+                  <div key={provider.name} className={`rounded-lg border p-4 text-center ${provider.color}`}>
+                    <p className="font-semibold text-sm">{provider.name}</p>
+                    <p className="text-xs text-muted mt-1">{provider.desc}</p>
+                    <Badge variant="outline" className="text-[10px] mt-2">Available on Enterprise</Badge>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Enable SSO</p>
+                    <p className="text-xs text-muted">Allow team members to sign in with your company identity provider</p>
+                  </div>
+                  <Badge variant="secondary" className="text-xs">Enterprise Plan</Badge>
+                </div>
+                <div className="space-y-2 opacity-50">
+                  <div className="space-y-1">
+                    <Label className="text-xs">SAML Entity ID</Label>
+                    <Input placeholder="https://your-idp.com/entity-id" disabled />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">SSO Login URL</Label>
+                    <Input placeholder="https://your-idp.com/sso/saml" disabled />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">X.509 Certificate</Label>
+                    <Input placeholder="Paste your IdP certificate" disabled />
+                  </div>
+                </div>
+                <p className="text-xs text-muted">
+                  Contact support to configure SSO for your organization. We support SAML 2.0 and OpenID Connect.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="data" className="space-y-6 mt-4">
           <Card>
             <CardHeader>

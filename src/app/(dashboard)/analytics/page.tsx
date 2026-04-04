@@ -12,6 +12,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { EmptyState } from "@/components/ui/empty-state";
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from "recharts";
 
 interface KeyMetrics {
   totalPeople: number;
@@ -267,23 +270,20 @@ export default function AnalyticsPage() {
           <CardTitle className="text-base">Performance Trend ({monthlyTrend.length} Months)</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-end gap-4 h-48">
-            {monthlyTrend.map((m) => {
-              const score = Math.round(m.avgKPI);
-              return (
-                <div key={m.month} className="flex-1 flex flex-col items-center gap-2">
-                  <span className={`text-xs font-mono ${getScoreColor(score)}`}>{score}</span>
-                  <div className="w-full bg-border rounded-t-md relative" style={{ height: "100%" }}>
-                    <div
-                      className={`absolute bottom-0 w-full rounded-t-md transition-all ${getScoreBg(score)}`}
-                      style={{ height: `${score}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-muted">{m.month}</span>
-                </div>
-              );
-            })}
-          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={monthlyTrend.map((m) => ({ ...m, score: Math.round(m.avgKPI) }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "var(--color-muted)" }} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "var(--color-muted)" }} />
+              <Tooltip contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
+              <Bar dataKey="score" radius={[4, 4, 0, 0]}>
+                {monthlyTrend.map((m, i) => {
+                  const s = Math.round(m.avgKPI);
+                  return <Cell key={i} fill={s >= 90 ? "#22c55e" : s >= 70 ? "#6C5CE7" : s >= 50 ? "#f97316" : "#ef4444"} />;
+                })}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </CardContent>
       </Card>
 
@@ -296,24 +296,15 @@ export default function AnalyticsPage() {
               <CardTitle className="text-base">Composite Performance Score Trend</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-end gap-4 h-48">
-                {scoreTrend.map((s) => {
-                  const label = new Date(s.period + "-01").toLocaleString("default", { month: "short" });
-                  return (
-                    <div key={s.period} className="flex-1 flex flex-col items-center gap-2">
-                      <span className={`text-xs font-mono ${getScoreColor(s.avgScore)}`}>{s.avgScore}</span>
-                      <div className="w-full bg-border rounded-t-md relative" style={{ height: "100%" }}>
-                        <div
-                          className={`absolute bottom-0 w-full rounded-t-md transition-all ${getScoreBg(s.avgScore)}`}
-                          style={{ height: `${s.avgScore}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-muted">{label}</span>
-                      <span className="text-[9px] text-muted">{s.count} people</span>
-                    </div>
-                  );
-                })}
-              </div>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={scoreTrend.map((s) => ({ ...s, label: new Date(s.period + "-01").toLocaleString("default", { month: "short" }) }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--color-muted)" }} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "var(--color-muted)" }} />
+                  <Tooltip contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="avgScore" stroke="#6C5CE7" strokeWidth={2} dot={{ fill: "#6C5CE7", r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
             </CardContent>
           </Card>
         )}

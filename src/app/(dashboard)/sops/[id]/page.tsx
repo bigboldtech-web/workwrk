@@ -127,6 +127,81 @@ function generateStepId(): string {
   return `step_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: string; currentVersion: number; onRollback: () => void }) {
+  const [versions, setVersions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [rolling, setRolling] = useState(false);
+  const { success: ts, error: te } = useToast();
+
+  useEffect(() => {
+    fetch(`/api/sops/${sopId}/versions`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.data?.versions) setVersions(d.data.versions); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [sopId]);
+
+  async function handleRollback(versionId: string, ver: number) {
+    if (!confirm(`Rollback to v${ver}? Current content will be saved as a new version.`)) return;
+    setRolling(true);
+    try {
+      const res = await fetch(`/api/sops/${sopId}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionId }),
+      });
+      if (res.ok) {
+        ts(`Rolled back to v${ver}`);
+        onRollback();
+      } else {
+        const err = await res.json();
+        te(err.error || "Rollback failed");
+      }
+    } catch { te("Rollback failed"); } finally { setRolling(false); }
+  }
+
+  if (loading) return <Card><CardContent className="p-4"><div className="h-32 bg-surface-2 rounded animate-pulse" /></CardContent></Card>;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">Version History</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          {/* Current version */}
+          <div className="flex items-center gap-3 p-3 rounded-lg border border-purple-500/30 bg-purple-500/5">
+            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/20 text-purple-400 text-xs font-bold">v{currentVersion}</div>
+            <div className="flex-1">
+              <p className="text-sm font-medium">Current Version</p>
+              <p className="text-xs text-muted">Live version</p>
+            </div>
+            <Badge variant="outline" className="text-[10px]">Latest</Badge>
+          </div>
+
+          {/* Past versions */}
+          {versions.length === 0 ? (
+            <p className="text-xs text-muted text-center py-4">No previous versions. Versions are saved when you publish.</p>
+          ) : (
+            versions.map((v: any) => (
+              <div key={v.id} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-surface-3">
+                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-surface-2 text-muted text-xs font-bold">v{v.version}</div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium">{v.title}</p>
+                  <p className="text-xs text-muted">{new Date(v.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                </div>
+                <Button variant="outline" size="sm" className="text-xs" onClick={() => handleRollback(v.id, v.version)} disabled={rolling}>
+                  Rollback
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SOPDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -1189,55 +1264,7 @@ export default function SOPDetailPage() {
 
             {/* History Tab */}
             <TabsContent value="history" className="mt-4">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">Version History</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {Array.from({ length: sop.version }, (_, i) => {
-                      const ver = sop.version - i;
-                      const isCurrent = ver === sop.version;
-                      return (
-                        <div
-                          key={ver}
-                          className="flex items-center gap-3 p-3 rounded-lg border border-border bg-surface-3"
-                        >
-                          <div
-                            className={`flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                              isCurrent
-                                ? "bg-purple-500/20 text-purple-400"
-                                : "bg-surface-2 text-muted"
-                            }`}
-                          >
-                            v{ver}
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">
-                              Version {ver}
-                              {isCurrent && (
-                                <span className="text-purple-400 ml-2 text-xs">
-                                  (Current)
-                                </span>
-                              )}
-                            </p>
-                            <p className="text-xs text-muted">
-                              {isCurrent
-                                ? formatDate(sop.updatedAt)
-                                : formatDate(sop.createdAt)}
-                            </p>
-                          </div>
-                          {isCurrent && (
-                            <Badge variant="outline" className="text-[10px]">
-                              Latest
-                            </Badge>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+              <VersionHistoryTab sopId={id} currentVersion={sop.version} onRollback={fetchSOP} />
             </TabsContent>
           </Tabs>
         </div>

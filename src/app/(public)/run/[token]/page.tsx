@@ -333,13 +333,39 @@ export default function ProcessRunPage() {
           </div>
         );
       }
-      case "file_upload":
+      case "file_upload": {
+        const fileUrl = value as string;
         return (
-          <div className={`flex items-center gap-2 p-3 rounded border border-dashed border-border ${disabled ? "opacity-50" : ""}`}>
-            <Upload size={16} className="text-muted" />
-            <span className="text-xs text-muted">File upload (coming soon)</span>
+          <div className={`${disabled ? "opacity-50" : ""}`}>
+            {fileUrl ? (
+              <div className="flex items-center gap-2 p-2 rounded border border-border bg-surface">
+                <Upload size={14} className="text-green-400" />
+                <a href={fileUrl} target="_blank" rel="noopener" className="text-xs text-purple-400 hover:underline truncate flex-1">
+                  {fileUrl.split("/").pop()}
+                </a>
+              </div>
+            ) : (
+              <label className={`flex items-center gap-2 p-3 rounded border border-dashed border-border cursor-pointer hover:border-purple-400 transition-colors ${disabled ? "pointer-events-none" : ""}`}>
+                <Upload size={16} className="text-muted" />
+                <span className="text-xs text-muted">Click to upload file (max 10MB)</span>
+                <input type="file" className="hidden" disabled={disabled} onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const fd = new FormData();
+                  fd.append("file", file);
+                  try {
+                    const res = await fetch("/api/upload", { method: "POST", body: fd });
+                    if (res.ok) {
+                      const data = await res.json();
+                      setStepInputValue(stepId, input.id, data.url);
+                    }
+                  } catch {}
+                }} />
+              </label>
+            )}
           </div>
         );
+      }
       default:
         return (
           <Input

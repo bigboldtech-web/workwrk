@@ -21,6 +21,8 @@ import { ErrorState } from "@/components/ui/error-state";
 import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { EmployeeDashboard } from "@/components/dashboard/employee-dashboard";
 import { ManagerTeamDashboard } from "@/components/dashboard/manager-dashboard";
+import { BirthdayCard } from "@/components/dashboard/birthday-card";
+import { AnnouncementsBanner } from "@/components/dashboard/announcements-banner";
 import { useRole } from "@/hooks/use-role";
 import { Trophy } from "lucide-react";
 
@@ -127,7 +129,7 @@ function EmployeeOfMonthCard() {
       .catch(() => {});
   }, []);
 
-  if (!eom) return null;
+  if (!eom) return null; // Don't show card if no data yet
 
   return (
     <Card className="border-yellow-500/20 bg-gradient-to-r from-yellow-500/5 to-amber-500/5 dark:from-yellow-500/10 dark:to-amber-500/5">
@@ -290,6 +292,12 @@ export default function DashboardPage() {
           Overview of your business operating system
         </p>
       </div>
+
+      {/* Announcements */}
+      <AnnouncementsBanner />
+
+      {/* Birthday Card */}
+      <BirthdayCard />
 
       {/* Onboarding Checklist */}
       <OnboardingChecklist />

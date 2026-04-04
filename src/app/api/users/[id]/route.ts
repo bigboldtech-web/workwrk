@@ -99,6 +99,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   for (const key of allowedFields) {
     if (body[key] !== undefined) data[key] = body[key];
   }
+  // Convert date strings to Date objects
+  if (data.dateOfBirth) data.dateOfBirth = new Date(data.dateOfBirth);
 
   const user = await prisma.user.update({
     where: { id },

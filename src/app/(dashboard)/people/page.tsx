@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Search, Plus, Users, TrendingUp, TrendingDown, Minus,
-  MoreHorizontal, Mail, Building2, UserCheck, Download, Trash2,
+  MoreHorizontal, Mail, Building2, UserCheck, Download, Upload, Trash2,
   UserMinus, Target, BookOpen,
 } from "lucide-react";
 import {
@@ -118,6 +118,53 @@ export default function PeoplePage() {
   const [showNewDept, setShowNewDept] = useState(false);
   const [newDeptName, setNewDeptName] = useState("");
   const [creatingDept, setCreatingDept] = useState(false);
+
+  // Bulk import
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [importResult, setImportResult] = useState<any>(null);
+  const [importing, setImporting] = useState(false);
+
+  function parseCSV(text: string) {
+    const lines = text.split("\n").filter((l) => l.trim());
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
+    return lines.slice(1).map((line) => {
+      const values = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+      const row: any = {};
+      headers.forEach((h, i) => { row[h === "firstname" ? "firstName" : h === "lastname" ? "lastName" : h === "accesslevel" ? "accessLevel" : h] = values[i] || ""; });
+      return row;
+    });
+  }
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFile(file);
+    const text = await file.text();
+    const rows = parseCSV(text);
+    setImportPreview(rows);
+    setImportResult(null);
+  }
+
+  async function handleBulkImport(dryRun: boolean) {
+    if (importPreview.length === 0) return;
+    setImporting(true);
+    try {
+      const res = await fetch(`/api/people/bulk-import${dryRun ? "?dryRun=true" : ""}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: importPreview, dryRun }),
+      });
+      const data = await res.json();
+      setImportResult(data.data || data);
+      if (!dryRun && res.ok) {
+        toastSuccess(`${(data.data || data).imported} employees imported!`);
+        fetchUsers();
+      }
+    } catch { toastError("Import failed"); } finally { setImporting(false); }
+  }
 
   const handleCreateRole = async () => {
     if (!newRoleTitle.trim()) return;
@@ -367,6 +414,9 @@ export default function PeoplePage() {
           <Button variant="outline" size="sm" onClick={handleExport} className="gap-2">
             <Download size={14} /> Export
           </Button>
+          {canInvite && <Button variant="outline" size="sm" onClick={() => setShowBulkImport(true)} className="gap-2">
+            <Upload size={14} /> Bulk Import
+          </Button>}
           {canInvite && <Dialog open={showAddDialog} onOpenChange={(open) => { setShowAddDialog(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
               <Button className="gap-2"><Plus size={16} /> Invite Person</Button>
@@ -745,6 +795,84 @@ export default function PeoplePage() {
         confirmLabel="Remove Person"
         loading={deleting}
       />
+
+      {/* Bulk Import Dialog */}
+      <Dialog open={showBulkImport} onOpenChange={(open) => { setShowBulkImport(open); if (!open) { setImportFile(null); setImportPreview([]); setImportResult(null); } }}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Bulk Import Employees</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-4">
+            {!importFile ? (
+              <>
+                <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
+                  <Upload size={32} className="mx-auto text-muted mb-3" />
+                  <p className="text-sm font-medium mb-1">Upload CSV File</p>
+                  <p className="text-xs text-muted mb-4">Max 1000 rows per import</p>
+                  <label className="cursor-pointer">
+                    <Button variant="outline" size="sm" className="gap-1.5" asChild><span><Upload size={14} /> Select CSV</span></Button>
+                    <input type="file" className="hidden" accept=".csv" onChange={handleFileSelect} />
+                  </label>
+                </div>
+                <a href="/api/people/bulk-import" download className="text-xs text-purple-400 hover:underline flex items-center gap-1">
+                  <Download size={12} /> Download CSV template
+                </a>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm"><strong>{importPreview.length}</strong> rows found in <strong>{importFile.name}</strong></p>
+                  <Button variant="ghost" size="sm" onClick={() => { setImportFile(null); setImportPreview([]); setImportResult(null); }}>Change file</Button>
+                </div>
+
+                {/* Preview table */}
+                <div className="max-h-48 overflow-auto border border-border rounded">
+                  <table className="w-full text-xs">
+                    <thead className="bg-surface-2 sticky top-0">
+                      <tr>
+                        <th className="p-2 text-left">#</th>
+                        <th className="p-2 text-left">Name</th>
+                        <th className="p-2 text-left">Email</th>
+                        <th className="p-2 text-left">Dept</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.slice(0, 20).map((row, i) => (
+                        <tr key={i} className="border-t border-border">
+                          <td className="p-2 text-muted">{i + 1}</td>
+                          <td className="p-2">{row.firstName} {row.lastName}</td>
+                          <td className="p-2 text-muted">{row.email}</td>
+                          <td className="p-2 text-muted">{row.department || "—"}</td>
+                        </tr>
+                      ))}
+                      {importPreview.length > 20 && <tr><td colSpan={4} className="p-2 text-center text-muted">...and {importPreview.length - 20} more</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Results */}
+                {importResult && (
+                  <div className={`p-3 rounded-lg border ${importResult.errors > 0 ? "border-amber-500/30 bg-amber-500/5" : "border-green-500/30 bg-green-500/5"}`}>
+                    <p className="text-sm font-medium">{importResult.imported != null ? `Imported: ${importResult.imported}` : `Valid: ${importResult.valid}`}</p>
+                    {importResult.errors > 0 && <p className="text-xs text-amber-400 mt-1">{importResult.errors} error(s)</p>}
+                    {importResult.errorDetails?.slice(0, 5).map((e: any, i: number) => (
+                      <p key={i} className="text-[10px] text-muted mt-0.5">Row {e.row}: {e.message} ({e.field})</p>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {importFile && (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => handleBulkImport(true)} disabled={importing}>
+                {importing ? "Validating..." : "Validate"}
+              </Button>
+              <Button onClick={() => handleBulkImport(false)} disabled={importing || importPreview.length === 0}>
+                {importing ? "Importing..." : `Import ${importPreview.length} Employees`}
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

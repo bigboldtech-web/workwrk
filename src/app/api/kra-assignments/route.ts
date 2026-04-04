@@ -82,9 +82,10 @@ export async function GET(req: NextRequest) {
               unit: true,
               records: {
                 where: { userId: targetUserId },
-                orderBy: { createdAt: "desc" },
-                take: 1,
+                orderBy: { period: "desc" },
+                take: 6,
               },
+              targetValue: true,
             },
           },
         },

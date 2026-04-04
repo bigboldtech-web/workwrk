@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { ToastProvider } from "@/components/ui/toast";
 import { KudosFab } from "@/components/kudos/kudos-fab";
+import { ScreenProtection } from "@/components/security/screen-protection";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -61,6 +62,7 @@ export default function DashboardLayout({
           <main className="flex-1 overflow-y-auto p-6">{children}</main>
         </div>
         <KudosFab />
+        <ScreenProtection />
       </div>
     </ToastProvider>
   );

@@ -56,6 +56,7 @@ interface Task {
   category?: string | null;
   status: string;
   incompleteReason?: string | null;
+  recurringGroupId?: string | null;
   assignee?: { id: string; firstName: string; lastName: string };
   kra?: { id: string; name: string } | null;
 }
@@ -86,6 +87,10 @@ export default function TasksPage() {
   const [showReasonDialog, setShowReasonDialog] = useState(false);
   const [reasonTaskId, setReasonTaskId] = useState("");
   const [incompleteReason, setIncompleteReason] = useState("");
+
+  // Delete confirmation dialog
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteTaskTarget, setDeleteTaskTarget] = useState<Task | null>(null);
 
   const weekDates = getWeekDates(weekBase);
   const weekStart = formatDate(weekDates[0]);
@@ -179,25 +184,45 @@ export default function TasksPage() {
           toastSuccess("Task updated");
         }
       } else {
-        // Create — handle recurring
+        // Create — handle recurring with batch API
         const dates = getRecurringDates(form.date, form.recurring, form.recurringDays, form.recurringDuration);
-        let created = 0;
-        for (const date of dates) {
-          const payload = {
-            title: form.title, description: form.description || null, date,
-            hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
-            category: form.category || null, status: form.status,
-          };
+
+        if (dates.length === 1) {
+          // Single task — use regular API
           const res = await fetch("/api/tasks", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({
+              title: form.title, description: form.description || null, date: dates[0],
+              hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
+              category: form.category || null, status: form.status,
+            }),
           });
-          if (res.ok) created++;
+          if (res.ok) {
+            setShowDialog(false);
+            fetchTasks();
+            toastSuccess("Task created");
+          }
+        } else {
+          // Batch create for recurring
+          const tasks = dates.map((date) => ({
+            title: form.title, description: form.description || null, date,
+            hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
+            category: form.category || null, status: form.status,
+          }));
+          const res = await fetch("/api/tasks/batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tasks }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const count = (data.data || data).created;
+            setShowDialog(false);
+            fetchTasks();
+            toastSuccess(`${count} recurring tasks created`);
+          }
         }
-        setShowDialog(false);
-        fetchTasks();
-        toastSuccess(created > 1 ? `${created} recurring tasks created` : "Task created");
       }
     } catch { toastError("Failed to save task"); } finally { setSaving(false); }
   }
@@ -232,16 +257,24 @@ export default function TasksPage() {
     } catch {}
   }
 
-  async function handleDelete(taskId: string) {
+  function confirmDelete(task: Task) {
+    setDeleteTaskTarget(task);
+    setShowDialog(false);
+    setShowDeleteDialog(true);
+  }
+
+  async function handleDelete(deleteAll: boolean) {
+    if (!deleteTaskTarget) return;
     try {
       await fetch("/api/tasks", {
         method: "DELETE", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: taskId }),
+        body: JSON.stringify({ id: deleteTaskTarget.id, deleteAll }),
       });
-      setShowDialog(false);
+      setShowDeleteDialog(false);
+      setDeleteTaskTarget(null);
       fetchTasks();
-      toastSuccess("Task deleted");
-    } catch {}
+      toastSuccess(deleteAll ? "All future recurring tasks deleted" : "Task deleted");
+    } catch { toastError("Failed to delete"); }
   }
 
   function prevWeek() { const d = new Date(weekBase); d.setDate(d.getDate() - 7); setWeekBase(d); }
@@ -515,7 +548,7 @@ export default function TasksPage() {
           <DialogFooter>
             <div className="flex items-center justify-between w-full">
               {editingTask && (
-                <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => handleDelete(editingTask.id)}>
+                <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-300" onClick={() => confirmDelete(editingTask)}>
                   <Trash2 size={14} className="mr-1" /> Delete
                 </Button>
               )}
@@ -540,6 +573,38 @@ export default function TasksPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowReasonDialog(false)}>Cancel</Button>
             <Button onClick={handleSubmitReason} disabled={!incompleteReason.trim()}>Submit</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={(open) => { setShowDeleteDialog(open); if (!open) setDeleteTaskTarget(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Delete Task</DialogTitle></DialogHeader>
+          <div className="py-4 space-y-3">
+            <p className="text-sm">
+              Delete <strong>&quot;{deleteTaskTarget?.title}&quot;</strong>?
+            </p>
+            {deleteTaskTarget?.recurringGroupId && (
+              <p className="text-xs text-muted">
+                This is a recurring task. You can delete just this one or all future occurrences.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <div className="flex items-center justify-between w-full">
+              <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>Cancel</Button>
+              <div className="flex items-center gap-2">
+                {deleteTaskTarget?.recurringGroupId && (
+                  <Button variant="destructive" onClick={() => handleDelete(true)}>
+                    Delete All Future
+                  </Button>
+                )}
+                <Button variant="outline" className="text-red-400 border-red-400/30 hover:bg-red-500/10" onClick={() => handleDelete(false)}>
+                  Delete This Only
+                </Button>
+              </div>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

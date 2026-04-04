@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { broadcastWebhook } from "@/lib/webhooks";
 
 export async function GET(
@@ -66,8 +66,19 @@ export async function PATCH(
 
   if (status !== undefined) {
     data.status = status;
-    if (status === "PUBLISHED" && existing.status !== "PUBLISHED") {
+    if (status === "PUBLISHED") {
       data.publishedAt = new Date();
+      // Save version snapshot before updating
+      await prisma.sOPVersion.create({
+        data: {
+          sopId: id,
+          version: existing.version,
+          title: existing.title,
+          description: existing.description,
+          content: existing.content as any,
+          publishedBy: getUserId(session),
+        },
+      });
     }
   }
 

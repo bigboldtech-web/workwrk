@@ -120,13 +120,13 @@ export async function PATCH(req: NextRequest) {
   return jsonSuccess(updated);
 }
 
-// DELETE: Delete a task
+// DELETE: Delete a task (or all future recurring tasks)
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const orgId = getOrgId(session);
-  const { id } = await req.json();
+  const { id, deleteAll } = await req.json();
 
   if (!id) return jsonError("Task ID is required");
 
@@ -136,6 +136,19 @@ export async function DELETE(req: NextRequest) {
 
   if (!task) return jsonError("Task not found", 404);
 
+  // Delete all future recurring tasks in the same group
+  if (deleteAll && task.recurringGroupId) {
+    const result = await prisma.task.deleteMany({
+      where: {
+        recurringGroupId: task.recurringGroupId,
+        organizationId: orgId,
+        date: { gte: task.date },
+      },
+    });
+    return jsonSuccess({ message: `Deleted ${result.count} tasks` });
+  }
+
+  // Delete single task
   await prisma.task.delete({ where: { id } });
 
   return jsonSuccess({ message: "Task deleted" });

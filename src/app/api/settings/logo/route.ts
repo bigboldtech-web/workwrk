@@ -29,7 +29,8 @@ export async function POST(req: NextRequest) {
     return jsonError("File too large. Maximum 2MB");
   }
 
-  const ext = file.type.split("/")[1].replace("svg+xml", "svg");
+  const mimeToExt: Record<string, string> = { png: "png", jpeg: "jpg", webp: "webp", "svg+xml": "svg" };
+  const ext = mimeToExt[file.type.split("/")[1]] || "png";
   const filename = `logo-${orgId}-${Date.now()}.${ext}`;
   const uploadDir = path.join(process.cwd(), "public", "uploads");
   const filePath = path.join(uploadDir, filename);

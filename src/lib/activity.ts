@@ -8,6 +8,11 @@ interface LogActivityParams {
   targetId?: string;
   targetType?: string;
   metadata?: Record<string, any>;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  oldValue?: Record<string, any> | null;
+  newValue?: Record<string, any> | null;
+  severity?: "info" | "warning" | "critical";
 }
 
 export async function logActivity({
@@ -18,6 +23,11 @@ export async function logActivity({
   targetId,
   targetType,
   metadata,
+  ipAddress,
+  userAgent,
+  oldValue,
+  newValue,
+  severity = "info",
 }: LogActivityParams) {
   try {
     await prisma.activityLog.create({
@@ -29,10 +39,19 @@ export async function logActivity({
         targetId,
         targetType,
         metadata: metadata || undefined,
+        ipAddress,
+        userAgent,
+        oldValue: oldValue || undefined,
+        newValue: newValue || undefined,
+        severity,
       },
     });
   } catch (err) {
-    // Don't let activity logging failures break the main flow
     console.error("Failed to log activity:", err);
   }
+}
+
+// Shorthand for security-critical events
+export async function logAuditEvent(params: Omit<LogActivityParams, "severity"> & { severity?: "warning" | "critical" }) {
+  return logActivity({ ...params, severity: params.severity || "warning" });
 }

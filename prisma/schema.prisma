@@ -41,6 +41,10 @@ model Organization {
   ideas               Idea[]
   offices             Office[]
   sopCategories       SOPCategory[]
+  announcements       Announcement[]
+  policies            Policy[]
+  okrs                OKR[]
+  pulseSurveys        PulseSurvey[]
 
   @@index([slug])
 }
@@ -395,6 +399,7 @@ model Task {
   hoursSpent       Float?
   category         String?
   incompleteReason String?
+  recurringGroupId String?
   status           TaskStatus @default(PLANNED)
   organizationId   String
   organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -419,6 +424,21 @@ enum TaskStatus {
 // ==========================================
 // MODULE 5: SOP MANAGEMENT
 // ==========================================
+
+model SOPVersion {
+  id          String   @id @default(cuid())
+  sopId       String
+  sop         SOP      @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  version     Int
+  title       String
+  description String?
+  content     Json
+  publishedBy String?
+  createdAt   DateTime @default(now())
+
+  @@index([sopId])
+  @@index([version])
+}
 
 model SOPCategory {
   id             String          @id @default(cuid())
@@ -459,6 +479,7 @@ model SOP {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   compliance     SOPCompliance[]
+  versions       SOPVersion[]
   assignments    SOPAssignment[]
   processRuns    ProcessRun[]
   createdAt      DateTime  @default(now())
@@ -1062,8 +1083,13 @@ model ActivityLog {
   actor          User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
   targetId       String?  // ID of the affected entity
   targetType     String?  // "task", "review", "sop", "meeting", "user", etc.
-  description    String   // Human-readable: "Priya completed task 'Submit Q3 report'"
-  metadata       Json?    // Extra context
+  description    String
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  oldValue       Json?
+  newValue       Json?
+  severity       String   @default("info")  // info, warning, critical
   organizationId String
   createdAt      DateTime @default(now())
 
@@ -1071,6 +1097,7 @@ model ActivityLog {
   @@index([actorId])
   @@index([type])
   @@index([createdAt])
+  @@index([severity])
 }
 
 // ==========================================
@@ -1179,4 +1206,209 @@ model IdeaComment {
   createdAt DateTime @default(now())
 
   @@index([ideaId])
+}
+
+// ==========================================
+// ANNOUNCEMENTS
+// ==========================================
+
+model Announcement {
+  id             String               @id @default(cuid())
+  title          String
+  content        String
+  type           String               @default("INFO")   // INFO, WARNING, CELEBRATION, POLICY, EVENT
+  priority       String               @default("NORMAL")  // LOW, NORMAL, HIGH, URGENT
+  pinned         Boolean              @default(false)
+  publishedAt    DateTime?
+  expiresAt      DateTime?
+  targetAudience Json?
+  authorId       String
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dismissals     AnnouncementDismissal[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([organizationId])
+  @@index([publishedAt])
+}
+
+model AnnouncementDismissal {
+  id             String       @id @default(cuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  userId         String
+  dismissedAt    DateTime     @default(now())
+
+  @@unique([announcementId, userId])
+  @@index([userId])
+}
+
+// ==========================================
+// COMPANY POLICIES & BYLAWS
+// ==========================================
+
+model Policy {
+  id              String              @id @default(cuid())
+  title           String
+  content         String
+  category        String?             // "HR", "Security", "Compliance", "Operations", "Code of Conduct", "Leave", "Expense"
+  version         Int                 @default(1)
+  status          String              @default("DRAFT")  // DRAFT, PUBLISHED, ARCHIVED
+  requiresAck     Boolean             @default(true)     // Requires employee acknowledgment
+  effectiveDate   DateTime?
+  organizationId  String
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  acknowledgments PolicyAcknowledgment[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model PolicyAcknowledgment {
+  id        String   @id @default(cuid())
+  policyId  String
+  policy    Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  userId    String
+  acknowledgedAt DateTime @default(now())
+  ipAddress String?
+
+  @@unique([policyId, userId])
+  @@index([userId])
+  @@index([policyId])
+}
+
+// ==========================================
+// OKR (OBJECTIVES & KEY RESULTS)
+// ==========================================
+
+model OKR {
+  id             String       @id @default(cuid())
+  title          String
+  description    String?
+  level          String       @default("INDIVIDUAL")  // COMPANY, TEAM, INDIVIDUAL
+  status         String       @default("ON_TRACK")    // ON_TRACK, AT_RISK, BEHIND, COMPLETED
+  progress       Int          @default(0)             // 0-100
+  startDate      DateTime?
+  endDate        DateTime?
+  quarter        String?      // "Q2 2026"
+  ownerId        String?
+  departmentId   String?
+  parentId       String?
+  parent         OKR?         @relation("OKRChildren", fields: [parentId], references: [id])
+  children       OKR[]        @relation("OKRChildren")
+  keyResults     KeyResult[]
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([ownerId])
+  @@index([parentId])
+  @@index([level])
+  @@index([quarter])
+}
+
+model KeyResult {
+  id          String      @id @default(cuid())
+  title       String
+  unit        String?     // %, count, $, etc.
+  startValue  Float       @default(0)
+  targetValue Float
+  currentValue Float      @default(0)
+  progress    Int         @default(0)  // 0-100 auto-calculated
+  okrId       String
+  okr         OKR         @relation(fields: [okrId], references: [id], onDelete: Cascade)
+  checkIns    KRCheckIn[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([okrId])
+}
+
+model KRCheckIn {
+  id          String    @id @default(cuid())
+  keyResultId String
+  keyResult   KeyResult @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+  value       Float
+  note        String?
+  userId      String
+  createdAt   DateTime  @default(now())
+
+  @@index([keyResultId])
+}
+
+// ==========================================
+// 9-BOX GRID (TALENT CALIBRATION)
+// ==========================================
+
+model TalentAssessment {
+  id             String   @id @default(cuid())
+  userId         String
+  period         String   // "Q2 2026"
+  performance    Int      // 1-3 (Low, Medium, High)
+  potential       Int      // 1-3 (Low, Medium, High)
+  boxPosition    String   // "1-1", "1-2", etc.
+  action         String?  // "Promote", "Develop", "Retain", "Coach", "PIP", "Exit"
+  notes          String?
+  assessedBy     String
+  organizationId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, period, organizationId])
+  @@index([organizationId])
+  @@index([period])
+}
+
+// ==========================================
+// PULSE SURVEYS
+// ==========================================
+
+model PulseSurvey {
+  id             String          @id @default(cuid())
+  title          String
+  questions      Json            // [{id, text, type: "rating"|"text"|"nps"}]
+  status         String          @default("DRAFT")  // DRAFT, ACTIVE, CLOSED
+  frequency      String?         // WEEKLY, MONTHLY, QUARTERLY
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  responses      SurveyResponse[]
+  createdAt      DateTime        @default(now())
+  closedAt       DateTime?
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model SurveyResponse {
+  id        String      @id @default(cuid())
+  surveyId  String
+  survey    PulseSurvey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  userId    String
+  answers   Json        // [{questionId, value}]
+  createdAt DateTime    @default(now())
+
+  @@unique([surveyId, userId])
+  @@index([surveyId])
+}
+
+// ==========================================
+// 1:1 MEETING TEMPLATES
+// ==========================================
+
+model MeetingTemplate {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  type           String   @default("ONE_ON_ONE")  // ONE_ON_ONE, TEAM_STANDUP, QUARTERLY_REVIEW
+  agendaItems    Json     // [{title, description, timeMinutes, type: "discussion"|"action"|"review"}]
+  isDefault      Boolean  @default(false)
+  organizationId String?  // null = system template
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
 }

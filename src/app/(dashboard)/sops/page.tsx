@@ -121,6 +121,14 @@ export default function SOPsPage() {
     if (isEmployee) router.replace("/sops/my-sops");
   }, [isEmployee, router]);
 
+  if (isEmployee) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
+      </div>
+    );
+  }
+
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -140,6 +148,7 @@ export default function SOPsPage() {
   const [newSubcategory, setNewSubcategory] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [sopType, setSopType] = useState<"WRITTEN" | "RECORDED" | "CHECKLIST">("WRITTEN");
+  const [showExtensionDialog, setShowExtensionDialog] = useState(false);
 
   // Categories from DB
   const [savedCategories, setSavedCategories] = useState<any[]>([]);
@@ -246,11 +255,10 @@ export default function SOPsPage() {
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
 
-    // For recorded SOPs, redirect to the recorder
+    // For recorded SOPs, show extension instructions
     if (sopType === "RECORDED") {
       setShowAddDialog(false);
-      // TODO: open recorder flow
-      toastSuccess("Use the WorkwrK browser extension to record SOPs — it captures your screen steps automatically");
+      setShowExtensionDialog(true);
       return;
     }
 
@@ -528,6 +536,50 @@ export default function SOPsPage() {
           onLimitChange={(l) => { setLimit(l); setPage(1); }}
         />
       )}
+
+      {/* Extension Download Dialog */}
+      <Dialog open={showExtensionDialog} onOpenChange={setShowExtensionDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>WorkwrK SOP Recorder</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted">
+              Record SOPs by capturing your screen actions. Install the browser extension to get started.
+            </p>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-start gap-2 p-2 rounded bg-surface">
+                <span className="text-purple-400 font-bold">1.</span>
+                <span>Open Chrome and go to <code className="text-xs bg-surface-2 px-1 rounded">chrome://extensions</code></span>
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded bg-surface">
+                <span className="text-purple-400 font-bold">2.</span>
+                <span>Enable <strong>Developer mode</strong> (top right toggle)</span>
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded bg-surface">
+                <span className="text-purple-400 font-bold">3.</span>
+                <span>Click <strong>Load unpacked</strong> and select the extension folder</span>
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded bg-surface">
+                <span className="text-purple-400 font-bold">4.</span>
+                <span>Click the WorkwrK icon in your toolbar to start recording</span>
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded bg-surface">
+                <span className="text-purple-400 font-bold">5.</span>
+                <span>Navigate through the process — each click is captured as a step with a screenshot</span>
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded bg-surface">
+                <span className="text-purple-400 font-bold">6.</span>
+                <span>Click <strong>Stop Recording</strong> to save the SOP automatically</span>
+              </div>
+            </div>
+            <p className="text-xs text-muted">
+              Contact your admin to get the extension files, or download from your company repository.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExtensionDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

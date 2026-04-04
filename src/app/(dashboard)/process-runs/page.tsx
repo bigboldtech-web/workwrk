@@ -90,7 +90,7 @@ export default function ProcessRunsPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const { success: toastSuccess } = useToast();
+  const { success: toastSuccess, error: toastError } = useToast();
 
   const fetchRuns = useCallback(async () => {
     setLoading(true);
@@ -133,7 +133,8 @@ export default function ProcessRunsPage() {
       new Date(r.dueDate) < new Date()
   ).length;
 
-  function copyLink(token: string) {
+  function copyLink(token: string | null) {
+    if (!token) { toastError("No share link available"); return; }
     const link = `${window.location.origin}/run/${token}`;
     navigator.clipboard.writeText(link);
     toastSuccess("Link copied!");

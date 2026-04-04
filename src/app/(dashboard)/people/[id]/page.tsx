@@ -344,7 +344,7 @@ export default function UserProfilePage() {
       if (editRoleId) body.roleId = editRoleId;
       if (editAccessLevel) body.accessLevel = editAccessLevel;
       if (editStatus) body.status = editStatus;
-      if (editDob) body.dateOfBirth = new Date(editDob).toISOString();
+      if (editDob) body.dateOfBirth = `${editDob}T12:00:00.000Z`;
       if (editOfficeId) body.officeId = editOfficeId;
 
       const res = await fetch(`/api/users/${id}`, {
