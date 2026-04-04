@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -14,7 +15,9 @@ export async function GET(req: NextRequest) {
 
   const where: any = { organizationId: orgId };
   if (level) where.level = level;
-  if (quarter) where.quarter = quarter;
+  if (quarter) {
+    where.OR = [{ quarter }, { quarter: null }, { quarter: "" }];
+  }
   if (ownerId) where.ownerId = ownerId;
 
   const okrs = await prisma.oKR.findMany({
@@ -75,6 +78,15 @@ export async function POST(req: NextRequest) {
   const created = await prisma.oKR.findUnique({
     where: { id: okr.id },
     include: { keyResults: true },
+  });
+
+  logActivity({
+    type: "okr_created",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Created OKR "${okr.title}" (${body.level || "INDIVIDUAL"})`,
+    targetId: okr.id,
+    targetType: "okr",
   });
 
   return jsonSuccess(created, 201);

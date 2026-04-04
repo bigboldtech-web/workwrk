@@ -69,9 +69,9 @@ export default function OKRsPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/okrs?quarter=${quarter}`)
+    fetch(`/api/okrs?quarter=${encodeURIComponent(quarter)}`)
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.data) setOkrs(d.data); })
+      .then((d) => { if (d?.data) setOkrs(d.data); else setOkrs([]); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [quarter]);
@@ -84,12 +84,15 @@ export default function OKRsPage() {
     if (!form.title.trim()) return;
     setSaving(true);
     try {
+      const okrQuarter = form.quarter.trim() || quarter;
       const res = await fetch("/api/okrs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...form,
-          quarter: form.quarter || quarter,
+          title: form.title,
+          description: form.description,
+          level: form.level,
+          quarter: okrQuarter,
           keyResults: form.keyResults.filter((kr) => kr.title.trim()).map((kr) => ({
             title: kr.title, targetValue: Number(kr.targetValue) || 100, unit: kr.unit || "%",
           })),

@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   BookOpen, Plus, Search, FileText, Clock, CheckCircle, AlertTriangle,
   Eye, Edit3, Users, BarChart3, ClipboardList, ShieldCheck,
-  PenLine, Video, ListChecks,
+  PenLine, Video, ListChecks, Download,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -109,6 +109,139 @@ function SkeletonCard() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
+  const [extensionDetected, setExtensionDetected] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    // Check if extension is installed by looking for the data attribute
+    const check = () => {
+      const detected = document.documentElement.getAttribute("data-workwrk-extension") === "true";
+      setExtensionDetected(detected);
+      setChecking(false);
+    };
+
+    // Listen for extension message
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === "WORKWRK_EXTENSION_INSTALLED") {
+        setExtensionDetected(true);
+        setChecking(false);
+      }
+    };
+    window.addEventListener("message", handler);
+
+    // Check after a short delay (extension might take time to inject)
+    setTimeout(check, 500);
+
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  async function downloadExtension() {
+    try {
+      const res = await fetch("/api/extension/download");
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      // Create a downloadable zip-like file
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "workwrk-sop-recorder.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Fallback: direct link to extension folder instructions
+    }
+  }
+
+  if (extensionDetected) {
+    return (
+      <div className="space-y-4 py-4">
+        <div className="p-4 rounded-lg border border-green-500/30 bg-green-500/10 text-center">
+          <CheckCircle size={32} className="mx-auto text-green-400 mb-2" />
+          <p className="text-sm font-semibold text-green-400">Extension Detected!</p>
+          <p className="text-xs text-muted mt-1">WorkwrK SOP Recorder is installed and ready.</p>
+        </div>
+        <div className="space-y-2 text-sm">
+          <p className="font-medium">How to record:</p>
+          <div className="flex items-start gap-2 p-2 rounded bg-surface">
+            <span className="text-purple-400 font-bold">1.</span>
+            <span>Click the <strong>WorkwrK icon</strong> in your browser toolbar</span>
+          </div>
+          <div className="flex items-start gap-2 p-2 rounded bg-surface">
+            <span className="text-purple-400 font-bold">2.</span>
+            <span>Click <strong>Start Recording</strong></span>
+          </div>
+          <div className="flex items-start gap-2 p-2 rounded bg-surface">
+            <span className="text-purple-400 font-bold">3.</span>
+            <span>Navigate through the process — each click captures a step with screenshot</span>
+          </div>
+          <div className="flex items-start gap-2 p-2 rounded bg-surface">
+            <span className="text-purple-400 font-bold">4.</span>
+            <span>Click <strong>Stop Recording</strong> — SOP is saved automatically</span>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>Got it</Button>
+        </DialogFooter>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 py-4">
+      {checking ? (
+        <div className="p-4 text-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-purple-500 border-t-transparent mx-auto mb-2" />
+          <p className="text-xs text-muted">Checking for extension...</p>
+        </div>
+      ) : (
+        <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/10 text-center">
+          <AlertTriangle size={32} className="mx-auto text-amber-400 mb-2" />
+          <p className="text-sm font-semibold">Extension Not Found</p>
+          <p className="text-xs text-muted mt-1">Install the WorkwrK SOP Recorder to start recording.</p>
+        </div>
+      )}
+
+      <div className="space-y-2 text-sm">
+        <p className="font-medium">Setup Instructions:</p>
+        <div className="flex items-start gap-2 p-2 rounded bg-surface">
+          <span className="text-purple-400 font-bold">1.</span>
+          <span>Download the extension files using the button below</span>
+        </div>
+        <div className="flex items-start gap-2 p-2 rounded bg-surface">
+          <span className="text-purple-400 font-bold">2.</span>
+          <span>Extract the downloaded folder</span>
+        </div>
+        <div className="flex items-start gap-2 p-2 rounded bg-surface">
+          <span className="text-purple-400 font-bold">3.</span>
+          <span>Open Chrome → <code className="text-xs bg-surface-2 px-1 rounded">chrome://extensions</code></span>
+        </div>
+        <div className="flex items-start gap-2 p-2 rounded bg-surface">
+          <span className="text-purple-400 font-bold">4.</span>
+          <span>Enable <strong>Developer mode</strong> (top right toggle)</span>
+        </div>
+        <div className="flex items-start gap-2 p-2 rounded bg-surface">
+          <span className="text-purple-400 font-bold">5.</span>
+          <span>Click <strong>Load unpacked</strong> → select the extracted folder</span>
+        </div>
+        <div className="flex items-start gap-2 p-2 rounded bg-surface">
+          <span className="text-purple-400 font-bold">6.</span>
+          <span>Refresh this page — the extension will be detected automatically</span>
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>Cancel</Button>
+        <Button onClick={downloadExtension} className="gap-1.5">
+          <Download size={14} /> Download Extension
+        </Button>
+      </DialogFooter>
+    </div>
   );
 }
 
@@ -539,45 +672,9 @@ export default function SOPsPage() {
 
       {/* Extension Download Dialog */}
       <Dialog open={showExtensionDialog} onOpenChange={setShowExtensionDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>WorkwrK SOP Recorder</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-4">
-            <p className="text-sm text-muted">
-              Record SOPs by capturing your screen actions. Install the browser extension to get started.
-            </p>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-start gap-2 p-2 rounded bg-surface">
-                <span className="text-purple-400 font-bold">1.</span>
-                <span>Open Chrome and go to <code className="text-xs bg-surface-2 px-1 rounded">chrome://extensions</code></span>
-              </div>
-              <div className="flex items-start gap-2 p-2 rounded bg-surface">
-                <span className="text-purple-400 font-bold">2.</span>
-                <span>Enable <strong>Developer mode</strong> (top right toggle)</span>
-              </div>
-              <div className="flex items-start gap-2 p-2 rounded bg-surface">
-                <span className="text-purple-400 font-bold">3.</span>
-                <span>Click <strong>Load unpacked</strong> and select the extension folder</span>
-              </div>
-              <div className="flex items-start gap-2 p-2 rounded bg-surface">
-                <span className="text-purple-400 font-bold">4.</span>
-                <span>Click the WorkwrK icon in your toolbar to start recording</span>
-              </div>
-              <div className="flex items-start gap-2 p-2 rounded bg-surface">
-                <span className="text-purple-400 font-bold">5.</span>
-                <span>Navigate through the process — each click is captured as a step with a screenshot</span>
-              </div>
-              <div className="flex items-start gap-2 p-2 rounded bg-surface">
-                <span className="text-purple-400 font-bold">6.</span>
-                <span>Click <strong>Stop Recording</strong> to save the SOP automatically</span>
-              </div>
-            </div>
-            <p className="text-xs text-muted">
-              Contact your admin to get the extension files, or download from your company repository.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowExtensionDialog(false)}>Close</Button>
-          </DialogFooter>
+          <ExtensionSetupContent onClose={() => setShowExtensionDialog(false)} />
         </DialogContent>
       </Dialog>
     </div>

@@ -11,7 +11,12 @@ export async function GET() {
   const currentPeriod = getCurrentPeriod();
   const lastPeriod = getLastPeriod();
 
-  const [kraAssignments, kpiRecords, sopAssignments, reviews, performanceScore] = await Promise.all([
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const [kraAssignments, kpiRecords, sopAssignments, reviews, performanceScore, myOkrs, todayTasks, pendingSurveys, pendingPolicies] = await Promise.all([
     // My KRA assignments with KPIs
     prisma.kRAAssignment.findMany({
       where: { userId, status: "ACTIVE" },
@@ -49,6 +54,36 @@ export async function GET() {
       where: { userId },
       orderBy: { period: "desc" },
     }),
+    // My OKRs
+    prisma.oKR.findMany({
+      where: { ownerId: userId },
+      select: { id: true, title: true, progress: true, status: true, quarter: true },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    // Today's tasks
+    prisma.task.findMany({
+      where: { assigneeId: userId, date: { gte: today, lt: tomorrow } },
+      select: { id: true, title: true, status: true, hoursSpent: true, category: true },
+      orderBy: { createdAt: "asc" },
+    }),
+    // Pending surveys
+    prisma.pulseSurvey.count({
+      where: {
+        organizationId: orgId,
+        status: "ACTIVE",
+        responses: { none: { userId } },
+      },
+    }),
+    // Pending policies
+    prisma.policy.count({
+      where: {
+        organizationId: orgId,
+        status: "PUBLISHED",
+        requiresAck: true,
+        acknowledgments: { none: { userId } },
+      },
+    }),
   ]);
 
   // Calculate KPI completion for current period
@@ -56,11 +91,15 @@ export async function GET() {
   const currentRecords = kpiRecords.filter((r) => r.period === currentPeriod && r.actualValue != null);
   const completionRate = allKpiIds.length > 0 ? Math.round((currentRecords.length / allKpiIds.length) * 100) : 0;
 
+  const todayCompleted = todayTasks.filter((t) => t.status === "COMPLETED").length;
+
   return jsonSuccess({
     kraAssignments,
     kpiRecords,
     sopAssignments,
     reviews,
+    myOkrs,
+    todayTasks,
     stats: {
       compositeScore: performanceScore?.score ?? null,
       totalKpis: allKpiIds.length,
@@ -68,6 +107,10 @@ export async function GET() {
       completionRate,
       pendingSops: sopAssignments.length,
       pendingReviews: reviews.length,
+      pendingSurveys,
+      pendingPolicies,
+      todayTasksTotal: todayTasks.length,
+      todayTasksDone: todayCompleted,
     },
     currentPeriod,
     lastPeriod,

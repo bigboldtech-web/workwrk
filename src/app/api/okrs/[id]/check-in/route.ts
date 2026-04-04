@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
+import { triggerRecalculation } from "@/services/performanceScoreService";
 
 // POST: Check in on a key result (update progress)
 export async function POST(
@@ -50,6 +52,19 @@ export async function POST(
     where: { id: okrId },
     data: { progress: avgProgress, status },
   });
+
+  // Log activity and trigger recalculation
+  const orgId = getOrgId(session);
+  const okr = await prisma.oKR.findUnique({ where: { id: okrId }, select: { title: true, ownerId: true } });
+  logActivity({
+    type: "okr_check_in",
+    actorId: userId,
+    organizationId: orgId,
+    description: `Updated OKR progress to ${avgProgress}% — "${okr?.title}"`,
+    targetId: okrId,
+    targetType: "okr",
+  });
+  if (okr?.ownerId) triggerRecalculation(okr.ownerId, orgId);
 
   return jsonSuccess({ progress: avgProgress, status, krProgress: progress });
 }

@@ -8,15 +8,76 @@ export async function GET(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const period = new URL(req.url).searchParams.get("period") || "";
+  const url = new URL(req.url);
+  const period = url.searchParams.get("period") || "";
+  const autoPlace = url.searchParams.get("auto") === "true";
 
   const where: any = { organizationId: orgId };
   if (period) where.period = period;
 
-  const assessments = await prisma.talentAssessment.findMany({
+  let assessments = await prisma.talentAssessment.findMany({
     where,
     orderBy: { createdAt: "desc" },
   });
+
+  // Auto-place: generate assessments from performance scores for users not yet assessed
+  if (autoPlace && period) {
+    const assessedUserIds = new Set(assessments.map((a) => a.userId));
+    const allUsers = await prisma.user.findMany({
+      where: { organizationId: orgId, deletedAt: null, accessLevel: { not: "SUPER_ADMIN" } },
+      select: { id: true },
+    });
+
+    // Get KPI scores for the period or latest
+    const kpiPeriod = period.replace(/Q(\d) (\d{4})/, (_, q, y) => {
+      const month = (parseInt(q) - 1) * 3 + 1;
+      return `${y}-${String(month).padStart(2, "0")}`;
+    });
+
+    const performanceScores = await prisma.performanceScore.findMany({
+      where: { organizationId: orgId },
+      orderBy: { period: "desc" },
+      distinct: ["userId"],
+    });
+    const scoreMap = new Map(performanceScores.map((s) => [s.userId, s.score]));
+
+    const newAssessments: any[] = [];
+    for (const user of allUsers) {
+      if (assessedUserIds.has(user.id)) continue;
+      const score = scoreMap.get(user.id);
+      if (score == null) continue;
+
+      // Map score to performance: 0-50 = Low(1), 50-80 = Medium(2), 80+ = High(3)
+      const performance = score >= 80 ? 3 : score >= 50 ? 2 : 1;
+      // Default potential to medium (can be manually adjusted)
+      const potential = 2;
+      const boxPosition = `${performance}-${potential}`;
+
+      newAssessments.push({
+        userId: user.id,
+        period,
+        performance,
+        potential,
+        boxPosition,
+        action: null,
+        notes: "Auto-placed from performance score",
+        assessedBy: getUserId(session),
+        organizationId: orgId,
+      });
+    }
+
+    if (newAssessments.length > 0) {
+      for (const a of newAssessments) {
+        await prisma.talentAssessment.upsert({
+          where: { userId_period_organizationId: { userId: a.userId, period: a.period, organizationId: orgId } },
+          create: a,
+          update: {},
+        });
+      }
+      // Re-fetch after auto-placement
+      assessments = await prisma.talentAssessment.findMany({ where, orderBy: { createdAt: "desc" } });
+    }
+  }
 
   // Get user details
   const userIds = [...new Set(assessments.map((a) => a.userId))];

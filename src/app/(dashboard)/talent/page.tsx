@@ -35,7 +35,7 @@ export default function TalentPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`/api/talent-assessment?period=${period}`).then((r) => r.ok ? r.json() : { data: [] }),
+      fetch(`/api/talent-assessment?period=${period}&auto=true`).then((r) => r.ok ? r.json() : { data: [] }),
       fetch("/api/users?limit=100").then((r) => r.ok ? r.json() : { data: [] }),
     ]).then(([assessData, userData]) => {
       setAssessments(assessData?.data || []);
@@ -117,50 +117,54 @@ export default function TalentPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center mb-2">
-            <span className="text-[10px] text-muted w-20 text-right pr-2 -rotate-90 origin-center">PERFORMANCE →</span>
-            <div className="flex-1">
-              <p className="text-[10px] text-muted text-center mb-1">POTENTIAL →</p>
-              <div className="grid grid-cols-3 gap-2">
-                <p className="text-[10px] text-muted text-center">Low</p>
-                <p className="text-[10px] text-muted text-center">Medium</p>
-                <p className="text-[10px] text-muted text-center">High</p>
-              </div>
-            </div>
+          {/* Column headers — Potential */}
+          <div className="grid grid-cols-[60px_1fr_1fr_1fr] gap-2 mb-1">
+            <div />
+            <p className="text-[10px] text-muted text-center">Low Potential</p>
+            <p className="text-[10px] text-muted text-center">Medium Potential</p>
+            <p className="text-[10px] text-muted text-center">High Potential</p>
           </div>
+
           {/* Grid rows: High performance (3) at top, Low (1) at bottom */}
-          {[3, 2, 1].map((perf) => (
-            <div key={perf} className="grid grid-cols-3 gap-2 mb-2">
-              {[1, 2, 3].map((pot) => {
-                const key = `${perf}-${pot}`;
-                const box = BOX_LABELS[key];
-                const people = grid[key] || [];
-                return (
-                  <div key={key} className={`min-h-[100px] rounded-lg border-2 p-2 ${box.color}`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-medium">{box.label}</span>
-                      <span className="text-[9px] text-muted">{people.length}</span>
+          {[3, 2, 1].map((perf) => {
+            const perfLabel = perf === 3 ? "High" : perf === 2 ? "Mid" : "Low";
+            return (
+              <div key={perf} className="grid grid-cols-[60px_1fr_1fr_1fr] gap-2 mb-2">
+                {/* Row label */}
+                <div className="flex items-center justify-center">
+                  <span className="text-[10px] text-muted font-medium text-center leading-tight">{perfLabel}<br/>Perf</span>
+                </div>
+                {[1, 2, 3].map((pot) => {
+                  const key = `${perf}-${pot}`;
+                  const box = BOX_LABELS[key];
+                  const people = grid[key] || [];
+                  return (
+                    <div key={key} className={`min-h-[110px] rounded-lg border-2 p-3 ${box.color}`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold">{box.label}</span>
+                        <span className="text-[10px] text-muted">{people.length}</span>
+                      </div>
+                      <p className="text-[10px] text-muted mb-2">{box.action}</p>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {people.map((p: any) => (
+                          <div key={p.userId} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-background/60 border border-white/10" title={`${p.user?.firstName} ${p.user?.lastName} — ${p.user?.role?.title || ""} ${p.user?.department?.name || ""}`}>
+                            <Avatar className="h-6 w-6">
+                              {p.user?.avatar ? (
+                                <img src={p.user.avatar} alt="" className="h-full w-full object-cover rounded-full" />
+                              ) : (
+                                <AvatarFallback className="text-[10px] font-bold">{p.user?.firstName?.[0]}{p.user?.lastName?.[0]}</AvatarFallback>
+                              )}
+                            </Avatar>
+                            <span className="text-xs font-medium truncate max-w-[80px]">{p.user?.firstName} {p.user?.lastName?.[0]}.</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <p className="text-[9px] text-muted mb-2">{box.action}</p>
-                    <div className="flex flex-wrap gap-1">
-                      {people.map((p: any) => (
-                        <div key={p.userId} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-background/50 text-[10px]" title={`${p.user?.firstName} ${p.user?.lastName}`}>
-                          <Avatar className="h-4 w-4">
-                            <AvatarFallback className="text-[8px]">{p.user?.firstName?.[0]}{p.user?.lastName?.[0]}</AvatarFallback>
-                          </Avatar>
-                          <span className="truncate max-w-[60px]">{p.user?.firstName}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-          <div className="flex items-center gap-1 text-[10px] text-muted justify-between mt-1">
-            <span>Low Performance</span>
-            <span>High Performance</span>
-          </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
 

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 // GET: List tasks (calendar view)
 // Query params: userId, startDate, endDate, kraId
@@ -86,6 +87,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  logActivity({
+    type: "task_created",
+    actorId: currentUserId,
+    organizationId: orgId,
+    description: `Created task "${task.title}"`,
+    targetId: task.id,
+    targetType: "task",
+  });
+
   return jsonSuccess(task, 201);
 }
 
@@ -116,6 +126,18 @@ export async function PATCH(req: NextRequest) {
       kra: { select: { id: true, name: true } },
     },
   });
+
+  // Log completion
+  if (updates.status === "COMPLETED" && task.status !== "COMPLETED") {
+    logActivity({
+      type: "task_completed",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Completed task "${updated.title}"`,
+      targetId: id,
+      targetType: "task",
+    });
+  }
 
   return jsonSuccess(updated);
 }

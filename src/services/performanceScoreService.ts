@@ -152,6 +152,26 @@ async function calcSopCompliance(userId: string): Promise<number | null> {
   return Math.round((completedSteps / totalSteps) * 100);
 }
 
+async function calcOkrScore(userId: string): Promise<number | null> {
+  const okrs = await prisma.oKR.findMany({
+    where: { ownerId: userId },
+    select: { progress: true },
+  });
+  if (okrs.length === 0) return null;
+  const avg = okrs.reduce((sum, o) => sum + o.progress, 0) / okrs.length;
+  return Math.min(Math.round(avg), 100);
+}
+
+async function calcTaskScore(userId: string): Promise<number | null> {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const [total, completed] = await Promise.all([
+    prisma.task.count({ where: { assigneeId: userId, date: { gte: thirtyDaysAgo } } }),
+    prisma.task.count({ where: { assigneeId: userId, date: { gte: thirtyDaysAgo }, status: "COMPLETED" } }),
+  ]);
+  if (total === 0) return null;
+  return Math.round((completed / total) * 100);
+}
+
 async function calcKudosBonus(userId: string): Promise<number> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -171,7 +191,7 @@ export async function calculatePerformanceScore(
 ): Promise<{ score: number; breakdown: ScoreBreakdown }> {
   const weights = await getOrgWeights(organizationId);
 
-  const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, kudosBonus] =
+  const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, kudosBonus, okrScore, taskScore] =
     await Promise.all([
       calcKpiScore(userId),
       calcManagerRating(userId),
@@ -179,6 +199,8 @@ export async function calculatePerformanceScore(
       calcSelfRating(userId),
       calcSopCompliance(userId),
       calcKudosBonus(userId),
+      calcOkrScore(userId),
+      calcTaskScore(userId),
     ]);
 
   const breakdown: ScoreBreakdown = {
@@ -188,8 +210,10 @@ export async function calculatePerformanceScore(
     selfRating,
     sopCompliance,
     kudosBonus,
+    okrScore: okrScore ?? undefined,
+    taskScore: taskScore ?? undefined,
     weights,
-  };
+  } as ScoreBreakdown;
 
   const components: { value: number; weight: number }[] = [];
   if (kpiScore != null) components.push({ value: kpiScore, weight: weights.kpi });
@@ -197,6 +221,9 @@ export async function calculatePerformanceScore(
   if (peerRating != null) components.push({ value: peerRating, weight: weights.peer });
   if (selfRating != null) components.push({ value: selfRating, weight: weights.self });
   if (sopCompliance != null) components.push({ value: sopCompliance, weight: weights.sopCompliance });
+  // OKR and task scores contribute as bonuses (up to 5 points each)
+  if (okrScore != null) components.push({ value: okrScore, weight: 10 });
+  if (taskScore != null) components.push({ value: taskScore, weight: 5 });
 
   let compositeScore = 0;
   if (components.length > 0) {

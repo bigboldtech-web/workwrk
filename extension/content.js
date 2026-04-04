@@ -1,6 +1,10 @@
 let isRecording = false;
 let highlightEl = null;
 
+// Inject detection flag so the web app knows the extension is installed
+window.postMessage({ type: "WORKWRK_EXTENSION_INSTALLED", version: "1.0.0" }, "*");
+document.documentElement.setAttribute("data-workwrk-extension", "true");
+
 // Check recording state on load
 chrome.storage.local.get(["isRecording"], (result) => {
   if (result.isRecording) {
