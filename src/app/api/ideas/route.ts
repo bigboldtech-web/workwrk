@@ -50,19 +50,25 @@ export async function POST(req: NextRequest) {
     return jsonError("Title and description are required");
   }
 
-  const idea = await prisma.idea.create({
-    data: {
-      title: title.trim(),
-      description: description.trim(),
-      category: category || null,
-      submitterId: userId,
-      organizationId: orgId,
-    },
-    include: {
-      submitter: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-      _count: { select: { votes: true, comments: true } },
-    },
-  });
+  try {
+    const idea = await prisma.idea.create({
+      data: {
+        title: title.trim(),
+        description: description.trim(),
+        category: category || null,
+        submitterId: userId,
+        organizationId: orgId,
+      },
+      include: {
+        submitter: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+        votes: { select: { userId: true } },
+        _count: { select: { votes: true, comments: true } },
+      },
+    });
 
-  return jsonSuccess(idea, 201);
+    return jsonSuccess(idea, 201);
+  } catch (err: any) {
+    console.error("Ideas POST error:", err);
+    return jsonError(err.message || "Failed to create idea", 500);
+  }
 }

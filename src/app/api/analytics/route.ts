@@ -2,12 +2,19 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
 import { getTopPerformers } from "@/services/performanceScoreService";
 
-export async function GET() {
+export async function GET(req: Request) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const orgId = getOrgId(session);
   const now = new Date();
+
+  // Parse date range
+  const url = new URL(req.url);
+  const range = url.searchParams.get("range") || "6m";
+  const rangeMonths: Record<string, number> = { "1m": 1, "3m": 3, "6m": 6, "12m": 12 };
+  const months = rangeMonths[range] || 6;
+  const rangeStart = new Date(now.getFullYear(), now.getMonth() - months, 1);
 
   const [users, departments, sops, sopCompliance, kpiRecords, checkIns, kraAssignments] = await Promise.all([
     prisma.user.findMany({
@@ -15,7 +22,7 @@ export async function GET() {
       include: {
         department: { select: { name: true } },
         role: { select: { title: true } },
-        kpiRecords: { select: { score: true, period: true, createdAt: true } },
+        kpiRecords: { where: { createdAt: { gte: rangeStart } }, select: { score: true, period: true, createdAt: true } },
       },
     }),
     prisma.department.findMany({
@@ -87,7 +94,7 @@ export async function GET() {
   });
 
   // Performance score trend — single query instead of 6 sequential ones
-  const periods = Array.from({ length: 6 }, (_, i) => {
+  const periods = Array.from({ length: months }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
@@ -155,6 +162,7 @@ export async function GET() {
   });
 
   return jsonSuccess({
+    dateRange: { range, months, from: rangeStart.toISOString(), to: now.toISOString() },
     healthScore,
     keyMetrics: {
       totalPeople: users.length,

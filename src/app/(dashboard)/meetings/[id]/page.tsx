@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   ArrowLeft, Edit3, Save, Trash2, FileText, Users, CheckSquare,
   MessageSquare, Plus, Calendar, Clock, ArrowRight, Square,
-  CheckCircle, X, ExternalLink,
+  CheckCircle, X, ExternalLink, Mic, MicOff, Sparkles, ClipboardPaste,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -72,6 +72,155 @@ function getMeetingTypeColor(type: string) {
     case "QUARTERLY_REVIEW": return "bg-orange-500/20 text-orange-400";
     default: return "bg-slate-500/20 text-slate-400";
   }
+}
+
+// ============================================
+// Voice-to-Text Recording Button
+// ============================================
+function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => void }) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [supported, setSupported] = useState(true);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) { setSupported(false); return; }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    let finalTranscript = "";
+
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + " ";
+          onTranscript(transcript.trim());
+        } else {
+          interim += transcript;
+        }
+      }
+    };
+
+    recognition.onerror = () => setIsRecording(false);
+    recognition.onend = () => setIsRecording(false);
+
+    recognitionRef.current = recognition;
+  }, [onTranscript]);
+
+  function toggleRecording() {
+    if (!recognitionRef.current) return;
+    if (isRecording) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+    } else {
+      recognitionRef.current.start();
+      setIsRecording(true);
+    }
+  }
+
+  if (!supported) return null;
+
+  return (
+    <Button
+      variant={isRecording ? "destructive" : "outline"}
+      size="sm"
+      onClick={toggleRecording}
+      className="gap-1.5 text-xs"
+    >
+      {isRecording ? <><MicOff size={14} /> Stop Recording</> : <><Mic size={14} /> Voice Record</>}
+    </Button>
+  );
+}
+
+// ============================================
+// AI Summary Button
+// ============================================
+function AISummaryButton({ notes, onSummary }: { notes: string; onSummary: (summary: string) => void }) {
+  const [generating, setGenerating] = useState(false);
+  const { success: toastSuccess, error: toastError } = useToast();
+
+  async function generateSummary() {
+    if (!notes.trim()) { toastError("Write some notes first, then generate a summary."); return; }
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: `Convert these raw meeting notes into a structured Minutes of Meeting (MOM) format. Include sections: Attendees (if mentioned), Discussion Points, Key Decisions, Action Items (with owners if mentioned), and Next Steps. Keep it professional and concise. Here are the notes:\n\n${notes}`,
+          type: "meeting_summary",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const summary = data.response || data.data?.response || data.answer || "";
+        if (summary) {
+          onSummary(`--- MINUTES OF MEETING ---\n\n${summary}\n\n--- Original Notes ---\n${notes}`);
+          toastSuccess("Meeting summary generated!");
+        } else {
+          toastError("Could not generate summary. Try again.");
+        }
+      } else {
+        toastError("AI service unavailable. Make sure ANTHROPIC_API_KEY is set.");
+      }
+    } catch { toastError("Failed to generate summary"); } finally { setGenerating(false); }
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={generateSummary} disabled={generating || !notes.trim()} className="gap-1.5 text-xs">
+      <Sparkles size={14} /> {generating ? "Generating..." : "AI Summary"}
+    </Button>
+  );
+}
+
+// ============================================
+// Paste Transcript Button
+// ============================================
+function PasteTranscriptButton({ onPaste }: { onPaste: (text: string) => void }) {
+  const [showDialog, setShowDialog] = useState(false);
+  const [transcript, setTranscript] = useState("");
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setShowDialog(true)} className="gap-1.5 text-xs">
+        <ClipboardPaste size={14} /> Paste Transcript
+      </Button>
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Paste Meeting Transcript</DialogTitle></DialogHeader>
+          <div className="py-4 space-y-3">
+            <p className="text-xs text-muted">
+              Paste a transcript from Zoom, Google Meet, Teams, or any transcription tool. You can then use AI Summary to structure it.
+            </p>
+            <Textarea
+              value={transcript}
+              onChange={(e) => setTranscript(e.target.value)}
+              placeholder="Paste your meeting transcript here..."
+              rows={12}
+              className="text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
+            <Button onClick={() => {
+              if (transcript.trim()) {
+                onPaste(transcript.trim());
+                setTranscript("");
+                setShowDialog(false);
+              }
+            }} disabled={!transcript.trim()}>
+              Add to Notes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 export default function MeetingDetailPage() {
@@ -142,7 +291,7 @@ export default function MeetingDetailPage() {
       const res = await fetch("/api/users");
       if (res.ok) {
         const data = await res.json();
-        setUsers(Array.isArray(data) ? data : []);
+        setUsers(Array.isArray(data) ? data : data?.data || []);
       }
     } catch {}
   }, []);
@@ -465,26 +614,32 @@ export default function MeetingDetailPage() {
         </TabsContent>
 
         {/* Notes Tab */}
-        <TabsContent value="notes" className="mt-4">
+        <TabsContent value="notes" className="mt-4 space-y-4">
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm">Meeting Notes</CardTitle>
                 <div className="flex items-center gap-2">
-                  {notesDirty && <span className="text-[10px] text-orange-400">Unsaved changes (auto-saves in 30s)</span>}
+                  {notesDirty && <span className="text-[10px] text-orange-400">Unsaved</span>}
                   <Button size="sm" onClick={saveNotes} disabled={saving || !notesDirty} className="gap-1.5">
-                    <Save size={14} /> {saving ? "Saving..." : "Save Notes"}
+                    <Save size={14} /> {saving ? "Saving..." : "Save"}
                   </Button>
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
+              {/* Tool buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <VoiceRecordButton onTranscript={(text) => { setNotes((prev) => prev + (prev ? "\n" : "") + text); setNotesDirty(true); }} />
+                <AISummaryButton notes={notes} onSummary={(summary) => { setNotes(summary); setNotesDirty(true); }} />
+                <PasteTranscriptButton onPaste={(text) => { setNotes((prev) => prev + (prev ? "\n\n--- Pasted Transcript ---\n" : "") + text); setNotesDirty(true); }} />
+              </div>
               <Textarea
                 value={notes}
                 onChange={(e) => { setNotes(e.target.value); setNotesDirty(true); }}
-                placeholder="Write meeting notes here... (auto-saves every 30 seconds)"
+                placeholder="Write meeting notes, use voice recording, or paste a transcript..."
                 rows={16}
-                className="bg-surface-3 border-border font-mono text-sm"
+                className="bg-surface-3 border-border text-sm"
               />
             </CardContent>
           </Card>

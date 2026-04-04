@@ -599,22 +599,22 @@ export default function SOPsPage() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-          <Card><CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold">{sops.length}</p>
-            <p className="text-xs text-muted">Total SOPs</p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Card><CardContent className="p-3 text-center">
+            <p className="text-lg font-bold">{sops.length}</p>
+            <p className="text-[10px] text-muted">Total SOPs</p>
           </CardContent></Card>
-          <Card><CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-green-400">{publishedSops.length}</p>
-            <p className="text-xs text-muted">Published</p>
+          <Card><CardContent className="p-3 text-center">
+            <p className="text-lg font-bold text-green-400">{publishedSops.length}</p>
+            <p className="text-[10px] text-muted">Published</p>
           </CardContent></Card>
-          <Card><CardContent className="p-4 text-center">
-            <p className={`text-2xl font-bold ${getComplianceText(avgCompliance)}`}>{avgCompliance}%</p>
-            <p className="text-xs text-muted">Avg Compliance</p>
+          <Card><CardContent className="p-3 text-center">
+            <p className={`text-lg font-bold ${getComplianceText(avgCompliance)}`}>{avgCompliance}%</p>
+            <p className="text-[10px] text-muted">Avg Compliance</p>
           </CardContent></Card>
-          <Card><CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-red-400">{publishedSops.filter(s => getComplianceScore(s) < 70).length}</p>
-            <p className="text-xs text-muted">Below Target</p>
+          <Card><CardContent className="p-3 text-center">
+            <p className="text-lg font-bold text-red-400">{publishedSops.filter(s => getComplianceScore(s) < 70).length}</p>
+            <p className="text-[10px] text-muted">Below Target</p>
           </CardContent></Card>
         </div>
       )}
@@ -643,9 +643,9 @@ export default function SOPsPage() {
       </div>
 
       {/* SOP Grid / List */}
-      <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" : "space-y-2"}>
+      <div className={viewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "space-y-2"}>
         {loading
-          ? Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
+          ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
           : filtered.length === 0 ? (
             <div className="col-span-full">
               <EmptyState
@@ -662,39 +662,31 @@ export default function SOPsPage() {
               const assigned = getAssignedCount(sop);
               return (
                 <Link key={sop.id} href={`/sops/${sop.id}`}><Card className="hover:border-muted-2 transition-all cursor-pointer group">
-                  <CardContent className="p-5">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="rounded-lg bg-purple-500/10 p-2">
-                          <FileText size={16} className="text-purple-400" />
-                        </div>
+                  <CardContent className="p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <FileText size={14} className="text-purple-400 shrink-0" />
                         {getStatusBadge(sop.status)}
                       </div>
-                      <Badge variant="outline" className="text-[10px]">v{sop.version}</Badge>
+                      <Badge variant="outline" className="text-[9px]">v{sop.version}</Badge>
                     </div>
-
-                    <h3 className="font-semibold text-sm mb-1">{sop.title}</h3>
-                    <div className="flex items-center gap-1 mb-3">
-                      {sop.category && <Badge variant="outline" className="text-[10px]">{sop.category}</Badge>}
-                      {sop.subcategory && <Badge variant="outline" className="text-[10px] text-purple-400">{sop.subcategory}</Badge>}
+                    <h3 className="font-semibold text-xs mb-1 truncate">{sop.title}</h3>
+                    <div className="flex items-center gap-1 mb-2">
+                      {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
+                      {sop.subcategory && <Badge variant="outline" className="text-[9px] text-purple-400">{sop.subcategory}</Badge>}
                     </div>
-
                     {sop.status === "PUBLISHED" && (
-                      <div className="space-y-2 mt-3">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-muted">Compliance</span>
-                          <span className={`font-mono font-bold ${getComplianceText(compliance)}`}>{compliance}%</span>
-                        </div>
-                        <Progress value={compliance} className="h-1.5" indicatorClassName={getComplianceColor(compliance)} />
+                      <div className="flex items-center gap-2 mb-2">
+                        <Progress value={compliance} className="h-1 flex-1" indicatorClassName={getComplianceColor(compliance)} />
+                        <span className={`text-[10px] font-mono ${getComplianceText(compliance)}`}>{compliance}%</span>
                       </div>
                     )}
-
-                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-border text-[10px] text-muted">
-                      <div className="flex items-center gap-3">
-                        <span className="flex items-center gap-1"><CheckCircle size={10} /> {steps} steps</span>
-                        {assigned > 0 && <span className="flex items-center gap-1"><Users size={10} /> {assigned}</span>}
+                    <div className="flex items-center justify-between text-[9px] text-muted">
+                      <div className="flex items-center gap-2">
+                        <span>{steps} steps</span>
+                        {assigned > 0 && <span>{assigned} assigned</span>}
                       </div>
-                      <span className="flex items-center gap-1"><Clock size={10} /> {formatDate(sop.publishedAt || sop.createdAt)}</span>
+                      <span>{formatDate(sop.publishedAt || sop.createdAt)}</span>
                     </div>
                   </CardContent>
                 </Card></Link>

@@ -62,6 +62,31 @@ export async function POST(
     },
   });
 
+  // Auto-create a task in Work Calendar for the assigned person
+  await prisma.task.create({
+    data: {
+      title: `[Action Item] ${title}`,
+      description: `From meeting: ${meeting.title}`,
+      date: deadline ? new Date(deadline) : new Date(),
+      assigneeId,
+      organizationId: orgId,
+      status: "PLANNED",
+    },
+  });
+
+  // Create notification for the assignee
+  if (assigneeId !== getUserId(session)) {
+    await prisma.notification.create({
+      data: {
+        userId: assigneeId,
+        type: "action_item",
+        title: `New action item: ${title}`,
+        message: `From meeting "${meeting.title}"${deadline ? ` — due ${new Date(deadline).toLocaleDateString()}` : ""}`,
+        link: `/meetings/${meetingId}`,
+      },
+    });
+  }
+
   return jsonSuccess(item, 201);
 }
 

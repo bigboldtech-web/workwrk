@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ function getStatusStyle(status: string) {
 }
 
 export default function OnboardingPage() {
+  const router = useRouter();
   const [instances, setInstances] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
@@ -61,7 +63,7 @@ export default function OnboardingPage() {
       setInstances(Array.isArray(instData) ? instData : []);
       setTemplates(Array.isArray(tmplData) ? tmplData : []);
       setCourses(Array.isArray(courseData) ? courseData : []);
-      setUsers(Array.isArray(userData) ? userData : []);
+      setUsers(Array.isArray(userData) ? userData : userData?.data || []);
     } catch (err) {
       console.error("Failed to fetch onboarding data:", err);
     } finally {
@@ -190,8 +192,9 @@ export default function OnboardingPage() {
                   <Input value={templateForm.description} onChange={(e) => setTemplateForm({ ...templateForm, description: e.target.value })} placeholder="Brief description" />
                 </div>
                 <div className="space-y-2">
-                  <Label>Steps (one per line)</Label>
-                  <Textarea value={templateForm.steps} onChange={(e) => setTemplateForm({ ...templateForm, steps: e.target.value })} placeholder={"IT Setup\nTeam Introductions\nRole Briefing\nFirst Project Assignment"} rows={5} />
+                  <Label>Steps (one per line — use | to add description: Step Title | Step Description)</Label>
+                  <Textarea value={templateForm.steps} onChange={(e) => setTemplateForm({ ...templateForm, steps: e.target.value })} placeholder={"IT Setup | Set up laptop, email, and VPN access\nTeam Introductions | Meet your team members and manager\nRole Briefing | Understand your responsibilities and KRAs\nFirst Project Assignment | Get assigned to your first task"} rows={6} />
+                  <p className="text-[10px] text-muted">Tip: Use "Step Title | Description" format for detailed steps</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Duration (days)</Label>
@@ -578,7 +581,7 @@ export default function OnboardingPage() {
                 const enrolled = c._count?.enrollments || 0;
                 const completions = c.enrollments?.filter((e: any) => e.completedAt).length || 0;
                 return (
-                  <Card key={c.id} className="hover:border-muted-2 transition-colors">
+                  <Card key={c.id} className="hover:border-muted-2 transition-colors cursor-pointer" onClick={() => router.push(`/onboarding/course/${c.id}`)}>
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">

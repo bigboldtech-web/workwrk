@@ -84,6 +84,7 @@ export default function IdeasPage() {
       const params = new URLSearchParams();
       if (tab === "mine") params.set("mine", "true");
       if (tab === "review") params.set("status", "SUBMITTED");
+      // roadmap and all: no filter — show everything
       const res = await fetch(`/api/ideas?${params}`);
       if (res.ok) {
         const data = await res.json();
@@ -108,8 +109,11 @@ export default function IdeasPage() {
         setTitle(""); setDescription(""); setCategory("");
         fetchIdeas();
         toastSuccess("Idea submitted!");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to submit idea");
       }
-    } catch { toastError("Failed to submit idea"); } finally { setSubmitting(false); }
+    } catch (e) { toastError("Failed to submit idea"); } finally { setSubmitting(false); }
   }
 
   async function handleVote(ideaId: string) {
@@ -171,15 +175,52 @@ export default function IdeasPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="all" className="gap-1.5"><Lightbulb size={14} /> All Ideas</TabsTrigger>
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="all" className="gap-1.5"><Lightbulb size={14} /> All</TabsTrigger>
           <TabsTrigger value="mine" className="gap-1.5"><Send size={14} /> My Ideas</TabsTrigger>
+          <TabsTrigger value="roadmap" className="gap-1.5"><Award size={14} /> Roadmap</TabsTrigger>
           {isManager && <TabsTrigger value="review" className="gap-1.5"><Clock size={14} /> Review</TabsTrigger>}
         </TabsList>
       </Tabs>
 
-      {/* Ideas List */}
-      {loading ? (
+      {/* Roadmap View */}
+      {tab === "roadmap" && !loading && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[
+            { status: "SUBMITTED", label: "New Ideas", color: "border-blue-500/30" },
+            { status: "UNDER_REVIEW", label: "Under Review", color: "border-amber-500/30" },
+            { status: "APPROVED", label: "Approved", color: "border-green-500/30" },
+            { status: "IMPLEMENTED", label: "Implemented", color: "border-purple-500/30" },
+          ].map((col) => {
+            const colIdeas = ideas.filter((i) => i.status === col.status);
+            return (
+              <div key={col.status} className={`border-t-2 ${col.color} bg-surface rounded-lg p-3`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold uppercase text-muted">{col.label}</h3>
+                  <span className="text-[10px] text-muted-2">{colIdeas.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {colIdeas.map((idea) => (
+                    <Card key={idea.id} className="hover:border-muted-2 transition-colors">
+                      <CardContent className="p-2.5">
+                        <p className="text-xs font-medium mb-1">{idea.title}</p>
+                        <div className="flex items-center justify-between text-[10px] text-muted">
+                          <span>{idea.submitter.firstName}</span>
+                          <span className="flex items-center gap-1"><ThumbsUp size={10} /> {idea._count.votes}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {colIdeas.length === 0 && <p className="text-[10px] text-muted-2 text-center py-4">No ideas</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Ideas List (not shown on roadmap view) */}
+      {tab !== "roadmap" && (loading ? (
         <div className="space-y-3">
           {[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-20 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}
         </div>
@@ -268,7 +309,7 @@ export default function IdeasPage() {
             );
           })}
         </div>
-      )}
+      ))}
 
       {/* Submit Idea Dialog */}
       <Dialog open={showSubmit} onOpenChange={setShowSubmit}>

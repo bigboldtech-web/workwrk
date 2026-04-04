@@ -61,6 +61,7 @@ interface MostRecognized {
 }
 
 interface AnalyticsData {
+  dateRange?: { range: string; months: number; from: string; to: string };
   healthScore: number;
   keyMetrics: KeyMetrics;
   monthlyTrend: MonthlyTrend[];
@@ -150,12 +151,14 @@ export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState("6m"); // 1m, 3m, 6m, 12m
 
   useEffect(() => {
     async function fetchAnalytics() {
       try {
         setError(null);
-        const res = await fetch("/api/analytics");
+        setLoading(true);
+        const res = await fetch(`/api/analytics?range=${dateRange}`);
         if (!res.ok) throw new Error("Failed to load analytics data");
         const json = await res.json();
         setData(json);
@@ -167,7 +170,7 @@ export default function AnalyticsPage() {
       }
     }
     fetchAnalytics();
-  }, []);
+  }, [dateRange]);
 
   if (loading) return <LoadingSkeleton />;
 
@@ -207,16 +210,36 @@ export default function AnalyticsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
-          <p className="text-muted text-sm mt-1">Real-time dashboards and performance insights</p>
+          <p className="text-muted text-sm mt-1">Performance insights and trends</p>
         </div>
-        <Button
-          variant="outline"
-          className="gap-2"
-          onClick={() => window.open("/api/export/people", "_blank")}
-        >
-          <Download size={16} /> Export CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-surface rounded-lg border border-border p-0.5">
+            {[
+              { value: "1m", label: "1M" },
+              { value: "3m", label: "3M" },
+              { value: "6m", label: "6M" },
+              { value: "12m", label: "1Y" },
+            ].map((opt) => (
+              <button key={opt.value} onClick={() => setDateRange(opt.value)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  dateRange === opt.value ? "bg-purple-500 text-white" : "text-muted hover:text-foreground"
+                }`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => window.open("/api/export/people", "_blank")}>
+            <Download size={14} /> Export
+          </Button>
+        </div>
       </div>
+
+      {/* Date range info */}
+      {data.dateRange && (
+        <p className="text-xs text-muted">
+          Showing data from {new Date(data.dateRange.from).toLocaleDateString("en-US", { month: "short", year: "numeric" })} to {new Date(data.dateRange.to).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+        </p>
+      )}
 
       {/* Company Health Score */}
       <Card className="border-purple-500/20 bg-gradient-to-r from-purple-500/5 to-transparent">
