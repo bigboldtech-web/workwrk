@@ -68,6 +68,11 @@ const bottomNav = [
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+
+  // Sync sidebar width to CSS variable so the content area can adjust
+  useEffect(() => {
+    document.documentElement.style.setProperty("--sidebar-width", collapsed ? "68px" : "260px");
+  }, [collapsed]);
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null);
   const [announcementCount, setAnnouncementCount] = useState(0);
 
@@ -120,7 +125,7 @@ export function Sidebar() {
             <Link href="/dashboard" className="mx-auto">
               <span className="bg-gradient-to-r from-purple-500 to-green-400 bg-clip-text text-xl font-extrabold text-transparent"
                 style={{ fontFamily: "'Syne', sans-serif" }}>
-                t
+                W
               </span>
             </Link>
           )}

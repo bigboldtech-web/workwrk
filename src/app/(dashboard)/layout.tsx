@@ -57,7 +57,7 @@ export default function DashboardLayout({
     <ToastProvider>
       <div className="flex h-screen">
         <Sidebar />
-        <div className="flex flex-1 flex-col pl-[260px]">
+        <div className="flex flex-1 flex-col transition-all duration-300" style={{ paddingLeft: "var(--sidebar-width, 260px)" }}>
           <Topbar />
           <main className="flex-1 overflow-y-auto p-6">{children}</main>
         </div>
