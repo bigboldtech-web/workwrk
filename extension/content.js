@@ -143,16 +143,61 @@ function getElementDescription(el) {
   return `Click on ${el.tagName.toLowerCase()} element`;
 }
 
-// No visual feedback on click — recording is invisible to the user
-function showClickHighlight(el) {
-  // Intentionally empty — seamless recording like Scribe
+// Brief subtle click indicator — small dot that fades quickly
+function showClickHighlight(x, y) {
+  const dot = document.createElement("div");
+  dot.style.cssText = `
+    position: fixed; top: ${y - 12}px; left: ${x - 12}px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: rgba(239, 68, 68, 0.4); border: 2px solid rgba(239, 68, 68, 0.8);
+    pointer-events: none; z-index: 2147483646;
+    animation: twrk-click-fade 0.6s ease-out forwards;
+  `;
+  document.body.appendChild(dot);
+  setTimeout(() => dot.remove(), 600);
 }
 
-// Capture a screenshot of the current tab
-async function captureScreenshot() {
+// Capture a screenshot and annotate click position
+async function captureScreenshot(clickX, clickY) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: "captureScreenshot" }, (response) => {
-      resolve(response?.screenshot || null);
+    chrome.runtime.sendMessage({ action: "captureScreenshot" }, async (response) => {
+      const screenshot = response?.screenshot || null;
+      if (!screenshot || clickX == null) { resolve(screenshot); return; }
+
+      // Draw click indicator on the screenshot
+      try {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+
+          // Scale click coordinates to screenshot dimensions
+          const scaleX = img.width / window.innerWidth;
+          const scaleY = img.height / window.innerHeight;
+          const sx = clickX * scaleX;
+          const sy = clickY * scaleY;
+
+          // Draw red circle at click point
+          ctx.beginPath();
+          ctx.arc(sx, sy, 18 * scaleX, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(239, 68, 68, 0.9)";
+          ctx.lineWidth = 3 * scaleX;
+          ctx.stroke();
+
+          // Draw inner dot
+          ctx.beginPath();
+          ctx.arc(sx, sy, 5 * scaleX, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(239, 68, 68, 0.9)";
+          ctx.fill();
+
+          resolve(canvas.toDataURL("image/png", 0.8));
+        };
+        img.onerror = () => resolve(screenshot);
+        img.src = screenshot;
+      } catch { resolve(screenshot); }
     });
   });
 }
@@ -166,11 +211,14 @@ document.addEventListener("click", async (e) => {
   // Ignore clicks on our own UI
   if (el.closest("#twrk-recording-indicator")) return;
 
-  // Show visual feedback
-  showClickHighlight(el);
+  const clickX = e.clientX;
+  const clickY = e.clientY;
 
-  // Capture screenshot
-  const screenshot = await captureScreenshot();
+  // Show brief visual feedback
+  showClickHighlight(clickX, clickY);
+
+  // Capture screenshot with click annotation
+  const screenshot = await captureScreenshot(clickX, clickY);
 
   // Build step data
   const step = {

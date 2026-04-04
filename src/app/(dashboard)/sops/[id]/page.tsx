@@ -929,12 +929,41 @@ export default function SOPDetailPage() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {sop?.content?.type === "recorded" && Array.isArray(sop.content.steps) && sop.content.steps.length > 0 ? (
-                    /* Recorded SOP — show steps with screenshots, editable descriptions */
-                    ((sop.content.steps || []) as RecordedStep[]).map((step, index) => (
-                      <div key={index} className="rounded-lg border border-border bg-surface-3 overflow-hidden">
+                    <>
+                    {/* Recorded SOP — editable steps with add/delete/reorder */}
+                    {((sop.content.steps || []) as RecordedStep[]).map((step, index) => {
+                      const totalSteps = (sop.content.steps as RecordedStep[]).length;
+                      const updateRecordedSteps = (newSteps: RecordedStep[]) => {
+                        fetch(`/api/sops/${id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ content: { ...sop.content, steps: newSteps } }),
+                        }).then(() => fetchSOP());
+                      };
+                      return (
+                      <div key={index} className="rounded-lg border border-border bg-surface-3 overflow-hidden group">
                         <div className="flex items-start gap-3 p-4">
-                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 text-sm font-bold shrink-0">
-                            {step.order || index + 1}
+                          {/* Move up/down + step number */}
+                          <div className="flex flex-col items-center gap-1 shrink-0">
+                            {editing && index > 0 && (
+                              <button className="text-muted hover:text-foreground text-xs" onClick={() => {
+                                const s = [...(sop.content.steps as RecordedStep[])];
+                                [s[index - 1], s[index]] = [s[index], s[index - 1]];
+                                s.forEach((st, i) => { st.order = i + 1; });
+                                updateRecordedSteps(s);
+                              }}>▲</button>
+                            )}
+                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 text-sm font-bold">
+                              {index + 1}
+                            </div>
+                            {editing && index < totalSteps - 1 && (
+                              <button className="text-muted hover:text-foreground text-xs" onClick={() => {
+                                const s = [...(sop.content.steps as RecordedStep[])];
+                                [s[index], s[index + 1]] = [s[index + 1], s[index]];
+                                s.forEach((st, i) => { st.order = i + 1; });
+                                updateRecordedSteps(s);
+                              }}>▼</button>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             {editing ? (
@@ -945,12 +974,7 @@ export default function SOPDetailPage() {
                                 onBlur={(e) => {
                                   const newSteps = [...(sop.content.steps as RecordedStep[])];
                                   newSteps[index] = { ...newSteps[index], description: e.target.value };
-                                  // Update via API
-                                  fetch(`/api/sops/${id}`, {
-                                    method: "PATCH",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ content: { ...sop.content, steps: newSteps } }),
-                                  });
+                                  updateRecordedSteps(newSteps);
                                 }}
                               />
                             ) : (
@@ -958,6 +982,16 @@ export default function SOPDetailPage() {
                             )}
                             {step.url && <p className="text-xs text-muted-2 mt-0.5 truncate">{step.url}</p>}
                           </div>
+                          {/* Delete button */}
+                          {editing && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 shrink-0" onClick={() => {
+                              const newSteps = (sop.content.steps as RecordedStep[]).filter((_, i) => i !== index);
+                              newSteps.forEach((st, i) => { st.order = i + 1; });
+                              updateRecordedSteps(newSteps);
+                            }}>
+                              <X size={14} />
+                            </Button>
+                          )}
                         </div>
                         {step.screenshot && (
                           <div className="px-4 pb-4">
@@ -965,7 +999,30 @@ export default function SOPDetailPage() {
                           </div>
                         )}
                       </div>
-                    ))
+                      );
+                    })}
+                    {/* Add Step button for recorded SOPs */}
+                    {editing && (
+                      <Button variant="ghost" size="sm" className="w-full border border-dashed border-border text-muted hover:text-purple-400 gap-1.5 mt-2" onClick={() => {
+                        const newSteps = [...(sop.content.steps as RecordedStep[]), {
+                          order: (sop.content.steps as RecordedStep[]).length + 1,
+                          action: "manual",
+                          description: "New step — click to edit",
+                          url: "",
+                          screenshot: null,
+                          elementText: "",
+                          elementTag: "",
+                        }];
+                        fetch(`/api/sops/${id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ content: { ...sop.content, steps: newSteps } }),
+                        }).then(() => fetchSOP());
+                      }}>
+                        <Plus size={14} /> Add Step
+                      </Button>
+                    )}
+                    </>
                   ) : steps.length === 0 ? (
                     <div className="text-center py-8">
                       <FileText
