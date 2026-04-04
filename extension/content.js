@@ -46,92 +46,94 @@ function hideRecordingIndicator() {
   }
 }
 
-// Get a human-readable description of what was clicked
+// Get a human-readable description of what was clicked — Scribe-style
 function getElementDescription(el) {
-  // Button text
-  if (el.tagName === "BUTTON" || el.closest("button")) {
-    const btn = el.tagName === "BUTTON" ? el : el.closest("button");
-    const text = btn.textContent.trim();
-    if (text) return `Click "${text.slice(0, 80)}"`;
+  // Find the best label for this element
+  function findLabel(element) {
+    // Check for aria-label
+    const ariaLabel = element.getAttribute("aria-label");
+    if (ariaLabel) return ariaLabel;
+    // Check for associated label
+    if (element.id) {
+      const label = document.querySelector(`label[for="${element.id}"]`);
+      if (label) return label.textContent.trim();
+    }
+    // Check parent label
+    const parentLabel = element.closest("label");
+    if (parentLabel) return parentLabel.textContent.trim();
+    // Check placeholder
+    const placeholder = element.getAttribute("placeholder");
+    if (placeholder) return placeholder;
+    return null;
   }
 
-  // Link text
+  // Button
+  if (el.tagName === "BUTTON" || el.closest("button")) {
+    const btn = el.tagName === "BUTTON" ? el : el.closest("button");
+    const text = btn.textContent.trim().replace(/\s+/g, " ");
+    if (text) return `Click on the "${text.slice(0, 60)}" button`;
+    return "Click on a button";
+  }
+
+  // Link
   if (el.tagName === "A" || el.closest("a")) {
     const link = el.tagName === "A" ? el : el.closest("a");
-    const text = link.textContent.trim();
-    if (text) return `Click "${text.slice(0, 80)}"`;
+    const text = link.textContent.trim().replace(/\s+/g, " ");
+    if (text) return `Click on the "${text.slice(0, 60)}" link`;
+    return "Click on a link";
   }
 
   // Input / textarea
   if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
-    const label = el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.getAttribute("name") || "";
-    return `Click on ${label ? '"' + label + '"' : "input"} field`;
+    const label = findLabel(el) || el.getAttribute("name") || "";
+    const type = el.type || "text";
+    if (type === "checkbox") return `Toggle the "${label || "checkbox"}" checkbox`;
+    if (type === "radio") return `Select the "${label || "option"}" radio button`;
+    return `Click on the "${label || "text"}" field`;
   }
 
-  // Select
-  if (el.tagName === "SELECT") {
-    const label = el.getAttribute("aria-label") || el.getAttribute("name") || "";
-    return `Click on ${label ? '"' + label + '"' : "dropdown"}`;
+  // Select / dropdown
+  if (el.tagName === "SELECT" || el.closest("[role='listbox']") || el.closest("[role='combobox']")) {
+    const label = findLabel(el) || "";
+    return `Click on the "${label || "dropdown"}" dropdown`;
   }
 
-  // Checkbox / Radio
-  if (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")) {
-    const label = el.closest("label")?.textContent.trim() || "";
-    return label ? `Toggle "${label.slice(0, 60)}"` : `Toggle ${el.type}`;
+  // Menu item / option
+  if (el.closest("[role='menuitem']") || el.closest("[role='option']")) {
+    const item = el.closest("[role='menuitem']") || el.closest("[role='option']");
+    const text = item.textContent.trim().replace(/\s+/g, " ");
+    return `Select "${text.slice(0, 60)}" from the menu`;
+  }
+
+  // Tab
+  if (el.closest("[role='tab']")) {
+    const text = el.closest("[role='tab']").textContent.trim();
+    return `Click on the "${text}" tab`;
   }
 
   // Image
   if (el.tagName === "IMG") {
-    return `Click on image${el.alt ? ' "' + el.alt.slice(0, 60) + '"' : ""}`;
+    return `Click on the${el.alt ? ' "' + el.alt.slice(0, 40) + '"' : ""} image`;
   }
 
-  // Menu item / list item
-  if (el.closest("[role='menuitem']") || el.closest("[role='option']")) {
-    const item = el.closest("[role='menuitem']") || el.closest("[role='option']");
-    const text = item.textContent.trim();
-    return `Click "${text.slice(0, 80)}"`;
+  // Heading
+  if (/^H[1-6]$/.test(el.tagName)) {
+    return `Click on the "${el.textContent.trim().slice(0, 60)}" heading`;
   }
 
-  // Generic element with text
-  const text = el.textContent.trim();
-  if (text && text.length < 80) {
-    return `Click "${text}"`;
+  // Generic element with short text
+  const text = el.textContent.trim().replace(/\s+/g, " ");
+  if (text && text.length < 60) {
+    return `Click on "${text}"`;
   }
 
-  // Fallback
-  return `Click on ${el.tagName.toLowerCase()}`;
+  // Fallback with tag name
+  return `Click on a ${el.tagName.toLowerCase()} element`;
 }
 
-// Show a brief highlight around the clicked element
+// No visual feedback on click — recording is invisible to the user
 function showClickHighlight(el) {
-  if (highlightEl) highlightEl.remove();
-
-  const rect = el.getBoundingClientRect();
-  highlightEl = document.createElement("div");
-  highlightEl.className = "twrk-click-highlight";
-  highlightEl.style.cssText = `
-    position: fixed;
-    top: ${rect.top - 4}px;
-    left: ${rect.left - 4}px;
-    width: ${rect.width + 8}px;
-    height: ${rect.height + 8}px;
-    border: 3px solid #7C3AED;
-    border-radius: 8px;
-    pointer-events: none;
-    z-index: 2147483646;
-    transition: opacity 0.3s;
-  `;
-  document.body.appendChild(highlightEl);
-
-  setTimeout(() => {
-    if (highlightEl) {
-      highlightEl.style.opacity = "0";
-      setTimeout(() => {
-        if (highlightEl) highlightEl.remove();
-        highlightEl = null;
-      }, 300);
-    }
-  }, 800);
+  // Intentionally empty — seamless recording like Scribe
 }
 
 // Capture a screenshot of the current tab

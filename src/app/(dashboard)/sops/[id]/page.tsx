@@ -913,7 +913,7 @@ export default function SOPDetailPage() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm">
-                      Steps ({steps.length})
+                      Steps ({sop?.content?.type === "recorded" ? (sop.content.steps as any[])?.length || 0 : steps.length})
                     </CardTitle>
                     {editing && (
                       <Button
@@ -928,7 +928,28 @@ export default function SOPDetailPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {steps.length === 0 ? (
+                  {sop?.content?.type === "recorded" && Array.isArray(sop.content.steps) && sop.content.steps.length > 0 ? (
+                    /* Recorded SOP — show steps with screenshots directly */
+                    ((sop.content.steps || []) as RecordedStep[]).map((step, index) => (
+                      <div key={index} className="rounded-lg border border-border bg-surface-3 overflow-hidden">
+                        <div className="flex items-start gap-3 p-4">
+                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 text-sm font-bold shrink-0">
+                            {step.order || index + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">{step.description || `Step ${index + 1}`}</p>
+                            {step.url && <p className="text-xs text-muted-2 mt-0.5 truncate">{step.url}</p>}
+                            {step.elementText && <p className="text-xs text-muted mt-1">Element: <code className="bg-surface-2 px-1 rounded text-[10px]">{step.elementTag} — {step.elementText}</code></p>}
+                          </div>
+                        </div>
+                        {step.screenshot && (
+                          <div className="px-4 pb-4">
+                            <img src={step.screenshot} alt={`Step ${index + 1}`} className="w-full rounded-lg border border-border" />
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : steps.length === 0 ? (
                     <div className="text-center py-8">
                       <FileText
                         size={32}
@@ -948,35 +969,6 @@ export default function SOPDetailPage() {
                         </Button>
                       )}
                     </div>
-                  ) : sop?.content?.type === "recorded" ? (
-                    /* Recorded SOP Steps with Screenshots */
-                    ((sop.content.steps || []) as RecordedStep[]).map((step, index) => (
-                      <div
-                        key={index}
-                        className="rounded-lg border border-border bg-surface-3 overflow-hidden"
-                      >
-                        <div className="flex items-center gap-3 p-4">
-                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 text-sm font-bold shrink-0">
-                            {step.order || index + 1}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium">{step.description}</p>
-                            {step.url && (
-                              <p className="text-xs text-muted-2 mt-0.5 truncate">{step.url}</p>
-                            )}
-                          </div>
-                        </div>
-                        {step.screenshot && (
-                          <div className="px-4 pb-4">
-                            <img
-                              src={step.screenshot}
-                              alt={`Step ${step.order || index + 1}: ${step.description}`}
-                              className="w-full rounded-lg border border-border"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ))
                   ) : (
                     steps.map((step, index) => (
                       <div
