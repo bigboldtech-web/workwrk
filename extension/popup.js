@@ -1,88 +1,83 @@
 const states = {
   idle: document.getElementById("idle-state"),
   recording: document.getElementById("recording-state"),
-  review: document.getElementById("review-state"),
   saving: document.getElementById("saving-state"),
   success: document.getElementById("success-state"),
+  error: document.getElementById("error-state"),
 };
 
+let sopTitle = "";
+let sopCategory = "";
+let sopDescription = "";
+
 function showState(state) {
-  Object.values(states).forEach((el) => (el.style.display = "none"));
-  states[state].style.display = "block";
+  Object.values(states).forEach((el) => { if (el) el.style.display = "none"; });
+  if (states[state]) states[state].style.display = "block";
 }
 
-// Load saved server URL
-chrome.storage.local.get(["serverUrl"], (result) => {
-  if (result.serverUrl) {
-    document.getElementById("server-url").value = result.serverUrl;
-  }
-});
-
 // Check if already recording
-chrome.storage.local.get(["isRecording", "steps"], (result) => {
+chrome.storage.local.get(["isRecording", "steps", "sopTitle", "sopCategory", "sopDescription"], (result) => {
   if (result.isRecording) {
     showState("recording");
     document.getElementById("step-count").textContent = (result.steps || []).length;
+    sopTitle = result.sopTitle || "";
+    sopCategory = result.sopCategory || "";
+    sopDescription = result.sopDescription || "";
   }
 });
 
-// Start Recording
+// Start Recording — title required BEFORE recording
 document.getElementById("start-btn").addEventListener("click", async () => {
-  const serverUrl = document.getElementById("server-url").value.trim();
-  chrome.storage.local.set({ serverUrl, isRecording: true, steps: [] });
+  const title = document.getElementById("sop-title").value.trim();
+  const category = document.getElementById("sop-category").value.trim();
+  const description = document.getElementById("sop-description").value.trim();
+  const errorEl = document.getElementById("start-error");
 
-  // Inject content script into the active tab
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab) {
-    chrome.tabs.sendMessage(tab.id, { action: "startRecording" });
+  if (!title) {
+    errorEl.style.display = "block";
+    return;
   }
+  errorEl.style.display = "none";
+
+  sopTitle = title;
+  sopCategory = category;
+  sopDescription = description;
+
+  chrome.storage.local.set({
+    isRecording: true, steps: [],
+    sopTitle: title, sopCategory: category, sopDescription: description,
+  });
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab) chrome.tabs.sendMessage(tab.id, { action: "startRecording" });
 
   showState("recording");
   document.getElementById("step-count").textContent = "0";
 });
 
-// Stop Recording
+// Stop Recording — auto-save immediately (title already set)
 document.getElementById("stop-btn").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab) {
-    chrome.tabs.sendMessage(tab.id, { action: "stopRecording" });
-  }
+  if (tab) chrome.tabs.sendMessage(tab.id, { action: "stopRecording" });
 
   chrome.storage.local.set({ isRecording: false });
-
-  chrome.storage.local.get(["steps"], (result) => {
-    const steps = result.steps || [];
-    document.getElementById("final-count").textContent = steps.length;
-    showState("review");
-  });
-});
-
-// Save to WorkwrK
-document.getElementById("save-btn").addEventListener("click", async () => {
-  const title = document.getElementById("sop-title").value.trim();
-  const category = document.getElementById("sop-category").value.trim();
-  const errorEl = document.getElementById("save-error");
-
-  if (!title) {
-    errorEl.textContent = "Please enter a title for the SOP.";
-    errorEl.style.display = "block";
-    return;
-  }
-
-  errorEl.style.display = "none";
   showState("saving");
 
-  chrome.storage.local.get(["steps", "serverUrl"], async (result) => {
+  // Get stored title and steps
+  chrome.storage.local.get(["steps", "sopTitle", "sopCategory", "sopDescription"], async (result) => {
     const steps = result.steps || [];
-    const serverUrl = result.serverUrl || "https://workwrk.com";
+    const title = result.sopTitle || sopTitle;
+    const category = result.sopCategory || sopCategory;
+    const description = result.sopDescription || sopDescription;
 
     try {
-      const response = await fetch(`${serverUrl}/api/sops/record`, {
+      const response = await fetch("https://workwrk.com/api/sops/record", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
           title,
+          description: description || null,
           category: category || null,
           steps: steps.map((s, i) => ({
             order: i + 1,
@@ -97,37 +92,41 @@ document.getElementById("save-btn").addEventListener("click", async () => {
       });
 
       if (response.ok) {
-        chrome.storage.local.set({ steps: [] });
+        chrome.storage.local.set({ steps: [], sopTitle: "", sopCategory: "", sopDescription: "" });
         showState("success");
       } else {
         const data = await response.json();
-        showState("review");
-        errorEl.textContent = data.error || "Failed to save. Make sure you're logged in to WorkwrK.";
-        errorEl.style.display = "block";
+        document.getElementById("save-error").textContent = data.error || "Failed to save. Make sure you're logged in.";
+        showState("error");
       }
     } catch (err) {
-      showState("review");
-      errorEl.textContent = "Network error. Check your server URL and connection.";
-      errorEl.style.display = "block";
+      document.getElementById("save-error").textContent = "Network error. Check your connection.";
+      showState("error");
     }
   });
 });
 
-// Discard
-document.getElementById("discard-btn").addEventListener("click", () => {
-  chrome.storage.local.set({ steps: [], isRecording: false });
+// Retry
+document.getElementById("retry-btn")?.addEventListener("click", () => {
   showState("idle");
+  document.getElementById("sop-title").value = sopTitle;
+  document.getElementById("sop-category").value = sopCategory;
+  document.getElementById("sop-description").value = sopDescription;
 });
 
 // Record Another
 document.getElementById("new-btn").addEventListener("click", () => {
+  sopTitle = ""; sopCategory = ""; sopDescription = "";
+  document.getElementById("sop-title").value = "";
+  document.getElementById("sop-category").value = "";
+  document.getElementById("sop-description").value = "";
   showState("idle");
 });
 
-// Listen for step count updates from background
+// Listen for step count updates
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.steps) {
-    const steps = changes.steps.newValue || [];
-    document.getElementById("step-count").textContent = steps.length;
+    const el = document.getElementById("step-count");
+    if (el) el.textContent = (changes.steps.newValue || []).length;
   }
 });

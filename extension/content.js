@@ -127,8 +127,20 @@ function getElementDescription(el) {
     return `Click on "${text}"`;
   }
 
+  // SVG elements — find nearest meaningful parent
+  if (el.tagName === "svg" || el.tagName === "path" || el.tagName === "circle" || el.closest("svg")) {
+    const parent = el.closest("button") || el.closest("a") || el.closest("[role='button']") || el.parentElement;
+    if (parent && parent !== document.body) {
+      const parentText = parent.textContent.trim().replace(/\s+/g, " ");
+      if (parentText && parentText.length < 60) return `Click on the "${parentText}" button`;
+      const ariaLabel = parent.getAttribute("aria-label") || parent.getAttribute("title");
+      if (ariaLabel) return `Click on "${ariaLabel}"`;
+    }
+    return "Click on an icon";
+  }
+
   // Fallback with tag name
-  return `Click on a ${el.tagName.toLowerCase()} element`;
+  return `Click on ${el.tagName.toLowerCase()} element`;
 }
 
 // No visual feedback on click — recording is invisible to the user

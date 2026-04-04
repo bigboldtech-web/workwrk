@@ -4,161 +4,33 @@
   <meta charset="utf-8">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      width: 320px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0A0A0F;
-      color: #E8E8F0;
-    }
-    .header {
-      padding: 16px;
-      border-bottom: 1px solid #2A2A3A;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .header .logo {
-      font-size: 16px;
-      font-weight: 700;
-      background: linear-gradient(to right, #A78BFA, #6EE7B7);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .header .subtitle {
-      font-size: 11px;
-      color: #8888A0;
-    }
-    .content {
-      padding: 16px;
-    }
-    .status {
-      text-align: center;
-      padding: 20px 0;
-    }
-    .status .icon {
-      font-size: 40px;
-      margin-bottom: 8px;
-    }
-    .status .text {
-      font-size: 13px;
-      color: #8888A0;
-      margin-bottom: 16px;
-    }
-    .status .recording-text {
-      color: #EF4444;
-      font-weight: 600;
-    }
-    .btn {
-      width: 100%;
-      padding: 10px 16px;
-      border: none;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: all 0.15s;
-    }
-    .btn-primary {
-      background: #7C3AED;
-      color: white;
-    }
+    body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0A0A0F; color: #E8E8F0; }
+    .header { padding: 16px; border-bottom: 1px solid #2A2A3A; display: flex; align-items: center; gap: 8px; }
+    .header .logo { font-size: 16px; font-weight: 700; background: linear-gradient(to right, #A78BFA, #6EE7B7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .header .subtitle { font-size: 11px; color: #8888A0; }
+    .content { padding: 16px; }
+    .status { text-align: center; padding: 16px 0; }
+    .status .icon { font-size: 40px; margin-bottom: 8px; }
+    .status .text { font-size: 13px; color: #8888A0; margin-bottom: 12px; }
+    .recording-text { color: #EF4444; font-weight: 600; }
+    .btn { width: 100%; padding: 10px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.15s; }
+    .btn-primary { background: #7C3AED; color: white; }
     .btn-primary:hover { background: #6D28D9; }
-    .btn-danger {
-      background: #EF4444;
-      color: white;
-    }
-    .btn-danger:hover { background: #DC2626; }
-    .btn-secondary {
-      background: #1A1A26;
-      color: #E8E8F0;
-      border: 1px solid #2A2A3A;
-      margin-top: 8px;
-    }
-    .btn-secondary:hover { background: #2A2A3A; }
-    .steps-count {
-      text-align: center;
-      padding: 8px;
-      margin-top: 12px;
-      background: #1A1A26;
-      border-radius: 8px;
-      font-size: 12px;
-      color: #8888A0;
-    }
-    .steps-count strong {
-      color: #A78BFA;
-    }
-    .pulse {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      background: #EF4444;
-      border-radius: 50%;
-      animation: pulse 1.5s infinite;
-    }
-    @keyframes pulse {
-      0% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.5; transform: scale(1.2); }
-      100% { opacity: 1; transform: scale(1); }
-    }
-    .config {
-      margin-top: 12px;
-    }
-    .config label {
-      display: block;
-      font-size: 11px;
-      color: #8888A0;
-      margin-bottom: 4px;
-    }
-    .config input, .config select {
-      width: 100%;
-      padding: 8px;
-      background: #12121A;
-      border: 1px solid #2A2A3A;
-      border-radius: 6px;
-      color: #E8E8F0;
-      font-size: 12px;
-      margin-bottom: 8px;
-    }
-    .config input:focus, .config select:focus {
-      outline: none;
-      border-color: #7C3AED;
-    }
-    .saving {
-      text-align: center;
-      padding: 20px;
-    }
-    .spinner {
-      width: 24px;
-      height: 24px;
-      border: 3px solid #2A2A3A;
-      border-top: 3px solid #7C3AED;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 12px;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    .success {
-      color: #10B981;
-      font-size: 13px;
-    }
-    .error {
-      color: #EF4444;
-      font-size: 12px;
-      margin-top: 8px;
-    }
-    .footer {
-      padding: 12px 16px;
-      border-top: 1px solid #2A2A3A;
-      font-size: 10px;
-      color: #6B6B80;
-      text-align: center;
-    }
+    .btn-danger { background: #EF4444; color: white; }
+    .btn-secondary { background: #1A1A26; color: #E8E8F0; border: 1px solid #2A2A3A; margin-top: 8px; }
+    .steps-count { text-align: center; padding: 8px; margin-top: 12px; background: #1A1A26; border-radius: 8px; font-size: 12px; color: #8888A0; }
+    .steps-count strong { color: #A78BFA; }
+    .pulse { display: inline-block; width: 10px; height: 10px; background: #EF4444; border-radius: 50%; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    .config { margin-top: 12px; text-align: left; }
+    .config label { display: block; font-size: 11px; color: #8888A0; margin-bottom: 4px; }
+    .config input { width: 100%; padding: 8px; background: #12121A; border: 1px solid #2A2A3A; border-radius: 6px; color: #E8E8F0; font-size: 12px; margin-bottom: 8px; }
+    .config input:focus { outline: none; border-color: #7C3AED; }
+    .spinner { width: 24px; height: 24px; border: 3px solid #2A2A3A; border-top: 3px solid #7C3AED; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .success { color: #10B981; font-size: 13px; }
+    .error { color: #EF4444; font-size: 12px; margin-top: 8px; }
+    .footer { padding: 8px 16px; border-top: 1px solid #2A2A3A; font-size: 10px; color: #6B6B80; text-align: center; }
   </style>
 </head>
 <body>
@@ -168,72 +40,54 @@
   </div>
 
   <div class="content">
-    <!-- Idle State -->
+    <!-- Idle: Enter title first, then start -->
     <div id="idle-state" class="status">
       <div class="icon">🎯</div>
-      <div class="text">Click "Start Recording" then perform your workflow. Each click will be captured as a step.</div>
+      <div class="text">Name your SOP, then start recording your workflow.</div>
       <div class="config">
-        <label>Server URL</label>
-        <input type="text" id="server-url" placeholder="https://workwrk.com" value="https://workwrk.com" />
+        <label>SOP Title</label>
+        <input type="text" id="sop-title" placeholder="e.g., How to process a refund" />
+        <label>Category (optional)</label>
+        <input type="text" id="sop-category" placeholder="e.g., Sales, Operations" />
+        <label>Description (optional)</label>
+        <input type="text" id="sop-description" placeholder="What does this SOP cover?" />
       </div>
-      <button class="btn btn-primary" id="start-btn">
-        ⏺ Start Recording
-      </button>
+      <button class="btn btn-primary" id="start-btn">⏺ Start Recording</button>
+      <div id="start-error" class="error" style="display:none;">Please enter a title for the SOP.</div>
     </div>
 
-    <!-- Recording State -->
+    <!-- Recording -->
     <div id="recording-state" class="status" style="display:none;">
       <div><span class="pulse"></span></div>
       <div class="recording-text" style="margin-top: 12px;">Recording...</div>
-      <div class="text">Click around your workflow. Each action is captured automatically.</div>
-      <div class="steps-count">
-        <strong id="step-count">0</strong> steps captured
-      </div>
-      <button class="btn btn-danger" id="stop-btn" style="margin-top: 12px;">
-        ⏹ Stop Recording
-      </button>
+      <div class="text">Perform your workflow normally. Every click is captured.</div>
+      <div class="steps-count"><strong id="step-count">0</strong> steps captured</div>
+      <button class="btn btn-danger" id="stop-btn" style="margin-top: 12px;">⏹ Stop & Save</button>
     </div>
 
-    <!-- Review State -->
-    <div id="review-state" class="status" style="display:none;">
-      <div class="icon">✅</div>
-      <div class="text">Recording complete! <strong id="final-count">0</strong> steps captured.</div>
-      <div class="config">
-        <label>SOP Title</label>
-        <input type="text" id="sop-title" placeholder="How to..." />
-        <label>Category</label>
-        <input type="text" id="sop-category" placeholder="e.g., Sales, Engineering" />
-      </div>
-      <button class="btn btn-primary" id="save-btn">
-        💾 Save to WorkwrK
-      </button>
-      <button class="btn btn-secondary" id="discard-btn">
-        🗑 Discard
-      </button>
-      <div id="save-error" class="error" style="display:none;"></div>
-    </div>
-
-    <!-- Saving State -->
+    <!-- Saving -->
     <div id="saving-state" class="status" style="display:none;">
       <div class="spinner"></div>
       <div class="text">Saving SOP to WorkwrK...</div>
     </div>
 
-    <!-- Success State -->
+    <!-- Success -->
     <div id="success-state" class="status" style="display:none;">
       <div class="icon">🎉</div>
       <div class="success">SOP saved successfully!</div>
-      <div class="text" style="margin-top: 8px;">You can view it in your SOPs section.</div>
-      <button class="btn btn-primary" id="new-btn" style="margin-top: 12px;">
-        ⏺ Record Another
-      </button>
+      <div class="text" style="margin-top: 8px;">View it in your SOPs section.</div>
+      <button class="btn btn-primary" id="new-btn" style="margin-top: 12px;">⏺ Record Another</button>
+    </div>
+
+    <!-- Error -->
+    <div id="error-state" class="status" style="display:none;">
+      <div class="icon">❌</div>
+      <div class="error" id="save-error">Failed to save.</div>
+      <button class="btn btn-secondary" id="retry-btn" style="margin-top: 12px;">Try Again</button>
     </div>
   </div>
 
-  <div class="footer">
-    WorkwrK SOP Recorder v1.0
-  </div>
-
+  <div class="footer">WorkwrK SOP Recorder v1.0</div>
   <script src="popup.js"></script>
 </body>
 </html>

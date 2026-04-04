@@ -39,6 +39,7 @@ import {
 // Items without a moduleKey are always shown (Dashboard, Organization)
 const navigation: { name: string; href: string; icon: any; moduleKey?: string; managerOnly?: boolean; adminOnly?: boolean }[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Announcements", href: "/announcements", icon: Megaphone },
   { name: "People", href: "/people", icon: Users, moduleKey: "people", managerOnly: true },
   { name: "Organization", href: "/organization", icon: Building2 },
   { name: "KRA & KPIs", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi" },
@@ -54,7 +55,6 @@ const navigation: { name: string; href: string; icon: any; moduleKey?: string; m
   { name: "Talent Grid", href: "/talent", icon: Grid3x3, managerOnly: true },
   { name: "Surveys", href: "/surveys", icon: ClipboardCheck },
   { name: "Policies", href: "/policies", icon: Shield },
-  { name: "Announcements", href: "/announcements", icon: Megaphone, adminOnly: true },
   { name: "Activity", href: "/activity", icon: Activity },
   { name: "Integrations", href: "/integrations", icon: Link2, adminOnly: true },
   { name: "AI Assistant", href: "/ai", icon: Bot, moduleKey: "ai" },
@@ -69,6 +69,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null);
+  const [announcementCount, setAnnouncementCount] = useState(0);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -78,6 +79,12 @@ export function Sidebar() {
           setEnabledModules(data.settings.enabledModules);
         }
       })
+      .catch(() => {});
+
+    // Fetch unread announcement count
+    fetch("/api/announcements")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.data) setAnnouncementCount(d.data.length); })
       .catch(() => {});
   }, []);
 
@@ -134,7 +141,7 @@ export function Sidebar() {
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                  "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
                   isActive
                     ? "bg-purple-600/10 text-purple-400 border border-purple-600/20"
                     : "text-muted hover:bg-surface-2 hover:text-foreground",
@@ -143,7 +150,19 @@ export function Sidebar() {
                 title={collapsed ? item.name : undefined}
               >
                 <item.icon size={20} className={cn(isActive && "text-purple-400")} />
-                {!collapsed && <span>{item.name}</span>}
+                {!collapsed && (
+                  <span className="flex-1 flex items-center justify-between">
+                    <span>{item.name}</span>
+                    {item.name === "Announcements" && announcementCount > 0 && (
+                      <span className="flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
+                        {announcementCount}
+                      </span>
+                    )}
+                  </span>
+                )}
+                {collapsed && item.name === "Announcements" && announcementCount > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
+                )}
               </Link>
             );
           })}
