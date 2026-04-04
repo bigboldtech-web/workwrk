@@ -24,7 +24,10 @@ import { useRole } from "@/hooks/use-role";
 const CATEGORIES = ["Development", "Meetings", "Admin", "Planning", "Review", "Communication", "Research", "Other"];
 
 function formatDate(d: Date): string {
-  return d.toISOString().split("T")[0];
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getWeekDates(baseDate: Date): Date[] {
@@ -73,6 +76,8 @@ export default function TasksPage() {
   const [form, setForm] = useState({
     title: "", description: "", date: formatDate(new Date()),
     hoursSpent: "", category: "", status: "PLANNED",
+    recurring: "none" as string, // none, daily, weekdays, weekly, monthly
+    recurringDays: [] as number[], // 0=Sun, 1=Mon, ... 6=Sat for custom
   });
   const [saving, setSaving] = useState(false);
 
@@ -102,7 +107,7 @@ export default function TasksPage() {
 
   function openNewTask(date?: string) {
     setEditingTask(null);
-    setForm({ title: "", description: "", date: date || formatDate(new Date()), hoursSpent: "", category: "", status: "PLANNED" });
+    setForm({ title: "", description: "", date: date || formatDate(new Date()), hoursSpent: "", category: "", status: "PLANNED", recurring: "none", recurringDays: [] });
     setShowDialog(true);
   }
 
@@ -112,30 +117,81 @@ export default function TasksPage() {
       title: task.title, description: task.description || "", date: task.date.split("T")[0],
       hoursSpent: task.hoursSpent != null ? String(task.hoursSpent) : "",
       category: task.category || "", status: task.status,
+      recurring: "none", recurringDays: [],
     });
     setShowDialog(true);
+  }
+
+  function getRecurringDates(startDate: string, recurring: string, recurringDays: number[]): string[] {
+    const dates: string[] = [];
+    const start = new Date(startDate);
+
+    if (recurring === "none") return [startDate];
+
+    // Generate dates for 4 weeks ahead
+    for (let i = 0; i < 28; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
+
+      if (recurring === "daily") {
+        dates.push(formatDate(d));
+      } else if (recurring === "weekdays") {
+        if (dayOfWeek >= 1 && dayOfWeek <= 5) dates.push(formatDate(d));
+      } else if (recurring === "weekly") {
+        if (dayOfWeek === start.getDay()) dates.push(formatDate(d));
+      } else if (recurring === "monthly") {
+        if (d.getDate() === start.getDate()) dates.push(formatDate(d));
+      } else if (recurring === "custom" && recurringDays.length > 0) {
+        if (recurringDays.includes(dayOfWeek)) dates.push(formatDate(d));
+      }
+    }
+
+    return dates.length > 0 ? dates : [startDate];
   }
 
   async function handleSave() {
     if (!form.title.trim()) return;
     setSaving(true);
     try {
-      const payload: any = {
-        title: form.title, description: form.description || null, date: form.date,
-        hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
-        category: form.category || null, status: form.status,
-      };
-      if (editingTask) payload.id = editingTask.id;
-
-      const res = await fetch("/api/tasks", {
-        method: editingTask ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
+      if (editingTask) {
+        // Update existing task
+        const payload: any = {
+          id: editingTask.id,
+          title: form.title, description: form.description || null, date: form.date,
+          hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
+          category: form.category || null, status: form.status,
+        };
+        const res = await fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          setShowDialog(false);
+          fetchTasks();
+          toastSuccess("Task updated");
+        }
+      } else {
+        // Create — handle recurring
+        const dates = getRecurringDates(form.date, form.recurring, form.recurringDays);
+        let created = 0;
+        for (const date of dates) {
+          const payload = {
+            title: form.title, description: form.description || null, date,
+            hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
+            category: form.category || null, status: form.status,
+          };
+          const res = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (res.ok) created++;
+        }
         setShowDialog(false);
         fetchTasks();
-        toastSuccess(editingTask ? "Task updated" : "Task created");
+        toastSuccess(created > 1 ? `${created} recurring tasks created` : "Task created");
       }
     } catch { toastError("Failed to save task"); } finally { setSaving(false); }
   }
@@ -384,6 +440,52 @@ export default function TasksPage() {
                 </Select>
               </div>
             </div>
+            {/* Recurring — only for new tasks */}
+            {!editingTask && (
+              <div className="space-y-2">
+                <Label>Repeat</Label>
+                <Select value={form.recurring} onValueChange={(v) => setForm({ ...form, recurring: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No repeat (one-time)</SelectItem>
+                    <SelectItem value="daily">Daily (every day for 4 weeks)</SelectItem>
+                    <SelectItem value="weekdays">Weekdays (Mon-Fri for 4 weeks)</SelectItem>
+                    <SelectItem value="weekly">Weekly (same day for 4 weeks)</SelectItem>
+                    <SelectItem value="monthly">Monthly (same date)</SelectItem>
+                    <SelectItem value="custom">Custom days</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.recurring === "custom" && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, i) => (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() => {
+                          const days = form.recurringDays.includes(i)
+                            ? form.recurringDays.filter((d) => d !== i)
+                            : [...form.recurringDays, i];
+                          setForm({ ...form, recurringDays: days });
+                        }}
+                        className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                          form.recurringDays.includes(i)
+                            ? "bg-purple-500 text-white"
+                            : "bg-surface-2 text-muted hover:text-foreground"
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {form.recurring !== "none" && (
+                  <p className="text-[10px] text-muted">
+                    Tasks will be created for the next 4 weeks starting from the selected date.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>Description</Label>
               <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What did you do? Any notes..." rows={3} />
