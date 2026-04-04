@@ -43,9 +43,15 @@ export default function AnnouncementsPage() {
 
   useEffect(() => {
     fetch("/api/announcements")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.data) setAnnouncements(d.data); })
-      .catch(() => {})
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((d) => {
+        const items = d?.data || d || [];
+        setAnnouncements(Array.isArray(items) ? items : []);
+      })
+      .catch((err) => console.error("Failed to fetch announcements:", err))
       .finally(() => setLoading(false));
   }, []);
 

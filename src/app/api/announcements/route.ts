@@ -7,42 +7,19 @@ export async function GET() {
   if (error) return error;
 
   const orgId = getOrgId(session);
-  const userId = getUserId(session);
-  const now = new Date();
 
-  // Simple query — fetch all announcements for this org
-  const announcements = await prisma.announcement.findMany({
-    where: { organizationId: orgId },
-    include: {
-      dismissals: { where: { userId }, select: { id: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+  try {
+    const announcements = await prisma.announcement.findMany({
+      where: { organizationId: orgId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
 
-  // Filter: show active (not expired, not dismissed unless pinned)
-  const active = announcements.filter((a) => {
-    // Check expiry
-    if (a.expiresAt && new Date(a.expiresAt) < now) return false;
-    // Pinned always show
-    if (a.pinned) return true;
-    // Hide dismissed
-    if (a.dismissals.length > 0) return false;
-    return true;
-  });
-
-  return jsonSuccess(active.map((a) => ({
-    id: a.id,
-    title: a.title,
-    content: a.content,
-    type: a.type,
-    priority: a.priority,
-    pinned: a.pinned,
-    publishedAt: a.publishedAt,
-    expiresAt: a.expiresAt,
-    createdAt: a.createdAt,
-    dismissed: a.dismissals.length > 0,
-  })));
+    return jsonSuccess(announcements);
+  } catch (err: any) {
+    console.error("Announcements GET error:", err);
+    return jsonError(err.message || "Failed to fetch announcements", 500);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -57,6 +34,7 @@ export async function POST(req: NextRequest) {
 
   if (!title?.trim() || !content?.trim()) return jsonError("Title and content required");
 
+  try {
   const announcement = await prisma.announcement.create({
     data: {
       title: title.trim(),
@@ -66,11 +44,15 @@ export async function POST(req: NextRequest) {
       pinned: pinned === true,
       publishedAt: new Date(),
       expiresAt: expiresAt ? new Date(expiresAt) : null,
-      targetAudience: targetAudience || null,
+      targetAudience: targetAudience || undefined,
       authorId: userId,
       organizationId: orgId,
     },
   });
 
   return jsonSuccess(announcement, 201);
+  } catch (err: any) {
+    console.error("Announcements POST error:", err);
+    return jsonError(err.message || "Failed to create announcement", 500);
+  }
 }

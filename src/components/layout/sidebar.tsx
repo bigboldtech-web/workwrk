@@ -84,7 +84,7 @@ export function Sidebar() {
     // Fetch unread announcement count
     fetch("/api/announcements")
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.data) setAnnouncementCount(d.data.length); })
+      .then((d) => { const items = d?.data || []; setAnnouncementCount(Array.isArray(items) ? items.length : 0); })
       .catch(() => {});
   }, []);
 

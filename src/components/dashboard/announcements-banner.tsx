@@ -31,7 +31,10 @@ export function AnnouncementsBanner() {
   useEffect(() => {
     fetch("/api/announcements")
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.data) setAnnouncements(d.data); })
+      .then((d) => {
+        const items = d?.data || d || [];
+        setAnnouncements(Array.isArray(items) ? items : []);
+      })
       .catch(() => {});
   }, []);
 
