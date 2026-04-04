@@ -160,6 +160,19 @@ function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | nu
 function KraAssignmentsTab({ userId }: { userId: string }) {
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedPeriod, setSelectedPeriod] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  // Generate last 6 months for period selector
+  const periodOptions = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleString("default", { month: "short", year: "numeric" });
+    return { value: val, label: label + (i === 0 ? " (Current)" : "") };
+  });
 
   useEffect(() => {
     fetch(`/api/kra-assignments?userId=${userId}`)
@@ -193,19 +206,33 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
         <p className="text-xs text-muted">
           Total weightage: <span className={totalWeightage === 100 ? "text-green-400 font-medium" : "text-orange-400 font-medium"}>{totalWeightage}%</span>
         </p>
-        <Progress
-          value={Math.min(totalWeightage, 100)}
-          className="w-32 h-1.5"
-          indicatorClassName={totalWeightage === 100 ? "bg-green-500" : "bg-orange-500"}
-        />
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted">Showing KPI data for:</span>
+          <select
+            value={selectedPeriod}
+            onChange={(e) => setSelectedPeriod(e.target.value)}
+            className="text-xs bg-surface border border-border rounded px-2 py-1"
+          >
+            {periodOptions.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
+      <Progress
+        value={Math.min(totalWeightage, 100)}
+        className="h-1.5"
+        indicatorClassName={totalWeightage === 100 ? "bg-green-500" : "bg-orange-500"}
+      />
       {assignments.map((a: any) => {
         const kpiProgress = a.kra?.kpis?.map((kpi: any) => {
-          const latestRecord = kpi.records?.[0];
-          if (!latestRecord) return null;
-          const pct = latestRecord.targetValue > 0 ? Math.min(Math.round((latestRecord.actualValue / latestRecord.targetValue) * 100), 120) : 0;
-          return { name: kpi.name, unit: kpi.unit, pct, actual: latestRecord.actualValue, target: latestRecord.targetValue };
-        }).filter(Boolean) ?? [];
+          // Find record matching selected period
+          const record = kpi.records?.find((r: any) => r.period === selectedPeriod) || kpi.records?.[0];
+          if (!record) return { name: kpi.name, unit: kpi.unit, target: kpi.targetValue, pct: 0, actual: null, targetVal: kpi.targetValue, period: null };
+          const target = record.targetValue || kpi.targetValue || 0;
+          const pct = target > 0 ? Math.min(Math.round((record.actualValue / target) * 100), 120) : 0;
+          return { name: kpi.name, unit: kpi.unit, pct, actual: record.actualValue, target, period: record.period };
+        }) ?? [];
 
         return (
           <div key={a.id} className="rounded-lg border border-border bg-surface p-4">
@@ -216,7 +243,6 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                   <p className="text-sm font-medium">{a.kra?.name}</p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <Badge variant="outline" className="text-[10px]">{a.kra?.category}</Badge>
-                    <span className="text-[10px] text-muted">{a.period}</span>
                     <Badge className={`text-[10px] ${a.status === "ACTIVE" ? "bg-green-500/20 text-green-400" : "bg-slate-500/20 text-slate-400"}`}>{a.status}</Badge>
                   </div>
                 </div>
@@ -225,19 +251,21 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                 <p className="text-lg font-bold font-mono text-purple-400">{a.weightage}%</p>
               </div>
             </div>
-            {kpiProgress.length > 0 && (
-              <div className="mt-3 space-y-2 border-t border-border pt-3">
-                {kpiProgress.map((kpi: any, i: number) => (
-                  <div key={i}>
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="text-muted">{kpi.name}</span>
+            <div className="mt-3 space-y-2 border-t border-border pt-3">
+              {kpiProgress.map((kpi: any, i: number) => (
+                <div key={i}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-muted">{kpi.name}</span>
+                    {kpi.actual != null ? (
                       <span className={getScoreColor(kpi.pct)}>{kpi.actual}/{kpi.target} {kpi.unit} ({kpi.pct}%)</span>
-                    </div>
-                    <Progress value={Math.min(kpi.pct, 100)} className="h-1" indicatorClassName={getProgressColor(kpi.pct)} />
+                    ) : (
+                      <span className="text-muted-2">/{kpi.target} {kpi.unit} (Not recorded)</span>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
+                  <Progress value={Math.min(kpi.pct, 100)} className="h-1" indicatorClassName={kpi.actual != null ? getProgressColor(kpi.pct) : "bg-border"} />
+                </div>
+              ))}
+            </div>
           </div>
         );
       })}

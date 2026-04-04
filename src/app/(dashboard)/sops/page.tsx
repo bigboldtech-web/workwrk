@@ -35,6 +35,7 @@ interface SOP {
   title: string;
   description: string;
   category: string;
+  subcategory?: string | null;
   content: { steps: unknown[] };
   version: number;
   status: string;
@@ -136,10 +137,77 @@ export default function SOPsPage() {
   // Form state
   const [newTitle, setNewTitle] = useState("");
   const [newCategory, setNewCategory] = useState("");
+  const [newSubcategory, setNewSubcategory] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [sopType, setSopType] = useState<"WRITTEN" | "RECORDED" | "CHECKLIST">("WRITTEN");
 
+  // Categories from DB
+  const [savedCategories, setSavedCategories] = useState<any[]>([]);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [showAddSubcategory, setShowAddSubcategory] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newSubcatName, setNewSubcatName] = useState("");
+
   const { success: toastSuccess, error: toastError } = useToast();
+
+  // Fetch saved categories
+  useEffect(() => {
+    fetch("/api/sop-categories")
+      .then((r) => r.ok ? r.json() : { data: [] })
+      .then((d) => setSavedCategories(d.data || []))
+      .catch(() => {});
+  }, []);
+
+  const selectedCategoryObj = savedCategories.find((c: any) => c.name === newCategory);
+  const subcategories = selectedCategoryObj?.subcategories || [];
+
+  async function handleAddCategory() {
+    if (!newCatName.trim()) return;
+    try {
+      const res = await fetch("/api/sop-categories", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newCatName.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const created = data.data || data;
+        setSavedCategories([...savedCategories, created]);
+        setNewCategory(created.name);
+        setNewCatName("");
+        setShowAddCategory(false);
+        toastSuccess("Category added");
+      } else {
+        const err = await res.json();
+        toastError(err.error || "Failed");
+      }
+    } catch { toastError("Failed to add category"); }
+  }
+
+  async function handleAddSubcategory() {
+    if (!newSubcatName.trim() || !selectedCategoryObj) return;
+    try {
+      const res = await fetch("/api/sop-categories", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newSubcatName.trim(), categoryId: selectedCategoryObj.id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const created = data.data || data;
+        setSavedCategories(savedCategories.map((c: any) =>
+          c.id === selectedCategoryObj.id
+            ? { ...c, subcategories: [...(c.subcategories || []), created] }
+            : c
+        ));
+        setNewSubcategory(created.name);
+        setNewSubcatName("");
+        setShowAddSubcategory(false);
+        toastSuccess("Subcategory added");
+      } else {
+        const err = await res.json();
+        toastError(err.error || "Failed");
+      }
+    } catch { toastError("Failed to add subcategory"); }
+  }
 
   // Debounce search
   const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
@@ -199,6 +267,7 @@ export default function SOPsPage() {
           title: newTitle,
           description: newDescription,
           category: newCategory,
+          subcategory: newSubcategory || undefined,
           sopType,
           content: initialContent,
           status: "DRAFT",
@@ -209,6 +278,7 @@ export default function SOPsPage() {
       setShowAddDialog(false);
       setNewTitle("");
       setNewCategory("");
+      setNewSubcategory("");
       setNewDescription("");
       setSopType("WRITTEN");
       toastSuccess("SOP created successfully");
@@ -221,9 +291,9 @@ export default function SOPsPage() {
     }
   };
 
-  const DEFAULT_CATEGORIES = ["Operations", "HR", "Sales", "Marketing", "Finance", "Engineering", "Customer Support", "Onboarding", "Compliance", "General"];
+  const savedCatNames = savedCategories.map((c: any) => c.name);
   const existingCategories = [...new Set(sops.map((s) => s.category).filter(Boolean))];
-  const categories = [...new Set([...DEFAULT_CATEGORIES, ...existingCategories])].sort();
+  const categories = [...new Set([...savedCatNames, ...existingCategories])].sort();
 
   const filtered = sops; // Server-side filtering now
 
@@ -281,25 +351,52 @@ export default function SOPsPage() {
               </div>
 
               <div className="space-y-2"><Label>Title <span className="text-red-400">*</span></Label><Input placeholder="e.g., Client Onboarding Process" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Category</Label>
-                <div className="flex items-center gap-2">
-                  <Select value={newCategory} onValueChange={setNewCategory}>
-                    <SelectTrigger className="flex-1"><SelectValue placeholder="Select category" /></SelectTrigger>
-                    <SelectContent>
-                      {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  {!categories.includes(newCategory) && newCategory && (
-                    <Badge variant="secondary" className="text-xs shrink-0">{newCategory}</Badge>
+              <div className="space-y-2">
+                <Label>Category</Label>
+                {showAddCategory ? (
+                  <div className="flex items-center gap-2">
+                    <Input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Category name" onKeyDown={(e) => e.key === "Enter" && handleAddCategory()} autoFocus />
+                    <Button size="sm" onClick={handleAddCategory} disabled={!newCatName.trim()}>Add</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setShowAddCategory(false); setNewCatName(""); }}>Cancel</Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Select value={newCategory} onValueChange={(v) => { setNewCategory(v); setNewSubcategory(""); }}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Select category" /></SelectTrigger>
+                      <SelectContent>
+                        {savedCategories.map((c: any) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Button size="sm" variant="outline" className="shrink-0 text-xs" onClick={() => setShowAddCategory(true)}>+ Add</Button>
+                  </div>
+                )}
+              </div>
+              {newCategory && (
+                <div className="space-y-2">
+                  <Label>Subcategory</Label>
+                  {showAddSubcategory ? (
+                    <div className="flex items-center gap-2">
+                      <Input value={newSubcatName} onChange={(e) => setNewSubcatName(e.target.value)} placeholder="Subcategory name" onKeyDown={(e) => e.key === "Enter" && handleAddSubcategory()} autoFocus />
+                      <Button size="sm" onClick={handleAddSubcategory} disabled={!newSubcatName.trim()}>Add</Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setShowAddSubcategory(false); setNewSubcatName(""); }}>Cancel</Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Select value={newSubcategory} onValueChange={setNewSubcategory}>
+                        <SelectTrigger className="flex-1"><SelectValue placeholder="Select subcategory (optional)" /></SelectTrigger>
+                        <SelectContent>
+                          {subcategories.length === 0 ? (
+                            <div className="p-2 text-xs text-muted text-center">No subcategories yet</div>
+                          ) : (
+                            subcategories.map((s: any) => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" variant="outline" className="shrink-0 text-xs" onClick={() => setShowAddSubcategory(true)}>+ Add</Button>
+                    </div>
                   )}
                 </div>
-                <Input
-                  placeholder="Or type a custom category"
-                  value={categories.includes(newCategory) ? "" : newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
-                  className="text-sm"
-                />
-              </div>
+              )}
               <div className="space-y-2"><Label>Description</Label><Textarea placeholder="What does this SOP cover?" value={newDescription} onChange={(e) => setNewDescription(e.target.value)} /></div>
             </div>
             <DialogFooter>
@@ -391,7 +488,10 @@ export default function SOPsPage() {
                     </div>
 
                     <h3 className="font-semibold text-sm mb-1">{sop.title}</h3>
-                    <Badge variant="outline" className="text-[10px] mb-3">{sop.category}</Badge>
+                    <div className="flex items-center gap-1 mb-3">
+                      {sop.category && <Badge variant="outline" className="text-[10px]">{sop.category}</Badge>}
+                      {sop.subcategory && <Badge variant="outline" className="text-[10px] text-purple-400">{sop.subcategory}</Badge>}
+                    </div>
 
                     {sop.status === "PUBLISHED" && (
                       <div className="space-y-2 mt-3">

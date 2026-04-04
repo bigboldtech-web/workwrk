@@ -40,6 +40,7 @@ model Organization {
   employeeOfMonths    EmployeeOfMonth[]
   ideas               Idea[]
   offices             Office[]
+  sopCategories       SOPCategory[]
 
   @@index([slug])
 }
@@ -419,11 +420,35 @@ enum TaskStatus {
 // MODULE 5: SOP MANAGEMENT
 // ==========================================
 
+model SOPCategory {
+  id             String          @id @default(cuid())
+  name           String
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subcategories  SOPSubcategory[]
+  createdAt      DateTime        @default(now())
+
+  @@unique([name, organizationId])
+  @@index([organizationId])
+}
+
+model SOPSubcategory {
+  id         String      @id @default(cuid())
+  name       String
+  categoryId String
+  category   SOPCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdAt  DateTime    @default(now())
+
+  @@unique([name, categoryId])
+  @@index([categoryId])
+}
+
 model SOP {
   id             String    @id @default(cuid())
   title          String
   description    String?
   category       String?
+  subcategory    String?
   sopType        SOPType   @default(WRITTEN)
   kraId          String?
   kra            KRA?     @relation(fields: [kraId], references: [id])
