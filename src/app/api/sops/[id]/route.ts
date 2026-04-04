@@ -17,16 +17,9 @@ export async function GET(
     where: { id, organizationId: orgId },
     include: {
       compliance: {
+        take: 20,
         include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              avatar: true,
-            },
-          },
+          user: { select: { id: true, firstName: true, lastName: true } },
         },
         orderBy: { createdAt: "desc" },
       },
@@ -87,16 +80,9 @@ export async function PATCH(
     data,
     include: {
       compliance: {
+        take: 20,
         include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              avatar: true,
-            },
-          },
+          user: { select: { id: true, firstName: true, lastName: true } },
         },
         orderBy: { createdAt: "desc" },
       },

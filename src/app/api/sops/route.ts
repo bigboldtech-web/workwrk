@@ -28,7 +28,10 @@ export async function GET(req: NextRequest) {
   const [sops, total] = await Promise.all([
     prisma.sOP.findMany({
       where,
-      include: {
+      select: {
+        id: true, title: true, description: true, category: true, subcategory: true,
+        sopType: true, version: true, status: true, shareToken: true,
+        createdAt: true, updatedAt: true, publishedAt: true,
         _count: { select: { compliance: true } },
         kra: { select: { id: true, name: true } },
       },

@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         role: { select: { id: true, title: true } },
-        kpis: true,
+        kpis: { select: { id: true, name: true, unit: true, type: true, frequency: true, targetValue: true, lowerIsBetter: true, description: true, kraId: true } },
         _count: { select: { assignments: true } },
       },
       orderBy: { name: "asc" },
