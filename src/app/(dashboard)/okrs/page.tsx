@@ -61,8 +61,22 @@ export default function OKRsPage() {
   });
   const [form, setForm] = useState({
     title: "", description: "", level: "INDIVIDUAL", quarter: "",
+    ownerId: "", departmentId: "",
     keyResults: [{ title: "", targetValue: "100", unit: "%" }],
   });
+  const [users, setUsers] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
+
+  // Fetch users and departments for assignment
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/users?limit=200").then((r) => r.ok ? r.json() : { data: [] }),
+      fetch("/api/departments").then((r) => r.ok ? r.json() : []),
+    ]).then(([u, d]) => {
+      setUsers(Array.isArray(u) ? u : u?.data || []);
+      setDepartments(Array.isArray(d) ? d : d?.data || []);
+    });
+  }, []);
   const [checkInOkr, setCheckInOkr] = useState<OKR | null>(null);
   const [checkInValues, setCheckInValues] = useState<Record<string, string>>({});
   const { success: toastSuccess, error: toastError } = useToast();
@@ -93,6 +107,8 @@ export default function OKRsPage() {
           description: form.description,
           level: form.level,
           quarter: okrQuarter,
+          ownerId: form.ownerId || undefined,
+          departmentId: form.departmentId || undefined,
           keyResults: form.keyResults.filter((kr) => kr.title.trim()).map((kr) => ({
             title: kr.title, targetValue: Number(kr.targetValue) || 100, unit: kr.unit || "%",
           })),
@@ -100,7 +116,7 @@ export default function OKRsPage() {
       });
       if (res.ok) {
         setShowCreate(false);
-        setForm({ title: "", description: "", level: "INDIVIDUAL", quarter: "", keyResults: [{ title: "", targetValue: "100", unit: "%" }] });
+        setForm({ title: "", description: "", level: "INDIVIDUAL", quarter: "", ownerId: "", departmentId: "", keyResults: [{ title: "", targetValue: "100", unit: "%" }] });
         // Refresh
         const d = await fetch(`/api/okrs?quarter=${quarter}`).then((r) => r.json());
         if (d?.data) setOkrs(d.data);
@@ -273,9 +289,45 @@ export default function OKRsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Quarter</Label>
-                <Input value={form.quarter || quarter} onChange={(e) => setForm({ ...form, quarter: e.target.value })} placeholder="Q2 2026" />
+                <Select value={form.quarter || quarter} onValueChange={(v) => setForm({ ...form, quarter: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 8 }, (_, i) => {
+                      const now = new Date();
+                      const q = Math.ceil((now.getMonth() + 1) / 3) + Math.floor(i / 1) - 1;
+                      const adjustedQ = ((q - 1 + 4) % 4) + 1;
+                      const year = now.getFullYear() + Math.floor((q - 1) / 4);
+                      return `Q${adjustedQ} ${year}`;
+                    }).filter((v, i, a) => a.indexOf(v) === i).slice(0, 6).map((q) => (
+                      <SelectItem key={q} value={q}>{q}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
+            {/* Assignment based on level */}
+            {form.level === "INDIVIDUAL" && (
+              <div className="space-y-2">
+                <Label>Assign To</Label>
+                <Select value={form.ownerId} onValueChange={(v) => setForm({ ...form, ownerId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select person" /></SelectTrigger>
+                  <SelectContent>
+                    {users.map((u: any) => <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {form.level === "TEAM" && (
+              <div className="space-y-2">
+                <Label>Team / Department</Label>
+                <Select value={form.departmentId} onValueChange={(v) => setForm({ ...form, departmentId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                  <SelectContent>
+                    {departments.map((d: any) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Description</Label>
               <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Why is this important?" rows={2} />

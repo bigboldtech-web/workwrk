@@ -276,7 +276,7 @@ export default function SOPsPage() {
   const [newCategory, setNewCategory] = useState("");
   const [newSubcategory, setNewSubcategory] = useState("");
   const [newDescription, setNewDescription] = useState("");
-  const [sopType, setSopType] = useState<"WRITTEN" | "RECORDED" | "CHECKLIST">("WRITTEN");
+  const [sopType, setSopType] = useState<"WRITTEN" | "STEPS" | "RECORDED" | "CHECKLIST">("WRITTEN");
   const [showExtensionDialog, setShowExtensionDialog] = useState(false);
 
   // Categories from DB
@@ -415,8 +415,12 @@ export default function SOPsPage() {
 
     setCreating(true);
     try {
+      // Map STEPS to WRITTEN sopType in DB (both use same model)
+      const dbSopType = sopType === "STEPS" ? "WRITTEN" : sopType;
       const initialContent = sopType === "CHECKLIST"
         ? { sections: [] }
+        : sopType === "WRITTEN"
+        ? { type: "richtext", html: "" }
         : { steps: [] };
 
       const res = await fetch("/api/sops", {
@@ -427,7 +431,7 @@ export default function SOPsPage() {
           description: newDescription,
           category: newCategory,
           subcategory: newSubcategory || undefined,
-          sopType,
+          sopType: dbSopType,
           content: initialContent,
           status: "DRAFT",
         }),
@@ -485,9 +489,10 @@ export default function SOPsPage() {
               {/* SOP Type Selector */}
               <div className="space-y-2">
                 <Label>Type</Label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {[
-                    { value: "WRITTEN" as const, icon: PenLine, label: "Write", desc: "Manual rich text" },
+                    { value: "WRITTEN" as const, icon: PenLine, label: "Write", desc: "Rich text editor" },
+                    { value: "STEPS" as const, icon: FileText, label: "Step-by-Step", desc: "Numbered steps" },
                     { value: "RECORDED" as const, icon: Video, label: "Record", desc: "Screen recording" },
                     { value: "CHECKLIST" as const, icon: ListChecks, label: "Checklist", desc: "Runnable process" },
                   ].map((opt) => (

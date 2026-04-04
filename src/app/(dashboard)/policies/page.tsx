@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { RichEditor } from "@/components/ui/rich-editor";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,7 +144,7 @@ export default function PoliciesPage() {
                 {isExpanded && (
                   <div className="border-t border-border px-12 py-4">
                     <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <div className="whitespace-pre-wrap text-sm text-muted">{policy.content}</div>
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-sm" dangerouslySetInnerHTML={{ __html: policy.content }} />
                     </div>
                     {policy.effectiveDate && (
                       <p className="text-xs text-muted mt-3">Effective: {new Date(policy.effectiveDate).toLocaleDateString()}</p>
@@ -193,7 +194,7 @@ export default function PoliciesPage() {
             </div>
             <div className="space-y-2">
               <Label>Content <span className="text-red-400">*</span></Label>
-              <Textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="Write the full policy text here..." rows={10} />
+              <RichEditor content={form.content} onChange={(html) => setForm({ ...form, content: html })} placeholder="Write the full policy text here..." minHeight="250px" />
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={form.requiresAck} onChange={(e) => setForm({ ...form, requiresAck: e.target.checked })} className="rounded" />

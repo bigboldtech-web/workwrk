@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-builder";
+import { RichEditor } from "@/components/ui/rich-editor";
 import { useRole } from "@/hooks/use-role";
 
 interface ComplianceUser {
@@ -125,6 +126,30 @@ function formatDate(dateStr: string | null): string {
 
 function generateStepId(): string {
   return `step_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function RichTextSopEditor({ content, editable, onSave }: { content: string; editable: boolean; onSave: (html: string) => void }) {
+  const [html, setHtml] = useState(content);
+  const [dirty, setDirty] = useState(false);
+
+  return (
+    <div>
+      <RichEditor
+        content={html}
+        onChange={(newHtml) => { setHtml(newHtml); setDirty(true); }}
+        editable={editable}
+        placeholder="Write your SOP content here... Use headings, lists, bold text, links, and images."
+        minHeight="400px"
+      />
+      {editable && dirty && (
+        <div className="flex justify-end p-3 border-t border-border">
+          <Button size="sm" onClick={() => { onSave(html); setDirty(false); }} className="gap-1.5">
+            <Save size={14} /> Save Content
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: string; currentVersion: number; onRollback: () => void }) {
@@ -891,6 +916,26 @@ export default function SOPDetailPage() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Rich Text Editor for "Write" type SOPs */}
+              {sop.content && (sop.content as any).type === "richtext" && (
+                <Card>
+                  <CardContent className="p-0">
+                    <RichTextSopEditor
+                      content={(sop.content as any).html || ""}
+                      editable={editing}
+                      onSave={async (html) => {
+                        await fetch(`/api/sops/${id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ content: { type: "richtext", html } }),
+                        });
+                        fetchSOP();
+                      }}
+                    />
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Steps / Checklist Builder */}
               {sop.sopType === "CHECKLIST" ? (

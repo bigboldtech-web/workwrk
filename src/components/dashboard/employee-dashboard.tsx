@@ -85,6 +85,33 @@ export function EmployeeDashboard() {
         </Card>
       </div>
 
+      {/* Action Items Row */}
+      {(stats.pendingSurveys > 0 || stats.pendingPolicies > 0 || (stats.todayTasksTotal || 0) > 0) && (
+        <div className="flex items-center gap-3 flex-wrap">
+          {stats.pendingSurveys > 0 && (
+            <Link href="/surveys">
+              <Badge variant="warning" className="text-xs cursor-pointer hover:opacity-80 gap-1.5 py-1">
+                {stats.pendingSurveys} survey{stats.pendingSurveys > 1 ? "s" : ""} pending
+              </Badge>
+            </Link>
+          )}
+          {stats.pendingPolicies > 0 && (
+            <Link href="/policies">
+              <Badge variant="destructive" className="text-xs cursor-pointer hover:opacity-80 gap-1.5 py-1">
+                {stats.pendingPolicies} polic{stats.pendingPolicies > 1 ? "ies" : "y"} to acknowledge
+              </Badge>
+            </Link>
+          )}
+          {(stats.todayTasksTotal || 0) > 0 && (
+            <Link href="/tasks">
+              <Badge variant="secondary" className="text-xs cursor-pointer hover:opacity-80 gap-1.5 py-1">
+                {stats.todayTasksDone}/{stats.todayTasksTotal} tasks today
+              </Badge>
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* My KRAs & KPI Progress */}
       <Card>
         <CardHeader className="pb-2">
@@ -144,6 +171,33 @@ export function EmployeeDashboard() {
           )}
         </CardContent>
       </Card>
+
+      {/* My OKRs */}
+      {data.myOkrs && data.myOkrs.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Target size={14} className="text-purple-400" /> My Goals (OKRs)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {data.myOkrs.map((okr: any) => (
+              <div key={okr.id} className="flex items-center gap-3 p-2 rounded-lg border border-border">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{okr.title}</p>
+                  <p className="text-[10px] text-muted">{okr.quarter}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Progress value={okr.progress} className="w-16 h-1.5" />
+                  <span className={`text-xs font-mono font-bold ${
+                    okr.progress >= 70 ? "text-green-400" : okr.progress >= 40 ? "text-orange-400" : "text-red-400"
+                  }`}>{okr.progress}%</span>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Pending SOPs */}
       {sopAssignments && sopAssignments.length > 0 && (
