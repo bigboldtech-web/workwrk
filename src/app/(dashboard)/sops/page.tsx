@@ -143,19 +143,14 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
     try {
       const res = await fetch("/api/extension/download");
       if (!res.ok) throw new Error();
-      const data = await res.json();
-
-      // Create a downloadable zip-like file
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "workwrk-sop-recorder.json";
+      a.download = "workwrk-sop-recorder.zip";
       a.click();
       URL.revokeObjectURL(url);
-    } catch {
-      // Fallback: direct link to extension folder instructions
-    }
+    } catch {}
   }
 
   if (extensionDetected) {
@@ -211,23 +206,23 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
         <p className="font-medium">Setup Instructions:</p>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
           <span className="text-purple-400 font-bold">1.</span>
-          <span>Download the extension files using the button below</span>
+          <span>Click <strong>Download Extension</strong> below to get the ZIP file</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
           <span className="text-purple-400 font-bold">2.</span>
-          <span>Extract the downloaded folder</span>
+          <span>Extract/unzip the downloaded file — you will get an <strong>extension</strong> folder</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
           <span className="text-purple-400 font-bold">3.</span>
-          <span>Open Chrome → <code className="text-xs bg-surface-2 px-1 rounded">chrome://extensions</code></span>
+          <span>Open Chrome and type <code className="text-xs bg-surface-2 px-1 rounded">chrome://extensions</code> in the address bar</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
           <span className="text-purple-400 font-bold">4.</span>
-          <span>Enable <strong>Developer mode</strong> (top right toggle)</span>
+          <span>Enable <strong>Developer mode</strong> toggle (top right corner)</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
           <span className="text-purple-400 font-bold">5.</span>
-          <span>Click <strong>Load unpacked</strong> → select the extracted folder</span>
+          <span>Click <strong>Load unpacked</strong> → select the <strong>extension</strong> folder from the extracted ZIP</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
           <span className="text-purple-400 font-bold">6.</span>
