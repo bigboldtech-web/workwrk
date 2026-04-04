@@ -28,7 +28,7 @@ export async function GET() {
   const reportIds = directReports.map((r) => r.id);
 
   // Get current period KPI records for all reports
-  const [teamRecords, pendingApprovals, latestScores] = await Promise.all([
+  const [teamRecords, pendingApprovals, latestScores, pendingReviewsCount] = await Promise.all([
     prisma.kPIRecord.findMany({
       where: { userId: { in: reportIds }, period: currentPeriod },
       select: { userId: true, actualValue: true, score: true, status: true },
@@ -48,6 +48,13 @@ export async function GET() {
       where: { userId: { in: reportIds } },
       orderBy: { period: "desc" },
       distinct: ["userId"],
+    }),
+    // Pending reviews for direct reports
+    prisma.review.count({
+      where: {
+        subjectId: { in: reportIds },
+        status: { in: ["PENDING", "SELF_ASSESSMENT", "MANAGER_REVIEW"] },
+      },
     }),
   ]);
 
@@ -92,6 +99,7 @@ export async function GET() {
       avgTeamScore,
       teamCompletionRate,
       pendingApprovalCount: pendingApprovals.length,
+      pendingReviews: pendingReviewsCount,
     },
     currentPeriod,
   });

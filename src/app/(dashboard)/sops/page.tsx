@@ -259,6 +259,7 @@ export default function SOPsPage() {
 
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -497,10 +498,26 @@ export default function SOPsPage() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <Select value={newCategory} onValueChange={(v) => { setNewCategory(v); setNewSubcategory(""); }}>
+                    <Select value={newCategory} onValueChange={async (v) => {
+                      setNewCategory(v);
+                      setNewSubcategory("");
+                      // Auto-create in DB if it's an old category not yet saved
+                      if (!savedCategories.find((c: any) => c.name === v)) {
+                        try {
+                          const res = await fetch("/api/sop-categories", {
+                            method: "POST", headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ name: v }),
+                          });
+                          if (res.ok) {
+                            const data = await res.json();
+                            setSavedCategories([...savedCategories, data.data || data]);
+                          }
+                        } catch {}
+                      }
+                    }}>
                       <SelectTrigger className="flex-1"><SelectValue placeholder="Select category" /></SelectTrigger>
                       <SelectContent>
-                        {savedCategories.map((c: any) => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                        {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <Button size="sm" variant="outline" className="shrink-0 text-xs" onClick={() => setShowAddCategory(true)}>+ Add</Button>
@@ -590,10 +607,18 @@ export default function SOPsPage() {
             {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1 ml-auto">
+          <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("grid")} title="Grid view">
+            <BarChart3 size={14} className="rotate-90" />
+          </Button>
+          <Button variant={viewMode === "list" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("list")} title="List view">
+            <ClipboardList size={14} />
+          </Button>
+        </div>
       </div>
 
-      {/* SOP Grid */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {/* SOP Grid / List */}
+      <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" : "space-y-2"}>
         {loading
           ? Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
           : filtered.length === 0 ? (

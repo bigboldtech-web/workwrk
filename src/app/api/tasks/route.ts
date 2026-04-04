@@ -159,14 +159,21 @@ export async function DELETE(req: NextRequest) {
   if (!task) return jsonError("Task not found", 404);
 
   // Delete all future recurring tasks in the same group
-  if (deleteAll && task.recurringGroupId) {
-    const result = await prisma.task.deleteMany({
-      where: {
-        recurringGroupId: task.recurringGroupId,
-        organizationId: orgId,
-        date: { gte: task.date },
-      },
-    });
+  if (deleteAll) {
+    const where: any = {
+      organizationId: orgId,
+      date: { gte: task.date },
+      assigneeId: task.assigneeId,
+    };
+
+    if (task.recurringGroupId) {
+      where.recurringGroupId = task.recurringGroupId;
+    } else {
+      // Fallback: match by title for old tasks without groupId
+      where.title = task.title;
+    }
+
+    const result = await prisma.task.deleteMany({ where });
     return jsonSuccess({ message: `Deleted ${result.count} tasks` });
   }
 

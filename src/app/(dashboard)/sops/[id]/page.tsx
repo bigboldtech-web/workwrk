@@ -263,7 +263,7 @@ export default function SOPDetailPage() {
       ]);
       if (usersRes.ok) {
         const data = await usersRes.json();
-        setOrgUsers(Array.isArray(data) ? data : data.users || []);
+        setOrgUsers(Array.isArray(data) ? data : data.data || data.users || []);
       }
       if (deptsRes.ok) {
         const data = await deptsRes.json();
@@ -929,7 +929,7 @@ export default function SOPDetailPage() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {sop?.content?.type === "recorded" && Array.isArray(sop.content.steps) && sop.content.steps.length > 0 ? (
-                    /* Recorded SOP — show steps with screenshots directly */
+                    /* Recorded SOP — show steps with screenshots, editable descriptions */
                     ((sop.content.steps || []) as RecordedStep[]).map((step, index) => (
                       <div key={index} className="rounded-lg border border-border bg-surface-3 overflow-hidden">
                         <div className="flex items-start gap-3 p-4">
@@ -937,9 +937,26 @@ export default function SOPDetailPage() {
                             {step.order || index + 1}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium">{step.description || `Step ${index + 1}`}</p>
+                            {editing ? (
+                              <input
+                                type="text"
+                                defaultValue={step.description || `Step ${index + 1}`}
+                                className="w-full text-sm font-medium bg-transparent border-b border-border pb-1 focus:border-purple-400 focus:outline-none"
+                                onBlur={(e) => {
+                                  const newSteps = [...(sop.content.steps as RecordedStep[])];
+                                  newSteps[index] = { ...newSteps[index], description: e.target.value };
+                                  // Update via API
+                                  fetch(`/api/sops/${id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ content: { ...sop.content, steps: newSteps } }),
+                                  });
+                                }}
+                              />
+                            ) : (
+                              <p className="text-sm font-medium">{step.description || `Step ${index + 1}`}</p>
+                            )}
                             {step.url && <p className="text-xs text-muted-2 mt-0.5 truncate">{step.url}</p>}
-                            {step.elementText && <p className="text-xs text-muted mt-1">Element: <code className="bg-surface-2 px-1 rounded text-[10px]">{step.elementTag} — {step.elementText}</code></p>}
                           </div>
                         </div>
                         {step.screenshot && (
@@ -1274,7 +1291,10 @@ export default function SOPDetailPage() {
                   <Label className="text-[10px] text-muted uppercase tracking-wider">
                     Category
                   </Label>
-                  <p className="text-sm">{sop.category || "Uncategorized"}</p>
+                  <p className="text-sm">
+                    {sop.category || "Uncategorized"}
+                    {(sop as any).subcategory && <span className="text-muted"> / {(sop as any).subcategory}</span>}
+                  </p>
                 </div>
               </div>
 

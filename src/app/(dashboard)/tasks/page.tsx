@@ -595,7 +595,7 @@ export default function TasksPage() {
             <div className="flex items-center justify-between w-full">
               <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>Cancel</Button>
               <div className="flex items-center gap-2">
-                {deleteTaskTarget?.recurringGroupId && (
+                {(deleteTaskTarget?.recurringGroupId || tasks.filter((t) => t.title === deleteTaskTarget?.title).length > 1) && (
                   <Button variant="destructive" onClick={() => handleDelete(true)}>
                     Delete All Future
                   </Button>

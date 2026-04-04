@@ -18,9 +18,11 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { title, category, steps } = body as {
+  const { title, description, category, subcategory, steps } = body as {
     title: string;
+    description?: string;
     category: string | null;
+    subcategory?: string | null;
     steps: RecordedStep[];
   };
 
@@ -50,8 +52,9 @@ export async function POST(req: NextRequest) {
   const sop = await prisma.sOP.create({
     data: {
       title: title.trim(),
-      description: `Recorded SOP with ${steps.length} steps`,
+      description: description?.trim() || null,
       category: category?.trim() || null,
+      subcategory: subcategory?.trim() || null,
       sopType: "RECORDED",
       content,
       status: "PUBLISHED",
