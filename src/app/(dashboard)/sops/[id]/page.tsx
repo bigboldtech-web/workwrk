@@ -894,13 +894,10 @@ export default function SOPDetailPage() {
 
               {/* Steps / Checklist Builder */}
               {sop.sopType === "CHECKLIST" ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium">Checklist Builder</h3>
-                    {aiGenerating && (
-                      <span className="text-xs text-purple-400 animate-pulse">Generating with AI...</span>
-                    )}
-                  </div>
+                <div>
+                  {aiGenerating && (
+                    <p className="text-xs text-purple-400 animate-pulse mb-2">Generating with AI...</p>
+                  )}
                   <ChecklistBuilder
                     sections={checklistSections}
                     onChange={setChecklistSections}

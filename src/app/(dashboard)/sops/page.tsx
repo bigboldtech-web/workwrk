@@ -322,20 +322,42 @@ export default function SOPsPage() {
   }
 
   async function handleAddSubcategory() {
-    if (!newSubcatName.trim() || !selectedCategoryObj) return;
+    if (!newSubcatName.trim()) return;
+
+    // Find or wait for category to be in DB
+    let catObj = savedCategories.find((c: any) => c.name === newCategory);
+
+    // If category not yet in DB, create it first
+    if (!catObj && newCategory) {
+      try {
+        const catRes = await fetch("/api/sop-categories", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newCategory }),
+        });
+        if (catRes.ok) {
+          const catData = await catRes.json();
+          catObj = catData.data || catData;
+          setSavedCategories([...savedCategories, catObj]);
+        }
+      } catch {}
+    }
+
+    if (!catObj?.id) { toastError("Please select a category first"); return; }
+
     try {
       const res = await fetch("/api/sop-categories", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newSubcatName.trim(), categoryId: selectedCategoryObj.id }),
+        body: JSON.stringify({ name: newSubcatName.trim(), categoryId: catObj.id }),
       });
       if (res.ok) {
         const data = await res.json();
         const created = data.data || data;
-        setSavedCategories(savedCategories.map((c: any) =>
-          c.id === selectedCategoryObj.id
-            ? { ...c, subcategories: [...(c.subcategories || []), created] }
-            : c
-        ));
+        // Refresh categories from server to get latest subcategories
+        const refreshRes = await fetch("/api/sop-categories");
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          setSavedCategories(refreshData.data || []);
+        }
         setNewSubcategory(created.name);
         setNewSubcatName("");
         setShowAddSubcategory(false);
@@ -502,15 +524,18 @@ export default function SOPsPage() {
                       setNewCategory(v);
                       setNewSubcategory("");
                       // Auto-create in DB if it's an old category not yet saved
-                      if (!savedCategories.find((c: any) => c.name === v)) {
+                      const exists = savedCategories.find((c: any) => c.name === v);
+                      if (!exists) {
                         try {
-                          const res = await fetch("/api/sop-categories", {
+                          await fetch("/api/sop-categories", {
                             method: "POST", headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ name: v }),
                           });
-                          if (res.ok) {
-                            const data = await res.json();
-                            setSavedCategories([...savedCategories, data.data || data]);
+                          // Refetch all categories to get fresh data with IDs
+                          const refreshRes = await fetch("/api/sop-categories");
+                          if (refreshRes.ok) {
+                            const refreshData = await refreshRes.json();
+                            setSavedCategories(refreshData.data || []);
                           }
                         } catch {}
                       }

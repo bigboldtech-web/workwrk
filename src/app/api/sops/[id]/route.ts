@@ -4,7 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSucces
 import { broadcastWebhook } from "@/lib/webhooks";
 
 export async function GET(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { error, session } = await getSessionOrFail();

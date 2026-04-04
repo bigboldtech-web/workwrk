@@ -193,7 +193,7 @@ async function captureScreenshot(clickX, clickY) {
           ctx.fillStyle = "rgba(239, 68, 68, 0.9)";
           ctx.fill();
 
-          resolve(canvas.toDataURL("image/png", 0.8));
+          resolve(canvas.toDataURL("image/jpeg", 0.5));
         };
         img.onerror = () => resolve(screenshot);
         img.src = screenshot;

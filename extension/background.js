@@ -1,7 +1,7 @@
 // Handle screenshot capture requests from content script
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "captureScreenshot") {
-    chrome.tabs.captureVisibleTab(null, { format: "png", quality: 80 }, (dataUrl) => {
+    chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 50 }, (dataUrl) => {
       sendResponse({ screenshot: dataUrl || null });
     });
     return true; // Keep message channel open for async response
