@@ -221,7 +221,9 @@ export default function SOPsPage() {
     }
   };
 
-  const categories = [...new Set(sops.map((s) => s.category).filter(Boolean))];
+  const DEFAULT_CATEGORIES = ["Operations", "HR", "Sales", "Marketing", "Finance", "Engineering", "Customer Support", "Onboarding", "Compliance", "General"];
+  const existingCategories = [...new Set(sops.map((s) => s.category).filter(Boolean))];
+  const categories = [...new Set([...DEFAULT_CATEGORIES, ...existingCategories])].sort();
 
   const filtered = sops; // Server-side filtering now
 
@@ -280,11 +282,23 @@ export default function SOPsPage() {
 
               <div className="space-y-2"><Label>Title <span className="text-red-400">*</span></Label><Input placeholder="e.g., Client Onboarding Process" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} /></div>
               <div className="space-y-2"><Label>Category</Label>
-                <Select value={newCategory} onValueChange={setNewCategory}><SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-                  <SelectContent>
-                    {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-2">
+                  <Select value={newCategory} onValueChange={setNewCategory}>
+                    <SelectTrigger className="flex-1"><SelectValue placeholder="Select category" /></SelectTrigger>
+                    <SelectContent>
+                      {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {!categories.includes(newCategory) && newCategory && (
+                    <Badge variant="secondary" className="text-xs shrink-0">{newCategory}</Badge>
+                  )}
+                </div>
+                <Input
+                  placeholder="Or type a custom category"
+                  value={categories.includes(newCategory) ? "" : newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  className="text-sm"
+                />
               </div>
               <div className="space-y-2"><Label>Description</Label><Textarea placeholder="What does this SOP cover?" value={newDescription} onChange={(e) => setNewDescription(e.target.value)} /></div>
             </div>

@@ -76,8 +76,9 @@ export default function TasksPage() {
   const [form, setForm] = useState({
     title: "", description: "", date: formatDate(new Date()),
     hoursSpent: "", category: "", status: "PLANNED",
-    recurring: "none" as string, // none, daily, weekdays, weekly, monthly
-    recurringDays: [] as number[], // 0=Sun, 1=Mon, ... 6=Sat for custom
+    recurring: "none" as string,
+    recurringDays: [] as number[],
+    recurringDuration: "1month" as string, // 1month, 3months, 6months, 1year, forever
   });
   const [saving, setSaving] = useState(false);
 
@@ -107,7 +108,7 @@ export default function TasksPage() {
 
   function openNewTask(date?: string) {
     setEditingTask(null);
-    setForm({ title: "", description: "", date: date || formatDate(new Date()), hoursSpent: "", category: "", status: "PLANNED", recurring: "none", recurringDays: [] });
+    setForm({ title: "", description: "", date: date || formatDate(new Date()), hoursSpent: "", category: "", status: "PLANNED", recurring: "none", recurringDays: [], recurringDuration: "1month" });
     setShowDialog(true);
   }
 
@@ -117,22 +118,27 @@ export default function TasksPage() {
       title: task.title, description: task.description || "", date: task.date.split("T")[0],
       hoursSpent: task.hoursSpent != null ? String(task.hoursSpent) : "",
       category: task.category || "", status: task.status,
-      recurring: "none", recurringDays: [],
+      recurring: "none", recurringDays: [], recurringDuration: "1month",
     });
     setShowDialog(true);
   }
 
-  function getRecurringDates(startDate: string, recurring: string, recurringDays: number[]): string[] {
+  function getRecurringDates(startDate: string, recurring: string, recurringDays: number[], duration: string): string[] {
     const dates: string[] = [];
     const start = new Date(startDate);
 
     if (recurring === "none") return [startDate];
 
-    // Generate dates for 4 weeks ahead
-    for (let i = 0; i < 28; i++) {
+    // Calculate total days based on duration
+    const durationDays: Record<string, number> = {
+      "1month": 30, "3months": 90, "6months": 180, "1year": 365,
+    };
+    const totalDays = durationDays[duration] || 30;
+
+    for (let i = 0; i < totalDays; i++) {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
-      const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
+      const dayOfWeek = d.getDay();
 
       if (recurring === "daily") {
         dates.push(formatDate(d));
@@ -174,7 +180,7 @@ export default function TasksPage() {
         }
       } else {
         // Create — handle recurring
-        const dates = getRecurringDates(form.date, form.recurring, form.recurringDays);
+        const dates = getRecurringDates(form.date, form.recurring, form.recurringDays, form.recurringDuration);
         let created = 0;
         for (const date of dates) {
           const payload = {
@@ -408,7 +414,7 @@ export default function TasksPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Title <span className="text-red-400">*</span></Label>
-              <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What did you work on?" />
+              <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Task name" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -479,16 +485,31 @@ export default function TasksPage() {
                   </div>
                 )}
                 {form.recurring !== "none" && (
-                  <p className="text-[10px] text-muted">
-                    Tasks will be created for the next 4 weeks starting from the selected date.
-                  </p>
+                  <div className="space-y-2 mt-2">
+                    <Label>Duration</Label>
+                    <Select value={form.recurringDuration} onValueChange={(v) => setForm({ ...form, recurringDuration: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1month">1 Month</SelectItem>
+                        <SelectItem value="3months">3 Months</SelectItem>
+                        <SelectItem value="6months">6 Months</SelectItem>
+                        <SelectItem value="1year">1 Year</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-muted">
+                      {(() => {
+                        const count = getRecurringDates(form.date, form.recurring, form.recurringDays, form.recurringDuration).length;
+                        return `${count} tasks will be created starting from the selected date.`;
+                      })()}
+                    </p>
+                  </div>
                 )}
               </div>
             )}
 
             <div className="space-y-2">
               <Label>Description</Label>
-              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What did you do? Any notes..." rows={3} />
+              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Add notes or details about this task..." rows={3} />
             </div>
           </div>
           <DialogFooter>

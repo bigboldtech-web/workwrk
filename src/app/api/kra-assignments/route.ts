@@ -40,14 +40,23 @@ export async function GET(req: NextRequest) {
   // If no userId, check if requesting all org assignments
   const all = searchParams.get("all");
   if (all === "true") {
-    const assignments = await prisma.kRAAssignment.findMany({
-      where: { kra: { organizationId: orgId } },
-      include: {
-        kra: { select: { id: true, name: true, category: true, kpis: { select: { id: true, name: true, unit: true } } } },
-        user: { select: { id: true, firstName: true, lastName: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const page = parseInt(searchParams.get("page") || "1");
+    const limit = Math.min(parseInt(searchParams.get("limit") || "100"), 200);
+    const skip = (page - 1) * limit;
+
+    const [assignments, total] = await Promise.all([
+      prisma.kRAAssignment.findMany({
+        where: { kra: { organizationId: orgId } },
+        include: {
+          kra: { select: { id: true, name: true, category: true, kpis: { select: { id: true, name: true, unit: true } } } },
+          user: { select: { id: true, firstName: true, lastName: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip,
+      }),
+      prisma.kRAAssignment.count({ where: { kra: { organizationId: orgId } } }),
+    ]);
     return jsonSuccess(assignments);
   }
 

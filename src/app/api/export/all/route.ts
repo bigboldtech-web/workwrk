@@ -42,6 +42,8 @@ export async function GET(req: NextRequest) {
         kra: { select: { name: true } },
         createdAt: true,
       },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
     }),
     prisma.sOP.findMany({
       where: { organizationId: orgId },

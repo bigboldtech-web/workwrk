@@ -86,18 +86,20 @@ export async function GET() {
     };
   });
 
-  // Performance score trend
-  const scoreTrendMonths: { period: string; avgScore: number; count: number }[] = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const scores = await prisma.performanceScore.findMany({
-      where: { organizationId: orgId, period },
-      select: { score: true },
-    });
+  // Performance score trend — single query instead of 6 sequential ones
+  const periods = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const allTrendScores = await prisma.performanceScore.findMany({
+    where: { organizationId: orgId, period: { in: periods } },
+    select: { score: true, period: true },
+  });
+  const scoreTrendMonths = periods.map((period) => {
+    const scores = allTrendScores.filter((s) => s.period === period);
     const avg = scores.length > 0 ? Math.round(scores.reduce((s, r) => s + r.score, 0) / scores.length) : 0;
-    scoreTrendMonths.push({ period, avgScore: avg, count: scores.length });
-  }
+    return { period, avgScore: avg, count: scores.length };
+  });
 
   // Top performers
   const topComposite = await getTopPerformers(orgId, 5);

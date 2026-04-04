@@ -213,7 +213,7 @@ export default function OrganizationPage() {
       const [deptRes, roleRes, userRes, settingsRes, officesRes] = await Promise.all([
         fetch("/api/departments"),
         fetch("/api/roles"),
-        fetch("/api/users?limit=500"),
+        fetch("/api/users?limit=100"),
         fetch("/api/settings"),
         fetch("/api/offices"),
       ]);
