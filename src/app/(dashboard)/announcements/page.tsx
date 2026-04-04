@@ -62,8 +62,12 @@ export default function AnnouncementsPage() {
         }),
       });
       if (res.ok) {
-        const data = await res.json();
-        setAnnouncements([data.data || data, ...announcements]);
+        // Refetch all announcements to get consistent data
+        const refreshRes = await fetch("/api/announcements");
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          setAnnouncements(refreshData.data || []);
+        }
         setShowCreate(false);
         setForm({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
         toastSuccess("Announcement published");

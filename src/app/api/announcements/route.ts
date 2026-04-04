@@ -10,26 +10,26 @@ export async function GET() {
   const userId = getUserId(session);
   const now = new Date();
 
+  // Simple query — fetch all announcements for this org
   const announcements = await prisma.announcement.findMany({
-    where: {
-      organizationId: orgId,
-      OR: [
-        { publishedAt: null },
-        { publishedAt: { lte: now } },
-      ],
-      AND: [
-        { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-      ],
-    },
+    where: { organizationId: orgId },
     include: {
       dismissals: { where: { userId }, select: { id: true } },
     },
-    orderBy: [{ pinned: "desc" }, { priority: "desc" }, { createdAt: "desc" }],
-    take: 20,
+    orderBy: { createdAt: "desc" },
+    take: 50,
   });
 
-  // Filter out dismissed (unless pinned)
-  const active = announcements.filter((a) => a.pinned || a.dismissals.length === 0);
+  // Filter: show active (not expired, not dismissed unless pinned)
+  const active = announcements.filter((a) => {
+    // Check expiry
+    if (a.expiresAt && new Date(a.expiresAt) < now) return false;
+    // Pinned always show
+    if (a.pinned) return true;
+    // Hide dismissed
+    if (a.dismissals.length > 0) return false;
+    return true;
+  });
 
   return jsonSuccess(active.map((a) => ({
     id: a.id,
