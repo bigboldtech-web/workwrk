@@ -243,20 +243,6 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
 export default function SOPsPage() {
   const router = useRouter();
   const { canManageSOPs, isEmployee } = useRole();
-
-  // Employees go directly to My SOPs
-  useEffect(() => {
-    if (isEmployee) router.replace("/sops/my-sops");
-  }, [isEmployee, router]);
-
-  if (isEmployee) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
-      </div>
-    );
-  }
-
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -322,13 +308,22 @@ export default function SOPsPage() {
   }
 
   async function handleAddSubcategory() {
-    if (!newSubcatName.trim()) return;
+    if (!newSubcatName.trim() || !newCategory) { toastError("Select a category first"); return; }
 
-    // Find or wait for category to be in DB
-    let catObj = savedCategories.find((c: any) => c.name === newCategory);
+    // Always fetch fresh categories to get the latest IDs
+    let catObj: any = null;
+    try {
+      const freshRes = await fetch("/api/sop-categories");
+      if (freshRes.ok) {
+        const freshData = await freshRes.json();
+        const freshCats = freshData.data || [];
+        setSavedCategories(freshCats);
+        catObj = freshCats.find((c: any) => c.name === newCategory);
+      }
+    } catch {}
 
-    // If category not yet in DB, create it first
-    if (!catObj && newCategory) {
+    // If still not found, create the category first
+    if (!catObj) {
       try {
         const catRes = await fetch("/api/sop-categories", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -337,12 +332,11 @@ export default function SOPsPage() {
         if (catRes.ok) {
           const catData = await catRes.json();
           catObj = catData.data || catData;
-          setSavedCategories([...savedCategories, catObj]);
         }
       } catch {}
     }
 
-    if (!catObj?.id) { toastError("Please select a category first"); return; }
+    if (!catObj?.id) { toastError("Failed to find or create category"); return; }
 
     try {
       const res = await fetch("/api/sop-categories", {
@@ -459,6 +453,15 @@ export default function SOPsPage() {
   const categories = [...new Set([...savedCatNames, ...existingCategories])].sort();
 
   const filtered = sops; // Server-side filtering now
+
+  // Employees go directly to My SOPs
+  useEffect(() => {
+    if (isEmployee) router.replace("/sops/my-sops");
+  }, [isEmployee, router]);
+
+  if (isEmployee) {
+    return <div className="flex items-center justify-center h-64"><div className="h-6 w-6 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" /></div>;
+  }
 
   const publishedSops = sops.filter(s => s.status === "PUBLISHED");
   const avgCompliance = publishedSops.length > 0

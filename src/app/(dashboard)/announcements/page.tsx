@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRole } from "@/hooks/use-role";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ const PRIORITIES = [
 ];
 
 export default function AnnouncementsPage() {
+  const { isManager } = useRole();
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -88,9 +90,11 @@ export default function AnnouncementsPage() {
           <h1 className="text-lg font-bold tracking-tight">Announcements</h1>
           <p className="text-muted text-sm mt-1">Publish company-wide announcements</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} className="gap-1.5">
-          <Plus size={14} /> New Announcement
-        </Button>
+        {isManager && (
+          <Button onClick={() => setShowCreate(true)} className="gap-1.5">
+            <Plus size={14} /> New Announcement
+          </Button>
+        )}
       </div>
 
       {loading ? (

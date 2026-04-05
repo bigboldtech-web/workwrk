@@ -373,6 +373,10 @@ export default function SOPDetailPage() {
     if (sop?.sopType === "CHECKLIST") {
       return { sections: checklistSections };
     }
+    // For richtext SOPs, preserve existing content (it's saved via its own Save button)
+    if (sop?.content && (sop.content as any).type === "richtext") {
+      return sop.content;
+    }
     return { steps };
   };
 

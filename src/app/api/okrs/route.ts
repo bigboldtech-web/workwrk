@@ -39,11 +39,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
-
+  // Employees can create INDIVIDUAL OKRs for themselves; managers can create any
   const orgId = getOrgId(session);
   const body = await req.json();
   const { title, description, level, quarter, startDate, endDate, ownerId, departmentId, parentId, keyResults } = body;
+
+  if (!isManager(session) && level !== "INDIVIDUAL") {
+    return jsonError("Only managers can create Company/Team OKRs", 403);
+  }
 
   if (!title?.trim()) return jsonError("Title required");
 

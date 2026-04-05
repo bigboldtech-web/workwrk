@@ -79,6 +79,65 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+function SOPCategoriesManager() {
+  const [categories, setCategories] = useState<any[]>([]);
+  const [newCat, setNewCat] = useState("");
+  const [newSubcats, setNewSubcats] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    fetch("/api/sop-categories").then((r) => r.ok ? r.json() : { data: [] }).then((d) => setCategories(d.data || [])).catch(() => {});
+  }, []);
+
+  async function addCategory() {
+    if (!newCat.trim()) return;
+    const res = await fetch("/api/sop-categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newCat.trim() }) });
+    if (res.ok) { setNewCat(""); const d = await fetch("/api/sop-categories").then((r) => r.json()); setCategories(d.data || []); }
+  }
+
+  async function addSubcategory(catId: string) {
+    const name = newSubcats[catId]?.trim();
+    if (!name) return;
+    const res = await fetch("/api/sop-categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, categoryId: catId }) });
+    if (res.ok) { setNewSubcats({ ...newSubcats, [catId]: "" }); const d = await fetch("/api/sop-categories").then((r) => r.json()); setCategories(d.data || []); }
+  }
+
+  async function deleteItem(id: string, type: string) {
+    await fetch("/api/sop-categories", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, type }) });
+    const d = await fetch("/api/sop-categories").then((r) => r.json());
+    setCategories(d.data || []);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="New category name" className="h-8 text-xs" onKeyDown={(e) => e.key === "Enter" && addCategory()} />
+        <Button size="sm" onClick={addCategory} disabled={!newCat.trim()} className="text-xs h-8">Add</Button>
+      </div>
+      {categories.map((cat: any) => (
+        <div key={cat.id} className="border border-border rounded-lg p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">{cat.name}</span>
+            <Button variant="ghost" size="sm" className="h-6 text-xs text-red-400" onClick={() => deleteItem(cat.id, "category")}>Delete</Button>
+          </div>
+          <div className="ml-4 space-y-1">
+            {(cat.subcategories || []).map((sub: any) => (
+              <div key={sub.id} className="flex items-center justify-between text-xs">
+                <span className="text-muted">↳ {sub.name}</span>
+                <Button variant="ghost" size="sm" className="h-5 text-[10px] text-red-400" onClick={() => deleteItem(sub.id, "subcategory")}>×</Button>
+              </div>
+            ))}
+            <div className="flex items-center gap-1 mt-1">
+              <Input value={newSubcats[cat.id] || ""} onChange={(e) => setNewSubcats({ ...newSubcats, [cat.id]: e.target.value })} placeholder="Add subcategory" className="h-6 text-[10px]" onKeyDown={(e) => e.key === "Enter" && addSubcategory(cat.id)} />
+              <Button variant="ghost" size="sm" className="h-6 text-[10px] text-purple-400" onClick={() => addSubcategory(cat.id)}>+</Button>
+            </div>
+          </div>
+        </div>
+      ))}
+      {categories.length === 0 && <p className="text-xs text-muted text-center py-4">No categories yet. Add one above.</p>}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [data, setData] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1066,6 +1125,17 @@ export default function SettingsPage() {
               >
                 <Download size={14} /> Export All Data
               </Button>
+            </CardContent>
+          </Card>
+
+          {/* SOP Categories Management */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">SOP Categories & Subcategories</CardTitle>
+              <CardDescription>Manage categories used in SOPs</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <SOPCategoriesManager />
             </CardContent>
           </Card>
 
