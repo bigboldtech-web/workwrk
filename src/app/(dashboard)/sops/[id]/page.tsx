@@ -544,7 +544,7 @@ export default function SOPDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div className="flex items-center gap-4">
           <div className="h-8 w-8 bg-surface-2 rounded animate-pulse" />
           <div className="h-6 w-64 bg-surface-2 rounded animate-pulse" />
@@ -578,7 +578,7 @@ export default function SOPDetailPage() {
   const assignOverdue = assignments.filter((a: any) => a.status !== "COMPLETED" && a.dueDate && new Date(a.dueDate) < new Date()).length;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">

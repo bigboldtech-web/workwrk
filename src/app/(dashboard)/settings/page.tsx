@@ -447,9 +447,9 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <h1 className="text-lg font-bold tracking-tight">Settings</h1>
           <p className="text-muted text-sm mt-1">Manage your organization settings</p>
         </div>
         <div className="space-y-4">
@@ -464,9 +464,9 @@ export default function SettingsPage() {
   const weightTotal = scoreWeights.kpi + scoreWeights.manager + scoreWeights.peer + scoreWeights.self + (scoreWeights.sopCompliance || 0);
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+        <h1 className="text-lg font-bold tracking-tight">Settings</h1>
         <p className="text-muted text-sm mt-1">Manage your organization settings and preferences</p>
       </div>
 

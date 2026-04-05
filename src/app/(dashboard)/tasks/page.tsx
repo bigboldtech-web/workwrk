@@ -297,7 +297,7 @@ export default function TasksPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Work Calendar</h1>
+          <h1 className="text-lg font-bold tracking-tight">Work Calendar</h1>
           <p className="text-muted text-sm mt-1">
             {completedCount}/{tasks.length} tasks &middot; {totalHours}h logged this week
           </p>

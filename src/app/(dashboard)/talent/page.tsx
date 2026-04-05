@@ -72,10 +72,10 @@ export default function TalentPage() {
   const unplaced = users.filter((u: any) => !placedUserIds.has(u.id));
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">9-Box Talent Grid</h1>
+          <h1 className="text-lg font-bold tracking-tight">9-Box Talent Grid</h1>
           <p className="text-muted text-sm mt-1">Performance vs Potential assessment</p>
         </div>
         <Select value={period} onValueChange={setPeriod}>

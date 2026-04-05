@@ -312,7 +312,7 @@ export default function ReviewCycleDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="h-32 bg-surface rounded-lg border border-border animate-pulse" />
         <div className="h-64 bg-surface rounded-lg border border-border animate-pulse" />
@@ -334,7 +334,7 @@ export default function ReviewCycleDetailPage() {
   const canSelfAssess = myReview && (myReview.status === "PENDING" || myReview.status === "SELF_ASSESSMENT");
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="sm" onClick={() => router.push("/reviews")}>

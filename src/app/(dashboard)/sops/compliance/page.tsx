@@ -57,7 +57,7 @@ export default function SOPCompliancePage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div className="h-8 w-64 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => (
@@ -76,13 +76,13 @@ export default function SOPCompliancePage() {
   const { overview, departmentCompliance, personScores, sopCompliance, overdueList } = data;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => router.push("/sops")} className="shrink-0">
           <ArrowLeft size={18} />
         </Button>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">SOP Compliance Dashboard</h1>
+          <h1 className="text-lg font-bold tracking-tight">SOP Compliance Dashboard</h1>
           <p className="text-muted text-sm mt-1">Organization-wide SOP compliance tracking</p>
         </div>
       </div>

@@ -136,9 +136,9 @@ export default function KraKpiPage() {
   // Employee view — show only their assigned KPIs
   if (isEmployee && currentUserId) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">My KRAs & KPIs</h1>
+          <h1 className="text-lg font-bold tracking-tight">My KRAs & KPIs</h1>
           <p className="text-muted text-sm mt-1">Your performance metrics and targets</p>
         </div>
         <MonthlyKpiRecorder userId={currentUserId} />
@@ -758,10 +758,10 @@ export default function KraKpiPage() {
   );
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">KRA & KPIs</h1>
+          <h1 className="text-lg font-bold tracking-tight">KRA & KPIs</h1>
           <p className="text-muted text-sm mt-1">Define, track, and score performance across your organization</p>
         </div>
         <div className="flex items-center gap-2">

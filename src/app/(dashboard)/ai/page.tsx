@@ -222,7 +222,7 @@ export default function AIPage() {
             <Bot size={24} className="text-purple-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">AI Assistant</h1>
+            <h1 className="text-lg font-bold tracking-tight">AI Assistant</h1>
             <p className="text-muted text-sm">Ask anything about your organization in plain English</p>
           </div>
         </div>

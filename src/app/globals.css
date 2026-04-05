@@ -70,7 +70,17 @@ body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-outfit), sans-serif;
+  font-size: 13px;
 }
+
+/* Compact global overrides */
+h1 { font-size: 1.25rem !important; }
+h2 { font-size: 1.1rem !important; }
+h3 { font-size: 0.95rem !important; }
+
+/* Compact cards */
+[class*="CardContent"] { padding: 12px !important; }
+[class*="CardHeader"] { padding: 12px 12px 8px !important; }
 
 /* Animations */
 @keyframes fadeIn {

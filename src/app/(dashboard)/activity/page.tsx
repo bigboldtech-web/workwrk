@@ -114,9 +114,9 @@ export default function ActivityPage() {
 
   if (error) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Activity Feed</h1>
+          <h1 className="text-lg font-bold tracking-tight">Activity Feed</h1>
           <p className="text-muted text-sm mt-1">Track what's happening across your organization</p>
         </div>
         <ErrorState message={error} onRetry={() => fetchActivity()} />
@@ -125,10 +125,10 @@ export default function ActivityPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Activity Feed</h1>
+        <h1 className="text-lg font-bold tracking-tight">Activity Feed</h1>
         <p className="text-muted text-sm mt-1">Track what's happening across your organization</p>
       </div>
 

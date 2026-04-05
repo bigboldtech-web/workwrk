@@ -75,10 +75,10 @@ export default function PoliciesPage() {
   const pendingAcks = policies.filter((p) => p.requiresAck && !p.acknowledged).length;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Policies & Bylaws</h1>
+          <h1 className="text-lg font-bold tracking-tight">Policies & Bylaws</h1>
           <p className="text-muted text-sm mt-1">
             {policies.length} policies {pendingAcks > 0 && <span className="text-amber-400">&middot; {pendingAcks} pending acknowledgment</span>}
           </p>

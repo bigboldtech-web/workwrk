@@ -131,7 +131,7 @@ export default function MySOPsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -148,9 +148,9 @@ export default function MySOPsPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">My SOPs</h1>
+        <h1 className="text-lg font-bold tracking-tight">My SOPs</h1>
         <p className="text-muted text-sm mt-1">
           {assignments.length} assigned &middot; {pending.length} pending &middot; {completed.length} completed
         </p>

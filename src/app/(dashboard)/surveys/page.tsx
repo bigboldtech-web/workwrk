@@ -88,10 +88,10 @@ export default function SurveysPage() {
   const pending = surveys.filter((s) => s.status === "ACTIVE" && !s.hasResponded).length;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Pulse Surveys</h1>
+          <h1 className="text-lg font-bold tracking-tight">Pulse Surveys</h1>
           <p className="text-muted text-sm mt-1">{surveys.length} surveys {pending > 0 && <span className="text-amber-400">&middot; {pending} pending</span>}</p>
         </div>
         {isManager && (

@@ -154,10 +154,10 @@ export default function OKRsPage() {
   const avgProgress = okrs.length > 0 ? Math.round(okrs.reduce((s, o) => s + o.progress, 0) / okrs.length) : 0;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">OKRs</h1>
+          <h1 className="text-lg font-bold tracking-tight">OKRs</h1>
           <p className="text-muted text-sm mt-1">{okrs.length} objectives &middot; {avgProgress}% avg progress</p>
         </div>
         <div className="flex items-center gap-2">

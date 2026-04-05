@@ -180,9 +180,9 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <h1 className="text-lg font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted text-sm mt-1">
             Overview of your business operating system
           </p>
@@ -225,9 +225,9 @@ export default function DashboardPage() {
 
   if (error || !data) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <h1 className="text-lg font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted text-sm mt-1">
             Overview of your business operating system
           </p>
@@ -284,10 +284,10 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-lg font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted text-sm mt-1">
           Overview of your business operating system
         </p>

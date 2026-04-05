@@ -88,9 +88,9 @@ function getScoreBg(score: number) {
 
 function LoadingSkeleton() {
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
+        <h1 className="text-lg font-bold tracking-tight">Analytics</h1>
         <p className="text-muted text-sm mt-1">Real-time dashboards and performance insights</p>
       </div>
 
@@ -180,9 +180,9 @@ export default function AnalyticsPage() {
 
   if (!data || (data.keyMetrics.totalPeople === 0 && data.monthlyTrend.length === 0 && data.deptComparison.length === 0)) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
+          <h1 className="text-lg font-bold tracking-tight">Analytics</h1>
           <p className="text-muted text-sm mt-1">Real-time dashboards and performance insights</p>
         </div>
         <EmptyState
@@ -206,10 +206,10 @@ export default function AnalyticsPage() {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
+          <h1 className="text-lg font-bold tracking-tight">Analytics</h1>
           <p className="text-muted text-sm mt-1">Performance insights and trends</p>
         </div>
         <div className="flex items-center gap-2">

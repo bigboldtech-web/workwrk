@@ -163,10 +163,10 @@ export default function IdeasPage() {
   const approved = ideas.filter((i) => ["APPROVED", "IMPLEMENTED", "REWARDED"].includes(i.status)).length;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Ideas Board</h1>
+          <h1 className="text-lg font-bold tracking-tight">Ideas Board</h1>
           <p className="text-muted text-sm mt-1">{ideas.length} ideas &middot; {submitted} pending &middot; {approved} approved</p>
         </div>
         <Button onClick={() => setShowSubmit(true)} className="gap-1.5">

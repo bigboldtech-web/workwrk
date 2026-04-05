@@ -266,10 +266,10 @@ export default function MeetingsPage() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Meetings & Check-ins</h1>
+          <h1 className="text-lg font-bold tracking-tight">Meetings & Check-ins</h1>
           <p className="text-muted text-sm mt-1">Structured meeting cadences and daily check-ins</p>
         </div>
         <Dialog open={showAddDialog} onOpenChange={(open) => { setShowAddDialog(open); if (!open) resetMeetingForm(); }}>

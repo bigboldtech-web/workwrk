@@ -71,7 +71,7 @@ export function Sidebar() {
 
   // Sync sidebar width to CSS variable so the content area can adjust
   useEffect(() => {
-    document.documentElement.style.setProperty("--sidebar-width", collapsed ? "68px" : "260px");
+    document.documentElement.style.setProperty("--sidebar-width", collapsed ? "56px" : "220px");
   }, [collapsed]);
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null);
   const [announcementCount, setAnnouncementCount] = useState(0);
@@ -106,15 +106,15 @@ export function Sidebar() {
     <aside
       className={cn(
         "fixed left-0 top-0 z-40 h-screen border-r border-border bg-background transition-all duration-300",
-        collapsed ? "w-[68px]" : "w-[260px]"
+        collapsed ? "w-[56px]" : "w-[220px]"
       )}
     >
       <div className="flex h-full flex-col">
         {/* Logo */}
-        <div className="flex h-16 items-center justify-between border-b border-border px-4">
+        <div className="flex h-12 items-center justify-between border-b border-border px-3">
           {!collapsed && (
             <Link href="/dashboard" className="flex items-center gap-2">
-              <span className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-xl font-extrabold tracking-tight text-transparent"
+              <span className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-base font-bold tracking-tight text-transparent"
                 style={{ fontFamily: "'Syne', sans-serif" }}>
                 workwrk
               </span>
@@ -123,7 +123,7 @@ export function Sidebar() {
           )}
           {collapsed && (
             <Link href="/dashboard" className="mx-auto">
-              <span className="bg-gradient-to-r from-purple-500 to-green-400 bg-clip-text text-xl font-extrabold text-transparent"
+              <span className="bg-gradient-to-r from-purple-500 to-green-400 bg-clip-text text-base font-bold text-transparent"
                 style={{ fontFamily: "'Syne', sans-serif" }}>
                 W
               </span>
@@ -146,7 +146,7 @@ export function Sidebar() {
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                  "relative flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
                   isActive
                     ? "bg-purple-600/10 text-purple-400 border border-purple-600/20"
                     : "text-muted hover:bg-surface-2 hover:text-foreground",
@@ -154,7 +154,7 @@ export function Sidebar() {
                 )}
                 title={collapsed ? item.name : undefined}
               >
-                <item.icon size={20} className={cn(isActive && "text-purple-400")} />
+                <item.icon size={16} className={cn(isActive && "text-purple-400")} />
                 {!collapsed && (
                   <span className="flex-1 flex items-center justify-between">
                     <span>{item.name}</span>
@@ -182,14 +182,14 @@ export function Sidebar() {
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                  "flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
                   isActive
                     ? "bg-purple-600/10 text-purple-400"
                     : "text-muted hover:bg-surface-2 hover:text-foreground",
                   collapsed && "justify-center px-2"
                 )}
               >
-                <item.icon size={20} />
+                <item.icon size={16} />
                 {!collapsed && <span>{item.name}</span>}
               </Link>
             );
@@ -198,7 +198,7 @@ export function Sidebar() {
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}
             className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted hover:bg-red-500/10 hover:text-red-400 transition-all",
+              "flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted hover:bg-red-500/10 hover:text-red-400 transition-all",
               collapsed && "justify-center px-2"
             )}
           >

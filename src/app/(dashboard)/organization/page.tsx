@@ -387,7 +387,7 @@ export default function OrganizationPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => (
@@ -399,9 +399,9 @@ export default function OrganizationPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Organization</h1>
+        <h1 className="text-lg font-bold tracking-tight">Organization</h1>
         <p className="text-muted text-sm mt-1">Manage your company structure, departments, and roles</p>
       </div>
 
