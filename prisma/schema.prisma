@@ -45,6 +45,7 @@ model Organization {
   policies            Policy[]
   okrs                OKR[]
   pulseSurveys        PulseSurvey[]
+  tools               Tool[]
 
   @@index([slug])
 }
@@ -1411,4 +1412,39 @@ model MeetingTemplate {
   createdAt      DateTime @default(now())
 
   @@index([organizationId])
+}
+
+// ==========================================
+// TOOLS & APPLICATIONS
+// ==========================================
+
+model Tool {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?
+  url            String?
+  icon           String?      // emoji or URL
+  category       String?      // "Communication", "Design", "Development", "Finance", "HR", "Marketing", "Sales", "Other"
+  credentials    Json?        // { username, password, apiKey, notes } — encrypted at rest
+  addedBy        String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  shares         ToolShare[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+model ToolShare {
+  id        String   @id @default(cuid())
+  toolId    String
+  tool      Tool     @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  userId    String
+  sharedBy  String
+  sharedAt  DateTime @default(now())
+
+  @@unique([toolId, userId])
+  @@index([userId])
+  @@index([toolId])
 }

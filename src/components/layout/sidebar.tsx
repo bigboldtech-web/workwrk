@@ -26,6 +26,7 @@ import {
   Bot,
   GraduationCap,
   Settings,
+  Wrench,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -56,6 +57,7 @@ const navigation: { name: string; href: string; icon: any; moduleKey?: string; m
   { name: "Surveys", href: "/surveys", icon: ClipboardCheck },
   { name: "Policies", href: "/policies", icon: Shield },
   { name: "Activity", href: "/activity", icon: Activity },
+  { name: "Tools", href: "/tools", icon: Wrench },
   { name: "Integrations", href: "/integrations", icon: Link2, adminOnly: true },
   { name: "AI Assistant", href: "/ai", icon: Bot, moduleKey: "ai" },
 ];
