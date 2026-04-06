@@ -540,18 +540,16 @@ export default function OrganizationPage() {
                   rows={4}
                   className="text-sm"
                 />
+              ) : companyProfile.about ? (
+                <p className="text-sm text-muted whitespace-pre-wrap">{companyProfile.about}</p>
               ) : (
-                {companyProfile.about ? (
-                  <p className="text-sm text-muted whitespace-pre-wrap">{companyProfile.about}</p>
-                ) : (
-                  <div className="text-center py-4">
-                    <p className="text-sm text-muted mb-2">No company description added yet.</p>
-                    <p className="text-xs text-muted mb-3">A strong company description helps AI generate better KRAs, KPIs, and align everything to your business.</p>
-                    <Button variant="outline" size="sm" className="gap-1 border-purple-500/30 text-purple-400" onClick={aiGenerateProfile} disabled={aiGenerating}>
-                      <Sparkles size={14} /> {aiGenerating ? "Generating..." : "Generate with AI"}
-                    </Button>
-                  </div>
-                )}
+                <div className="text-center py-4">
+                  <p className="text-sm text-muted mb-2">No company description added yet.</p>
+                  <p className="text-xs text-muted mb-3">A strong company description helps AI generate better KRAs, KPIs, and align everything to your business.</p>
+                  <Button variant="outline" size="sm" className="gap-1 border-purple-500/30 text-purple-400" onClick={aiGenerateProfile} disabled={aiGenerating}>
+                    <Sparkles size={14} /> {aiGenerating ? "Generating..." : "Generate with AI"}
+                  </Button>
+                </div>
               )}
             </CardContent>
           </Card>
