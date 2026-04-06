@@ -17,6 +17,7 @@ import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { useSession } from "next-auth/react";
 import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
+import { KraPicker } from "@/components/ui/kra-picker";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -1373,18 +1374,17 @@ export default function KraKpiPage() {
               <div className="space-y-2">
                 {multiAssignKras.map((entry, idx) => (
                   <div key={idx} className="flex items-center gap-2">
-                    <Select value={entry.kraId} onValueChange={(v) => {
-                      const updated = [...multiAssignKras];
-                      updated[idx] = { ...updated[idx], kraId: v };
-                      setMultiAssignKras(updated);
-                    }}>
-                      <SelectTrigger className="flex-1"><SelectValue placeholder="Select KRA" /></SelectTrigger>
-                      <SelectContent>
-                        {kras.filter((k) => !multiAssignKras.some((e, i) => i !== idx && e.kraId === k.id)).map((k) => (
-                          <SelectItem key={k.id} value={k.id}>{k.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <KraPicker
+                      kras={kras}
+                      value={entry.kraId}
+                      onChange={(v) => {
+                        const updated = [...multiAssignKras];
+                        updated[idx] = { ...updated[idx], kraId: v };
+                        setMultiAssignKras(updated);
+                      }}
+                      excludeIds={multiAssignKras.filter((_, i) => i !== idx).map((e) => e.kraId).filter(Boolean)}
+                      className="flex-1"
+                    />
                     <Input
                       type="number"
                       min="1"

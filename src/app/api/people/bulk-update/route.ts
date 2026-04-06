@@ -51,26 +51,34 @@ export async function POST(req: NextRequest) {
     }
 
     case "assign_kra": {
-      if (!payload?.kraId || !payload?.weightage) return jsonError("kraId and weightage are required");
-      const existing = await prisma.kRAAssignment.findMany({
-        where: { userId: { in: validIds }, kraId: payload.kraId },
-        select: { userId: true },
-      });
-      const existingUserIds = new Set(existing.map((e) => e.userId));
-      const newIds = validIds.filter((id) => !existingUserIds.has(id));
+      // Support multi-KRA assignment via kraEntries array
+      const entries = payload?.kraEntries || (payload?.kraId ? [{ kraId: payload.kraId, weightage: payload.weightage }] : []);
+      if (entries.length === 0) return jsonError("At least one KRA is required");
 
-      if (newIds.length > 0) {
-        await prisma.kRAAssignment.createMany({
-          data: newIds.map((userId) => ({
-            userId,
-            kraId: payload.kraId,
-            weightage: payload.weightage,
-            period: payload.period || "Q1 2026",
-            status: "ACTIVE",
-          })),
+      let totalAssigned = 0;
+      for (const entry of entries) {
+        if (!entry.kraId || !entry.weightage) continue;
+        const existing = await prisma.kRAAssignment.findMany({
+          where: { userId: { in: validIds }, kraId: entry.kraId },
+          select: { userId: true },
         });
+        const existingUserIds = new Set(existing.map((e: any) => e.userId));
+        const newIds = validIds.filter((id: string) => !existingUserIds.has(id));
+
+        if (newIds.length > 0) {
+          await prisma.kRAAssignment.createMany({
+            data: newIds.map((userId: string) => ({
+              userId,
+              kraId: entry.kraId,
+              weightage: parseFloat(entry.weightage) || 0,
+              period: payload.period || "Q1 2026",
+              status: "ACTIVE",
+            })),
+          });
+          totalAssigned += newIds.length;
+        }
       }
-      description = `Assigned KRA to ${newIds.length} people`;
+      description = `Assigned ${entries.length} KRA${entries.length > 1 ? "s" : ""} to ${validIds.length} people`;
       break;
     }
 

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { KraPicker } from "@/components/ui/kra-picker";
 import {
   Search, Plus, Users, TrendingUp, TrendingDown, Minus,
   MoreHorizontal, Mail, Building2, UserCheck, Download, Upload, Trash2,
@@ -753,15 +754,67 @@ export default function PeoplePage() {
             {bulkAction === "assign_kra" && (
               <>
                 <div className="space-y-2">
-                  <Label>KRA</Label>
-                  <Select value={bulkPayload.kraId || ""} onValueChange={(v) => setBulkPayload({ ...bulkPayload, kraId: v })}>
-                    <SelectTrigger><SelectValue placeholder="Select KRA" /></SelectTrigger>
-                    <SelectContent>{kras.map((k: any) => <SelectItem key={k.id} value={k.id}>{k.name}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2"><Label>Weightage (%)</Label><Input type="number" value={bulkPayload.weightage || 100} onChange={(e) => setBulkPayload({ ...bulkPayload, weightage: parseInt(e.target.value) || 100 })} /></div>
-                  <div className="space-y-2"><Label>Period</Label><Input value={bulkPayload.period || "Q1 2026"} onChange={(e) => setBulkPayload({ ...bulkPayload, period: e.target.value })} /></div>
+                  <div className="flex items-center justify-between">
+                    <Label>KRAs & Weightage</Label>
+                    <Button variant="ghost" size="sm" className="text-xs text-purple-400 h-6" onClick={() => {
+                      const current = bulkPayload.kraEntries || [];
+                      setBulkPayload({ ...bulkPayload, kraEntries: [...current, { kraId: "", weightage: "" }] });
+                    }}>
+                      <Plus size={12} className="mr-1" /> Add KRA
+                    </Button>
+                  </div>
+                  {(!bulkPayload.kraEntries || bulkPayload.kraEntries.length === 0) && (
+                    <div className="text-center py-4 border border-dashed border-border rounded-lg">
+                      <p className="text-xs text-muted mb-2">No KRAs added yet</p>
+                      <Button variant="outline" size="sm" className="text-xs gap-1" onClick={() => setBulkPayload({ ...bulkPayload, kraEntries: [{ kraId: "", weightage: "" }] })}>
+                        <Plus size={12} /> Add KRA
+                      </Button>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    {(bulkPayload.kraEntries || []).map((entry: any, idx: number) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <KraPicker
+                          kras={kras}
+                          value={entry.kraId}
+                          onChange={(v) => {
+                            const updated = [...(bulkPayload.kraEntries || [])];
+                            updated[idx] = { ...updated[idx], kraId: v };
+                            setBulkPayload({ ...bulkPayload, kraEntries: updated });
+                          }}
+                          excludeIds={(bulkPayload.kraEntries || []).filter((_: any, i: number) => i !== idx).map((e: any) => e.kraId).filter(Boolean)}
+                          className="flex-1"
+                        />
+                        <Input
+                          type="number" min="1" max="100" placeholder="%" className="w-20"
+                          value={entry.weightage}
+                          onChange={(e) => {
+                            const updated = [...(bulkPayload.kraEntries || [])];
+                            updated[idx] = { ...updated[idx], weightage: e.target.value };
+                            setBulkPayload({ ...bulkPayload, kraEntries: updated });
+                          }}
+                        />
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-400 shrink-0" onClick={() => {
+                          setBulkPayload({ ...bulkPayload, kraEntries: (bulkPayload.kraEntries || []).filter((_: any, i: number) => i !== idx) });
+                        }}>
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  {(bulkPayload.kraEntries || []).length > 0 && (() => {
+                    const total = (bulkPayload.kraEntries || []).reduce((sum: number, e: any) => sum + (parseFloat(e.weightage) || 0), 0);
+                    const isOver = total > 100;
+                    const isExact = total === 100;
+                    return (
+                      <div className={`flex items-center justify-between p-2 rounded-lg border ${isOver ? "border-red-500/30 bg-red-500/5" : isExact ? "border-green-500/30 bg-green-500/5" : "border-border"}`}>
+                        <span className="text-xs text-muted">Total Weightage</span>
+                        <span className={`text-sm font-mono font-bold ${isOver ? "text-red-400" : isExact ? "text-green-400" : "text-foreground"}`}>
+                          {total}%{isOver && <span className="text-[10px] ml-1">(exceeds 100%)</span>}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </>
             )}
