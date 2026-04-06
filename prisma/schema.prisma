@@ -41,6 +41,7 @@ model Organization {
   ideas               Idea[]
   offices             Office[]
   sopCategories       SOPCategory[]
+  kraCategories       KraCategory[]
   announcements       Announcement[]
   policies            Policy[]
   okrs                OKR[]
@@ -439,6 +440,17 @@ model SOPVersion {
 
   @@index([sopId])
   @@index([version])
+}
+
+model KraCategory {
+  id             String       @id @default(cuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([name, organizationId])
+  @@index([organizationId])
 }
 
 model SOPCategory {

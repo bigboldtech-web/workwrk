@@ -79,6 +79,69 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+function KRACategoriesManager() {
+  const [categories, setCategories] = useState<any[]>([]);
+  const [newCat, setNewCat] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
+  const fetchCategories = () => {
+    fetch("/api/kra-categories").then((r) => r.ok ? r.json() : { data: [] }).then((d) => setCategories(d.data || [])).catch(() => {});
+  };
+
+  useEffect(() => { fetchCategories(); }, []);
+
+  async function addCategory() {
+    if (!newCat.trim()) return;
+    const res = await fetch("/api/kra-categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newCat.trim() }) });
+    if (res.ok) { setNewCat(""); fetchCategories(); }
+  }
+
+  async function deleteCategory(id: string) {
+    await fetch("/api/kra-categories", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    fetchCategories();
+  }
+
+  async function saveEdit(id: string) {
+    if (!editName.trim()) return;
+    await fetch("/api/kra-categories", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name: editName.trim() }) });
+    setEditingId(null);
+    fetchCategories();
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="New category name" className="h-8 text-xs" onKeyDown={(e) => e.key === "Enter" && addCategory()} />
+        <Button size="sm" onClick={addCategory} disabled={!newCat.trim()} className="text-xs h-8">Add</Button>
+      </div>
+      {categories.map((cat: any) => (
+        <div key={cat.id} className="flex items-center justify-between border border-border rounded-lg px-3 py-2">
+          {editingId === cat.id ? (
+            <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-7 text-xs flex-1 mr-2" onKeyDown={(e) => e.key === "Enter" && saveEdit(cat.id)} autoFocus />
+          ) : (
+            <span className="text-sm">{cat.name}</span>
+          )}
+          <div className="flex items-center gap-1">
+            {editingId === cat.id ? (
+              <>
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-purple-400" onClick={() => saveEdit(cat.id)}>Save</Button>
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-muted" onClick={() => setEditingId(null)}>Cancel</Button>
+              </>
+            ) : (
+              <>
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-muted" onClick={() => { setEditingId(cat.id); setEditName(cat.name); }}>Edit</Button>
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-red-400" onClick={() => deleteCategory(cat.id)}>Delete</Button>
+              </>
+            )}
+          </div>
+        </div>
+      ))}
+      {categories.length === 0 && <p className="text-xs text-muted text-center py-4">No categories yet. Add one above.</p>}
+    </div>
+  );
+}
+
 function SOPCategoriesManager() {
   const [categories, setCategories] = useState<any[]>([]);
   const [newCat, setNewCat] = useState("");
@@ -1125,6 +1188,17 @@ export default function SettingsPage() {
               >
                 <Download size={14} /> Export All Data
               </Button>
+            </CardContent>
+          </Card>
+
+          {/* KRA Categories Management */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">KRA Categories</CardTitle>
+              <CardDescription>Manage categories used in KRAs. AI-generated KRAs will also auto-create categories here.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <KRACategoriesManager />
             </CardContent>
           </Card>
 

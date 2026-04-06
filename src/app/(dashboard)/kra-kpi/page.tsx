@@ -169,6 +169,7 @@ export default function KraKpiPage() {
   const [assignments, setAssignments] = useState<KraAssignment[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [kraCategories, setKraCategories] = useState<{ id: string; name: string }[]>([]);
 
   // Loading state
   const [loadingKras, setLoadingKras] = useState(true);
@@ -323,6 +324,16 @@ export default function KraKpiPage() {
     } catch {}
   }, []);
 
+  const fetchKraCategories = useCallback(async () => {
+    try {
+      const res = await fetch("/api/kra-categories");
+      if (res.ok) {
+        const data = await res.json();
+        setKraCategories(Array.isArray(data) ? data : data.data ?? []);
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     fetchKras();
     fetchKpis();
@@ -330,7 +341,8 @@ export default function KraKpiPage() {
     fetchAssignments();
     fetchRoles();
     fetchUsers();
-  }, [fetchKras, fetchKpis, fetchKpiRecords, fetchAssignments, fetchRoles, fetchUsers]);
+    fetchKraCategories();
+  }, [fetchKras, fetchKpis, fetchKpiRecords, fetchAssignments, fetchRoles, fetchUsers, fetchKraCategories]);
 
   // --- Handlers ---
 
@@ -567,6 +579,17 @@ export default function KraKpiPage() {
     if (!aiResults || aiResults.length === 0) return;
     setSavingKra(true);
     try {
+      // Auto-create any new categories from AI results
+      const existingCatNames = new Set(kraCategories.map((c) => c.name));
+      const newCatNames = new Set(aiResults.map((k: any) => k.category?.trim()).filter((c: string) => c && !existingCatNames.has(c)));
+      for (const catName of newCatNames) {
+        await fetch("/api/kra-categories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: catName }),
+        });
+      }
+
       let totalKpis = 0;
       for (const kra of aiResults) {
         const res = await fetch("/api/kras", {
@@ -601,7 +624,7 @@ export default function KraKpiPage() {
       setAiResults(null);
       setAiJobTitle("");
       setAiJobDescription("");
-      await Promise.all([fetchKras(), fetchKpis()]);
+      await Promise.all([fetchKras(), fetchKpis(), fetchKraCategories()]);
       toastSuccess(`Created ${aiResults.length} KRAs with ${totalKpis} KPIs`);
     } catch { toastError("Failed to save KRAs"); } finally { setSavingKra(false); }
   };
@@ -704,9 +727,10 @@ export default function KraKpiPage() {
           <Select value={kraCategory} onValueChange={setKraCategory}>
             <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
             <SelectContent>
-              {["Sales", "Engineering", "Marketing", "Operations", "Support", "HR", "Finance"].map((c) => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
+              {kraCategories.map((c) => (
+                <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
               ))}
+              {kraCategories.length === 0 && <p className="text-xs text-muted text-center py-2 px-2">No categories. Add them in Settings → Data.</p>}
             </SelectContent>
           </Select>
         </div>
@@ -1532,7 +1556,12 @@ export default function KraKpiPage() {
                     <div className="flex items-start gap-2">
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">{kra.category || "General"}</Badge>
+                          <Input
+                            value={kra.category || ""}
+                            onChange={(e) => handleAiResultEdit(kraIdx, "category", e.target.value)}
+                            className="text-[10px] h-5 w-28 px-1.5"
+                            placeholder="Category"
+                          />
                           <button onClick={() => handleAiRemoveKra(kraIdx)} className="text-muted hover:text-red-400 transition-colors ml-auto">
                             <X size={14} />
                           </button>
