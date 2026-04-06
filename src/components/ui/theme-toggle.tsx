@@ -17,12 +17,12 @@ export function ThemeToggle({ collapsed }: { collapsed?: boolean }) {
   return (
     <button
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted hover:bg-surface-2 hover:text-foreground transition-all ${
+      className={`flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted hover:bg-surface-2 hover:text-foreground transition-all w-full ${
         collapsed ? "justify-center px-2" : ""
       }`}
       title={isDark ? "Switch to light mode" : "Switch to dark mode"}
     >
-      {isDark ? <Sun size={20} /> : <Moon size={20} />}
+      {isDark ? <Sun size={16} /> : <Moon size={16} />}
       {!collapsed && <span>{isDark ? "Light Mode" : "Dark Mode"}</span>}
     </button>
   );

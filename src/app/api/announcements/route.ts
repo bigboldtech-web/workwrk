@@ -9,8 +9,15 @@ export async function GET() {
   const orgId = getOrgId(session);
 
   try {
+    const now = new Date();
     const announcements = await prisma.announcement.findMany({
-      where: { organizationId: orgId },
+      where: {
+        organizationId: orgId,
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: now } },
+        ],
+      },
       orderBy: { createdAt: "desc" },
       take: 50,
     });

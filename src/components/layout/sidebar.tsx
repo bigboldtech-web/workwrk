@@ -204,7 +204,7 @@ export function Sidebar() {
               collapsed && "justify-center px-2"
             )}
           >
-            <LogOut size={20} />
+            <LogOut size={16} />
             {!collapsed && <span>Sign Out</span>}
           </button>
         </div>

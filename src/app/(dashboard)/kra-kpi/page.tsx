@@ -21,7 +21,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Target, Plus, TrendingUp, TrendingDown, Minus, BarChart3, ChevronRight, ChevronDown, Users,
-  Pencil, Trash2, UserPlus, AlertTriangle,
+  Pencil, Trash2, UserPlus, AlertTriangle, Sparkles, Loader2, X,
 } from "lucide-react";
 
 interface Kra {
@@ -154,6 +154,13 @@ export default function KraKpiPage() {
   const [showEditKraDialog, setShowEditKraDialog] = useState(false);
   const [showEditKpiDialog, setShowEditKpiDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ type: "kra" | "kpi" | "assignment"; id: string } | null>(null);
+
+  // AI generation state
+  const [showAiDialog, setShowAiDialog] = useState(false);
+  const [aiJobTitle, setAiJobTitle] = useState("");
+  const [aiJobDescription, setAiJobDescription] = useState("");
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiResults, setAiResults] = useState<any[] | null>(null);
 
   // Data state
   const [kras, setKras] = useState<Kra[]>([]);
@@ -510,6 +517,95 @@ export default function KraKpiPage() {
   function resetAssignForm() { setAssignUserId(""); setAssignKraId(""); setAssignWeightage(""); setAssignPeriod(""); setMultiAssignKras([]); }
   function resetRecordForm() { setRecordKpiId(""); setRecordUserId(""); setRecordPeriod(""); setRecordTargetValue(""); setRecordActualValue(""); setRecordNotes(""); }
 
+  // AI KRA/KPI Generation
+  const handleAiGenerate = async () => {
+    if (!aiJobTitle.trim()) return;
+    setAiGenerating(true);
+    setAiResults(null);
+    try {
+      const res = await fetch("/api/kras/ai-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobTitle: aiJobTitle, jobDescription: aiJobDescription }),
+      });
+      if (!res.ok) throw new Error("Failed to generate");
+      const data = await res.json();
+      const kras = data.data?.kras || data.kras || [];
+      setAiResults(kras);
+    } catch { toastError("AI generation failed. Try again."); } finally { setAiGenerating(false); }
+  };
+
+  const handleAiResultEdit = (kraIdx: number, field: string, value: string) => {
+    if (!aiResults) return;
+    const updated = [...aiResults];
+    updated[kraIdx] = { ...updated[kraIdx], [field]: value };
+    setAiResults(updated);
+  };
+
+  const handleAiKpiEdit = (kraIdx: number, kpiIdx: number, field: string, value: any) => {
+    if (!aiResults) return;
+    const updated = [...aiResults];
+    const kpis = [...updated[kraIdx].kpis];
+    kpis[kpiIdx] = { ...kpis[kpiIdx], [field]: value };
+    updated[kraIdx] = { ...updated[kraIdx], kpis };
+    setAiResults(updated);
+  };
+
+  const handleAiRemoveKra = (kraIdx: number) => {
+    if (!aiResults) return;
+    setAiResults(aiResults.filter((_, i) => i !== kraIdx));
+  };
+
+  const handleAiRemoveKpi = (kraIdx: number, kpiIdx: number) => {
+    if (!aiResults) return;
+    const updated = [...aiResults];
+    updated[kraIdx] = { ...updated[kraIdx], kpis: updated[kraIdx].kpis.filter((_: any, i: number) => i !== kpiIdx) };
+    setAiResults(updated);
+  };
+
+  const handleAiSaveAll = async () => {
+    if (!aiResults || aiResults.length === 0) return;
+    setSavingKra(true);
+    try {
+      let totalKpis = 0;
+      for (const kra of aiResults) {
+        const res = await fetch("/api/kras", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: kra.name, description: kra.description, category: kra.category || undefined }),
+        });
+        if (!res.ok) throw new Error("Failed to create KRA");
+        const kraData = await res.json();
+        const createdKra = kraData.data || kraData;
+
+        for (const kpi of kra.kpis) {
+          if (!kpi.name?.trim()) continue;
+          await fetch("/api/kpis", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: kpi.name,
+              description: kpi.description || undefined,
+              type: kpi.type || "QUANTITATIVE",
+              unit: kpi.unit || undefined,
+              frequency: kpi.frequency || "MONTHLY",
+              targetValue: kpi.targetValue ? Number(kpi.targetValue) : undefined,
+              lowerIsBetter: kpi.lowerIsBetter === true,
+              kraId: createdKra.id,
+            }),
+          });
+          totalKpis++;
+        }
+      }
+      setShowAiDialog(false);
+      setAiResults(null);
+      setAiJobTitle("");
+      setAiJobDescription("");
+      await Promise.all([fetchKras(), fetchKpis()]);
+      toastSuccess(`Created ${aiResults.length} KRAs with ${totalKpis} KPIs`);
+    } catch { toastError("Failed to save KRAs"); } finally { setSavingKra(false); }
+  };
+
   function openEditKra(kra: Kra) {
     setEditingKra(kra);
     setKraName(kra.name);
@@ -773,6 +869,9 @@ export default function KraKpiPage() {
           </Button>
           <Button variant="outline" className="gap-2" onClick={() => setShowAssignDialog(true)}>
             <UserPlus size={16} /> Assign KRA
+          </Button>
+          <Button variant="outline" className="gap-2 border-purple-500/30 text-purple-400 hover:bg-purple-500/10" onClick={() => { setAiJobTitle(""); setAiJobDescription(""); setAiResults(null); setShowAiDialog(true); }}>
+            <Sparkles size={16} /> Create with AI
           </Button>
           <Button className="gap-2" onClick={() => { resetKraForm(); setShowAddKraDialog(true); }}>
             <Plus size={16} /> New KRA
@@ -1381,6 +1480,144 @@ export default function KraKpiPage() {
           else if (showDeleteConfirm.type === "assignment") handleDeleteAssignment(showDeleteConfirm.id);
         }}
       />
+
+      {/* AI KRA/KPI Generation Dialog */}
+      <Dialog open={showAiDialog} onOpenChange={(open) => { setShowAiDialog(open); if (!open) { setAiResults(null); setAiJobTitle(""); setAiJobDescription(""); } }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles size={18} className="text-purple-400" /> Generate KRAs & KPIs with AI
+            </DialogTitle>
+          </DialogHeader>
+
+          {!aiResults ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted">Enter a job role and description. AI will generate ~5 KRAs with ~3 KPIs each, all editable before saving.</p>
+              <div className="space-y-2">
+                <Label>Job Role Title *</Label>
+                <Input placeholder="e.g., Senior Software Engineer" value={aiJobTitle} onChange={(e) => setAiJobTitle(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Job Description</Label>
+                <Textarea
+                  placeholder="Describe what this person does... e.g., Leads backend development, manages deployments, mentors junior developers, collaborates with product team..."
+                  value={aiJobDescription}
+                  onChange={(e) => setAiJobDescription(e.target.value)}
+                  rows={4}
+                />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowAiDialog(false)}>Cancel</Button>
+                <Button onClick={handleAiGenerate} disabled={aiGenerating || !aiJobTitle.trim()} className="gap-2">
+                  {aiGenerating ? <><Loader2 size={16} className="animate-spin" /> Generating...</> : <><Sparkles size={16} /> Generate</>}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted">
+                  Generated <span className="font-medium text-foreground">{aiResults.length} KRAs</span> with{" "}
+                  <span className="font-medium text-foreground">{aiResults.reduce((sum: number, k: any) => sum + (k.kpis?.length || 0), 0)} KPIs</span>
+                  {" "}for <span className="font-medium text-purple-400">{aiJobTitle}</span>. Edit as needed, then save.
+                </p>
+                <Button variant="ghost" size="sm" onClick={() => setAiResults(null)} className="text-xs text-muted">
+                  Regenerate
+                </Button>
+              </div>
+
+              {aiResults.map((kra: any, kraIdx: number) => (
+                <Card key={kraIdx} className="border-border">
+                  <CardHeader className="p-3 pb-2">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">{kra.category || "General"}</Badge>
+                          <button onClick={() => handleAiRemoveKra(kraIdx)} className="text-muted hover:text-red-400 transition-colors ml-auto">
+                            <X size={14} />
+                          </button>
+                        </div>
+                        <Input
+                          value={kra.name}
+                          onChange={(e) => handleAiResultEdit(kraIdx, "name", e.target.value)}
+                          className="font-medium text-sm h-8"
+                          placeholder="KRA Name"
+                        />
+                        <Input
+                          value={kra.description || ""}
+                          onChange={(e) => handleAiResultEdit(kraIdx, "description", e.target.value)}
+                          className="text-xs text-muted h-7"
+                          placeholder="Description"
+                        />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-3 pt-0">
+                    <div className="space-y-2">
+                      {kra.kpis?.map((kpi: any, kpiIdx: number) => (
+                        <div key={kpiIdx} className="flex items-center gap-2 rounded-lg bg-surface-2 p-2">
+                          <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                            <div className="col-span-4">
+                              <Input
+                                value={kpi.name}
+                                onChange={(e) => handleAiKpiEdit(kraIdx, kpiIdx, "name", e.target.value)}
+                                className="text-xs h-7"
+                                placeholder="KPI Name"
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <Input
+                                value={kpi.targetValue ?? ""}
+                                onChange={(e) => handleAiKpiEdit(kraIdx, kpiIdx, "targetValue", e.target.value)}
+                                className="text-xs h-7"
+                                placeholder="Target"
+                                type="number"
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <Input
+                                value={kpi.unit || ""}
+                                onChange={(e) => handleAiKpiEdit(kraIdx, kpiIdx, "unit", e.target.value)}
+                                className="text-xs h-7"
+                                placeholder="Unit"
+                              />
+                            </div>
+                            <div className="col-span-3">
+                              <select
+                                value={kpi.frequency || "MONTHLY"}
+                                onChange={(e) => handleAiKpiEdit(kraIdx, kpiIdx, "frequency", e.target.value)}
+                                className="w-full h-7 rounded-md border border-border bg-background px-2 text-xs"
+                              >
+                                <option value="DAILY">Daily</option>
+                                <option value="WEEKLY">Weekly</option>
+                                <option value="MONTHLY">Monthly</option>
+                                <option value="QUARTERLY">Quarterly</option>
+                                <option value="YEARLY">Yearly</option>
+                              </select>
+                            </div>
+                            <div className="col-span-1 flex justify-center">
+                              <button onClick={() => handleAiRemoveKpi(kraIdx, kpiIdx)} className="text-muted hover:text-red-400 transition-colors">
+                                <X size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setShowAiDialog(false)}>Cancel</Button>
+                <Button onClick={handleAiSaveAll} disabled={savingKra || aiResults.length === 0} className="gap-2">
+                  {savingKra ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : <><Plus size={16} /> Save All KRAs & KPIs</>}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
