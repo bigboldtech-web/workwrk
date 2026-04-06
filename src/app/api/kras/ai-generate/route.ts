@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { prisma } from "@/lib/prisma";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import Anthropic from "@anthropic-ai/sdk";
 
 const anthropic = new Anthropic({
@@ -7,37 +8,76 @@ const anthropic = new Anthropic({
 });
 
 export async function POST(req: NextRequest) {
-  const { error } = await getSessionOrFail();
+  const { error, session } = await getSessionOrFail();
   if (error) return error;
 
+  const orgId = getOrgId(session);
   const { jobTitle, jobDescription } = await req.json();
 
   if (!jobTitle?.trim()) {
     return jsonError("Job title is required");
   }
 
+  // Gather company context
+  const [org, departments, existingKras, kraCategories] = await Promise.all([
+    prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { name: true, settings: true },
+    }),
+    prisma.department.findMany({
+      where: { organizationId: orgId },
+      select: { name: true },
+      take: 30,
+    }),
+    prisma.kRA.findMany({
+      where: { organizationId: orgId },
+      select: { name: true, category: true },
+      take: 50,
+    }),
+    prisma.kraCategory.findMany({
+      where: { organizationId: orgId },
+      select: { name: true },
+    }),
+  ]);
+
+  const settings = (org?.settings as any) || {};
+  const profile = settings.companyProfile || {};
+  const companyName = org?.name || "";
+  const industry = profile.industry || settings.industry || "";
+  const mission = profile.mission || "";
+  const vision = profile.vision || "";
+  const about = profile.about || "";
+  const values = Array.isArray(profile.values) ? profile.values.join(", ") : "";
+  const deptNames = departments.map((d) => d.name).join(", ");
+  const existingCategories = kraCategories.map((c) => c.name);
+  const existingKraNames = existingKras.map((k) => k.name).slice(0, 20).join(", ");
+
+  // Build company context block
+  let companyContext = "";
+  if (companyName) companyContext += `Company: ${companyName}\n`;
+  if (industry) companyContext += `Industry: ${industry}\n`;
+  if (about) companyContext += `About: ${about}\n`;
+  if (mission) companyContext += `Mission: ${mission}\n`;
+  if (vision) companyContext += `Vision: ${vision}\n`;
+  if (values) companyContext += `Core Values: ${values}\n`;
+  if (deptNames) companyContext += `Departments: ${deptNames}\n`;
+  if (existingKraNames) companyContext += `Existing KRAs: ${existingKraNames}\n`;
+
+  const categoryInstruction = existingCategories.length > 0
+    ? `Use these existing categories where appropriate: ${existingCategories.join(", ")}. You may create new categories only if none of the existing ones fit.`
+    : "Create appropriate categories for each KRA (e.g., Performance, Quality, Growth, Leadership, Communication).";
+
   if (!process.env.ANTHROPIC_API_KEY) {
-    // Fallback template
     return jsonSuccess({
       kras: [
         {
           name: "Core Job Performance",
           description: `Primary responsibilities for ${jobTitle}`,
-          category: "Performance",
+          category: existingCategories[0] || "Performance",
           kpis: [
             { name: "Task Completion Rate", type: "QUANTITATIVE", unit: "%", targetValue: 95, frequency: "MONTHLY", description: "Percentage of assigned tasks completed on time" },
             { name: "Quality Score", type: "QUANTITATIVE", unit: "score", targetValue: 90, frequency: "MONTHLY", description: "Quality rating of deliverables" },
             { name: "Deadline Adherence", type: "QUANTITATIVE", unit: "%", targetValue: 90, frequency: "MONTHLY", description: "Percentage of deadlines met" },
-          ],
-        },
-        {
-          name: "Professional Development",
-          description: "Growth and skill enhancement",
-          category: "Growth",
-          kpis: [
-            { name: "Training Hours", type: "QUANTITATIVE", unit: "hours", targetValue: 8, frequency: "MONTHLY", description: "Hours spent on learning and development" },
-            { name: "Skills Assessment Score", type: "QUANTITATIVE", unit: "score", targetValue: 80, frequency: "QUARTERLY", description: "Score from periodic skills evaluation" },
-            { name: "Certifications Completed", type: "QUANTITATIVE", unit: "count", targetValue: 1, frequency: "QUARTERLY", description: "Number of relevant certifications obtained" },
           ],
         },
       ],
@@ -50,13 +90,17 @@ export async function POST(req: NextRequest) {
       max_tokens: 3000,
       system: `You are an HR and performance management expert. Generate Key Result Areas (KRAs) and Key Performance Indicators (KPIs) for job roles.
 
+You have deep knowledge of this company and must tailor all KRAs and KPIs to align with the company's business, industry, values, and goals. Do NOT generate generic KRAs — every KRA should reflect what this specific company actually needs from this role.
+
+${companyContext ? `=== COMPANY CONTEXT ===\n${companyContext}` : ""}
+
 Return a JSON object with this exact structure:
 {
   "kras": [
     {
       "name": "KRA Name",
       "description": "Brief description of this KRA",
-      "category": "Category (e.g., Performance, Quality, Growth, Leadership, Communication)",
+      "category": "Category name",
       "kpis": [
         {
           "name": "KPI Name",
@@ -74,14 +118,15 @@ Return a JSON object with this exact structure:
 
 Rules:
 - Generate exactly 5 KRAs, each with exactly 3 KPIs
-- KPIs should be measurable and specific to the job role
+- ${categoryInstruction}
+- KPIs must be measurable, specific to the job role, AND relevant to this company's business
 - Types: "QUANTITATIVE" (numeric), "QUALITATIVE" (rating), "BINARY" (yes/no)
 - Frequencies: "DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"
-- Set realistic target values based on industry standards
+- Set realistic target values based on industry standards for ${industry || "this business"}
 - Set lowerIsBetter to true for metrics like error rate, response time, complaints
 - Use practical units: %, count, hours, score, $, days, etc.
-- Categories should be relevant to the role
-- Make KPIs actionable and trackable
+- Avoid duplicating existing KRAs in the system
+- Make KPIs actionable, trackable, and aligned with the company's mission and values
 - Return ONLY valid JSON, no markdown or explanation`,
       messages: [
         {
