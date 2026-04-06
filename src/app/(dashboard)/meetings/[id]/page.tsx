@@ -81,6 +81,9 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
   const [isRecording, setIsRecording] = useState(false);
   const [supported, setSupported] = useState(true);
   const recognitionRef = useRef<any>(null);
+  const isRecordingRef = useRef(false);
+  const onTranscriptRef = useRef(onTranscript);
+  onTranscriptRef.current = onTranscript;
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -91,34 +94,44 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
-    let finalTranscript = "";
-
     recognition.onresult = (event: any) => {
-      let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript + " ";
-          onTranscript(transcript.trim());
-        } else {
-          interim += transcript;
+          const transcript = event.results[i][0].transcript.trim();
+          if (transcript) onTranscriptRef.current(transcript);
         }
       }
     };
 
-    recognition.onerror = () => setIsRecording(false);
-    recognition.onend = () => setIsRecording(false);
+    recognition.onerror = (e: any) => {
+      // Don't stop on "no-speech" — just keep listening
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      isRecordingRef.current = false;
+      setIsRecording(false);
+    };
+
+    // Auto-restart when it stops (browser kills it after silence)
+    recognition.onend = () => {
+      if (isRecordingRef.current) {
+        // User still wants to record — restart automatically
+        try { recognition.start(); } catch {}
+      } else {
+        setIsRecording(false);
+      }
+    };
 
     recognitionRef.current = recognition;
-  }, [onTranscript]);
+  }, []); // No dependencies — stable ref
 
   function toggleRecording() {
     if (!recognitionRef.current) return;
     if (isRecording) {
+      isRecordingRef.current = false;
       recognitionRef.current.stop();
       setIsRecording(false);
     } else {
-      recognitionRef.current.start();
+      isRecordingRef.current = true;
+      try { recognitionRef.current.start(); } catch {}
       setIsRecording(true);
     }
   }
