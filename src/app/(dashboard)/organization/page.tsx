@@ -188,6 +188,7 @@ export default function OrganizationPage() {
   });
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [newValue, setNewValue] = useState("");
   const [orgName, setOrgName] = useState("");
 
@@ -250,6 +251,41 @@ export default function OrganizationPage() {
         toastSuccess("Company profile saved");
       }
     } catch { toastError("Failed to save profile"); } finally { setSavingProfile(false); }
+  }
+
+  async function aiGenerateProfile() {
+    setAiGenerating(true);
+    try {
+      const res = await fetch("/api/organization/ai-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: orgName,
+          website: companyProfile.website,
+          industry: companyProfile.industry,
+          currentAbout: companyProfile.about,
+          currentMission: companyProfile.mission,
+          currentVision: companyProfile.vision,
+          currentValues: companyProfile.values,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const result = data.data || {};
+        setCompanyProfile({
+          ...companyProfile,
+          about: result.about || companyProfile.about,
+          mission: result.mission || companyProfile.mission,
+          vision: result.vision || companyProfile.vision,
+          values: result.values?.length > 0 ? result.values : companyProfile.values,
+          industry: result.industry || companyProfile.industry,
+        });
+        setEditingProfile(true);
+        toastSuccess("AI generated profile — review and save");
+      } else {
+        toastError("AI generation failed");
+      }
+    } catch { toastError("AI generation failed"); } finally { setAiGenerating(false); }
   }
 
   function addValue() {
@@ -432,9 +468,14 @@ export default function OrganizationPage() {
                 </Button>
               </div>
             ) : (
-              <Button variant="outline" size="sm" onClick={() => setEditingProfile(true)}>
-                <Edit3 size={14} className="mr-1" /> Edit
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="gap-1 border-purple-500/30 text-purple-400 hover:bg-purple-500/10" onClick={aiGenerateProfile} disabled={aiGenerating}>
+                  <Sparkles size={14} /> {aiGenerating ? "Generating..." : "AI Assist"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setEditingProfile(true)}>
+                  <Edit3 size={14} className="mr-1" /> Edit
+                </Button>
+              </div>
             )}
           </div>
 
@@ -500,7 +541,17 @@ export default function OrganizationPage() {
                   className="text-sm"
                 />
               ) : (
-                <p className="text-sm text-muted whitespace-pre-wrap">{companyProfile.about || "No company description added yet."}</p>
+                {companyProfile.about ? (
+                  <p className="text-sm text-muted whitespace-pre-wrap">{companyProfile.about}</p>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-muted mb-2">No company description added yet.</p>
+                    <p className="text-xs text-muted mb-3">A strong company description helps AI generate better KRAs, KPIs, and align everything to your business.</p>
+                    <Button variant="outline" size="sm" className="gap-1 border-purple-500/30 text-purple-400" onClick={aiGenerateProfile} disabled={aiGenerating}>
+                      <Sparkles size={14} /> {aiGenerating ? "Generating..." : "Generate with AI"}
+                    </Button>
+                  </div>
+                )}
               )}
             </CardContent>
           </Card>

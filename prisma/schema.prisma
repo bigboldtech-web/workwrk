@@ -47,6 +47,7 @@ model Organization {
   okrs                OKR[]
   pulseSurveys        PulseSurvey[]
   tools               Tool[]
+  assets              Asset[]
 
   @@index([slug])
 }
@@ -124,6 +125,7 @@ model User {
   ideasReviewed       Idea[] @relation("IdeaReviewer")
   ideaVotes           IdeaVote[]
   ideaComments        IdeaComment[]
+  assignedAssets      Asset[]  @relation("AssetAssignee")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -1459,4 +1461,69 @@ model ToolShare {
   @@unique([toolId, userId])
   @@index([userId])
   @@index([toolId])
+}
+
+model Asset {
+  id             String       @id @default(cuid())
+  name           String
+  type           AssetType
+  brand          String?
+  model          String?
+  serialNumber   String?
+  imeiNumber     String?
+  purchaseDate   DateTime?
+  purchaseCost   Float?
+  warrantyExpiry DateTime?
+  condition      AssetCondition @default(GOOD)
+  status         AssetStatus    @default(AVAILABLE)
+  notes          String?
+
+  assignedToId   String?
+  assignedTo     User?        @relation("AssetAssignee", fields: [assignedToId], references: [id])
+  assignedAt     DateTime?
+  returnedAt     DateTime?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([assignedToId])
+  @@index([status])
+}
+
+enum AssetType {
+  LAPTOP
+  DESKTOP
+  MONITOR
+  PHONE
+  TABLET
+  KEYBOARD
+  MOUSE
+  HEADSET
+  WEBCAM
+  CHAIR
+  DESK
+  ID_CARD
+  ACCESS_CARD
+  VEHICLE
+  OTHER
+}
+
+enum AssetCondition {
+  NEW
+  GOOD
+  FAIR
+  POOR
+  DAMAGED
+}
+
+enum AssetStatus {
+  AVAILABLE
+  ASSIGNED
+  IN_REPAIR
+  RETIRED
+  LOST
 }

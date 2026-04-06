@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Users,
   Target, CheckSquare, TrendingUp, Clock, Star, Smile, Zap, Heart,
-  Edit3, Save,
+  Edit3, Save, Package, Laptop, Monitor, Smartphone,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -620,6 +620,7 @@ export default function UserProfilePage() {
           <TabsTrigger value="reviews">Reviews</TabsTrigger>
           <TabsTrigger value="kudos">Kudos {user._count?.kudosReceived > 0 ? `(${user._count.kudosReceived})` : ""}</TabsTrigger>
           <TabsTrigger value="checkins">Check-ins</TabsTrigger>
+          <TabsTrigger value="assets">Assets</TabsTrigger>
           <TabsTrigger value="reports">Direct Reports</TabsTrigger>
         </TabsList>
 
@@ -807,7 +808,74 @@ export default function UserProfilePage() {
             </div>
           )}
         </TabsContent>
+
+        {/* Assets Tab */}
+        <TabsContent value="assets" className="mt-4">
+          <AssetsTab userId={id as string} />
+        </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function AssetsTab({ userId }: { userId: string }) {
+  const [assets, setAssets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/assets?assignedToId=${userId}`)
+      .then((r) => r.ok ? r.json() : { data: [] })
+      .then((d) => setAssets(d.data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [userId]);
+
+  if (loading) return <div className="space-y-2">{[1,2].map((i) => <div key={i} className="h-16 bg-surface-2 rounded-lg animate-pulse" />)}</div>;
+
+  if (assets.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <Package size={32} className="mx-auto text-muted mb-3" />
+        <p className="text-sm text-muted">No assets assigned</p>
+        <p className="text-xs text-muted mt-1">Assets can be assigned from the Assets page</p>
+      </div>
+    );
+  }
+
+  const typeIcons: Record<string, any> = { LAPTOP: Laptop, DESKTOP: Monitor, MONITOR: Monitor, PHONE: Smartphone };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted mb-3">{assets.length} asset{assets.length !== 1 ? "s" : ""} assigned</p>
+      {assets.map((asset: any) => {
+        const Icon = typeIcons[asset.type] || Package;
+        return (
+          <Card key={asset.id}>
+            <CardContent className="p-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center shrink-0">
+                  <Icon size={18} className="text-muted" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium truncate">{asset.name}</p>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{asset.condition}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-muted mt-0.5">
+                    {asset.brand && <span>{asset.brand}</span>}
+                    {asset.model && <span>· {asset.model}</span>}
+                    {asset.serialNumber && <span>· S/N: {asset.serialNumber}</span>}
+                    {asset.imeiNumber && <span>· IMEI: {asset.imeiNumber}</span>}
+                  </div>
+                </div>
+                {asset.assignedAt && (
+                  <p className="text-[10px] text-muted shrink-0">Since {new Date(asset.assignedAt).toLocaleDateString()}</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }
