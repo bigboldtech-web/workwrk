@@ -72,5 +72,18 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Notify if assigned at creation
+  if (assignedToId) {
+    await prisma.notification.create({
+      data: {
+        userId: assignedToId,
+        type: "asset_assigned",
+        title: "Asset Assigned",
+        message: `You have been assigned: ${asset.name}${asset.serialNumber ? ` (S/N: ${asset.serialNumber})` : ""}`,
+        link: "/people/" + assignedToId,
+      },
+    });
+  }
+
   return jsonSuccess(asset, 201);
 }

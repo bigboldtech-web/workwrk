@@ -57,6 +57,23 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Notify all org users (skip the author)
+  const users = await prisma.user.findMany({
+    where: { organizationId: orgId, deletedAt: null, id: { not: userId } },
+    select: { id: true },
+  });
+  if (users.length > 0) {
+    await prisma.notification.createMany({
+      data: users.map((u) => ({
+        userId: u.id,
+        type: "announcement",
+        title: `${announcement.priority === "URGENT" ? "🚨 " : ""}New Announcement`,
+        message: announcement.title,
+        link: "/announcements",
+      })),
+    });
+  }
+
   return jsonSuccess(announcement, 201);
   } catch (err: any) {
     console.error("Announcements POST error:", err);

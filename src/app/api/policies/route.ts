@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
 
   if (!title?.trim() || !content?.trim()) return jsonError("Title and content required");
 
+  const finalStatus = status || "PUBLISHED";
   const policy = await prisma.policy.create({
     data: {
       title: title.trim(),
@@ -49,10 +50,29 @@ export async function POST(req: NextRequest) {
       category: category || null,
       requiresAck: requiresAck !== false,
       effectiveDate: effectiveDate ? new Date(effectiveDate) : null,
-      status: status || "PUBLISHED",
+      status: finalStatus,
       organizationId: orgId,
     },
   });
+
+  // Notify all org users when published
+  if (finalStatus === "PUBLISHED") {
+    const users = await prisma.user.findMany({
+      where: { organizationId: orgId, deletedAt: null },
+      select: { id: true },
+    });
+    if (users.length > 0) {
+      await prisma.notification.createMany({
+        data: users.map((u) => ({
+          userId: u.id,
+          type: "policy_published",
+          title: policy.requiresAck ? "New Policy — Acknowledgment Required" : "New Policy Published",
+          message: `${policy.title}${policy.category ? ` (${policy.category})` : ""}`,
+          link: "/policies",
+        })),
+      });
+    }
+  }
 
   return jsonSuccess(policy, 201);
 }

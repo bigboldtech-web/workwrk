@@ -180,5 +180,16 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Notify the user
+  await prisma.notification.create({
+    data: {
+      userId,
+      type: "kra_assigned",
+      title: "New KRA Assigned",
+      message: `You have been assigned the KRA: ${kra.name} (${weightage}% weightage)`,
+      link: "/kra-kpi",
+    },
+  });
+
   return jsonSuccess(assignment, 201);
 }

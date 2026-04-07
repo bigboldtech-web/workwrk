@@ -75,6 +75,21 @@ export async function POST(req: NextRequest) {
               status: "ACTIVE",
             })),
           });
+
+          // Notify newly assigned users
+          const kraInfo = await prisma.kRA.findUnique({ where: { id: entry.kraId }, select: { name: true } });
+          if (kraInfo) {
+            await prisma.notification.createMany({
+              data: newIds.map((userId: string) => ({
+                userId,
+                type: "kra_assigned",
+                title: "New KRA Assigned",
+                message: `You have been assigned the KRA: ${kraInfo.name} (${entry.weightage}% weightage)`,
+                link: "/kra-kpi",
+              })),
+            });
+          }
+
           totalAssigned += newIds.length;
         }
       }

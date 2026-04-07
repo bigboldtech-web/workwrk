@@ -67,6 +67,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     },
   });
 
+  // Notify newly assigned user
+  if (body.assignedToId !== undefined && body.assignedToId && body.assignedToId !== existing.assignedToId) {
+    await prisma.notification.create({
+      data: {
+        userId: body.assignedToId,
+        type: "asset_assigned",
+        title: "Asset Assigned",
+        message: `You have been assigned: ${updated.name}${updated.serialNumber ? ` (S/N: ${updated.serialNumber})` : ""}`,
+        link: "/people/" + body.assignedToId,
+      },
+    });
+  }
+
   return jsonSuccess(updated);
 }
 

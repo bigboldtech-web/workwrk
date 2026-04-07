@@ -81,8 +81,19 @@ function renderMarkdown(text: string) {
     });
 }
 
-function boldify(text: string): string {
+function escapeHtml(text: string): string {
   return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function boldify(text: string): string {
+  // Escape HTML first to prevent XSS, then apply formatting
+  const escaped = escapeHtml(text);
+  return escaped
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')
     .replace(/`(.+?)`/g, '<code class="bg-border px-1 py-0.5 rounded text-purple-300 text-xs font-mono">$1</code>');
 }
