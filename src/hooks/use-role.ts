@@ -32,11 +32,11 @@ export function useRole() {
     isAdmin: ADMIN_ROLES.includes(accessLevel),
     isEmployee: accessLevel === "EMPLOYEE" || accessLevel === "AGENT",
     isExecutive,
-    canManagePeople: ADMIN_ROLES.includes(accessLevel),
+    canManagePeople: MANAGER_ROLES.includes(accessLevel),
     canManageSOPs: MANAGER_ROLES.includes(accessLevel),
     canManageReviews: MANAGER_ROLES.includes(accessLevel),
     canManageKRAs: MANAGER_ROLES.includes(accessLevel),
-    canInvite: ADMIN_ROLES.includes(accessLevel),
+    canInvite: MANAGER_ROLES.includes(accessLevel),
     canViewAnalytics: MANAGER_ROLES.includes(accessLevel),
   };
 }

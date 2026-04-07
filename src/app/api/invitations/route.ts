@@ -38,7 +38,8 @@ export async function POST(req: Request) {
     const orgId = (session.user as any).organizationId;
     const accessLevel = (session.user as any).accessLevel;
 
-    if (!["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL"].includes(accessLevel)) {
+    const MANAGER_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR"];
+    if (!MANAGER_LEVELS.includes(accessLevel)) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
@@ -123,7 +124,8 @@ export async function DELETE(req: Request) {
     const orgId = (session.user as any).organizationId;
     const accessLevel = (session.user as any).accessLevel;
 
-    if (!["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL"].includes(accessLevel)) {
+    const MANAGER_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR"];
+    if (!MANAGER_LEVELS.includes(accessLevel)) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
