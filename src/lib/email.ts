@@ -100,6 +100,7 @@ export async function queueEmail({
         to,
         subject,
         template,
+        html,
         variables: variables || {},
         organizationId,
         status: "QUEUED",
@@ -163,7 +164,7 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
         from: FROM_ADDRESS,
         to: email.to,
         subject: email.subject,
-        html: renderFromLog(email),
+        html: email.html || renderFromLog(email),
       });
 
       await prisma.emailLog.update({

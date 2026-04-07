@@ -1011,6 +1011,7 @@ model EmailLog {
   to             String
   subject        String
   template       String
+  html           String?
   variables      Json        @default("{}")
   status         EmailStatus @default(QUEUED)
   error          String?

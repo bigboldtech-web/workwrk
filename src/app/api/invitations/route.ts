@@ -86,15 +86,19 @@ export async function POST(req: Request) {
       accessLevel: inviteLevel || "EMPLOYEE",
     });
 
-    sendEmail({
-      to: email,
-      subject,
-      html,
-      template: "invitation",
-      variables: { companyName: org?.name, inviteLink },
-      organizationId: orgId,
-      category: "invitation",
-    });
+    try {
+      await sendEmail({
+        to: email,
+        subject,
+        html,
+        template: "invitation",
+        variables: { companyName: org?.name, inviteLink },
+        organizationId: orgId,
+        category: "invitation",
+      });
+    } catch (emailErr) {
+      console.error("[Invitation] Email send failed:", emailErr);
+    }
 
     broadcastWebhook({
       organizationId: orgId,
