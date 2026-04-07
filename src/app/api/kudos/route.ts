@@ -108,16 +108,22 @@ export async function POST(req: NextRequest) {
     dashboardLink: `${baseUrl}/dashboard`,
   });
 
-  sendEmail({
-    to: receiver.email || "",
-    subject,
-    html,
-    template: "kudos",
-    variables: { senderName: `${kudos.giver.firstName} ${kudos.giver.lastName}`, message: message.trim() },
-    organizationId: orgId,
-    userId: receiverId,
-    category: "kudos",
-  });
+  if (receiver.email) {
+    try {
+      await sendEmail({
+        to: receiver.email,
+        subject,
+        html,
+        template: "kudos",
+        variables: { senderName: `${kudos.giver.firstName} ${kudos.giver.lastName}`, message: message.trim() },
+        organizationId: orgId,
+        userId: receiverId,
+        category: "kudos",
+      });
+    } catch (emailErr) {
+      console.error("[Kudos] Email send failed:", emailErr);
+    }
+  }
 
   logActivity({
     type: "kudos_given",

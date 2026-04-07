@@ -47,15 +47,19 @@ export async function POST(req: Request) {
       firstName: user.firstName,
     });
 
-    sendEmail({
-      to: email,
-      subject,
-      html,
-      template: "password-reset",
-      variables: { resetLink, firstName: user.firstName },
-      organizationId: user.organizationId,
-      category: "invitation", // Always send, bypass preferences
-    });
+    try {
+      await sendEmail({
+        to: email,
+        subject,
+        html,
+        template: "password-reset",
+        variables: { resetLink, firstName: user.firstName },
+        organizationId: user.organizationId,
+        category: "invitation", // Always send, bypass preferences
+      });
+    } catch (emailErr) {
+      console.error("[ForgotPassword] Email send failed:", emailErr);
+    }
 
     return successResponse;
   } catch (error) {

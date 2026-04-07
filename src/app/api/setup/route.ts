@@ -165,15 +165,19 @@ export async function POST(req: Request) {
         accessLevel: invite.role || "EMPLOYEE",
       });
 
-      sendEmail({
-        to: invite.email,
-        subject,
-        html,
-        template: "invitation",
-        variables: { companyName: org?.name, inviteLink },
-        organizationId: orgId,
-        category: "invitation",
-      });
+      try {
+        await sendEmail({
+          to: invite.email,
+          subject,
+          html,
+          template: "invitation",
+          variables: { companyName: org?.name, inviteLink },
+          organizationId: orgId,
+          category: "invitation",
+        });
+      } catch (emailErr) {
+        console.error("[Setup] Email send failed:", emailErr);
+      }
     }
 
     return NextResponse.json({ success: true });

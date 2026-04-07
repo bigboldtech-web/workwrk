@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
+import { sendEmail } from "@/lib/email";
+import { welcomeTemplate } from "@/lib/email-templates";
 
 export async function POST(req: Request) {
   try {
@@ -76,6 +78,27 @@ export async function POST(req: Request) {
 
       return { organization, user };
     });
+
+    // Send welcome email
+    try {
+      const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+      const { subject, html } = welcomeTemplate({
+        firstName,
+        organizationName,
+        loginLink: `${baseUrl}/login`,
+      });
+      await sendEmail({
+        to: email,
+        subject,
+        html,
+        template: "welcome",
+        variables: { firstName, organizationName },
+        organizationId: result.organization.id,
+        category: "invitation",
+      });
+    } catch (emailErr) {
+      console.error("[Register] Welcome email failed:", emailErr);
+    }
 
     return NextResponse.json(
       {

@@ -206,10 +206,12 @@ function renderFromLog(email: { template: string; variables: any }): string {
 export async function sendEmail(params: QueueEmailParams): Promise<void> {
   await queueEmail(params);
 
-  // Attempt immediate send in background (fire-and-forget)
-  processEmailQueue().catch((err) => {
-    console.error("[Email] Background queue processing failed:", err);
-  });
+  // Process the queue immediately so the email gets sent before the request returns
+  try {
+    await processEmailQueue();
+  } catch (err) {
+    console.error("[Email] Queue processing failed:", err);
+  }
 }
 
 // ==========================================

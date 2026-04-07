@@ -129,16 +129,20 @@ export async function POST(req: NextRequest) {
       sopLink: `${baseUrl}/sops/my-sops`,
     });
 
-    sendEmail({
-      to: user.email,
-      subject,
-      html,
-      template: "sop-assigned",
-      variables: { sopTitle: sop.title, dueDate },
-      organizationId: orgId,
-      userId: user.id,
-      category: "sop",
-    });
+    try {
+      await sendEmail({
+        to: user.email,
+        subject,
+        html,
+        template: "sop-assigned",
+        variables: { sopTitle: sop.title, dueDate },
+        organizationId: orgId,
+        userId: user.id,
+        category: "sop",
+      });
+    } catch (emailErr) {
+      console.error("[SOPAssignment] Email send failed:", emailErr);
+    }
   }
 
   return jsonSuccess({ message: `${result.count} assignments created`, count: result.count }, 201);

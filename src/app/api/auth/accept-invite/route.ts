@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { sendEmail } from "@/lib/email";
+import { welcomeTemplate } from "@/lib/email-templates";
 
 // GET: Fetch invitation details by token
 export async function GET(req: NextRequest) {
@@ -96,6 +98,31 @@ export async function POST(req: Request) {
         data: { accepted: true },
       });
     });
+
+    // Send welcome email
+    try {
+      const org = await prisma.organization.findUnique({
+        where: { id: invitation.organizationId },
+        select: { name: true },
+      });
+      const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+      const { subject, html } = welcomeTemplate({
+        firstName,
+        organizationName: org?.name || "your team",
+        loginLink: `${baseUrl}/login`,
+      });
+      await sendEmail({
+        to: invitation.email,
+        subject,
+        html,
+        template: "welcome",
+        variables: { firstName, organizationName: org?.name },
+        organizationId: invitation.organizationId,
+        category: "invitation",
+      });
+    } catch (emailErr) {
+      console.error("[AcceptInvite] Welcome email failed:", emailErr);
+    }
 
     return NextResponse.json({ message: "Account created successfully" }, { status: 201 });
   } catch (error: any) {

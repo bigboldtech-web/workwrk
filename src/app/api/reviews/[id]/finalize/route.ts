@@ -81,16 +81,20 @@ export async function POST(
       reviewLink: `${baseUrl}/reviews/${cycleId}`,
     });
 
-    sendEmail({
-      to: user.email,
-      subject,
-      html,
-      template: "review-completed",
-      variables: { reviewCycleName: cycle.name },
-      organizationId: orgId,
-      userId: user.id,
-      category: "review",
-    });
+    try {
+      await sendEmail({
+        to: user.email,
+        subject,
+        html,
+        template: "review-completed",
+        variables: { reviewCycleName: cycle.name },
+        organizationId: orgId,
+        userId: user.id,
+        category: "review",
+      });
+    } catch (emailErr) {
+      console.error("[ReviewFinalize] Email send failed:", emailErr);
+    }
   }
 
   logActivity({
