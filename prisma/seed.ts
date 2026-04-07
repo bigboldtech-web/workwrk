@@ -65,7 +65,7 @@ async function main() {
 
   const roleMap = Object.fromEntries(roles.map((r) => [r.title, r.id]));
   const passwordHash = await bcrypt.hash("password123", 12);
-  const adminPasswordHash = await bcrypt.hash("TheyWrk@1212@TW", 12);
+  const adminPasswordHash = await bcrypt.hash("WorkWrk@1212@WW", 12);
 
   // Create admin user
   const admin = await prisma.user.create({
