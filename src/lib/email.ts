@@ -204,14 +204,15 @@ function renderFromLog(email: { template: string; variables: any }): string {
 // ==========================================
 
 export async function sendEmail(params: QueueEmailParams): Promise<void> {
+  // Queue synchronously (fast — just a DB insert)
   await queueEmail(params);
 
-  // Process the queue immediately so the email gets sent before the request returns
-  try {
-    await processEmailQueue();
-  } catch (err) {
-    console.error("[Email] Queue processing failed:", err);
-  }
+  // Process the queue in background — this is safe in a long-running Node
+  // server because the event loop keeps the promise alive after the response
+  // returns. Errors are caught and logged so we never throw to the request.
+  processEmailQueue().catch((err) => {
+    console.error("[Email] Background queue processing failed:", err);
+  });
 }
 
 // ==========================================
