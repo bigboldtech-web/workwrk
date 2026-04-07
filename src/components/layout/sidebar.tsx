@@ -90,10 +90,14 @@ export function Sidebar() {
       })
       .catch(() => {});
 
-    // Fetch unread announcement count
+    // Fetch unread announcement count (browser-cached for 60s, so this is
+    // free if the banner already fetched it)
     fetch("/api/announcements")
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => { const items = d?.data || []; setAnnouncementCount(Array.isArray(items) ? items.length : 0); })
+      .then((d) => {
+        const items = Array.isArray(d) ? d : d?.data || [];
+        setAnnouncementCount(items.length);
+      })
       .catch(() => {});
   }, []);
 

@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
@@ -22,7 +22,9 @@ export async function GET() {
       take: 50,
     });
 
-    return jsonSuccess(announcements);
+    return NextResponse.json(announcements, {
+      headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
+    });
   } catch (err: any) {
     console.error("Announcements GET error:", err);
     return jsonError(err.message || "Failed to fetch announcements", 500);

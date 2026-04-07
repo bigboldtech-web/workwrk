@@ -1,5 +1,6 @@
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId } from "@/lib/api-helpers";
 import { getTopPerformers } from "@/services/performanceScoreService";
 
 export async function GET() {
@@ -121,7 +122,7 @@ export async function GET() {
   if (pipCount > 0) alerts.push({ type: "danger", message: `${pipCount} employee(s) on PIP`, time: "active" });
   if (sopCompliance > 80) alerts.push({ type: "success", message: `SOP compliance is at ${sopCompliance}%`, time: "this period" });
 
-  return jsonSuccess({
+  return NextResponse.json({
     stats: { totalPeople, newPeopleThisMonth, sopCompliance, sopCount },
     topPerformers,
     recentKpiRecords: recentKpiRecords.map((r) => ({
@@ -141,5 +142,11 @@ export async function GET() {
       giver: k.giver, receiver: k.receiver,
       createdAt: k.createdAt.toISOString(),
     })),
+  }, {
+    headers: {
+      // Cache dashboard for 30 seconds in browser to avoid hammering DB on
+      // navigation / refresh
+      "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+    },
   });
 }

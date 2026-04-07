@@ -93,6 +93,8 @@ export async function GET() {
         sops: org._count.sops,
         aiQueries: org._count.aiQueries,
       },
+    }, {
+      headers: { "Cache-Control": "private, max-age=120, stale-while-revalidate=300" },
     });
   } catch (error) {
     console.error("Settings GET error:", error);

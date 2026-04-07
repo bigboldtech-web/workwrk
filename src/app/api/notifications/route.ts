@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
@@ -7,15 +7,20 @@ export async function GET() {
   if (error) return error;
 
   const userId = getUserId(session);
-  const notifications = await prisma.notification.findMany({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-    take: 50,
+
+  // Run both queries in parallel
+  const [notifications, unreadCount] = await Promise.all([
+    prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
+    prisma.notification.count({ where: { userId, read: false } }),
+  ]);
+
+  return NextResponse.json({ notifications, unreadCount }, {
+    headers: { "Cache-Control": "private, max-age=20, stale-while-revalidate=60" },
   });
-
-  const unreadCount = await prisma.notification.count({ where: { userId, read: false } });
-
-  return jsonSuccess({ notifications, unreadCount });
 }
 
 export async function PATCH(req: NextRequest) {
