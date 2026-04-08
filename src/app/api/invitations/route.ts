@@ -6,6 +6,7 @@ import { broadcastWebhook } from "@/lib/webhooks";
 import crypto from "crypto";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
+import { hasPermission } from "@/lib/api-helpers";
 
 export async function GET() {
   try {
@@ -36,10 +37,9 @@ export async function POST(req: Request) {
     }
 
     const orgId = (session.user as any).organizationId;
-    const accessLevel = (session.user as any).accessLevel;
 
-    const MANAGER_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR"];
-    if (!MANAGER_LEVELS.includes(accessLevel)) {
+    const allowed = await hasPermission(session, "people", "create");
+    if (!allowed) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
@@ -122,10 +122,9 @@ export async function DELETE(req: Request) {
     }
 
     const orgId = (session.user as any).organizationId;
-    const accessLevel = (session.user as any).accessLevel;
 
-    const MANAGER_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR"];
-    if (!MANAGER_LEVELS.includes(accessLevel)) {
+    const allowed = await hasPermission(session, "people", "create");
+    if (!allowed) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 
@@ -47,7 +47,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  const denied = await requirePermission(session, "sops", "create");
+  if (denied) return denied;
 
   const body = await req.json();
   const { title, description, category, subcategory, content, kraId, sopType } = body;

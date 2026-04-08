@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "./auth";
 import { AccessLevel } from "@/generated/prisma";
+import { prisma } from "./prisma";
+import { checkPermission, type PermissionModule, type PermissionMatrix, type AccessLevel as PermAccessLevel } from "./permissions";
 
 export async function getSessionOrFail() {
   const session = await getServerSession(authOptions);
@@ -42,4 +44,55 @@ export function jsonError(message: string, status: number = 400) {
 
 export function jsonSuccess(data: any, status: number = 200) {
   return NextResponse.json(data, { status });
+}
+
+// ============================================
+// Permission checks
+// ============================================
+
+// Per-request cache to avoid hitting DB repeatedly within one request
+const permissionCache = new WeakMap<object, PermissionMatrix | null>();
+
+async function getOrgPermissionMatrix(session: any): Promise<PermissionMatrix | null> {
+  if (permissionCache.has(session)) return permissionCache.get(session)!;
+  try {
+    const orgId = getOrgId(session);
+    const org = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { settings: true },
+    });
+    const matrix = ((org?.settings as any)?.permissions || null) as PermissionMatrix | null;
+    permissionCache.set(session, matrix);
+    return matrix;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if the current user has permission for a module/action.
+ * Falls back to defaults if no custom matrix exists.
+ */
+export async function hasPermission(
+  session: any,
+  module: PermissionModule,
+  action: string
+): Promise<boolean> {
+  const accessLevel = session.user.accessLevel as PermAccessLevel;
+  const matrix = await getOrgPermissionMatrix(session);
+  return checkPermission(accessLevel, matrix, module, action);
+}
+
+/**
+ * Convenience: check permission and return a 403 jsonError if denied.
+ * Returns null if allowed, the error response if denied.
+ */
+export async function requirePermission(
+  session: any,
+  module: PermissionModule,
+  action: string
+) {
+  const allowed = await hasPermission(session, module, action);
+  if (!allowed) return jsonError("Forbidden — insufficient permissions", 403);
+  return null;
 }

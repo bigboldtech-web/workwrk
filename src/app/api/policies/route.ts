@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -34,7 +34,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  const denied = await requirePermission(session, "policies", "create");
+  if (denied) return denied;
 
   const orgId = getOrgId(session);
   const body = await req.json();

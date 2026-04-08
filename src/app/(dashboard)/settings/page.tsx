@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,8 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import {
   Building2, Users, Shield, Bell, CreditCard, Check, Loader2, Send, Trash2,
-  UserX, RotateCcw, Download, AlertTriangle, Sliders, ToggleLeft, Key,
+  UserX, RotateCcw, Download, AlertTriangle, Sliders, ToggleLeft, Key, Lock,
 } from "lucide-react";
+import { PERMISSION_MODULES, ACCESS_LEVELS, DEFAULT_PERMISSIONS, PROTECTED_ADMIN_ROLES, type PermissionMatrix, type PermissionModule, type AccessLevel } from "@/lib/permissions";
+import { invalidatePermissionCache } from "@/hooks/use-permission";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/components/ui/toast";
 
@@ -78,6 +81,174 @@ const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+
+function AccessControlManager() {
+  const { data: session } = useSession();
+  const currentAccessLevel = ((session?.user as any)?.accessLevel || "") as string;
+  const [matrix, setMatrix] = useState<PermissionMatrix>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [activeLevel, setActiveLevel] = useState<AccessLevel>("MANAGER");
+  const [dirty, setDirty] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  const isAdmin = PROTECTED_ADMIN_ROLES.includes(currentAccessLevel as any);
+
+  useEffect(() => {
+    fetch("/api/permissions")
+      .then((r) => r.ok ? r.json() : { matrix: null })
+      .then((d) => {
+        setMatrix(d.matrix || {});
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Effective value: custom matrix value, or default
+  const getValue = (level: AccessLevel, mod: PermissionModule, action: string): boolean => {
+    const custom = matrix?.[level]?.[mod]?.[action];
+    if (custom !== undefined) return custom;
+    return (DEFAULT_PERMISSIONS as any)[level]?.[mod]?.[action] ?? false;
+  };
+
+  const setValue = (level: AccessLevel, mod: PermissionModule, action: string, value: boolean) => {
+    setMatrix((prev) => {
+      const next = { ...prev };
+      if (!next[level]) next[level] = {};
+      if (!next[level]![mod]) next[level]![mod] = {};
+      next[level]![mod]![action] = value;
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const resetLevel = (level: AccessLevel) => {
+    setMatrix((prev) => {
+      const next = { ...prev };
+      delete next[level];
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/permissions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matrix }),
+      });
+      if (res.ok) {
+        invalidatePermissionCache();
+        setDirty(false);
+        setSavedAt(Date.now());
+        setTimeout(() => setSavedAt(null), 2500);
+      }
+    } finally { setSaving(false); }
+  };
+
+  if (!isAdmin) {
+    return (
+      <div className="text-center py-8">
+        <Lock size={32} className="mx-auto text-muted mb-3" />
+        <p className="text-sm text-muted">Only Company Admin can manage access control.</p>
+      </div>
+    );
+  }
+
+  if (loading) return <div className="h-32 bg-surface-2 rounded animate-pulse" />;
+
+  const isProtected = PROTECTED_ADMIN_ROLES.includes(activeLevel);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <p className="text-xs text-muted">
+            Choose a role on the left, then toggle which modules and actions they can access.
+            Changes apply immediately to all users with that role.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {savedAt && <span className="text-xs text-green-400">✓ Saved</span>}
+          <Button size="sm" onClick={save} disabled={!dirty || saving}>
+            {saving ? "Saving..." : "Save Changes"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex gap-4">
+        {/* Roles list (left) */}
+        <div className="w-48 shrink-0 space-y-1">
+          <p className="text-[10px] uppercase tracking-wider text-muted mb-2 px-2">Roles</p>
+          {ACCESS_LEVELS.map((al) => {
+            const isActive = activeLevel === al.value;
+            const protectedRole = PROTECTED_ADMIN_ROLES.includes(al.value);
+            return (
+              <button
+                key={al.value}
+                onClick={() => setActiveLevel(al.value)}
+                className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${isActive ? "bg-purple-600/15 text-purple-300" : "hover:bg-surface-2 text-foreground"}`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium">{al.label}</span>
+                  {protectedRole && <Lock size={10} className="text-muted" />}
+                </div>
+                <p className="text-[10px] text-muted truncate">{al.description}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Permissions for selected role (right) */}
+        <div className="flex-1 border border-border rounded-lg overflow-hidden">
+          <div className="bg-surface-2 px-4 py-2 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">{ACCESS_LEVELS.find((a) => a.value === activeLevel)?.label} Permissions</p>
+              {isProtected && <p className="text-[10px] text-muted">This role has full access and cannot be modified</p>}
+            </div>
+            {!isProtected && matrix[activeLevel] && (
+              <Button variant="ghost" size="sm" className="text-xs text-muted h-6" onClick={() => resetLevel(activeLevel)}>
+                Reset to defaults
+              </Button>
+            )}
+          </div>
+
+          <div className="max-h-[500px] overflow-y-auto p-3 space-y-3">
+            {(Object.keys(PERMISSION_MODULES) as PermissionModule[]).map((mod) => {
+              const moduleInfo = PERMISSION_MODULES[mod];
+              const actions = Object.keys(moduleInfo.actions);
+              return (
+                <div key={mod} className="border border-border rounded-md p-3">
+                  <p className="text-xs font-semibold text-foreground mb-2">{moduleInfo.label}</p>
+                  <div className="space-y-1.5">
+                    {actions.map((action) => {
+                      const value = getValue(activeLevel, mod, action);
+                      const description = (moduleInfo.actions as any)[action];
+                      return (
+                        <div key={action} className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-muted flex-1">{description}</span>
+                          <button
+                            disabled={isProtected}
+                            onClick={() => setValue(activeLevel, mod, action, !value)}
+                            className={`relative w-9 h-5 rounded-full transition-colors ${value ? "bg-purple-500" : "bg-surface-2"} ${isProtected ? "opacity-50 cursor-not-allowed" : ""}`}
+                          >
+                            <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${value ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function KRACategoriesManager() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -596,6 +767,7 @@ export default function SettingsPage() {
         <TabsList className="flex-wrap">
           <TabsTrigger value="general" className="gap-2"><Building2 size={14} /> General</TabsTrigger>
           <TabsTrigger value="modules" className="gap-2"><ToggleLeft size={14} /> Modules</TabsTrigger>
+          <TabsTrigger value="access" className="gap-2"><Lock size={14} /> Access Control</TabsTrigger>
           <TabsTrigger value="team" className="gap-2"><Users size={14} /> Team</TabsTrigger>
           <TabsTrigger value="security" className="gap-2"><Shield size={14} /> Security</TabsTrigger>
           <TabsTrigger value="sso" className="gap-2"><Key size={14} /> SSO</TabsTrigger>
@@ -816,6 +988,19 @@ export default function SettingsPage() {
               <div className="pt-2">
                 <SaveButton section="modules" data={{ enabledModules }} />
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Access Control */}
+        <TabsContent value="access" className="space-y-6 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2"><Lock size={16} /> Access Control</CardTitle>
+              <CardDescription>Define what each role can do across every module. Only Company Admin can edit these.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AccessControlManager />
             </CardContent>
           </Card>
         </TabsContent>

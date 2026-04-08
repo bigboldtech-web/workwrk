@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -21,11 +21,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  // If body has assignedToId, this is an assign action, otherwise edit
+  const body = await req.json();
+  const action = body.assignedToId !== undefined ? "assign" : "edit";
+  const denied = await requirePermission(session, "assets", action);
+  if (denied) return denied;
 
   const { id } = await params;
   const orgId = getOrgId(session);
-  const body = await req.json();
 
   const existing = await prisma.asset.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("Asset not found", 404);
@@ -86,7 +89,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  const denied = await requirePermission(session, "assets", "delete");
+  if (denied) return denied;
 
   const { id } = await params;
   await prisma.asset.deleteMany({ where: { id, organizationId: getOrgId(session) } });
