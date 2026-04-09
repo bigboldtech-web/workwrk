@@ -277,6 +277,150 @@ function AccessControlManager() {
   );
 }
 
+function TeamMembersList() {
+  const { data: session } = useSession();
+  const callerLevel = ((session?.user as any)?.accessLevel || "") as string;
+  const isAdmin = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(callerLevel);
+
+  const [members, setMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [updating, setUpdating] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [filterLevel, setFilterLevel] = useState("");
+
+  const fetchMembers = () => {
+    setLoading(true);
+    fetch("/api/users?limit=200")
+      .then((r) => r.ok ? r.json() : { data: [] })
+      .then((d) => setMembers(Array.isArray(d) ? d : d.data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { fetchMembers(); }, []);
+
+  const updateAccessLevel = async (userId: string, newLevel: string) => {
+    setUpdating(userId);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessLevel: newLevel }),
+      });
+      if (res.ok) {
+        setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, accessLevel: newLevel } : m)));
+        setSavedId(userId);
+        setTimeout(() => setSavedId(null), 2000);
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to update access level");
+      }
+    } finally { setUpdating(null); }
+  };
+
+  const filtered = members.filter((m) => {
+    if (filterLevel && m.accessLevel !== filterLevel) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return `${m.firstName} ${m.lastName}`.toLowerCase().includes(q) || (m.email || "").toLowerCase().includes(q);
+  });
+
+  // Group counts
+  const counts: Record<string, number> = {};
+  for (const m of members) counts[m.accessLevel] = (counts[m.accessLevel] || 0) + 1;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 flex-1">
+          <Input
+            placeholder="Search by name or email..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 text-sm flex-1"
+          />
+          <select
+            value={filterLevel}
+            onChange={(e) => setFilterLevel(e.target.value)}
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs text-foreground"
+          >
+            <option value="">All roles</option>
+            {ACCESS_LEVELS.map((al) => (
+              <option key={al.value} value={al.value}>{al.label} ({counts[al.value] || 0})</option>
+            ))}
+          </select>
+        </div>
+        <p className="text-xs text-muted shrink-0">{filtered.length} of {members.length} members</p>
+      </div>
+
+      {!isAdmin && (
+        <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-2.5">
+          <p className="text-xs text-orange-400">View only. Only Company Admin can change access levels.</p>
+        </div>
+      )}
+
+      <div className="border border-border rounded-lg overflow-hidden">
+        {loading ? (
+          <div className="p-4 space-y-2">
+            {[1,2,3].map((i) => <div key={i} className="h-12 bg-surface-2 rounded animate-pulse" />)}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="text-sm text-muted">No team members found</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border max-h-[500px] overflow-y-auto">
+            {filtered.map((member) => {
+              const isSelf = (session?.user as any)?.id === member.id;
+              const isProtectedTarget = ["SUPER_ADMIN"].includes(member.accessLevel) && callerLevel !== "SUPER_ADMIN";
+              const canEdit = isAdmin && !isProtectedTarget;
+              return (
+                <div key={member.id} className="flex items-center gap-3 p-3 hover:bg-surface-2 transition-colors">
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback className="bg-purple-600/20 text-purple-400 text-xs">
+                      {member.firstName?.[0]}{member.lastName?.[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">{member.firstName} {member.lastName}</p>
+                      {isSelf && <Badge variant="outline" className="text-[10px] px-1.5 py-0">You</Badge>}
+                    </div>
+                    <p className="text-xs text-muted truncate">{member.email}</p>
+                  </div>
+                  {member.department && (
+                    <p className="text-[11px] text-muted hidden md:block">{member.department.name}</p>
+                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {savedId === member.id && <span className="text-[10px] text-green-400">Saved</span>}
+                    <select
+                      value={member.accessLevel}
+                      disabled={!canEdit || updating === member.id}
+                      onChange={(e) => updateAccessLevel(member.id, e.target.value)}
+                      className={`h-8 rounded-md border border-border bg-background px-2 text-xs ${!canEdit ? "opacity-60 cursor-not-allowed" : ""}`}
+                    >
+                      {ACCESS_LEVELS.map((al) => (
+                        <option key={al.value} value={al.value}>{al.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {isAdmin && (
+        <div className="text-xs text-muted">
+          <p>Promote a team member to <strong className="text-foreground">Company Admin</strong> to give them full access including the ability to manage Access Control.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function KRACategoriesManager() {
   const [categories, setCategories] = useState<any[]>([]);
   const [newCat, setNewCat] = useState("");
@@ -1034,6 +1178,16 @@ export default function SettingsPage() {
 
         {/* Team */}
         <TabsContent value="team" className="space-y-6 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Team Members & Access Levels</CardTitle>
+              <CardDescription>View all team members and assign their access level. Promote a member to Company Admin to give them full system control.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TeamMembersList />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Invite Team Members</CardTitle>

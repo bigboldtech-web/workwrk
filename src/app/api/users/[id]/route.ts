@@ -93,6 +93,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const orgId = getOrgId(session);
   const { id } = await params;
   const body = await req.json();
+  const callerAccessLevel = (session.user as any).accessLevel;
+  const isAdmin = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(callerAccessLevel);
+
+  // Verify target user is in same org
+  const targetUser = await prisma.user.findFirst({
+    where: { id, organizationId: orgId },
+    select: { id: true, accessLevel: true },
+  });
+  if (!targetUser) return jsonError("User not found", 404);
+
+  // Only COMPANY_ADMIN/SUPER_ADMIN can change accessLevel
+  if (body.accessLevel !== undefined && !isAdmin) {
+    return jsonError("Only Company Admin can change access levels", 403);
+  }
+
+  // Prevent locking out the last COMPANY_ADMIN
+  if (body.accessLevel !== undefined && targetUser.accessLevel === "COMPANY_ADMIN" && body.accessLevel !== "COMPANY_ADMIN") {
+    const adminCount = await prisma.user.count({
+      where: { organizationId: orgId, accessLevel: "COMPANY_ADMIN", deletedAt: null },
+    });
+    if (adminCount <= 1) {
+      return jsonError("Cannot demote the last Company Admin. Promote another user first.", 400);
+    }
+  }
 
   const allowedFields = ["firstName", "lastName", "phone", "avatar", "status", "departmentId", "roleId", "accessLevel", "managerId", "dateOfBirth", "officeId"];
   const data: any = {};
