@@ -227,14 +227,41 @@ function AccessControlManager() {
                       const value = getValue(activeLevel, mod, action);
                       const description = (moduleInfo.actions as any)[action];
                       return (
-                        <div key={action} className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-muted flex-1">{description}</span>
+                        <div key={action} className="flex items-center justify-between gap-3">
+                          <span className="text-xs text-muted flex-1 min-w-0">{description}</span>
                           <button
+                            type="button"
+                            role="switch"
+                            aria-checked={value}
                             disabled={isProtected}
                             onClick={() => setValue(activeLevel, mod, action, !value)}
-                            className={`relative w-9 h-5 rounded-full transition-colors ${value ? "bg-purple-500" : "bg-surface-2"} ${isProtected ? "opacity-50 cursor-not-allowed" : ""}`}
+                            style={{
+                              width: "36px",
+                              height: "20px",
+                              borderRadius: "9999px",
+                              backgroundColor: value ? "#a855f7" : "#3f3f46",
+                              position: "relative",
+                              flexShrink: 0,
+                              border: "none",
+                              padding: 0,
+                              cursor: isProtected ? "not-allowed" : "pointer",
+                              opacity: isProtected ? 0.5 : 1,
+                              transition: "background-color 0.2s",
+                            }}
                           >
-                            <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${value ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+                            <span
+                              style={{
+                                position: "absolute",
+                                top: "2px",
+                                left: value ? "18px" : "2px",
+                                width: "16px",
+                                height: "16px",
+                                borderRadius: "9999px",
+                                backgroundColor: "#ffffff",
+                                transition: "left 0.2s",
+                                display: "block",
+                              }}
+                            />
                           </button>
                         </div>
                       );
