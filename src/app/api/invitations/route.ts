@@ -43,7 +43,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const { email, accessLevel: inviteLevel, departmentId, roleId } = await req.json();
+    const { email, accessLevel: inviteLevel, departmentId, roleId, managerId } = await req.json();
 
     if (!email || !email.includes("@")) {
       return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
@@ -74,6 +74,7 @@ export async function POST(req: Request) {
         organizationId: orgId,
         departmentId: departmentId || null,
         roleId: roleId || null,
+        managerId: managerId || null,
       },
     });
 

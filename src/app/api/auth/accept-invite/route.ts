@@ -90,6 +90,7 @@ export async function POST(req: Request) {
           accessLevel: invitation.accessLevel,
           departmentId: invitation.departmentId,
           roleId: invitation.roleId,
+          managerId: invitation.managerId,
         },
       });
 

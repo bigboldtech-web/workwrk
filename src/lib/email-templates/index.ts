@@ -6,3 +6,5 @@ export { reminderTemplate } from "./reminder";
 export { kudosTemplate } from "./kudos";
 export { passwordResetTemplate } from "./password-reset";
 export { welcomeTemplate } from "./welcome";
+export { evaluationReminderTemplate } from "./evaluation-reminder";
+export { overdueManagerTemplate } from "./overdue-reminder";

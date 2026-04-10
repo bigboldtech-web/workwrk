@@ -111,6 +111,7 @@ export default function PeoplePage() {
   const [formDepartmentId, setFormDepartmentId] = useState("");
   const [formRoleId, setFormRoleId] = useState("");
   const [formAccessLevel, setFormAccessLevel] = useState("");
+  const [formManagerId, setFormManagerId] = useState("");
 
   // Inline creation state
   const [showNewRole, setShowNewRole] = useState(false);
@@ -307,7 +308,7 @@ export default function PeoplePage() {
 
   const resetForm = () => {
     setFormEmail("");
-    setFormDepartmentId(""); setFormRoleId(""); setFormAccessLevel("");
+    setFormDepartmentId(""); setFormRoleId(""); setFormAccessLevel(""); setFormManagerId("");
   };
 
   const handleAddPerson = async () => {
@@ -321,6 +322,7 @@ export default function PeoplePage() {
           accessLevel: formAccessLevel || "EMPLOYEE",
           departmentId: formDepartmentId || undefined,
           roleId: formRoleId || undefined,
+          managerId: formManagerId || undefined,
         }),
       });
       if (!res.ok) {
@@ -507,6 +509,29 @@ export default function PeoplePage() {
                       <SelectItem value="AGENT">Agent</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Reports To</Label>
+                  <Select value={formManagerId} onValueChange={setFormManagerId}>
+                    <SelectTrigger><SelectValue placeholder="Select reporting manager" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No reporting manager</SelectItem>
+                      {(() => {
+                        const level = formAccessLevel || "EMPLOYEE";
+                        const isManagerLevel = ["MANAGER", "TEAM_LEAD", "HR"].includes(level);
+                        const isExecLevel = ["DIRECTOR", "VP"].includes(level);
+                        // Employees/agents see managers+, managers see directors+, directors see VPs+
+                        return people.filter((p) => {
+                          if (isExecLevel) return ["C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(p.accessLevel);
+                          if (isManagerLevel) return ["DIRECTOR", "VP", "C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(p.accessLevel);
+                          return ["MANAGER", "TEAM_LEAD", "HR", "DIRECTOR", "VP", "C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(p.accessLevel);
+                        }).map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.firstName} {p.lastName} — {p.accessLevel.replace("_", " ")}</SelectItem>
+                        ));
+                      })()}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted">This determines who they report to in the org chart and who evaluates them.</p>
                 </div>
               </div>
               <DialogFooter>
