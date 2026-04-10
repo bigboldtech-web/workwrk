@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Bell, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare } from "lucide-react";
+import { Bell, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle } from "lucide-react";
+import { useTour } from "@/components/tour-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -185,6 +186,9 @@ export function Topbar() {
           Quick Add
         </Button>
 
+        {/* Help / re-launch tour */}
+        <HelpButton />
+
         {/* Notifications */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -263,5 +267,40 @@ export function Topbar() {
         </DropdownMenu>
       </div>
     </header>
+  );
+}
+
+function HelpButton() {
+  const { startTour, isAdmin } = useTour();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-foreground transition-colors"
+          aria-label="Help"
+          title="Help & Tours"
+        >
+          <HelpCircle size={20} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel>Help & Tours</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {isAdmin && (
+          <DropdownMenuItem onClick={() => startTour("admin")} className="cursor-pointer">
+            <span className="text-sm">Replay Admin Setup Tour</span>
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem onClick={() => startTour("employee")} className="cursor-pointer">
+          <span className="text-sm">Replay New Member Tour</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <Link href="/docs">
+          <DropdownMenuItem className="cursor-pointer">
+            <span className="text-sm">Documentation</span>
+          </DropdownMenuItem>
+        </Link>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

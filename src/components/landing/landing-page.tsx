@@ -257,19 +257,19 @@ export function LandingPage() {
         <div className="hero-glow" />
         <div className="relative z-[1] mx-auto max-w-[1200px] px-6 text-center">
           <FadeIn delay={0}>
-            <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5 text-xs text-muted">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D68F]" />
-              Trusted by 500+ growing businesses
+            <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/5 px-4 py-1.5 text-xs text-purple-300">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-purple-400" />
+              ✨ Now with AI-powered KRA generation, asset tracking & granular access control
             </div>
           </FadeIn>
           <FadeIn delay={0.15}>
-            <h1 className="mx-auto mb-6 max-w-[800px] font-[family-name:var(--font-syne)] text-[clamp(2.8rem,6vw,5rem)] font-extrabold leading-[1.05] tracking-[-3px] text-foreground">
-              One Platform to Run<br /><span className="text-gradient">Your Entire Business</span>
+            <h1 className="mx-auto mb-6 max-w-[900px] font-[family-name:var(--font-syne)] text-[clamp(2.8rem,6vw,5rem)] font-extrabold leading-[1.05] tracking-[-3px] text-foreground">
+              The System That Runs<br /><span className="text-gradient">Your Entire Business</span>
             </h1>
           </FadeIn>
           <FadeIn delay={0.3}>
-            <p className="mx-auto mb-10 max-w-[560px] text-lg leading-relaxed text-muted">
-              Replace 15 disconnected tools with one intelligent system. People, KPIs, SOPs, reviews, tasks, recognition, and AI — unified.
+            <p className="mx-auto mb-10 max-w-[640px] text-lg leading-relaxed text-muted">
+              People, KRAs, KPIs, OKRs, SOPs, Reviews, Assets, Policies, Announcements, Recognition — all aligned, all interconnected, all powered by AI that understands <em>your</em> business.
             </p>
           </FadeIn>
           <FadeIn delay={0.45}>
@@ -302,8 +302,8 @@ export function LandingPage() {
       <section className="py-16">
         <StaggerContainer className="mx-auto grid max-w-[1200px] grid-cols-2 gap-5 px-6 md:grid-cols-4">
           {[
-            { number: "12+", label: "Integrated Modules", icon: <BarChart3 size={18} /> },
-            { number: "6", label: "Performance Data Sources", icon: <Target size={18} /> },
+            { number: "23+", label: "Integrated Modules", icon: <BarChart3 size={18} /> },
+            { number: "AI", label: "Generates KRAs, KPIs & SOPs", icon: <Target size={18} /> },
             { number: "10x", label: "Faster Reviews", icon: <Clock size={18} /> },
             { number: "100%", label: "Process Visibility", icon: <Shield size={18} /> },
           ].map((m) => (

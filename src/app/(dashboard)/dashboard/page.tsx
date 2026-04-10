@@ -23,6 +23,7 @@ import { EmployeeDashboard } from "@/components/dashboard/employee-dashboard";
 import { ManagerTeamDashboard } from "@/components/dashboard/manager-dashboard";
 import { BirthdayCard } from "@/components/dashboard/birthday-card";
 import { AnnouncementsBanner } from "@/components/dashboard/announcements-banner";
+import { AdminSetupChecklist } from "@/components/admin-setup-checklist";
 import { useRole } from "@/hooks/use-role";
 import { Trophy } from "lucide-react";
 
@@ -292,6 +293,9 @@ export default function DashboardPage() {
           Overview of your business operating system
         </p>
       </div>
+
+      {/* Admin setup checklist (only for admins, auto-hides when complete) */}
+      <AdminSetupChecklist />
 
       {/* Announcements */}
       <AnnouncementsBanner />

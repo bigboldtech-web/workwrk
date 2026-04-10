@@ -5,6 +5,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { ToastProvider } from "@/components/ui/toast";
 import { KudosFab } from "@/components/kudos/kudos-fab";
 import { ScreenProtection } from "@/components/security/screen-protection";
+import { TourProvider } from "@/components/tour-provider";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -55,15 +56,17 @@ export default function DashboardLayout({
 
   return (
     <ToastProvider>
-      <div className="flex h-screen">
-        <Sidebar />
-        <div className="flex flex-1 flex-col transition-all duration-300" style={{ paddingLeft: "var(--sidebar-width, 220px)" }}>
-          <Topbar />
-          <main className="flex-1 overflow-y-auto p-4">{children}</main>
+      <TourProvider>
+        <div className="flex h-screen">
+          <Sidebar />
+          <div className="flex flex-1 flex-col transition-all duration-300" style={{ paddingLeft: "var(--sidebar-width, 220px)" }}>
+            <Topbar />
+            <main className="flex-1 overflow-y-auto p-4">{children}</main>
+          </div>
+          <KudosFab />
+          <ScreenProtection />
         </div>
-        <KudosFab />
-        <ScreenProtection />
-      </div>
+      </TourProvider>
     </ToastProvider>
   );
 }
