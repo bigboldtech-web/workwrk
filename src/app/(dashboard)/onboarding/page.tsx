@@ -55,7 +55,7 @@ export default function OnboardingPage() {
         fetch("/api/onboarding?type=instances"),
         fetch("/api/onboarding?type=templates"),
         fetch("/api/training?type=courses"),
-        fetch("/api/users"),
+        fetch("/api/users?limit=500"),
       ]);
       const [instData, tmplData, courseData, userData] = await Promise.all([
         instRes.json(), tmplRes.json(), courseRes.json(), userRes.json(),

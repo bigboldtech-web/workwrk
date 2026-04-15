@@ -168,7 +168,7 @@ export default function ReviewCycleDetailPage() {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch("/api/users");
+      const res = await fetch("/api/users?limit=500");
       if (res.ok) {
         const data = await res.json();
         setAllUsers(Array.isArray(data) ? data : data.users ?? data.data ?? []);

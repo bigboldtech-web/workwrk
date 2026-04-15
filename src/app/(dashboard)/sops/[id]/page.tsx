@@ -283,7 +283,7 @@ export default function SOPDetailPage() {
   const fetchOrgUsers = useCallback(async () => {
     try {
       const [usersRes, deptsRes] = await Promise.all([
-        fetch("/api/users"),
+        fetch("/api/users?limit=500"),
         fetch("/api/departments"),
       ]);
       if (usersRes.ok) {

@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { sendEmail } from "@/lib/email";
+import { genericNotificationTemplate } from "@/lib/email-templates";
 
 // GET: List tasks (calendar view)
 // Query params: userId, startDate, endDate, kraId
@@ -115,6 +117,47 @@ export async function POST(req: NextRequest) {
     targetType: "task",
   });
 
+  // Notify assignee if task was delegated to someone else
+  if (task.assigneeId !== currentUserId) {
+    const dateStr = new Date(task.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    await prisma.notification.create({
+      data: {
+        userId: task.assigneeId,
+        type: "task_assigned",
+        title: "Task Assigned",
+        message: `${task.title}${task.date ? ` (due ${dateStr})` : ""}`,
+        link: "/tasks",
+      },
+    }).catch((err) => console.error("[Task] Notification failed:", err));
+
+    // Email the assignee
+    try {
+      const [assignee, actor] = await Promise.all([
+        prisma.user.findUnique({ where: { id: task.assigneeId }, select: { email: true, firstName: true } }),
+        prisma.user.findUnique({ where: { id: currentUserId }, select: { firstName: true, lastName: true } }),
+      ]);
+      if (assignee?.email) {
+        const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
+        const { subject, html } = genericNotificationTemplate({
+          heading: "Task Assigned",
+          recipientName: assignee.firstName,
+          subjectText: `${actor?.firstName || "Someone"} ${actor?.lastName || ""} assigned you a task.`,
+          itemTitle: task.title,
+          itemDetails: task.date ? `Due ${dateStr}` : undefined,
+          actionLabel: "View Task",
+          actionLink: `${baseUrl}/tasks`,
+          note: task.description || undefined,
+        });
+        await sendEmail({
+          to: assignee.email, subject, html,
+          template: "task-assigned",
+          variables: { title: task.title, dueDate: dateStr },
+          organizationId: orgId, userId: task.assigneeId, category: "reminder",
+        });
+      }
+    } catch (err) { console.error("[Task] Email failed:", err); }
+  }
+
   return jsonSuccess(task, 201);
 }
 
@@ -156,6 +199,20 @@ export async function PATCH(req: NextRequest) {
       targetId: id,
       targetType: "task",
     });
+  }
+
+  // Notify on reassignment
+  if (updates.assigneeId && updates.assigneeId !== task.assigneeId && updates.assigneeId !== getUserId(session)) {
+    const dateStr = new Date(updated.date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    await prisma.notification.create({
+      data: {
+        userId: updates.assigneeId,
+        type: "task_assigned",
+        title: "Task Reassigned to You",
+        message: `${updated.title}${updated.date ? ` (due ${dateStr})` : ""}`,
+        link: "/tasks",
+      },
+    }).catch((err) => console.error("[Task] Notification failed:", err));
   }
 
   return jsonSuccess(updated);

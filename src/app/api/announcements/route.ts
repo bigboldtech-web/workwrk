@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { sendEmail } from "@/lib/email";
+import { genericNotificationTemplate } from "@/lib/email-templates";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -63,7 +65,7 @@ export async function POST(req: NextRequest) {
   // Notify all org users (skip the author)
   const users = await prisma.user.findMany({
     where: { organizationId: orgId, deletedAt: null, id: { not: userId } },
-    select: { id: true },
+    select: { id: true, email: true, firstName: true },
   });
   if (users.length > 0) {
     await prisma.notification.createMany({
@@ -75,6 +77,30 @@ export async function POST(req: NextRequest) {
         link: "/announcements",
       })),
     });
+
+    // Email every org member (best-effort, non-blocking per user)
+    const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
+    const preview = announcement.content.length > 280
+      ? announcement.content.slice(0, 280) + "..."
+      : announcement.content;
+    for (const u of users) {
+      const { subject, html } = genericNotificationTemplate({
+        heading: announcement.priority === "URGENT" ? "🚨 Urgent Announcement" : "New Announcement",
+        recipientName: u.firstName,
+        subjectText: "A new announcement has been posted in your organization.",
+        itemTitle: announcement.title,
+        itemDetails: announcement.priority !== "NORMAL" ? `Priority: ${announcement.priority}` : undefined,
+        actionLabel: "View Announcement",
+        actionLink: `${baseUrl}/announcements`,
+        note: preview,
+      });
+      sendEmail({
+        to: u.email, subject, html,
+        template: "announcement",
+        variables: { title: announcement.title, priority: announcement.priority },
+        organizationId: orgId, userId: u.id, category: "reminder",
+      }).catch((err) => console.error(`[Announcement] Email to ${u.email} failed:`, err));
+    }
   }
 
   return jsonSuccess(announcement, 201);

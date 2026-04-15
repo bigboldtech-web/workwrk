@@ -24,6 +24,7 @@ import { ManagerTeamDashboard } from "@/components/dashboard/manager-dashboard";
 import { BirthdayCard } from "@/components/dashboard/birthday-card";
 import { AnnouncementsBanner } from "@/components/dashboard/announcements-banner";
 import { AdminSetupChecklist } from "@/components/admin-setup-checklist";
+import { DashboardOkrs } from "@/components/dashboard/dashboard-okrs";
 import { useRole } from "@/hooks/use-role";
 import { Trophy } from "lucide-react";
 
@@ -296,6 +297,9 @@ export default function DashboardPage() {
 
       {/* Admin setup checklist (only for admins, auto-hides when complete) */}
       <AdminSetupChecklist />
+
+      {/* OKRs — pinned at top so goals stay front and center */}
+      <DashboardOkrs />
 
       {/* Announcements */}
       <AnnouncementsBanner />

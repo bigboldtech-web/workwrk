@@ -8,3 +8,4 @@ export { passwordResetTemplate } from "./password-reset";
 export { welcomeTemplate } from "./welcome";
 export { evaluationReminderTemplate } from "./evaluation-reminder";
 export { overdueManagerTemplate } from "./overdue-reminder";
+export { genericNotificationTemplate } from "./generic-notification";

@@ -146,6 +146,36 @@ export async function POST(req: NextRequest) {
   }
 
   // ──────────────────────────────────────
+  // 3b. TASK DUE TODAY — in-app notification
+  // ──────────────────────────────────────
+  if (type === "all" || type === "tasks-due-today") {
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const dueToday = await prisma.task.findMany({
+      where: {
+        status: { not: "COMPLETED" },
+        date: { gte: startOfDay, lte: endOfDay },
+      },
+      select: { id: true, title: true, assigneeId: true },
+    });
+    if (dueToday.length > 0) {
+      await prisma.notification.createMany({
+        data: dueToday.map((t) => ({
+          userId: t.assigneeId,
+          type: "task_due_today",
+          title: "Task Due Today",
+          message: t.title,
+          link: "/tasks",
+        })),
+      });
+    }
+    results.push(`Tasks due today notifications: ${dueToday.length}`);
+  }
+
+  // ──────────────────────────────────────
   // 4. KPI RECORDING REMINDERS (monthly)
   // ──────────────────────────────────────
   if (type === "all" || type === "kpi-recording") {

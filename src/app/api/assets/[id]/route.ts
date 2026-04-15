@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { sendEmail } from "@/lib/email";
+import { genericNotificationTemplate } from "@/lib/email-templates";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -81,6 +83,35 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         link: "/people/" + body.assignedToId,
       },
     });
+
+    // Email the assignee
+    try {
+      const user = await prisma.user.findUnique({ where: { id: body.assignedToId }, select: { email: true, firstName: true } });
+      if (user?.email) {
+        const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
+        const { subject, html } = genericNotificationTemplate({
+          heading: "Asset Assigned to You",
+          recipientName: user.firstName,
+          subjectText: "A new company asset has been assigned to you.",
+          itemTitle: updated.name,
+          itemDetails: [
+            updated.type?.replace("_", " "),
+            updated.brand,
+            updated.model,
+            updated.serialNumber && `S/N: ${updated.serialNumber}`,
+            updated.imeiNumber && `IMEI: ${updated.imeiNumber}`,
+          ].filter(Boolean).join(" · "),
+          actionLabel: "View Profile",
+          actionLink: `${baseUrl}/people/${body.assignedToId}`,
+        });
+        sendEmail({
+          to: user.email, subject, html,
+          template: "asset-assigned",
+          variables: { asset: updated.name },
+          organizationId: orgId, userId: body.assignedToId, category: "reminder",
+        }).catch((err) => console.error("[Asset] Email failed:", err));
+      }
+    } catch (err) { console.error("[Asset] Email setup failed:", err); }
   }
 
   return jsonSuccess(updated);

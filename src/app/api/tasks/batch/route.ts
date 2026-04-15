@@ -38,5 +38,20 @@ export async function POST(req: NextRequest) {
 
   const result = await prisma.task.createMany({ data });
 
+  // If recurring tasks were assigned to someone else, send one notification
+  const assignedTo = data[0]?.assigneeId;
+  const firstTitle = data[0]?.title;
+  if (assignedTo && assignedTo !== currentUserId) {
+    await prisma.notification.create({
+      data: {
+        userId: assignedTo,
+        type: "task_assigned",
+        title: "Recurring Task Assigned",
+        message: `${firstTitle} — ${result.count} occurrences`,
+        link: "/tasks",
+      },
+    }).catch((err) => console.error("[Task batch] Notification failed:", err));
+  }
+
   return jsonSuccess({ created: result.count, groupId }, 201);
 }

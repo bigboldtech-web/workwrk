@@ -36,7 +36,7 @@ export function AdminSetupChecklist() {
     Promise.all([
       fetch("/api/settings").then((r) => r.ok ? r.json() : null).catch(() => null),
       fetch("/api/users?limit=200").then((r) => r.ok ? r.json() : null).catch(() => null),
-      fetch("/api/kras").then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch("/api/kras?limit=500").then((r) => r.ok ? r.json() : null).catch(() => null),
       fetch("/api/sops").then((r) => r.ok ? r.json() : null).catch(() => null),
       fetch("/api/departments").then((r) => r.ok ? r.json() : null).catch(() => null),
       fetch("/api/policies").then((r) => r.ok ? r.json() : null).catch(() => null),

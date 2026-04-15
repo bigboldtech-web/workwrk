@@ -138,7 +138,7 @@ export default function AssetsPage() {
   useEffect(() => { fetchAssets(); }, [fetchAssets]);
 
   useEffect(() => {
-    fetch("/api/users").then((r) => r.ok ? r.json() : { data: [] }).then((d) => setUsers(Array.isArray(d) ? d : d.data || [])).catch(() => {});
+    fetch("/api/users?limit=500").then((r) => r.ok ? r.json() : { data: [] }).then((d) => setUsers(Array.isArray(d) ? d : d.data || [])).catch(() => {});
   }, []);
 
   const filtered = assets.filter((a) => {

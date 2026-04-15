@@ -264,7 +264,7 @@ export default function KraKpiPage() {
   const fetchKras = useCallback(async () => {
     try {
       setLoadingKras(true);
-      const res = await fetch("/api/kras");
+      const res = await fetch("/api/kras?limit=500");
       if (res.ok) {
         const data = await res.json();
         setKras(Array.isArray(data) ? data : data.kras ?? data.data ?? []);
@@ -317,7 +317,7 @@ export default function KraKpiPage() {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch("/api/users");
+      const res = await fetch("/api/users?limit=500");
       if (res.ok) {
         const data = await res.json();
         setUsers(Array.isArray(data) ? data : data.users ?? data.data ?? []);

@@ -23,7 +23,7 @@ export function parsePaginationParams(req: NextRequest): PaginationParams {
   const { searchParams } = new URL(req.url);
 
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
-  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "20")));
+  const limit = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") || "20")));
   const search = searchParams.get("search") || undefined;
   const sortBy = searchParams.get("sortBy") || undefined;
   const sortOrder = (searchParams.get("sortOrder") === "asc" ? "asc" : "desc") as "asc" | "desc";

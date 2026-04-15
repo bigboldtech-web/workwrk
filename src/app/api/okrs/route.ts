@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { sendEmail } from "@/lib/email";
+import { genericNotificationTemplate } from "@/lib/email-templates";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -91,6 +93,46 @@ export async function POST(req: NextRequest) {
     targetId: okr.id,
     targetType: "okr",
   });
+
+  // Notify owner if assigned to someone else
+  if (okr.ownerId && okr.ownerId !== getUserId(session)) {
+    await prisma.notification.create({
+      data: {
+        userId: okr.ownerId,
+        type: "okr_assigned",
+        title: "New OKR Assigned to You",
+        message: okr.title,
+        link: "/okrs",
+      },
+    }).catch((err) => console.error("[OKR] Notification failed:", err));
+
+    // Email the owner
+    try {
+      const [owner, actor] = await Promise.all([
+        prisma.user.findUnique({ where: { id: okr.ownerId }, select: { email: true, firstName: true } }),
+        prisma.user.findUnique({ where: { id: getUserId(session) }, select: { firstName: true, lastName: true } }),
+      ]);
+      if (owner?.email) {
+        const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
+        const { subject, html } = genericNotificationTemplate({
+          heading: "OKR Assigned",
+          recipientName: owner.firstName,
+          subjectText: `${actor?.firstName || "Someone"} ${actor?.lastName || ""} assigned you a new OKR.`,
+          itemTitle: okr.title,
+          itemDetails: `${body.level || "INDIVIDUAL"} · ${body.quarter || "This quarter"}`,
+          actionLabel: "View OKR",
+          actionLink: `${baseUrl}/okrs`,
+          note: okr.description || undefined,
+        });
+        sendEmail({
+          to: owner.email, subject, html,
+          template: "okr-assigned",
+          variables: { title: okr.title, quarter: body.quarter },
+          organizationId: orgId, userId: okr.ownerId, category: "reminder",
+        }).catch((err) => console.error("[OKR] Email failed:", err));
+      }
+    } catch (err) { console.error("[OKR] Email setup failed:", err); }
+  }
 
   return jsonSuccess(created, 201);
 }
