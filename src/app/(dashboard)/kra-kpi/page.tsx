@@ -18,6 +18,7 @@ import { useRole } from "@/hooks/use-role";
 import { useSession } from "next-auth/react";
 import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KraPicker } from "@/components/ui/kra-picker";
+import { KraCategoryPicker } from "@/components/kra-category-picker";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -734,15 +735,12 @@ export default function KraKpiPage() {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
           <Label>Category</Label>
-          <Select value={kraCategory} onValueChange={setKraCategory}>
-            <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-            <SelectContent>
-              {kraCategories.map((c) => (
-                <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
-              ))}
-              {kraCategories.length === 0 && <p className="text-xs text-muted text-center py-2 px-2">No categories. Add them in Settings → Data.</p>}
-            </SelectContent>
-          </Select>
+          <KraCategoryPicker
+            categories={kraCategories}
+            value={kraCategory}
+            onChange={setKraCategory}
+            onCategoriesChanged={fetchKraCategories}
+          />
         </div>
         <div className="space-y-2">
           <Label>Description</Label>
