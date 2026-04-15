@@ -1348,7 +1348,7 @@ export default function KraKpiPage() {
 
       {/* Assign KRA Dialog */}
       <Dialog open={showAssignDialog} onOpenChange={(open) => { setShowAssignDialog(open); if (!open) resetAssignForm(); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Assign KRAs</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">

@@ -64,16 +64,16 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
         onClick={() => setOpen(!open)}
         className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-500"
       >
-        <span className="flex-1 truncate text-left">
+        <span className="flex-1 min-w-0 text-left">
           {selected ? (
-            <span className="flex items-center gap-2">
-              <span className="truncate">{selected.name}</span>
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="truncate min-w-0">{selected.name}</span>
               {selected.category && (
                 <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{selected.category}</span>
               )}
             </span>
           ) : (
-            <span className="text-muted">{placeholder}</span>
+            <span className="text-muted truncate block">{placeholder}</span>
           )}
         </span>
         <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
