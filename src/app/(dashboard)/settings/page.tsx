@@ -319,6 +319,30 @@ function TeamMembersList() {
     } finally { setUpdating(null); }
   };
 
+  const updateManager = async (userId: string, newManagerId: string) => {
+    setUpdating(userId);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ managerId: newManagerId || null }),
+      });
+      if (res.ok) {
+        const newMgr = newManagerId ? members.find((m) => m.id === newManagerId) : null;
+        setMembers((prev) => prev.map((m) => (m.id === userId ? {
+          ...m,
+          managerId: newManagerId || null,
+          manager: newMgr ? { id: newMgr.id, firstName: newMgr.firstName, lastName: newMgr.lastName } : null,
+        } : m)));
+        setSavedId(userId);
+        setTimeout(() => setSavedId(null), 2000);
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to update reporting manager");
+      }
+    } finally { setUpdating(null); }
+  };
+
   const filtered = members.filter((m) => {
     if (filterLevel && m.accessLevel !== filterLevel) return false;
     if (!search) return true;
@@ -390,20 +414,53 @@ function TeamMembersList() {
                     <p className="text-xs text-muted truncate">{member.email}</p>
                   </div>
                   {member.department && (
-                    <p className="text-[11px] text-muted hidden md:block">{member.department.name}</p>
+                    <p className="text-[11px] text-muted hidden lg:block">{member.department.name}</p>
                   )}
                   <div className="flex items-center gap-2 shrink-0">
                     {savedId === member.id && <span className="text-[10px] text-green-400">Saved</span>}
-                    <select
-                      value={member.accessLevel}
-                      disabled={!canEdit || updating === member.id}
-                      onChange={(e) => updateAccessLevel(member.id, e.target.value)}
-                      className={`h-8 rounded-md border border-border bg-background px-2 text-xs ${!canEdit ? "opacity-60 cursor-not-allowed" : ""}`}
-                    >
-                      {ACCESS_LEVELS.map((al) => (
-                        <option key={al.value} value={al.value}>{al.label}</option>
-                      ))}
-                    </select>
+
+                    {/* Reports To dropdown */}
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[9px] uppercase tracking-wider text-muted-2">Reports To</span>
+                      <select
+                        value={member.managerId || ""}
+                        disabled={!isAdmin || updating === member.id || isSelf}
+                        onChange={(e) => updateManager(member.id, e.target.value)}
+                        className={`h-8 rounded-md border border-border bg-background px-2 text-xs min-w-[140px] ${!isAdmin ? "opacity-60 cursor-not-allowed" : ""}`}
+                        title={isSelf ? "You cannot set your own reporting manager" : ""}
+                      >
+                        <option value="">— None —</option>
+                        {(() => {
+                          // Filter potential managers by the member's access level
+                          const lvl = member.accessLevel;
+                          const isExec = ["DIRECTOR", "VP"].includes(lvl);
+                          const isMgrLvl = ["MANAGER", "TEAM_LEAD", "HR"].includes(lvl);
+                          return members.filter((m) => {
+                            if (m.id === member.id) return false; // can't report to self
+                            if (isExec) return ["C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(m.accessLevel);
+                            if (isMgrLvl) return ["DIRECTOR", "VP", "C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(m.accessLevel);
+                            return ["MANAGER", "TEAM_LEAD", "HR", "DIRECTOR", "VP", "C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(m.accessLevel);
+                          }).map((m) => (
+                            <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+
+                    {/* Access Level dropdown */}
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[9px] uppercase tracking-wider text-muted-2">Access Level</span>
+                      <select
+                        value={member.accessLevel}
+                        disabled={!canEdit || updating === member.id}
+                        onChange={(e) => updateAccessLevel(member.id, e.target.value)}
+                        className={`h-8 rounded-md border border-border bg-background px-2 text-xs ${!canEdit ? "opacity-60 cursor-not-allowed" : ""}`}
+                      >
+                        {ACCESS_LEVELS.map((al) => (
+                          <option key={al.value} value={al.value}>{al.label}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               );
