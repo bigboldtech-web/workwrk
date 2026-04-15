@@ -148,6 +148,9 @@ Rules:
     return jsonError("Failed to generate KRAs. Try again.");
   } catch (err: any) {
     console.error("AI KRA generation error:", err);
-    return jsonError("AI generation failed. Try again.");
+    // Surface the actual Anthropic error message so admins can see if it's
+    // a credit/auth/rate-limit issue vs a code problem
+    const msg = err?.error?.error?.message || err?.message || "AI generation failed. Try again.";
+    return jsonError(`AI generation failed: ${msg}`);
   }
 }

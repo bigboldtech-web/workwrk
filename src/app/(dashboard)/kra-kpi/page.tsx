@@ -545,11 +545,16 @@ export default function KraKpiPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobTitle: aiJobTitle, jobDescription: aiJobDescription }),
       });
-      if (!res.ok) throw new Error("Failed to generate");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toastError(data?.error || "AI generation failed. Try again.");
+        return;
+      }
       const kras = data.data?.kras || data.kras || [];
       setAiResults(kras);
-    } catch { toastError("AI generation failed. Try again."); } finally { setAiGenerating(false); }
+    } catch (e: any) {
+      toastError(e?.message || "AI generation failed. Try again.");
+    } finally { setAiGenerating(false); }
   };
 
   const handleAiResultEdit = (kraIdx: number, field: string, value: string) => {

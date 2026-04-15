@@ -85,6 +85,7 @@ Rules:
     return jsonError("Failed to generate profile. Try again.");
   } catch (err: any) {
     console.error("AI profile generation error:", err);
-    return jsonError("AI generation failed. Try again.");
+    const msg = err?.error?.error?.message || err?.message || "AI generation failed. Try again.";
+    return jsonError(`AI generation failed: ${msg}`);
   }
 }
