@@ -668,6 +668,17 @@ export default function KraKpiPage() {
     setShowAssignDialog(true);
   }
 
+  function openRecordForKpi(kpi: Kpi) {
+    resetRecordForm();
+    setRecordKpiId(kpi.id);
+    if (kpi.targetValue != null) setRecordTargetValue(String(kpi.targetValue));
+    // Default period to current month (e.g., "Mar 2026")
+    const now = new Date();
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    setRecordPeriod(`${monthNames[now.getMonth()]} ${now.getFullYear()}`);
+    setShowRecordKpiDialog(true);
+  }
+
   // Build overview data from KPI records
   const overviewRecords = kpiRecords.map((rec) => {
     const name = rec.kpi?.name ?? "KPI";
@@ -893,9 +904,6 @@ export default function KraKpiPage() {
           <p className="text-muted text-sm mt-1">Define, track, and score performance across your organization</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => setShowRecordKpiDialog(true)}>
-            <BarChart3 size={16} /> Record KPI
-          </Button>
           <Button variant="outline" className="gap-2" onClick={() => { resetKpiForm(); setShowAddKpiDialog(true); }}>
             <Plus size={16} /> New KPI
           </Button>
@@ -1137,6 +1145,9 @@ export default function KraKpiPage() {
                                 <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.frequency}</td>
                                 <td className="px-4 py-2.5 text-right">
                                   <div className="flex items-center justify-end gap-1">
+                                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1 text-purple-400 hover:text-purple-300" onClick={() => openRecordForKpi(kpi)} title="Record a value">
+                                      <BarChart3 size={11} /> Record
+                                    </Button>
                                     <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEditKpi(kpi)} title="Edit"><Pencil size={12} className="text-muted" /></Button>
                                     <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setShowDeleteConfirm({ type: "kpi", id: kpi.id })} title="Delete"><Trash2 size={12} className="text-red-400" /></Button>
                                   </div>
