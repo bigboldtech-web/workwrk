@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import {
   Plus, ChevronLeft, ChevronRight, Calendar, List, Clock,
-  CheckCircle2, Circle, Play, Trash2, Users, AlertCircle,
+  CheckCircle2, Circle, Play, Trash2, Users, AlertCircle, Filter,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
@@ -71,12 +71,19 @@ export default function TasksPage() {
   const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
   const [teamView, setTeamView] = useState(false);
 
+  // Team members (recursive reports) and per-member filtering
+  const [teamMembers, setTeamMembers] = useState<Array<{ id: string; firstName: string; lastName: string; avatar?: string }>>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);  // empty = all team
+  const [showMemberPicker, setShowMemberPicker] = useState(false);
+
   // Task dialog
   const [showDialog, setShowDialog] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [form, setForm] = useState({
     title: "", description: "", date: formatDate(new Date()),
     hoursSpent: "", category: "", status: "PLANNED",
+    assigneeId: "",  // empty = current user
     recurring: "none" as string,
     recurringDays: [] as number[],
     recurringDuration: "1month" as string, // 1month, 3months, 6months, 1year, forever
@@ -100,20 +107,40 @@ export default function TasksPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ startDate: weekStart, endDate: weekEnd });
-      if (teamView && isManager) params.set("view", "team");
+      if (teamView && isManager) {
+        if (selectedMemberIds.length > 0) {
+          params.set("userIds", selectedMemberIds.join(","));
+        } else {
+          params.set("view", "team");
+        }
+      }
       const res = await fetch(`/api/tasks?${params}`);
       if (res.ok) {
         const data = await res.json();
         setTasks(Array.isArray(data) ? data : data.data || []);
       }
     } catch {} finally { setLoading(false); }
-  }, [weekStart, weekEnd, teamView, isManager]);
+  }, [weekStart, weekEnd, teamView, isManager, selectedMemberIds]);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
+  // Load team (self + recursive reports) for managers
+  useEffect(() => {
+    if (!isManager) return;
+    fetch("/api/my-team")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (d?.members) {
+          setTeamMembers(d.members);
+          setCurrentUserId(d.self?.id || "");
+        }
+      })
+      .catch(() => {});
+  }, [isManager]);
+
   function openNewTask(date?: string) {
     setEditingTask(null);
-    setForm({ title: "", description: "", date: date || formatDate(new Date()), hoursSpent: "", category: "", status: "PLANNED", recurring: "none", recurringDays: [], recurringDuration: "1month" });
+    setForm({ title: "", description: "", date: date || formatDate(new Date()), hoursSpent: "", category: "", status: "PLANNED", assigneeId: "", recurring: "none", recurringDays: [], recurringDuration: "1month" });
     setShowDialog(true);
   }
 
@@ -123,6 +150,7 @@ export default function TasksPage() {
       title: task.title, description: task.description || "", date: task.date.split("T")[0],
       hoursSpent: task.hoursSpent != null ? String(task.hoursSpent) : "",
       category: task.category || "", status: task.status,
+      assigneeId: task.assignee?.id || "",
       recurring: "none", recurringDays: [], recurringDuration: "1month",
     });
     setShowDialog(true);
@@ -172,6 +200,7 @@ export default function TasksPage() {
           title: form.title, description: form.description || null, date: form.date,
           hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
           category: form.category || null, status: form.status,
+          ...(form.assigneeId && { assigneeId: form.assigneeId }),
         };
         const res = await fetch("/api/tasks", {
           method: "PATCH",
@@ -196,6 +225,7 @@ export default function TasksPage() {
               title: form.title, description: form.description || null, date: dates[0],
               hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
               category: form.category || null, status: form.status,
+              assigneeId: form.assigneeId || undefined,
             }),
           });
           if (res.ok) {
@@ -209,6 +239,7 @@ export default function TasksPage() {
             title: form.title, description: form.description || null, date,
             hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
             category: form.category || null, status: form.status,
+            assigneeId: form.assigneeId || undefined,
           }));
           const res = await fetch("/api/tasks/batch", {
             method: "POST",
@@ -304,9 +335,76 @@ export default function TasksPage() {
         </div>
         <div className="flex items-center gap-2">
           {isManager && (
-            <Button variant={teamView ? "default" : "outline"} size="sm" className="gap-1.5" onClick={() => setTeamView(!teamView)}>
-              <Users size={14} /> {teamView ? "My Tasks" : "Team"}
-            </Button>
+            <>
+              <Button
+                variant={teamView ? "default" : "outline"}
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  setTeamView(!teamView);
+                  if (teamView) setSelectedMemberIds([]);
+                }}
+              >
+                <Users size={14} /> {teamView ? "Team" : "My Tasks"}
+              </Button>
+              {teamView && teamMembers.length > 1 && (
+                <div className="relative">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setShowMemberPicker(!showMemberPicker)}
+                  >
+                    <Filter size={12} />
+                    {selectedMemberIds.length === 0
+                      ? `All (${teamMembers.length})`
+                      : `${selectedMemberIds.length} selected`}
+                  </Button>
+                  {showMemberPicker && (
+                    <div className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border border-border bg-surface shadow-xl p-2 animate-in fade-in-0 zoom-in-95">
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <span className="text-[10px] uppercase tracking-wider text-muted">Team Members</span>
+                        <button
+                          onClick={() => setSelectedMemberIds([])}
+                          className="text-[10px] text-purple-400 hover:text-purple-300"
+                        >
+                          Show all
+                        </button>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto space-y-0.5">
+                        {teamMembers.map((m) => {
+                          const checked = selectedMemberIds.includes(m.id);
+                          return (
+                            <label
+                              key={m.id}
+                              className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface-2 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setSelectedMemberIds((prev) =>
+                                    checked ? prev.filter((id) => id !== m.id) : [...prev, m.id]
+                                  );
+                                }}
+                                className="accent-purple-500"
+                              />
+                              <span className="text-sm">
+                                {m.firstName} {m.lastName}
+                                {m.id === currentUserId && <span className="text-[10px] text-muted ml-1">(you)</span>}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div className="border-t border-border mt-2 pt-2 flex justify-end">
+                        <Button size="sm" className="text-xs h-7" onClick={() => setShowMemberPicker(false)}>Done</Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
           <Button onClick={() => openNewTask()} className="gap-1.5"><Plus size={14} /> Add Task</Button>
         </div>
@@ -449,6 +547,21 @@ export default function TasksPage() {
               <Label>Title <span className="text-red-400">*</span></Label>
               <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Task name" />
             </div>
+            {isManager && teamMembers.length > 1 && (
+              <div className="space-y-2">
+                <Label>Assign To</Label>
+                <Select value={form.assigneeId || "self"} onValueChange={(v) => setForm({ ...form, assigneeId: v === "self" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="Select assignee" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="self">Myself</SelectItem>
+                    {teamMembers.filter((m) => m.id !== currentUserId).map((m) => (
+                      <SelectItem key={m.id} value={m.id}>{m.firstName} {m.lastName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted">Leave as "Myself" for personal tasks. Select a team member to delegate.</p>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Date</Label>

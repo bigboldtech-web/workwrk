@@ -83,12 +83,19 @@ export default function ActivityPage() {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
 
+  // Team member filtering
+  const [teamMembers, setTeamMembers] = useState<Array<{ id: string; firstName: string; lastName: string }>>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [selectedActorIds, setSelectedActorIds] = useState<string[]>([]);
+  const [showMemberPicker, setShowMemberPicker] = useState(false);
+
   const fetchActivity = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ scope, page: String(page), limit: "30" });
       if (typeFilter) params.set("type", typeFilter);
+      if (selectedActorIds.length > 0) params.set("actorIds", selectedActorIds.join(","));
       const res = await fetch(`/api/activity?${params}`);
       if (!res.ok) throw new Error("Failed to load activity data");
       const data = await res.json();
@@ -100,7 +107,20 @@ export default function ActivityPage() {
     } finally {
       setLoading(false);
     }
-  }, [scope, typeFilter, page]);
+  }, [scope, typeFilter, page, selectedActorIds]);
+
+  // Load team on mount
+  useEffect(() => {
+    fetch("/api/my-team")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (d?.members) {
+          setTeamMembers(d.members);
+          setCurrentUserId(d.self?.id || "");
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetchActivity();
@@ -108,7 +128,7 @@ export default function ActivityPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [scope, typeFilter]);
+  }, [scope, typeFilter, selectedActorIds]);
 
   const grouped = groupByDate(activities);
 
@@ -158,6 +178,67 @@ export default function ActivityPage() {
               {f.label}
             </button>
           ))}
+
+          {/* Team member multi-select (only useful in team scope with ≥2 members) */}
+          {scope === "team" && teamMembers.length > 1 && (
+            <div className="relative ml-auto">
+              <button
+                onClick={() => setShowMemberPicker(!showMemberPicker)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${
+                  selectedActorIds.length > 0
+                    ? "border-purple-500 bg-purple-500/10 text-purple-400"
+                    : "border-border text-muted hover:border-muted-2"
+                }`}
+              >
+                <Users size={12} />
+                {selectedActorIds.length === 0
+                  ? `All team (${teamMembers.length})`
+                  : `${selectedActorIds.length} selected`}
+              </button>
+              {showMemberPicker && (
+                <div className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border border-border bg-surface shadow-xl p-2 animate-in fade-in-0 zoom-in-95">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <span className="text-[10px] uppercase tracking-wider text-muted">Show activity from</span>
+                    <button
+                      onClick={() => setSelectedActorIds([])}
+                      className="text-[10px] text-purple-400 hover:text-purple-300"
+                    >
+                      Show all
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto space-y-0.5">
+                    {teamMembers.map((m) => {
+                      const checked = selectedActorIds.includes(m.id);
+                      return (
+                        <label
+                          key={m.id}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface-2 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedActorIds((prev) =>
+                                checked ? prev.filter((id) => id !== m.id) : [...prev, m.id]
+                              );
+                            }}
+                            className="accent-purple-500"
+                          />
+                          <span className="text-sm">
+                            {m.firstName} {m.lastName}
+                            {m.id === currentUserId && <span className="text-[10px] text-muted ml-1">(you)</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="border-t border-border mt-2 pt-2 flex justify-end">
+                    <button onClick={() => setShowMemberPicker(false)} className="text-xs px-3 py-1 rounded-md bg-purple-500 text-white">Done</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <TabsContent value="my" className="mt-4">

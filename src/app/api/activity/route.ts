@@ -14,16 +14,48 @@ export async function GET(req: NextRequest) {
 
   const type = searchParams.get("type");
   const actorId = searchParams.get("actorId");
+  const actorIds = searchParams.get("actorIds"); // comma-separated
   const scope = searchParams.get("scope") || "team";
 
   const where: any = { organizationId: orgId };
+  const userIsManager = isManager(session);
 
-  if (scope === "my" || !isManager(session)) {
+  if (scope === "my" || !userIsManager) {
     where.actorId = userId;
+  } else if (scope === "team") {
+    // Recursive team — self + all direct/indirect reports
+    const allUsers = await prisma.user.findMany({
+      where: { organizationId: orgId, deletedAt: null },
+      select: { id: true, managerId: true },
+    });
+    const childrenMap = new Map<string, string[]>();
+    for (const u of allUsers) {
+      if (u.managerId) {
+        if (!childrenMap.has(u.managerId)) childrenMap.set(u.managerId, []);
+        childrenMap.get(u.managerId)!.push(u.id);
+      }
+    }
+    const teamIds = new Set<string>([userId]);
+    const queue: string[] = [userId];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      for (const c of childrenMap.get(id) || []) {
+        if (!teamIds.has(c)) { teamIds.add(c); queue.push(c); }
+      }
+    }
+    where.actorId = { in: Array.from(teamIds) };
   }
+  // scope === "all" and caller is manager → no actor filter (org-wide)
 
   if (type) where.type = type;
-  if (actorId && isManager(session)) where.actorId = actorId;
+
+  // Per-user filter (single or multiple)
+  if (actorIds && userIsManager) {
+    const ids = actorIds.split(",").map((s) => s.trim()).filter(Boolean);
+    if (ids.length > 0) where.actorId = { in: ids };
+  } else if (actorId && userIsManager) {
+    where.actorId = actorId;
+  }
 
   const [activities, total] = await Promise.all([
     prisma.activityLog.findMany({

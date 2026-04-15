@@ -15,25 +15,44 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
 
   const userId = url.searchParams.get("userId");
-  const view = url.searchParams.get("view"); // "team" for manager team view
+  const userIds = url.searchParams.get("userIds"); // comma-separated list
+  const view = url.searchParams.get("view"); // "team" for manager team view (recursive)
   const startDate = url.searchParams.get("startDate");
   const endDate = url.searchParams.get("endDate");
   const kraId = url.searchParams.get("kraId");
 
   const where: Record<string, unknown> = { organizationId: orgId };
+  const isManagerLevel = ["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD"].includes(accessLevel);
 
-  if (view === "team" && ["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD"].includes(accessLevel)) {
-    // Manager team view — show direct reports' tasks
-    const directReports = await prisma.user.findMany({
-      where: { managerId: currentUserId, organizationId: orgId },
-      select: { id: true },
+  if (userIds) {
+    // Multi-select filter — accept any user IDs (frontend passes team members)
+    const ids = userIds.split(",").map((s) => s.trim()).filter(Boolean);
+    if (ids.length > 0) where.assigneeId = { in: ids };
+  } else if (view === "team" && isManagerLevel) {
+    // Recursive team view — self + all direct/indirect reports
+    const allUsers = await prisma.user.findMany({
+      where: { organizationId: orgId, deletedAt: null },
+      select: { id: true, managerId: true },
     });
-    const reportIds = directReports.map((r) => r.id);
-    reportIds.push(currentUserId); // include own tasks too
-    where.assigneeId = { in: reportIds };
+    const childrenMap = new Map<string, string[]>();
+    for (const u of allUsers) {
+      if (u.managerId) {
+        if (!childrenMap.has(u.managerId)) childrenMap.set(u.managerId, []);
+        childrenMap.get(u.managerId)!.push(u.id);
+      }
+    }
+    const teamIds = new Set<string>([currentUserId]);
+    const queue: string[] = [currentUserId];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      for (const c of childrenMap.get(id) || []) {
+        if (!teamIds.has(c)) { teamIds.add(c); queue.push(c); }
+      }
+    }
+    where.assigneeId = { in: Array.from(teamIds) };
   } else if (userId) {
     where.assigneeId = userId;
-  } else if (!["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL", "VP", "DIRECTOR", "MANAGER"].includes(accessLevel)) {
+  } else if (!isManagerLevel) {
     where.assigneeId = currentUserId;
   }
 
