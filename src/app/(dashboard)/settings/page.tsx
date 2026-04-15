@@ -428,7 +428,7 @@ function KRACategoriesManager() {
   const [editName, setEditName] = useState("");
 
   const fetchCategories = () => {
-    fetch("/api/kra-categories").then((r) => r.ok ? r.json() : { data: [] }).then((d) => setCategories(d.data || [])).catch(() => {});
+    fetch("/api/kra-categories").then((r) => r.ok ? r.json() : []).then((d) => setCategories(Array.isArray(d) ? d : d?.data || [])).catch(() => {});
   };
 
   useEffect(() => { fetchCategories(); }, []);
@@ -490,26 +490,26 @@ function SOPCategoriesManager() {
   const [newSubcats, setNewSubcats] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    fetch("/api/sop-categories").then((r) => r.ok ? r.json() : { data: [] }).then((d) => setCategories(d.data || [])).catch(() => {});
+    fetch("/api/sop-categories").then((r) => r.ok ? r.json() : []).then((d) => setCategories(Array.isArray(d) ? d : d?.data || [])).catch(() => {});
   }, []);
 
   async function addCategory() {
     if (!newCat.trim()) return;
     const res = await fetch("/api/sop-categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newCat.trim() }) });
-    if (res.ok) { setNewCat(""); const d = await fetch("/api/sop-categories").then((r) => r.json()); setCategories(d.data || []); }
+    if (res.ok) { setNewCat(""); const d = await fetch("/api/sop-categories").then((r) => r.json()); setCategories(Array.isArray(d) ? d : d?.data || []); }
   }
 
   async function addSubcategory(catId: string) {
     const name = newSubcats[catId]?.trim();
     if (!name) return;
     const res = await fetch("/api/sop-categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, categoryId: catId }) });
-    if (res.ok) { setNewSubcats({ ...newSubcats, [catId]: "" }); const d = await fetch("/api/sop-categories").then((r) => r.json()); setCategories(d.data || []); }
+    if (res.ok) { setNewSubcats({ ...newSubcats, [catId]: "" }); const d = await fetch("/api/sop-categories").then((r) => r.json()); setCategories(Array.isArray(d) ? d : d?.data || []); }
   }
 
   async function deleteItem(id: string, type: string) {
     await fetch("/api/sop-categories", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, type }) });
     const d = await fetch("/api/sop-categories").then((r) => r.json());
-    setCategories(d.data || []);
+    setCategories(Array.isArray(d) ? d : d?.data || []);
   }
 
   return (

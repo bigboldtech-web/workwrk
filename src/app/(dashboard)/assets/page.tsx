@@ -130,7 +130,7 @@ export default function AssetsPage() {
       const res = await fetch(`/api/assets?${params}`);
       if (res.ok) {
         const data = await res.json();
-        setAssets(data.data || []);
+        setAssets(Array.isArray(data) ? data : data.data || []);
       }
     } catch {} finally { setLoading(false); }
   }, [filterStatus, filterType]);

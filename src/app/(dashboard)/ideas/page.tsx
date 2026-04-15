@@ -88,7 +88,7 @@ export default function IdeasPage() {
       const res = await fetch(`/api/ideas?${params}`);
       if (res.ok) {
         const data = await res.json();
-        setIdeas(data.data || []);
+        setIdeas(Array.isArray(data) ? data : data.data || []);
       }
     } catch {} finally { setLoading(false); }
   }, [tab]);

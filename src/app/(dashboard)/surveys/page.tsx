@@ -39,7 +39,7 @@ export default function SurveysPage() {
   useEffect(() => {
     fetch("/api/pulse-surveys")
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.data) setSurveys(d.data); })
+      .then((d) => { setSurveys(Array.isArray(d) ? d : d?.data || []); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -60,7 +60,7 @@ export default function SurveysPage() {
         setShowCreate(false);
         setForm({ title: "", questions: [{ id: "q1", text: "", type: "rating" }] });
         const d = await fetch("/api/pulse-surveys").then((r) => r.json());
-        if (d?.data) setSurveys(d.data);
+        setSurveys(Array.isArray(d) ? d : d?.data || []);
         toastSuccess("Survey published");
       }
     } catch { toastError("Failed"); } finally { setSaving(false); }
@@ -79,7 +79,7 @@ export default function SurveysPage() {
         setRespondingSurvey(null);
         setAnswers({});
         const d = await fetch("/api/pulse-surveys").then((r) => r.json());
-        if (d?.data) setSurveys(d.data);
+        setSurveys(Array.isArray(d) ? d : d?.data || []);
         toastSuccess("Response submitted");
       }
     } catch { toastError("Failed"); } finally { setSaving(false); }

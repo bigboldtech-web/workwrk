@@ -34,7 +34,7 @@ export default function PoliciesPage() {
   useEffect(() => {
     fetch("/api/policies")
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.data) setPolicies(d.data); })
+      .then((d) => { setPolicies(Array.isArray(d) ? d : d?.data || []); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);

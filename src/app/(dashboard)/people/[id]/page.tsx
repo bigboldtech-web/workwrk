@@ -825,7 +825,7 @@ function AssetsTab({ userId }: { userId: string }) {
   useEffect(() => {
     fetch(`/api/assets?assignedToId=${userId}`)
       .then((r) => r.ok ? r.json() : { data: [] })
-      .then((d) => setAssets(d.data || []))
+      .then((d) => setAssets(Array.isArray(d) ? d : d?.data || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [userId]);

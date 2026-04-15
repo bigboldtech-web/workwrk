@@ -85,7 +85,7 @@ export default function OKRsPage() {
     setLoading(true);
     fetch(`/api/okrs?quarter=${encodeURIComponent(quarter)}`)
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d?.data) setOkrs(d.data); else setOkrs([]); })
+      .then((d) => { setOkrs(Array.isArray(d) ? d : d?.data || []); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [quarter]);
@@ -119,7 +119,7 @@ export default function OKRsPage() {
         setForm({ title: "", description: "", level: "INDIVIDUAL", quarter: "", ownerId: "", departmentId: "", keyResults: [{ title: "", targetValue: "100", unit: "%" }] });
         // Refresh
         const d = await fetch(`/api/okrs?quarter=${quarter}`).then((r) => r.json());
-        if (d?.data) setOkrs(d.data);
+        setOkrs(Array.isArray(d) ? d : d?.data || []);
         toastSuccess("OKR created");
       }
     } catch { toastError("Failed"); } finally { setSaving(false); }
@@ -142,7 +142,7 @@ export default function OKRsPage() {
       setCheckInOkr(null);
       setCheckInValues({});
       const d = await fetch(`/api/okrs?quarter=${quarter}`).then((r) => r.json());
-      if (d?.data) setOkrs(d.data);
+      setOkrs(Array.isArray(d) ? d : d?.data || []);
       toastSuccess("Progress updated");
     } catch { toastError("Failed"); }
   }

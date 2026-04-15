@@ -278,7 +278,7 @@ export default function SOPsPage() {
   useEffect(() => {
     fetch("/api/sop-categories")
       .then((r) => r.ok ? r.json() : { data: [] })
-      .then((d) => setSavedCategories(d.data || []))
+      .then((d) => setSavedCategories(Array.isArray(d) ? d : d?.data || []))
       .catch(() => {});
   }, []);
 
