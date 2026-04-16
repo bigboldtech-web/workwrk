@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
         phone: true,
         status: true,
         accessLevel: true,
+        managerId: true,
         joinDate: true,
         deletedAt: true,
         department: { select: { id: true, name: true } },

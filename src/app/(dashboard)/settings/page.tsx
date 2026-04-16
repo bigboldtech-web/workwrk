@@ -1009,64 +1009,10 @@ export default function SettingsPage() {
         <TabsContent value="general" className="space-y-6 mt-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Organization Details</CardTitle>
-              <CardDescription>Basic information about your organization</CardDescription>
+              <CardTitle className="text-base">System Configuration</CardTitle>
+              <CardDescription>Timezone, currency, and fiscal year. For company profile (name, logo, mission, values), go to Organization → About.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Logo Upload */}
-              <div className="flex items-center gap-4">
-                <div className="h-16 w-16 rounded-lg border border-border bg-surface-2 flex items-center justify-center overflow-hidden">
-                  {logoUrl ? (
-                    <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
-                  ) : (
-                    <Building2 size={28} className="text-muted" />
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label>Company Logo</Label>
-                  <div className="flex gap-2">
-                    <label className="cursor-pointer">
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                        className="hidden"
-                        onChange={handleLogoUpload}
-                        disabled={uploadingLogo}
-                      />
-                      <span className="inline-flex h-8 items-center rounded-md bg-purple-600/20 px-3 text-xs text-purple-400 hover:bg-purple-600/30 transition-colors">
-                        {uploadingLogo ? "Uploading..." : "Upload Logo"}
-                      </span>
-                    </label>
-                    {logoUrl && (
-                      <Button variant="ghost" size="sm" onClick={handleLogoRemove} disabled={uploadingLogo} className="h-8 text-xs text-muted hover:text-red-400">
-                        Remove
-                      </Button>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted">PNG, JPEG, WebP, or SVG. Max 2MB.</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Organization Name</Label>
-                  <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Slug</Label>
-                  <Input value={data?.organization.slug || ""} disabled className="opacity-60" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Domain</Label>
-                  <Input value={orgDomain} onChange={(e) => setOrgDomain(e.target.value)} placeholder="yourcompany.com" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Plan</Label>
-                  <Input value={plan} disabled className="opacity-60" />
-                </div>
-              </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Timezone</Label>
@@ -1099,7 +1045,7 @@ export default function SettingsPage() {
                   </select>
                 </div>
               </div>
-              <SaveButton section="general" data={{ name: orgName, domain: orgDomain, timezone, currency, fiscalYearStart }} />
+              <SaveButton section="general" data={{ timezone, currency, fiscalYearStart }} />
             </CardContent>
           </Card>
 

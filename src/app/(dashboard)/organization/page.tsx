@@ -578,9 +578,8 @@ export default function OrganizationPage() {
         <TabsContent value="about" className="mt-4 space-y-4">
           {/* Header with edit button */}
           <div className="flex items-center justify-between">
-            <div>
+            <div className="flex items-center gap-3">
               <h2 className="text-lg font-bold">{orgName || "Your Company"}</h2>
-              <p className="text-xs text-muted">Company culture, mission, and values</p>
             </div>
             {editingProfile ? (
               <div className="flex items-center gap-2">
