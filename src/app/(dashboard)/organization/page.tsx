@@ -60,29 +60,35 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
         )}
       </div>
 
-      {/* Children with proper CSS connectors */}
+      {/* Children with connectors */}
       {directReports.length > 0 && (
         <div className="flex flex-col items-center">
-          <div className="h-6 w-px bg-border" />
+          {/* Vertical line from parent down */}
+          <div style={{ width: "2px", height: "24px", background: "#52525b" }} />
 
           {directReports.length === 1 ? (
             <OrgChartNode user={directReports[0]} allUsers={allUsers} depth={depth + 1} />
           ) : (
-            <div className="flex">
+            <div style={{ display: "flex" }}>
               {directReports.map((report: any, idx: number) => {
                 const isFirst = idx === 0;
                 const isLast = idx === directReports.length - 1;
-                // Each column is split into left-half and right-half borders
-                // First child: only right half has border-top
-                // Last child: only left half has border-top
-                // Middle: both halves have border-top
+                const count = directReports.length;
                 return (
-                  <div key={report.id} className="flex flex-col items-center" style={{ padding: "0 12px" }}>
-                    <div className="flex w-full">
-                      <div className="w-1/2 h-0" style={{ borderTop: !isFirst ? "1px solid var(--color-border, #3f3f46)" : "none" }} />
-                      <div className="w-1/2 h-0" style={{ borderTop: !isLast ? "1px solid var(--color-border, #3f3f46)" : "none" }} />
+                  <div key={report.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 16px" }}>
+                    {/* T-connector: horizontal segments (extend into padding) + vertical drop */}
+                    <div style={{ position: "relative", width: "100%", height: "24px", overflow: "visible" }}>
+                      {/* Left half — extends 16px into the gap between columns */}
+                      {!isFirst && (
+                        <div style={{ position: "absolute", top: 0, left: "-16px", right: "50%", height: "2px", background: "#52525b" }} />
+                      )}
+                      {/* Right half — extends 16px into the gap between columns */}
+                      {!isLast && (
+                        <div style={{ position: "absolute", top: 0, left: "50%", right: "-16px", height: "2px", background: "#52525b" }} />
+                      )}
+                      {/* Vertical drop */}
+                      <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: "2px", height: "100%", background: "#52525b" }} />
                     </div>
-                    <div className="h-5 w-px" style={{ background: "var(--color-border, #3f3f46)" }} />
                     <OrgChartNode user={report} allUsers={allUsers} depth={depth + 1} />
                   </div>
                 );
