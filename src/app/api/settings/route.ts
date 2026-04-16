@@ -50,6 +50,7 @@ export async function GET() {
         status: org.status,
       },
       settings: {
+        companyProfile: settings.companyProfile || null,
         enabledModules: settings.enabledModules || [
           "people", "kra-kpi", "tasks", "sops", "reviews", "meetings", "checkins", "ai", "analytics",
         ],
