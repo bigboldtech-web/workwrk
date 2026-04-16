@@ -48,6 +48,7 @@ model Organization {
   pulseSurveys        PulseSurvey[]
   tools               Tool[]
   assets              Asset[]
+  candorSessions      CandorSession[]
 
   @@index([slug])
 }
@@ -1528,4 +1529,38 @@ enum AssetStatus {
   IN_REPAIR
   RETIRED
   LOST
+}
+
+// ============================================
+// Candor Sessions — anonymous team feedback
+// ============================================
+
+model CandorSession {
+  id             String           @id @default(cuid())
+  title          String
+  description    String?
+  status         String           @default("DRAFT")  // DRAFT, ACTIVE, CLOSED
+  prompts        Json             @default("[]")      // Array of { id, text, type: "text"|"rating"|"start_stop_continue" }
+  departmentId   String?
+  createdBy      String
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  responses      CandorResponse[]
+  launchedAt     DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model CandorResponse {
+  id        String        @id @default(cuid())
+  sessionId String
+  session   CandorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  answers   Json          @default("[]")  // Array of { promptId, value }
+  createdAt DateTime      @default(now())
+
+  @@index([sessionId])
 }

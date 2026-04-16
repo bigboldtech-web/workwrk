@@ -35,6 +35,7 @@ import {
   FileText,
   ListChecks,
   Package,
+  MessageSquareHeart,
 } from "lucide-react";
 
 // moduleKey maps nav items to module keys from settings.enabledModules
@@ -56,6 +57,7 @@ const navigation: { name: string; href: string; icon: any; moduleKey?: string; m
   { name: "OKRs", href: "/okrs", icon: Crosshair },
   { name: "Talent Grid", href: "/talent", icon: Grid3x3, managerOnly: true },
   { name: "Surveys", href: "/surveys", icon: ClipboardCheck },
+  { name: "Candor", href: "/candor", icon: MessageSquareHeart },
   { name: "Policies", href: "/policies", icon: Shield },
   { name: "Assets", href: "/assets", icon: Package, managerOnly: true },
   { name: "Activity", href: "/activity", icon: Activity },
