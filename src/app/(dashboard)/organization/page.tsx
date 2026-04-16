@@ -158,14 +158,16 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
   };
 
   return (
-    <div className="relative rounded-lg border border-border" style={{ height: "calc(100vh - 220px)", overflow: "hidden" }}>
-      {/* Toolbar */}
-      <div className="absolute top-3 right-3 z-10 flex items-center gap-1 bg-surface/90 backdrop-blur border border-border rounded-lg p-1">
-        <button onClick={() => setZoom((z) => Math.min(2, z + 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">+</button>
-        <span className="text-[10px] text-muted w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
-        <button onClick={() => setZoom((z) => Math.max(0.2, z - 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">−</button>
-        <div className="w-px h-4 bg-border mx-1" />
-        <button onClick={fitToScreen} className="h-7 px-2 rounded flex items-center justify-center text-[10px] text-muted hover:bg-surface-2 hover:text-foreground">Fit</button>
+    <div className="rounded-lg border border-border" style={{ height: "calc(100vh - 220px)", overflow: "hidden", position: "relative" }}>
+      {/* Toolbar — fixed position relative to the canvas container, NOT inside the zoomable area */}
+      <div style={{ position: "absolute", top: "12px", right: "12px", zIndex: 20 }}>
+        <div className="flex items-center gap-1 bg-surface/90 backdrop-blur border border-border rounded-lg p-1">
+          <button onClick={() => setZoom((z) => Math.min(2, z + 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">+</button>
+          <span className="text-[10px] text-muted w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
+          <button onClick={() => setZoom((z) => Math.max(0.2, z - 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">−</button>
+          <div className="w-px h-4 bg-border mx-1" />
+          <button onClick={fitToScreen} className="h-7 px-2 rounded flex items-center justify-center text-[10px] text-muted hover:bg-surface-2 hover:text-foreground">Fit</button>
+        </div>
       </div>
 
       {/* Canvas */}
@@ -200,8 +202,10 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
       </div>
 
       {/* Hint */}
-      <div className="absolute bottom-3 left-3 text-[10px] text-muted bg-surface/80 backdrop-blur px-2 py-1 rounded">
-        Scroll to zoom · Drag to pan
+      <div style={{ position: "absolute", bottom: "12px", left: "12px", zIndex: 20 }}>
+        <span className="text-[10px] text-muted bg-surface/80 backdrop-blur px-2 py-1 rounded">
+          Scroll to zoom · Drag to pan
+        </span>
       </div>
     </div>
   );
