@@ -109,20 +109,13 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
-  // Auto-fit zoom on first render
+  // Auto-fit zoom on first render and when users change
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (containerRef.current && chartRef.current) {
-        const containerW = containerRef.current.clientWidth;
-        const chartW = chartRef.current.scrollWidth;
-        if (chartW > 0) {
-          const fitZoom = Math.min(0.9, (containerW - 40) / chartW);
-          setZoom(Math.max(0.3, fitZoom));
-        }
-      }
-    }, 100);
+      fitToScreen();
+    }, 200);
     return () => clearTimeout(timer);
-  }, [users]);
+  }, [users.length]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -146,16 +139,21 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
 
   const handleMouseUp = useCallback(() => setDragging(false), []);
 
-  const fitToScreen = () => {
+  const fitToScreen = useCallback(() => {
     if (containerRef.current && chartRef.current) {
       const containerW = containerRef.current.clientWidth;
-      const chartW = chartRef.current.scrollWidth;
-      if (chartW > 0) {
-        setZoom(Math.max(0.2, Math.min(0.9, (containerW - 40) / chartW)));
+      const containerH = containerRef.current.clientHeight;
+      const chartW = chartRef.current.offsetWidth || chartRef.current.scrollWidth;
+      const chartH = chartRef.current.offsetHeight || chartRef.current.scrollHeight;
+      if (chartW > 0 && chartH > 0) {
+        // Fit to whichever dimension is more constrained
+        const zoomW = (containerW - 60) / chartW;
+        const zoomH = (containerH - 80) / chartH;
+        setZoom(Math.max(0.2, Math.min(0.9, Math.min(zoomW, zoomH))));
       }
     }
     setPan({ x: 0, y: 0 });
-  };
+  }, []);
 
   return (
     <div
@@ -188,18 +186,22 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
         <span className="text-[10px] text-muted bg-surface/90 px-2 py-1 rounded border border-border">Scroll to zoom · Drag to pan</span>
       </div>
 
-      {/* Zoomable chart */}
+      {/* Zoomable chart — uses width/height 100% so transform-origin centers properly */}
       <div
         style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transformOrigin: "top center",
           transition: dragging ? "none" : "transform 0.15s ease-out",
-          display: "flex",
-          justifyContent: "center",
-          paddingTop: "32px",
+          paddingTop: "24px",
+          pointerEvents: "none",
         }}
       >
-        <div ref={chartRef} style={{ display: "inline-flex" }}>
+        <div ref={chartRef} style={{ display: "inline-flex", pointerEvents: "auto" }}>
           <OrgChart users={users} departments={departments} />
         </div>
       </div>
