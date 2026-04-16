@@ -158,49 +158,49 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
   };
 
   return (
-    <div>
-      {/* Toolbar — above the canvas, always visible */}
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[11px] text-muted">Scroll to zoom · Drag to pan</span>
-        <div className="flex items-center gap-1 border border-border rounded-lg p-1">
-          <button onClick={() => setZoom((z) => Math.min(2, z + 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">+</button>
-          <span className="text-[10px] text-muted w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
-          <button onClick={() => setZoom((z) => Math.max(0.2, z - 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">−</button>
-          <div className="w-px h-4 bg-border mx-1" />
-          <button onClick={fitToScreen} className="h-7 px-2 rounded flex items-center justify-center text-[10px] text-muted hover:bg-surface-2 hover:text-foreground">Fit</button>
-        </div>
+    <div
+      ref={containerRef}
+      className="rounded-lg border border-border relative"
+      style={{
+        height: "calc(100vh - 230px)",
+        overflow: "hidden",
+        cursor: dragging ? "grabbing" : "grab",
+        background: "radial-gradient(circle at 1px 1px, #27272a 1px, transparent 0)",
+        backgroundSize: "24px 24px",
+      }}
+      onWheel={handleWheel}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      {/* Toolbar — inside canvas but pinned top-right with high z-index */}
+      <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-surface border border-border rounded-lg p-1 shadow-lg">
+        <button onClick={() => setZoom((z) => Math.min(2, z + 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">+</button>
+        <span className="text-[10px] text-muted w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
+        <button onClick={() => setZoom((z) => Math.max(0.2, z - 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">−</button>
+        <div className="w-px h-4 bg-border mx-1" />
+        <button onClick={fitToScreen} className="h-7 px-2 rounded flex items-center justify-center text-[10px] text-muted hover:bg-surface-2 hover:text-foreground">Fit</button>
       </div>
 
-      {/* Canvas */}
+      {/* Hint — pinned bottom-left */}
+      <div className="absolute bottom-3 left-3 z-20">
+        <span className="text-[10px] text-muted bg-surface/90 px-2 py-1 rounded border border-border">Scroll to zoom · Drag to pan</span>
+      </div>
+
+      {/* Zoomable chart */}
       <div
-        ref={containerRef}
-        className="rounded-lg border border-border"
         style={{
-          height: "calc(100vh - 260px)",
-          overflow: "hidden",
-          cursor: dragging ? "grabbing" : "grab",
-          background: "radial-gradient(circle at 1px 1px, #27272a 1px, transparent 0)",
-          backgroundSize: "24px 24px",
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: "top center",
+          transition: dragging ? "none" : "transform 0.15s ease-out",
+          display: "flex",
+          justifyContent: "center",
+          paddingTop: "32px",
         }}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
       >
-        <div
-          style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: "top center",
-            transition: dragging ? "none" : "transform 0.15s ease-out",
-            display: "flex",
-            justifyContent: "center",
-            paddingTop: "32px",
-          }}
-        >
-          <div ref={chartRef} style={{ display: "inline-flex" }}>
-            <OrgChart users={users} departments={departments} />
-          </div>
+        <div ref={chartRef} style={{ display: "inline-flex" }}>
+          <OrgChart users={users} departments={departments} />
         </div>
       </div>
     </div>
@@ -1071,7 +1071,7 @@ export default function OrganizationPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="orgchart" className="mt-0">
+        <TabsContent value="orgchart" className="mt-2">
           <OrgChartCanvas users={users} departments={departments} />
         </TabsContent>
       </Tabs>
