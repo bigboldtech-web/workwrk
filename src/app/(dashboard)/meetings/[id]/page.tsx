@@ -124,10 +124,12 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
         setIsRecording(false);
         return;
       }
+      // Network errors are transient — auto-retry instead of stopping
       if (e.error === "network") {
-        setErrorMsg("Network error — Speech API needs internet connection.");
-        isRecordingRef.current = false;
-        setIsRecording(false);
+        if (isRecordingRef.current) {
+          setInterimText("Reconnecting...");
+          // onend will auto-restart since isRecordingRef is still true
+        }
         return;
       }
       console.error("[VoiceRecord] Error:", e.error);
@@ -137,7 +139,12 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
 
     recognition.onend = () => {
       if (isRecordingRef.current) {
-        try { recognition.start(); } catch {}
+        // Small delay before restart to handle transient network errors
+        setTimeout(() => {
+          if (isRecordingRef.current) {
+            try { recognition.start(); } catch {}
+          }
+        }, 300);
       } else {
         setIsRecording(false);
         setInterimText("");
