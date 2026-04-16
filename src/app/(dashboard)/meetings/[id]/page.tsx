@@ -80,14 +80,20 @@ function getMeetingTypeColor(type: string) {
 function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => void }) {
   const [isRecording, setIsRecording] = useState(false);
   const [supported, setSupported] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [interimText, setInterimText] = useState("");
   const recognitionRef = useRef<any>(null);
   const isRecordingRef = useRef(false);
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { setSupported(false); return; }
+    if (!SpeechRecognition) {
+      setSupported(false);
+      return;
+    }
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
@@ -95,58 +101,113 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
     recognition.lang = "en-US";
 
     recognition.onresult = (event: any) => {
+      let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
           const transcript = event.results[i][0].transcript.trim();
-          if (transcript) onTranscriptRef.current(transcript);
+          if (transcript) {
+            onTranscriptRef.current(transcript);
+            setInterimText("");
+          }
+        } else {
+          interim += event.results[i][0].transcript;
         }
       }
+      if (interim) setInterimText(interim);
     };
 
     recognition.onerror = (e: any) => {
-      // Don't stop on "no-speech" — just keep listening
       if (e.error === "no-speech" || e.error === "aborted") return;
+      if (e.error === "not-allowed") {
+        setErrorMsg("Microphone access denied. Please allow microphone in your browser settings.");
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        return;
+      }
+      if (e.error === "network") {
+        setErrorMsg("Network error — Speech API needs internet connection.");
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        return;
+      }
+      console.error("[VoiceRecord] Error:", e.error);
       isRecordingRef.current = false;
       setIsRecording(false);
     };
 
-    // Auto-restart when it stops (browser kills it after silence)
     recognition.onend = () => {
       if (isRecordingRef.current) {
-        // User still wants to record — restart automatically
         try { recognition.start(); } catch {}
       } else {
         setIsRecording(false);
+        setInterimText("");
       }
     };
 
     recognitionRef.current = recognition;
-  }, []); // No dependencies — stable ref
+  }, []);
 
   function toggleRecording() {
-    if (!recognitionRef.current) return;
+    setErrorMsg("");
+    if (!recognitionRef.current) {
+      setErrorMsg("Voice recording is only supported in Chrome. Please use Chrome or paste your transcript manually.");
+      return;
+    }
     if (isRecording) {
       isRecordingRef.current = false;
       recognitionRef.current.stop();
       setIsRecording(false);
+      setInterimText("");
     } else {
       isRecordingRef.current = true;
-      try { recognitionRef.current.start(); } catch {}
-      setIsRecording(true);
+      try {
+        recognitionRef.current.start();
+        setIsRecording(true);
+      } catch (err: any) {
+        setErrorMsg("Failed to start recording. Please check microphone permissions.");
+        isRecordingRef.current = false;
+      }
     }
   }
 
-  if (!supported) return null;
+  if (!supported) {
+    return (
+      <p className="text-[10px] text-muted">Voice recording requires Chrome browser.</p>
+    );
+  }
 
   return (
-    <Button
-      variant={isRecording ? "destructive" : "outline"}
-      size="sm"
-      onClick={toggleRecording}
-      className="gap-1.5 text-xs"
-    >
-      {isRecording ? <><MicOff size={14} /> Stop Recording</> : <><Mic size={14} /> Voice Record</>}
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button
+        variant={isRecording ? "destructive" : "outline"}
+        size="sm"
+        onClick={toggleRecording}
+        className="gap-1.5 text-xs"
+      >
+        {isRecording ? (
+          <>
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+            </span>
+            Stop Recording
+          </>
+        ) : (
+          <><Mic size={14} /> Voice Record</>
+        )}
+      </Button>
+      {isRecording && interimText && (
+        <span className="text-[11px] text-muted italic truncate max-w-[200px]">
+          {interimText}...
+        </span>
+      )}
+      {isRecording && !interimText && (
+        <span className="text-[11px] text-muted animate-pulse">Listening...</span>
+      )}
+      {errorMsg && (
+        <span className="text-[11px] text-red-400">{errorMsg}</span>
+      )}
+    </div>
   );
 }
 
