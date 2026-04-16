@@ -35,7 +35,9 @@ function getAccessLabel(level: string) {
 }
 
 function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[]; depth?: number }) {
-  const directReports = allUsers.filter((u) => u.manager?.id === user.id);
+  const directReports = allUsers
+    .filter((u) => u.manager?.id === user.id)
+    .sort((a: any, b: any) => (ACCESS_LEVEL_ORDER[a.accessLevel] ?? 7) - (ACCESS_LEVEL_ORDER[b.accessLevel] ?? 7));
   const borderColor = depth === 0 ? "border-purple-500/30" : "border-border";
   const bgColor = depth === 0 ? "bg-purple-500/10" : "bg-surface";
 
@@ -58,31 +60,36 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
         )}
       </div>
 
-      {/* Children */}
+      {/* Children with proper CSS connectors */}
       {directReports.length > 0 && (
-        <>
+        <div className="flex flex-col items-center">
           <div className="h-6 w-px bg-border" />
+
           {directReports.length === 1 ? (
             <OrgChartNode user={directReports[0]} allUsers={allUsers} depth={depth + 1} />
           ) : (
-            <div className="relative">
-              {/* Horizontal connector line */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 h-px bg-border" style={{
-                width: `${Math.min(directReports.length * 200, 900)}px`,
-              }} />
-              <div className="flex gap-6 pt-0">
-                {directReports
-                  .sort((a: any, b: any) => (ACCESS_LEVEL_ORDER[a.accessLevel] ?? 7) - (ACCESS_LEVEL_ORDER[b.accessLevel] ?? 7))
-                  .map((report: any) => (
-                    <div key={report.id} className="flex flex-col items-center">
-                      <div className="h-6 w-px bg-border" />
-                      <OrgChartNode user={report} allUsers={allUsers} depth={depth + 1} />
+            <div className="flex">
+              {directReports.map((report: any, idx: number) => {
+                const isFirst = idx === 0;
+                const isLast = idx === directReports.length - 1;
+                // Each column is split into left-half and right-half borders
+                // First child: only right half has border-top
+                // Last child: only left half has border-top
+                // Middle: both halves have border-top
+                return (
+                  <div key={report.id} className="flex flex-col items-center" style={{ padding: "0 12px" }}>
+                    <div className="flex w-full">
+                      <div className="w-1/2 h-0" style={{ borderTop: !isFirst ? "1px solid var(--color-border, #3f3f46)" : "none" }} />
+                      <div className="w-1/2 h-0" style={{ borderTop: !isLast ? "1px solid var(--color-border, #3f3f46)" : "none" }} />
                     </div>
-                  ))}
-              </div>
+                    <div className="h-5 w-px" style={{ background: "var(--color-border, #3f3f46)" }} />
+                    <OrgChartNode user={report} allUsers={allUsers} depth={depth + 1} />
+                  </div>
+                );
+              })}
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );
