@@ -288,9 +288,11 @@ export default function UserProfilePage() {
   const [editStatus, setEditStatus] = useState("");
   const [editDob, setEditDob] = useState("");
   const [editOfficeId, setEditOfficeId] = useState("");
+  const [editManagerId, setEditManagerId] = useState("");
   const [departments, setDepartments] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
   const [offices, setOffices] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -299,10 +301,12 @@ export default function UserProfilePage() {
       fetch("/api/departments").then((r) => r.ok ? r.json() : []),
       fetch("/api/roles").then((r) => r.ok ? r.json() : []),
       fetch("/api/offices").then((r) => r.ok ? r.json() : []),
-    ]).then(([depts, rls, offs]) => {
+      fetch("/api/users?limit=500").then((r) => r.ok ? r.json() : []),
+    ]).then(([depts, rls, offs, usrs]) => {
       setDepartments(Array.isArray(depts) ? depts : depts?.data || []);
       setRoles(Array.isArray(rls) ? rls : rls?.data || []);
       setOffices(Array.isArray(offs) ? offs : offs?.data || []);
+      setAllUsers(Array.isArray(usrs) ? usrs : usrs?.data || []);
     });
   }, []);
 
@@ -314,6 +318,7 @@ export default function UserProfilePage() {
     setEditStatus(user.status || "");
     setEditDob(user.dateOfBirth ? new Date(user.dateOfBirth).toISOString().split("T")[0] : "");
     setEditOfficeId(user.office?.id || "");
+    setEditManagerId(user.manager?.id || user.managerId || "");
     setShowEditDialog(true);
   };
 
@@ -346,6 +351,7 @@ export default function UserProfilePage() {
       if (editStatus) body.status = editStatus;
       if (editDob) body.dateOfBirth = `${editDob}T12:00:00.000Z`;
       if (editOfficeId) body.officeId = editOfficeId;
+      body.managerId = editManagerId || null;
 
       const res = await fetch(`/api/users/${id}`, {
         method: "PATCH",
@@ -494,6 +500,21 @@ export default function UserProfilePage() {
                         <SelectItem value="VP">VP</SelectItem>
                         <SelectItem value="C_LEVEL">C-Level</SelectItem>
                         <SelectItem value="HR">HR</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Reports To</Label>
+                    <Select value={editManagerId || "none"} onValueChange={(v) => setEditManagerId(v === "none" ? "" : v)}>
+                      <SelectTrigger><SelectValue placeholder="Select reporting manager" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— No reporting manager —</SelectItem>
+                        {allUsers
+                          .filter((u) => u.id !== id && ["MANAGER", "TEAM_LEAD", "HR", "DIRECTOR", "VP", "C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(u.accessLevel))
+                          .map((u) => (
+                            <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName}</SelectItem>
+                          ))
+                        }
                       </SelectContent>
                     </Select>
                   </div>

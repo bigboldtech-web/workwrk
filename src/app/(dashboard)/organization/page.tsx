@@ -249,6 +249,9 @@ export default function OrganizationPage() {
       if (res.ok) {
         setEditingProfile(false);
         toastSuccess("Company profile saved");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to save profile");
       }
     } catch { toastError("Failed to save profile"); } finally { setSavingProfile(false); }
   }
@@ -269,9 +272,9 @@ export default function OrganizationPage() {
           currentValues: companyProfile.values,
         }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const data = await res.json();
-        const result = data.data || {};
+        const result = data.data || data || {};
         setCompanyProfile({
           ...companyProfile,
           about: result.about || companyProfile.about,
@@ -283,9 +286,9 @@ export default function OrganizationPage() {
         setEditingProfile(true);
         toastSuccess("AI generated profile — review and save");
       } else {
-        toastError("AI generation failed");
+        toastError(data?.error || "AI generation failed");
       }
-    } catch { toastError("AI generation failed"); } finally { setAiGenerating(false); }
+    } catch (e: any) { toastError(e?.message || "AI generation failed"); } finally { setAiGenerating(false); }
   }
 
   function addValue() {
