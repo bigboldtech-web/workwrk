@@ -102,16 +102,32 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
 }
 
 function OrgChartCanvas({ users, departments }: { users: any[]; departments: any[] }) {
-  const [zoom, setZoom] = useState(0.85);
+  const [zoom, setZoom] = useState(0.55);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  // Auto-fit zoom on first render
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (containerRef.current && chartRef.current) {
+        const containerW = containerRef.current.clientWidth;
+        const chartW = chartRef.current.scrollWidth;
+        if (chartW > 0) {
+          const fitZoom = Math.min(0.9, (containerW - 40) / chartW);
+          setZoom(Math.max(0.3, fitZoom));
+        }
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [users]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.05 : 0.05;
-    setZoom((z) => Math.min(2, Math.max(0.3, z + delta)));
+    setZoom((z) => Math.min(2, Math.max(0.2, z + delta)));
   }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -130,24 +146,37 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
 
   const handleMouseUp = useCallback(() => setDragging(false), []);
 
-  const resetView = () => { setZoom(0.85); setPan({ x: 0, y: 0 }); };
+  const fitToScreen = () => {
+    if (containerRef.current && chartRef.current) {
+      const containerW = containerRef.current.clientWidth;
+      const chartW = chartRef.current.scrollWidth;
+      if (chartW > 0) {
+        setZoom(Math.max(0.2, Math.min(0.9, (containerW - 40) / chartW)));
+      }
+    }
+    setPan({ x: 0, y: 0 });
+  };
 
   return (
-    <div className="relative rounded-lg border border-border overflow-hidden" style={{ height: "calc(100vh - 220px)" }}>
+    <div className="relative rounded-lg border border-border" style={{ height: "calc(100vh - 220px)", overflow: "hidden" }}>
       {/* Toolbar */}
       <div className="absolute top-3 right-3 z-10 flex items-center gap-1 bg-surface/90 backdrop-blur border border-border rounded-lg p-1">
         <button onClick={() => setZoom((z) => Math.min(2, z + 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">+</button>
         <span className="text-[10px] text-muted w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
-        <button onClick={() => setZoom((z) => Math.max(0.3, z - 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">−</button>
+        <button onClick={() => setZoom((z) => Math.max(0.2, z - 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">−</button>
         <div className="w-px h-4 bg-border mx-1" />
-        <button onClick={resetView} className="h-7 px-2 rounded flex items-center justify-center text-[10px] text-muted hover:bg-surface-2 hover:text-foreground">Reset</button>
+        <button onClick={fitToScreen} className="h-7 px-2 rounded flex items-center justify-center text-[10px] text-muted hover:bg-surface-2 hover:text-foreground">Fit</button>
       </div>
 
-      {/* Canvas — drag to pan, scroll to zoom */}
+      {/* Canvas */}
       <div
         ref={containerRef}
-        className="h-full w-full bg-[radial-gradient(circle_at_1px_1px,_var(--color-border,#2a2a3a)_1px,_transparent_0)] [background-size:24px_24px]"
-        style={{ cursor: dragging ? "grabbing" : "grab" }}
+        className="h-full w-full"
+        style={{
+          cursor: dragging ? "grabbing" : "grab",
+          background: "radial-gradient(circle at 1px 1px, #27272a 1px, transparent 0)",
+          backgroundSize: "24px 24px",
+        }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -155,21 +184,23 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
         onMouseLeave={handleMouseUp}
       >
         <div
-          className="h-full w-full flex items-start justify-center pt-10"
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "top center",
             transition: dragging ? "none" : "transform 0.15s ease-out",
+            display: "flex",
+            justifyContent: "center",
+            paddingTop: "32px",
           }}
         >
-          <div className="min-w-fit p-8">
+          <div ref={chartRef} style={{ display: "inline-flex" }}>
             <OrgChart users={users} departments={departments} />
           </div>
         </div>
       </div>
 
       {/* Hint */}
-      <div className="absolute bottom-3 left-3 text-[10px] text-muted bg-surface/80 px-2 py-1 rounded">
+      <div className="absolute bottom-3 left-3 text-[10px] text-muted bg-surface/80 backdrop-blur px-2 py-1 rounded">
         Scroll to zoom · Drag to pan
       </div>
     </div>
