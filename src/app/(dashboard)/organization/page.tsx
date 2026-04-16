@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,6 +91,81 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function OrgChartCanvas({ users, departments }: { users: any[]; departments: any[] }) {
+  const [zoom, setZoom] = useState(0.85);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.05 : 0.05;
+    setZoom((z) => Math.min(2, Math.max(0.3, z + delta)));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setDragging(true);
+    dragStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+  }, [pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragging) return;
+    setPan({
+      x: dragStart.current.panX + (e.clientX - dragStart.current.x),
+      y: dragStart.current.panY + (e.clientY - dragStart.current.y),
+    });
+  }, [dragging]);
+
+  const handleMouseUp = useCallback(() => setDragging(false), []);
+
+  const resetView = () => { setZoom(0.85); setPan({ x: 0, y: 0 }); };
+
+  return (
+    <div className="relative rounded-lg border border-border overflow-hidden" style={{ height: "calc(100vh - 220px)" }}>
+      {/* Toolbar */}
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-1 bg-surface/90 backdrop-blur border border-border rounded-lg p-1">
+        <button onClick={() => setZoom((z) => Math.min(2, z + 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">+</button>
+        <span className="text-[10px] text-muted w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
+        <button onClick={() => setZoom((z) => Math.max(0.3, z - 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">−</button>
+        <div className="w-px h-4 bg-border mx-1" />
+        <button onClick={resetView} className="h-7 px-2 rounded flex items-center justify-center text-[10px] text-muted hover:bg-surface-2 hover:text-foreground">Reset</button>
+      </div>
+
+      {/* Canvas — drag to pan, scroll to zoom */}
+      <div
+        ref={containerRef}
+        className="h-full w-full bg-[radial-gradient(circle_at_1px_1px,_var(--color-border,#2a2a3a)_1px,_transparent_0)] [background-size:24px_24px]"
+        style={{ cursor: dragging ? "grabbing" : "grab" }}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <div
+          className="h-full w-full flex items-start justify-center pt-10"
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "top center",
+            transition: dragging ? "none" : "transform 0.15s ease-out",
+          }}
+        >
+          <div className="min-w-fit p-8">
+            <OrgChart users={users} departments={departments} />
+          </div>
+        </div>
+      </div>
+
+      {/* Hint */}
+      <div className="absolute bottom-3 left-3 text-[10px] text-muted bg-surface/80 px-2 py-1 rounded">
+        Scroll to zoom · Drag to pan
+      </div>
     </div>
   );
 }
@@ -959,12 +1034,8 @@ export default function OrganizationPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="orgchart" className="mt-4">
-          <Card>
-            <CardContent className="p-8">
-              <OrgChart users={users} departments={departments} />
-            </CardContent>
-          </Card>
+        <TabsContent value="orgchart" className="mt-0">
+          <OrgChartCanvas users={users} departments={departments} />
         </TabsContent>
       </Tabs>
 
