@@ -158,10 +158,11 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
   };
 
   return (
-    <div className="rounded-lg border border-border" style={{ height: "calc(100vh - 220px)", overflow: "hidden", position: "relative" }}>
-      {/* Toolbar — fixed position relative to the canvas container, NOT inside the zoomable area */}
-      <div style={{ position: "absolute", top: "12px", right: "12px", zIndex: 20 }}>
-        <div className="flex items-center gap-1 bg-surface/90 backdrop-blur border border-border rounded-lg p-1">
+    <div>
+      {/* Toolbar — above the canvas, always visible */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] text-muted">Scroll to zoom · Drag to pan</span>
+        <div className="flex items-center gap-1 border border-border rounded-lg p-1">
           <button onClick={() => setZoom((z) => Math.min(2, z + 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">+</button>
           <span className="text-[10px] text-muted w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
           <button onClick={() => setZoom((z) => Math.max(0.2, z - 0.1))} className="h-7 w-7 rounded flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground text-sm font-bold">−</button>
@@ -173,8 +174,10 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
       {/* Canvas */}
       <div
         ref={containerRef}
-        className="h-full w-full"
+        className="rounded-lg border border-border"
         style={{
+          height: "calc(100vh - 260px)",
+          overflow: "hidden",
           cursor: dragging ? "grabbing" : "grab",
           background: "radial-gradient(circle at 1px 1px, #27272a 1px, transparent 0)",
           backgroundSize: "24px 24px",
@@ -199,13 +202,6 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
             <OrgChart users={users} departments={departments} />
           </div>
         </div>
-      </div>
-
-      {/* Hint */}
-      <div style={{ position: "absolute", bottom: "12px", left: "12px", zIndex: 20 }}>
-        <span className="text-[10px] text-muted bg-surface/80 backdrop-blur px-2 py-1 rounded">
-          Scroll to zoom · Drag to pan
-        </span>
       </div>
     </div>
   );
