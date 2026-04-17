@@ -319,7 +319,7 @@ export default function SOPsPage() {
       const freshRes = await fetch("/api/sop-categories");
       if (freshRes.ok) {
         const freshData = await freshRes.json();
-        const freshCats = freshData.data || [];
+        const freshCats = Array.isArray(freshData) ? freshData : freshData.data || [];
         setSavedCategories(freshCats);
         catObj = freshCats.find((c: any) => c.name === newCategory);
       }
@@ -335,6 +335,15 @@ export default function SOPsPage() {
         if (catRes.ok) {
           const catData = await catRes.json();
           catObj = catData.data || catData;
+        } else {
+          // Category might already exist — re-fetch to get its ID
+          const retryRes = await fetch("/api/sop-categories");
+          if (retryRes.ok) {
+            const retryData = await retryRes.json();
+            const retryCats = Array.isArray(retryData) ? retryData : retryData.data || [];
+            setSavedCategories(retryCats);
+            catObj = retryCats.find((c: any) => c.name === newCategory);
+          }
         }
       } catch {}
     }
@@ -353,7 +362,7 @@ export default function SOPsPage() {
         const refreshRes = await fetch("/api/sop-categories");
         if (refreshRes.ok) {
           const refreshData = await refreshRes.json();
-          setSavedCategories(refreshData.data || []);
+          setSavedCategories(Array.isArray(refreshData) ? refreshData : refreshData.data || []);
         }
         setNewSubcategory(created.name);
         setNewSubcatName("");
@@ -598,7 +607,7 @@ export default function SOPsPage() {
                           const refreshRes = await fetch("/api/sop-categories");
                           if (refreshRes.ok) {
                             const refreshData = await refreshRes.json();
-                            setSavedCategories(refreshData.data || []);
+                            setSavedCategories(Array.isArray(refreshData) ? refreshData : refreshData.data || []);
                           }
                         } catch {}
                       }
