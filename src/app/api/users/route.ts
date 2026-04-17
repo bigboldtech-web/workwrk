@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { checkPlanLimit } from "@/lib/plan-limits";
 import { logActivity } from "@/lib/activity";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 
@@ -66,6 +67,10 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isManager(session)) return jsonError("Forbidden", 403);
+
+  // Plan limit enforcement
+  const planCheck = await checkPlanLimit(getOrgId(session), "users");
+  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
   const body = await req.json();
   const { firstName, lastName, email, password, departmentId, roleId, accessLevel, managerId } = body;

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -16,6 +17,8 @@ const links = [
 
 export function MarketingNav() {
   const pathname = usePathname();
+  const { data: sessionData } = useSession();
+  const isLoggedIn = !!sessionData?.user;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -64,12 +67,20 @@ export function MarketingNav() {
               )}
             </Link>
           ))}
-          <Link href="/login" className="btn-outline ml-2">
-            Log In
-          </Link>
-          <Link href="/register" className="btn-primary">
-            Start Free Trial
-          </Link>
+          {isLoggedIn ? (
+            <Link href="/dashboard" className="btn-primary ml-2">
+              Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link href="/login" className="btn-outline ml-2">
+                Log In
+              </Link>
+              <Link href="/register" className="btn-primary">
+                Start Free Trial
+              </Link>
+            </>
+          )}
         </div>
 
         {/* Mobile toggle */}
@@ -140,12 +151,20 @@ export function MarketingNav() {
                   transition={{ delay: 0.25, duration: 0.3 }}
                   className="mt-4 flex flex-col gap-3"
                 >
-                  <Link href="/login" className="btn-outline w-full justify-center">
-                    Log In
-                  </Link>
-                  <Link href="/register" className="btn-primary w-full justify-center">
-                    Start Free Trial
-                  </Link>
+                  {isLoggedIn ? (
+                    <Link href="/dashboard" className="btn-primary w-full justify-center">
+                      Dashboard
+                    </Link>
+                  ) : (
+                    <>
+                      <Link href="/login" className="btn-outline w-full justify-center">
+                        Log In
+                      </Link>
+                      <Link href="/register" className="btn-primary w-full justify-center">
+                        Start Free Trial
+                      </Link>
+                    </>
+                  )}
                 </motion.div>
               </div>
             </div>

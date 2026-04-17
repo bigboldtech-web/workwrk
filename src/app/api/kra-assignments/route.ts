@@ -74,18 +74,24 @@ export async function GET(req: NextRequest) {
         select: {
           id: true,
           name: true,
+          description: true,
           category: true,
           kpis: {
             select: {
               id: true,
               name: true,
+              description: true,
+              type: true,
               unit: true,
+              frequency: true,
+              targetValue: true,
+              targetLabel: true,
+              lowerIsBetter: true,
               records: {
                 where: { userId: targetUserId },
                 orderBy: { period: "desc" },
                 take: 6,
               },
-              targetValue: true,
             },
           },
         },

@@ -12,6 +12,7 @@ import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Users,
   Target, CheckSquare, TrendingUp, Clock, Star, Smile, Zap, Heart,
   Edit3, Save, Package, Laptop, Monitor, Smartphone,
+  ChevronDown, ChevronUp, CalendarClock, ArrowDownRight, ArrowUpRight, Info,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -157,15 +158,31 @@ function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | nu
   );
 }
 
+const FREQ_LABELS: Record<string, string> = {
+  DAILY: "Daily",
+  WEEKLY: "Weekly",
+  MONTHLY: "Monthly",
+  QUARTERLY: "Quarterly",
+  ANNUALLY: "Annually",
+};
+
+const FREQ_COLORS: Record<string, string> = {
+  DAILY: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
+  WEEKLY: "bg-blue-500/15 text-blue-400 border-blue-500/20",
+  MONTHLY: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+  QUARTERLY: "bg-amber-500/15 text-amber-400 border-amber-500/20",
+  ANNUALLY: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
+};
+
 function KraAssignmentsTab({ userId }: { userId: string }) {
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedKras, setExpandedKras] = useState<Set<string>>(new Set());
   const [selectedPeriod, setSelectedPeriod] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   });
 
-  // Generate last 6 months for period selector
   const periodOptions = Array.from({ length: 6 }, (_, i) => {
     const d = new Date();
     d.setMonth(d.getMonth() - i);
@@ -178,11 +195,22 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
     fetch(`/api/kra-assignments?userId=${userId}`)
       .then((r) => r.json())
       .then((data) => {
-        setAssignments(Array.isArray(data) ? data : data.assignments ?? data.data ?? []);
+        const items = Array.isArray(data) ? data : data.assignments ?? data.data ?? [];
+        setAssignments(items);
+        // Auto-expand all KRAs so user sees everything
+        setExpandedKras(new Set(items.map((a: any) => a.id)));
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [userId]);
+
+  const toggleKra = (id: string) => {
+    setExpandedKras((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   const totalWeightage = assignments.reduce((sum: number, a: any) => sum + (a.weightage || 0), 0);
 
@@ -190,7 +218,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
     return (
       <div className="space-y-3">
         {[1,2,3].map((i) => (
-          <div key={i} className="h-16 bg-surface rounded-lg border border-border animate-pulse" />
+          <div key={i} className="h-24 bg-surface rounded-lg border border-border animate-pulse" />
         ))}
       </div>
     );
@@ -224,48 +252,162 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
         className="h-1.5"
         indicatorClassName={totalWeightage === 100 ? "bg-green-500" : "bg-orange-500"}
       />
+
       {assignments.map((a: any) => {
-        const kpiProgress = a.kra?.kpis?.map((kpi: any) => {
-          // Find record matching selected period
+        const isExpanded = expandedKras.has(a.id);
+        const kpis = a.kra?.kpis ?? [];
+
+        // Calculate overall KRA score from KPIs
+        let totalPct = 0;
+        let recordedCount = 0;
+        const kpiDetails = kpis.map((kpi: any) => {
           const record = kpi.records?.find((r: any) => r.period === selectedPeriod) || kpi.records?.[0];
-          if (!record) return { name: kpi.name, unit: kpi.unit, target: kpi.targetValue, pct: 0, actual: null, targetVal: kpi.targetValue, period: null };
-          const target = record.targetValue || kpi.targetValue || 0;
-          const pct = target > 0 ? Math.min(Math.round((record.actualValue / target) * 100), 120) : 0;
-          return { name: kpi.name, unit: kpi.unit, pct, actual: record.actualValue, target, period: record.period };
-        }) ?? [];
+          const target = record?.targetValue || kpi.targetValue || 0;
+          const actual = record?.actualValue ?? null;
+          const pct = actual != null && target > 0 ? Math.min(Math.round((actual / target) * 100), 120) : 0;
+          if (actual != null) { totalPct += pct; recordedCount++; }
+          return { ...kpi, record, target, actual, pct, period: record?.period };
+        });
+        const avgScore = recordedCount > 0 ? Math.round(totalPct / recordedCount) : null;
 
         return (
-          <div key={a.id} className="rounded-lg border border-border bg-surface p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Target size={14} className="text-purple-400" />
-                <div>
-                  <p className="text-sm font-medium">{a.kra?.name}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <Badge variant="outline" className="text-[10px]">{a.kra?.category}</Badge>
-                    <Badge className={`text-[10px] ${a.status === "ACTIVE" ? "bg-green-500/20 text-green-400" : "bg-slate-500/20 text-slate-400"}`}>{a.status}</Badge>
+          <div key={a.id} className="rounded-lg border border-border bg-surface overflow-hidden">
+            {/* KRA Header - always visible */}
+            <button
+              onClick={() => toggleKra(a.id)}
+              className="w-full text-left p-4 hover:bg-surface-2/50 transition-colors"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <Target size={15} className="text-purple-400 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold truncate">{a.kra?.name}</p>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      {a.kra?.category && <Badge variant="outline" className="text-[9px]">{a.kra.category}</Badge>}
+                      <Badge className={`text-[9px] ${a.status === "ACTIVE" ? "bg-green-500/20 text-green-400" : "bg-slate-500/20 text-slate-400"}`}>{a.status}</Badge>
+                      <span className="text-[9px] text-muted">&middot; {kpis.length} KPI{kpis.length !== 1 ? "s" : ""}</span>
+                      {a.period && a.period !== "ongoing" && (
+                        <span className="text-[9px] text-muted">&middot; Period: {a.period}</span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="text-right">
-                <p className="text-lg font-bold font-mono text-purple-400">{a.weightage}%</p>
-              </div>
-            </div>
-            <div className="mt-3 space-y-2 border-t border-border pt-3">
-              {kpiProgress.map((kpi: any, i: number) => (
-                <div key={i}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-muted">{kpi.name}</span>
-                    {kpi.actual != null ? (
-                      <span className={getScoreColor(kpi.pct)}>{kpi.actual}/{kpi.target} {kpi.unit} ({kpi.pct}%)</span>
-                    ) : (
-                      <span className="text-muted-2">/{kpi.target} {kpi.unit} (Not recorded)</span>
-                    )}
+                <div className="flex items-center gap-3 shrink-0 ml-3">
+                  {avgScore != null && (
+                    <div className="text-right">
+                      <p className={`text-base font-bold font-mono ${getScoreColor(avgScore)}`}>{avgScore}%</p>
+                      <p className="text-[9px] text-muted">avg score</p>
+                    </div>
+                  )}
+                  <div className="text-right">
+                    <p className="text-lg font-bold font-mono text-purple-400">{a.weightage}%</p>
+                    <p className="text-[9px] text-muted">weight</p>
                   </div>
-                  <Progress value={Math.min(kpi.pct, 100)} className="h-1" indicatorClassName={kpi.actual != null ? getProgressColor(kpi.pct) : "bg-border"} />
+                  {isExpanded ? <ChevronUp size={14} className="text-muted" /> : <ChevronDown size={14} className="text-muted" />}
                 </div>
-              ))}
-            </div>
+              </div>
+            </button>
+
+            {/* Expanded Details */}
+            {isExpanded && (
+              <div className="border-t border-border">
+                {/* KRA Description */}
+                {a.kra?.description && (
+                  <div className="px-4 py-2.5 bg-surface-2/30 border-b border-border">
+                    <p className="text-[11px] text-muted leading-relaxed">{a.kra.description}</p>
+                  </div>
+                )}
+
+                {/* KPI Details */}
+                <div className="divide-y divide-border">
+                  {kpiDetails.length === 0 ? (
+                    <p className="text-xs text-muted p-4 text-center">No KPIs defined for this KRA</p>
+                  ) : (
+                    kpiDetails.map((kpi: any, i: number) => (
+                      <div key={i} className="px-4 py-3">
+                        {/* KPI Header Row */}
+                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium">{kpi.name}</p>
+                            {kpi.description && (
+                              <p className="text-[10px] text-muted mt-0.5 leading-snug">{kpi.description}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {kpi.actual != null ? (
+                              <span className={`text-xs font-semibold font-mono ${getScoreColor(kpi.pct)}`}>{kpi.pct}%</span>
+                            ) : (
+                              <span className="text-[10px] text-muted">Not recorded</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* KPI Meta Tags */}
+                        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                          {kpi.frequency && (
+                            <span className={`inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded border ${FREQ_COLORS[kpi.frequency] || "bg-slate-500/15 text-slate-400 border-slate-500/20"}`}>
+                              <CalendarClock size={8} />
+                              {FREQ_LABELS[kpi.frequency] || kpi.frequency}
+                            </span>
+                          )}
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-500/10 text-muted border border-border">
+                            {kpi.type === "QUALITATIVE" ? "Qualitative" : "Quantitative"}
+                          </span>
+                          {kpi.lowerIsBetter && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                              <ArrowDownRight size={8} /> Lower is better
+                            </span>
+                          )}
+                          {kpi.unit && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-500/10 text-muted border border-border">
+                              Unit: {kpi.unit}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Target & Actual Values */}
+                        <div className="flex items-center gap-4 mb-1.5">
+                          <div className="flex items-center gap-1.5 text-[10px]">
+                            <span className="text-muted">Target:</span>
+                            <span className="font-medium font-mono">{kpi.target}{kpi.unit ? ` ${kpi.unit}` : ""}</span>
+                            {kpi.targetLabel && <span className="text-muted">({kpi.targetLabel})</span>}
+                          </div>
+                          {kpi.actual != null && (
+                            <div className="flex items-center gap-1.5 text-[10px]">
+                              <span className="text-muted">Actual:</span>
+                              <span className={`font-medium font-mono ${getScoreColor(kpi.pct)}`}>{kpi.actual}{kpi.unit ? ` ${kpi.unit}` : ""}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Progress Bar */}
+                        <Progress
+                          value={Math.min(kpi.pct, 100)}
+                          className="h-1.5"
+                          indicatorClassName={kpi.actual != null ? getProgressColor(kpi.pct) : "bg-border"}
+                        />
+
+                        {/* Record details */}
+                        {kpi.record && (
+                          <div className="flex items-center gap-3 mt-1.5">
+                            {kpi.record.status && (
+                              <span className={`text-[9px] ${kpi.record.status === "APPROVED" ? "text-green-400" : kpi.record.status === "REJECTED" ? "text-red-400" : "text-muted"}`}>
+                                {kpi.record.status}
+                              </span>
+                            )}
+                            {kpi.record.notes && (
+                              <span className="text-[9px] text-muted truncate max-w-[200px]" title={kpi.record.notes}>
+                                Note: {kpi.record.notes}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}

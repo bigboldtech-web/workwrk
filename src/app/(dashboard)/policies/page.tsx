@@ -12,7 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Shield, Plus, CheckCircle2, X, Save,
+  Shield, Plus, CheckCircle2, X, Save, Trash2,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
@@ -70,6 +70,20 @@ export default function PoliciesPage() {
         toastSuccess("Policy acknowledged");
       }
     } catch { toastError("Failed"); } finally { setAcknowledging(null); }
+  }
+
+  async function handleDelete(policyId: string) {
+    if (!confirm("Are you sure you want to delete this policy? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`/api/policies/${policyId}`, { method: "DELETE" });
+      if (res.ok) {
+        setPolicies(policies.filter((p) => p.id !== policyId));
+        if (selectedPolicy?.id === policyId) setSelectedPolicy(null);
+        toastSuccess("Policy deleted");
+      } else {
+        toastError("Failed to delete");
+      }
+    } catch { toastError("Failed to delete"); }
   }
 
   const pendingAcks = policies.filter((p) => p.requiresAck && !p.acknowledged).length;
@@ -149,7 +163,14 @@ export default function PoliciesPage() {
                   <h2 className="text-base font-bold">{selectedPolicy.title}</h2>
                   {selectedPolicy.category && <Badge variant="outline" className="text-[9px]">{selectedPolicy.category}</Badge>}
                 </div>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedPolicy(null)}><X size={14} /></Button>
+                <div className="flex items-center gap-1">
+                  {isManager && (
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-300 hover:bg-red-500/10" onClick={() => handleDelete(selectedPolicy.id)}>
+                      <Trash2 size={14} />
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedPolicy(null)}><X size={14} /></Button>
+                </div>
               </div>
               {isManager && (
                 <div className="flex items-center gap-2 mb-3">

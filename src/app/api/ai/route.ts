@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { checkPlanLimit } from "@/lib/plan-limits";
 import Anthropic from "@anthropic-ai/sdk";
 import { getTopPerformers } from "@/services/performanceScoreService";
 
@@ -37,6 +38,10 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const userId = getUserId(session);
+
+  // Plan limit enforcement
+  const planCheck = await checkPlanLimit(orgId, "ai");
+  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
   // Gather comprehensive org context
   const [

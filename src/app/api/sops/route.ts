@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
+import { checkPlanLimit } from "@/lib/plan-limits";
 import { logActivity } from "@/lib/activity";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 
@@ -49,6 +50,10 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   const denied = await requirePermission(session, "sops", "create");
   if (denied) return denied;
+
+  // Plan limit enforcement
+  const planCheck = await checkPlanLimit(getOrgId(session), "sops");
+  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
   const body = await req.json();
   const { title, description, category, subcategory, content, kraId, sopType } = body;
