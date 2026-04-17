@@ -12,15 +12,18 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Shield, Plus, CheckCircle2, X, Save, Trash2,
+  Shield, Plus, CheckCircle2, X, Save, Trash2, Pencil,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
+import { useSession } from "next-auth/react";
 
 const CATEGORIES = ["HR", "Security", "Compliance", "Operations", "Code of Conduct", "Leave Policy", "Expense Policy", "Data Privacy", "Work From Home", "General"];
 
 export default function PoliciesPage() {
   const { isManager } = useRole();
+  const { data: sessionData } = useSession();
+  const currentUser = sessionData?.user as any;
   const [policies, setPolicies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPolicy, setSelectedPolicy] = useState<any>(null);
@@ -28,6 +31,7 @@ export default function PoliciesPage() {
   const { success: toastSuccess, error: toastError } = useToast();
 
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ title: "", content: "", category: "", requiresAck: true, effectiveDate: "" });
   const [saving, setSaving] = useState(false);
 
@@ -65,11 +69,51 @@ export default function PoliciesPage() {
     try {
       const res = await fetch(`/api/policies/${policyId}/acknowledge`, { method: "POST" });
       if (res.ok) {
-        setPolicies(policies.map((p) => p.id === policyId ? { ...p, acknowledged: true, acknowledgedAt: new Date().toISOString() } : p));
-        if (selectedPolicy?.id === policyId) setSelectedPolicy({ ...selectedPolicy, acknowledged: true, acknowledgedAt: new Date().toISOString() });
+        const now = new Date().toISOString();
+        const userName = currentUser ? `${currentUser.firstName || ""} ${currentUser.lastName || ""}`.trim() : "You";
+        const userEmail = currentUser?.email || "";
+        const ackData = { acknowledged: true, acknowledgedAt: now, acknowledgedBy: userName, acknowledgedEmail: userEmail };
+        setPolicies(policies.map((p) => p.id === policyId ? { ...p, ...ackData } : p));
+        if (selectedPolicy?.id === policyId) setSelectedPolicy({ ...selectedPolicy, ...ackData });
         toastSuccess("Policy acknowledged");
       }
     } catch { toastError("Failed"); } finally { setAcknowledging(null); }
+  }
+
+  function startEditing(policy: any) {
+    setForm({
+      title: policy.title || "",
+      content: policy.content || "",
+      category: policy.category || "",
+      requiresAck: policy.requiresAck ?? true,
+      effectiveDate: policy.effectiveDate ? new Date(policy.effectiveDate).toISOString().split("T")[0] : "",
+    });
+    setEditing(true);
+    setCreating(false);
+  }
+
+  async function handleUpdate() {
+    if (!selectedPolicy || !form.title.trim() || !form.content.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/policies/${selectedPolicy.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, effectiveDate: form.effectiveDate || undefined }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updated = data.data || data;
+        const merged = { ...selectedPolicy, ...updated };
+        setPolicies(policies.map((p) => p.id === selectedPolicy.id ? merged : p));
+        setSelectedPolicy(merged);
+        setEditing(false);
+        setForm({ title: "", content: "", category: "", requiresAck: true, effectiveDate: "" });
+        toastSuccess("Policy updated");
+      } else {
+        toastError("Failed to update");
+      }
+    } catch { toastError("Failed to update"); } finally { setSaving(false); }
   }
 
   async function handleDelete(policyId: string) {
@@ -130,11 +174,11 @@ export default function PoliciesPage() {
       {/* RIGHT: Full Content Editor / View */}
       {(selectedPolicy || creating) && (
         <div className="flex-1 overflow-y-auto">
-          {creating ? (
+          {(creating || editing) ? (
             <div className="p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold">New Policy</h2>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setCreating(false)}><X size={14} /></Button>
+                <h2 className="text-base font-bold">{editing ? "Edit Policy" : "New Policy"}</h2>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setCreating(false); setEditing(false); setForm({ title: "", content: "", category: "", requiresAck: true, effectiveDate: "" }); }}><X size={14} /></Button>
               </div>
               <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Policy title..." className="text-lg font-semibold border-none p-0 h-auto focus-visible:ring-0" />
               <div className="flex items-center gap-2 flex-wrap">
@@ -150,9 +194,9 @@ export default function PoliciesPage() {
               </div>
               <RichEditor content={form.content} onChange={(html) => setForm({ ...form, content: html })} placeholder="Write the full policy here — use headings, lists, bold, links, images..." minHeight="calc(100vh - 280px)" />
               <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setCreating(false)}>Cancel</Button>
-                <Button size="sm" onClick={handleCreate} disabled={saving || !form.title.trim() || !form.content.trim()} className="gap-1">
-                  <Save size={12} /> {saving ? "Publishing..." : "Publish"}
+                <Button variant="outline" size="sm" onClick={() => { setCreating(false); setEditing(false); setForm({ title: "", content: "", category: "", requiresAck: true, effectiveDate: "" }); }}>Cancel</Button>
+                <Button size="sm" onClick={editing ? handleUpdate : handleCreate} disabled={saving || !form.title.trim() || !form.content.trim()} className="gap-1">
+                  <Save size={12} /> {saving ? "Saving..." : editing ? "Save Changes" : "Publish"}
                 </Button>
               </div>
             </div>
@@ -165,7 +209,12 @@ export default function PoliciesPage() {
                 </div>
                 <div className="flex items-center gap-1">
                   {isManager && (
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-300 hover:bg-red-500/10" onClick={() => handleDelete(selectedPolicy.id)}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-purple-400 hover:text-purple-300 hover:bg-purple-500/10" onClick={() => startEditing(selectedPolicy)} title="Edit policy">
+                      <Pencil size={14} />
+                    </Button>
+                  )}
+                  {isManager && (
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-300 hover:bg-red-500/10" onClick={() => handleDelete(selectedPolicy.id)} title="Delete policy">
                       <Trash2 size={14} />
                     </Button>
                   )}
@@ -188,7 +237,36 @@ export default function PoliciesPage() {
                 </div>
               )}
               {selectedPolicy.acknowledged && (
-                <p className="text-xs text-green-400 mt-3 flex items-center gap-1"><CheckCircle2 size={12} /> Acknowledged {new Date(selectedPolicy.acknowledgedAt).toLocaleDateString()}</p>
+                <div className="mt-4 p-4 rounded-lg border border-green-500/20 bg-green-500/5">
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 size={16} className="text-green-400 mt-0.5 shrink-0" />
+                    <div className="space-y-1.5">
+                      <p className="text-sm font-semibold text-green-400">Policy Acknowledged</p>
+                      <div className="space-y-0.5">
+                        {selectedPolicy.acknowledgedBy && (
+                          <p className="text-xs text-foreground">
+                            <span className="text-muted">Signed by:</span>{" "}
+                            <span className="font-medium">{selectedPolicy.acknowledgedBy}</span>
+                          </p>
+                        )}
+                        {selectedPolicy.acknowledgedEmail && (
+                          <p className="text-xs text-muted">{selectedPolicy.acknowledgedEmail}</p>
+                        )}
+                        {selectedPolicy.acknowledgedAt && (
+                          <p className="text-xs text-foreground">
+                            <span className="text-muted">Date & Time:</span>{" "}
+                            <span className="font-medium">{new Date(selectedPolicy.acknowledgedAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</span>
+                            <span className="text-muted"> at </span>
+                            <span className="font-medium">{new Date(selectedPolicy.acknowledgedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                          </p>
+                        )}
+                        {selectedPolicy.acknowledgedIp && (
+                          <p className="text-xs text-muted">IP: {selectedPolicy.acknowledgedIp}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           ) : null}

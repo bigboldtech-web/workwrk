@@ -9,26 +9,36 @@ export async function GET() {
   const orgId = getOrgId(session);
   const userId = getUserId(session);
 
-  const policies = await prisma.policy.findMany({
-    where: { organizationId: orgId, status: "PUBLISHED" },
-    include: {
-      acknowledgments: { where: { userId }, select: { id: true, acknowledgedAt: true } },
-      _count: { select: { acknowledgments: true } },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
+  const [policies, totalUsers, currentUser] = await Promise.all([
+    prisma.policy.findMany({
+      where: { organizationId: orgId, status: "PUBLISHED" },
+      include: {
+        acknowledgments: { where: { userId } },
+        _count: { select: { acknowledgments: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.user.count({ where: { organizationId: orgId, deletedAt: null } }),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true, email: true },
+    }),
+  ]);
 
-  // Get total user count for acknowledgment percentage
-  const totalUsers = await prisma.user.count({ where: { organizationId: orgId, deletedAt: null } });
-
-  return jsonSuccess(policies.map((p) => ({
-    ...p,
-    acknowledged: p.acknowledgments.length > 0,
-    acknowledgedAt: p.acknowledgments[0]?.acknowledgedAt || null,
-    ackRate: totalUsers > 0 ? Math.round((p._count.acknowledgments / totalUsers) * 100) : 0,
-    totalAcks: p._count.acknowledgments,
-    totalUsers,
-  })));
+  return jsonSuccess(policies.map((p) => {
+    const ack = p.acknowledgments[0] || null;
+    return {
+      ...p,
+      acknowledged: !!ack,
+      acknowledgedAt: ack?.acknowledgedAt || null,
+      acknowledgedBy: ack && currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : null,
+      acknowledgedEmail: ack ? currentUser?.email || null : null,
+      acknowledgedIp: ack?.ipAddress || null,
+      ackRate: totalUsers > 0 ? Math.round((p._count.acknowledgments / totalUsers) * 100) : 0,
+      totalAcks: p._count.acknowledgments,
+      totalUsers,
+    };
+  }));
 }
 
 export async function POST(req: NextRequest) {

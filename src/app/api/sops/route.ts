@@ -17,7 +17,12 @@ export async function GET(req: NextRequest) {
 
   const where: any = { organizationId: getOrgId(session) };
   if (category) where.category = category;
-  if (status) where.status = status;
+  if (status) {
+    where.status = status;
+  } else {
+    // By default, exclude archived SOPs from the main listing
+    where.status = { not: "ARCHIVED" };
+  }
   if (kraId) where.kraId = kraId;
   if (pagination.search) {
     where.OR = [

@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   BookOpen, Plus, Search, FileText, Clock, CheckCircle, AlertTriangle,
   Eye, Edit3, Users, BarChart3, ClipboardList, ShieldCheck,
-  PenLine, Video, ListChecks, Download,
+  PenLine, Video, ListChecks, Download, Archive, RotateCcw, Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -264,6 +264,9 @@ export default function SOPsPage() {
   const [newDescription, setNewDescription] = useState("");
   const [sopType, setSopType] = useState<"WRITTEN" | "STEPS" | "RECORDED" | "CHECKLIST">("WRITTEN");
   const [showExtensionDialog, setShowExtensionDialog] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
+  const [archivedSops, setArchivedSops] = useState<SOP[]>([]);
+  const [loadingArchive, setLoadingArchive] = useState(false);
 
   // Categories from DB
   const [savedCategories, setSavedCategories] = useState<any[]>([]);
@@ -448,6 +451,53 @@ export default function SOPsPage() {
     }
   };
 
+  // Fetch archived SOPs
+  const fetchArchivedSops = useCallback(async () => {
+    setLoadingArchive(true);
+    try {
+      const res = await fetch("/api/sops?status=ARCHIVED&limit=100");
+      if (res.ok) {
+        const json = await res.json();
+        setArchivedSops(json.data || []);
+      }
+    } catch {} finally { setLoadingArchive(false); }
+  }, []);
+
+  // Load archived count on mount, full list when archive is opened
+  useEffect(() => {
+    fetchArchivedSops();
+  }, [fetchArchivedSops]);
+
+  useEffect(() => {
+    if (showArchive) fetchArchivedSops();
+  }, [showArchive, fetchArchivedSops]);
+
+  async function handleRestore(sopId: string) {
+    try {
+      const res = await fetch(`/api/sops/${sopId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "DRAFT" }),
+      });
+      if (res.ok) {
+        setArchivedSops(archivedSops.filter((s) => s.id !== sopId));
+        toastSuccess("SOP restored to Drafts");
+        fetchSOPs(); // refresh main list
+      } else { toastError("Failed to restore"); }
+    } catch { toastError("Failed to restore"); }
+  }
+
+  async function handlePermanentDelete(sopId: string) {
+    if (!confirm("Permanently delete this SOP? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`/api/sops/${sopId}`, { method: "DELETE" });
+      if (res.ok) {
+        setArchivedSops(archivedSops.filter((s) => s.id !== sopId));
+        toastSuccess("SOP permanently deleted");
+      } else { toastError("Failed to delete"); }
+    } catch { toastError("Failed to delete"); }
+  }
+
   const savedCatNames = savedCategories.map((c: any) => c.name);
   const existingCategories = [...new Set(sops.map((s) => s.category).filter(Boolean))];
   const categories = [...new Set([...savedCatNames, ...existingCategories])].sort();
@@ -482,6 +532,11 @@ export default function SOPsPage() {
           <Link href="/sops/compliance">
             <Button variant="outline" className="gap-2"><ShieldCheck size={16} /> Compliance</Button>
           </Link>
+          {canManageSOPs && (
+            <Button variant={showArchive ? "default" : "outline"} className="gap-2" onClick={() => setShowArchive(!showArchive)}>
+              <Archive size={16} /> Archive{archivedSops.length > 0 ? ` (${archivedSops.length})` : ""}
+            </Button>
+          )}
           {canManageSOPs && <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
             <DialogTrigger asChild>
               <Button className="gap-2"><Plus size={16} /> New SOP</Button>
@@ -596,6 +651,56 @@ export default function SOPsPage() {
         </div>
       </div>
 
+      {/* Archive View */}
+      {showArchive ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold flex items-center gap-2"><Archive size={14} className="text-muted" /> Archived SOPs</h2>
+              <p className="text-xs text-muted mt-0.5">Archived SOPs are hidden from the main page. Restore them to make them active again.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowArchive(false)}>Back to SOPs</Button>
+          </div>
+
+          {loadingArchive ? (
+            <div className="space-y-2">{[1,2,3].map((i) => <div key={i} className="h-14 bg-surface rounded-lg border border-border animate-pulse" />)}</div>
+          ) : archivedSops.length === 0 ? (
+            <div className="py-12 text-center">
+              <Archive size={32} className="mx-auto text-muted mb-2" />
+              <p className="text-sm font-medium">No archived SOPs</p>
+              <p className="text-xs text-muted mt-1">Archived SOPs will appear here</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {archivedSops.map((sop) => (
+                <div key={sop.id} className="rounded-lg border border-border bg-surface p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <FileText size={14} className="text-muted shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate">{sop.title}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
+                        {sop.subcategory && <Badge variant="outline" className="text-[9px] text-purple-400">{sop.subcategory}</Badge>}
+                        <span className="text-[9px] text-muted">v{sop.version}</span>
+                        <span className="text-[9px] text-muted">&middot; {formatDate(sop.createdAt)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                    <Button size="sm" variant="outline" className="gap-1 text-xs h-7" onClick={() => handleRestore(sop.id)}>
+                      <RotateCcw size={11} /> Restore
+                    </Button>
+                    <Button size="sm" variant="ghost" className="gap-1 text-xs h-7 text-red-400 hover:text-red-300 hover:bg-red-500/10" onClick={() => handlePermanentDelete(sop.id)}>
+                      <Trash2 size={11} /> Delete
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+      <>
       {/* Stats */}
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
@@ -713,6 +818,9 @@ export default function SOPsPage() {
           onPageChange={setPage}
           onLimitChange={(l) => { setLimit(l); setPage(1); }}
         />
+      )}
+
+      </>
       )}
 
       {/* Extension Download Dialog */}
