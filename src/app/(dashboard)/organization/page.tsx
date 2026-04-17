@@ -109,13 +109,28 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
-  // Auto-fit zoom on first render and when users change
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fitToScreen();
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [users.length]);
+  const fitToScreen = useCallback(() => {
+    if (containerRef.current && chartRef.current) {
+      const containerW = containerRef.current.clientWidth;
+      const containerH = containerRef.current.clientHeight;
+      // Use scrollWidth/scrollHeight to get true content size (not clipped by overflow)
+      const chartW = Math.max(chartRef.current.scrollWidth, chartRef.current.offsetWidth);
+      const chartH = Math.max(chartRef.current.scrollHeight, chartRef.current.offsetHeight);
+      if (chartW > 0 && chartH > 0) {
+        const padding = 80;
+        const zoomW = (containerW - padding) / chartW;
+        const zoomH = (containerH - padding) / chartH;
+        const newZoom = Math.max(0.2, Math.min(0.9, Math.min(zoomW, zoomH)));
+        setZoom(newZoom);
+        // Center the chart vertically within the container
+        const scaledH = chartH * newZoom;
+        const panY = scaledH < containerH ? (containerH - scaledH) / 2 - 24 * newZoom : 0;
+        setPan({ x: 0, y: Math.max(0, panY) });
+        return;
+      }
+    }
+    setPan({ x: 0, y: 0 });
+  }, []);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -139,21 +154,28 @@ function OrgChartCanvas({ users, departments }: { users: any[]; departments: any
 
   const handleMouseUp = useCallback(() => setDragging(false), []);
 
-  const fitToScreen = useCallback(() => {
-    if (containerRef.current && chartRef.current) {
-      const containerW = containerRef.current.clientWidth;
-      const containerH = containerRef.current.clientHeight;
-      const chartW = chartRef.current.offsetWidth || chartRef.current.scrollWidth;
-      const chartH = chartRef.current.offsetHeight || chartRef.current.scrollHeight;
-      if (chartW > 0 && chartH > 0) {
-        // Fit to whichever dimension is more constrained
-        const zoomW = (containerW - 60) / chartW;
-        const zoomH = (containerH - 80) / chartH;
-        setZoom(Math.max(0.2, Math.min(0.9, Math.min(zoomW, zoomH))));
+  // Auto-fit zoom on first render and when users change
+  useEffect(() => {
+    let attempts = 0;
+    const maxAttempts = 5;
+    const tryFit = () => {
+      attempts++;
+      if (chartRef.current && chartRef.current.scrollWidth > 0 && chartRef.current.scrollHeight > 0) {
+        fitToScreen();
+      } else if (attempts < maxAttempts) {
+        setTimeout(tryFit, 200);
       }
-    }
-    setPan({ x: 0, y: 0 });
-  }, []);
+    };
+    const timer = setTimeout(tryFit, 100);
+    return () => clearTimeout(timer);
+  }, [users.length]);
+
+  // Re-fit on window resize so chart adapts to different screen sizes
+  useEffect(() => {
+    const handleResize = () => fitToScreen();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [fitToScreen]);
 
   return (
     <div
@@ -238,7 +260,7 @@ function OrgChart({ users, departments }: { users: any[]; departments: any[] }) 
   const unlinked = users.filter((u) => !usersInTree.has(u.id) && !u.deletedAt);
 
   return (
-    <div className="space-y-8 overflow-x-auto">
+    <div className="space-y-8">
       {/* Main tree */}
       <div className="flex justify-center min-w-fit">
         <div className="flex flex-col items-center">
