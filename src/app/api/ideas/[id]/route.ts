@@ -87,6 +87,7 @@ export async function PATCH(
         type: "idea_update",
         title: `Your idea "${idea.title}" is now ${body.status.replace(/_/g, " ").toLowerCase()}`,
         message: body.reviewNotes || "",
+        link: "/ideas",
       },
     });
   }

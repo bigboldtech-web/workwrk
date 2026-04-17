@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
-import { sendEmail } from "@/lib/email";
+import { queueEmail, processEmailQueue } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 
 export async function GET() {
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
       })),
     });
 
-    // Email every org member (best-effort, non-blocking per user)
+    // Email every org member — queue all first, then process once to avoid race conditions
     const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
     const preview = announcement.content.length > 280
       ? announcement.content.slice(0, 280) + "..."
@@ -94,13 +94,15 @@ export async function POST(req: NextRequest) {
         actionLink: `${baseUrl}/announcements`,
         note: preview,
       });
-      sendEmail({
+      await queueEmail({
         to: u.email, subject, html,
         template: "announcement",
         variables: { title: announcement.title, priority: announcement.priority },
         organizationId: orgId, userId: u.id, category: "reminder",
-      }).catch((err) => console.error(`[Announcement] Email to ${u.email} failed:`, err));
+      });
     }
+    // Process the queue once after all emails are queued
+    processEmailQueue().catch((err) => console.error("[Announcement] Queue processing failed:", err));
   }
 
   return jsonSuccess(announcement, 201);

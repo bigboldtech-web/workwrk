@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { Bell, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Bell, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,18 @@ const typeIcons: Record<string, React.ComponentType<any>> = {
   meeting: MessageSquare,
 };
 
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d`;
+  return `${Math.floor(days / 7)}w`;
+}
+
 export function Topbar() {
   const { data: session } = useSession();
   const user = session?.user;
@@ -55,6 +68,7 @@ export function Topbar() {
   const searchRef = useRef<HTMLDivElement>(null);
   const searchTimeout = useRef<NodeJS.Timeout | null>(null);
 
+  const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -68,6 +82,33 @@ export function Topbar() {
         setUnreadCount(data.unreadCount ?? notifs.filter((n: Notification) => !n.read).length);
       })
       .catch(() => {});
+  }, []);
+
+  const handleNotificationClick = useCallback((notif: Notification) => {
+    // Mark as read
+    if (!notif.read) {
+      fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: notif.id }),
+      }).catch(() => {});
+      setNotifications((prev) => prev.map((n) => n.id === notif.id ? { ...n, read: true } : n));
+      setUnreadCount((c) => Math.max(0, c - 1));
+    }
+    // Navigate to the linked page
+    if (notif.link) {
+      router.push(notif.link);
+    }
+  }, [router]);
+
+  const handleMarkAllRead = useCallback(() => {
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markAllRead: true }),
+    }).catch(() => {});
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadCount(0);
   }, []);
 
   // Search with debounce
@@ -204,9 +245,16 @@ export function Topbar() {
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
               <span>Notifications</span>
-              {unreadCount > 0 && (
-                <Badge variant="secondary" className="text-[10px]">{unreadCount} new</Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && (
+                  <>
+                    <Badge variant="secondary" className="text-[10px]">{unreadCount} new</Badge>
+                    <button onClick={handleMarkAllRead} className="text-[10px] text-muted hover:text-foreground flex items-center gap-1" title="Mark all as read">
+                      <CheckCheck size={12} />
+                    </button>
+                  </>
+                )}
+              </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {notifications.length === 0 ? (
@@ -214,15 +262,28 @@ export function Topbar() {
                 No notifications yet
               </div>
             ) : (
-              notifications.slice(0, 5).map((notif) => (
-                <DropdownMenuItem key={notif.id} className="flex flex-col items-start gap-1 py-2">
-                  <div className="flex items-center gap-2 w-full">
-                    {!notif.read && <span className="h-2 w-2 rounded-full bg-purple-500 flex-shrink-0" />}
-                    <span className="text-sm font-medium truncate">{notif.title}</span>
-                  </div>
-                  <span className="text-xs text-muted line-clamp-1">{notif.message}</span>
+              <>
+                {notifications.slice(0, 5).map((notif) => (
+                  <DropdownMenuItem
+                    key={notif.id}
+                    className={`flex flex-col items-start gap-1 py-2 cursor-pointer ${!notif.read ? "bg-purple-500/5" : ""}`}
+                    onClick={() => handleNotificationClick(notif)}
+                  >
+                    <div className="flex items-center gap-2 w-full">
+                      {!notif.read && <span className="h-2 w-2 rounded-full bg-purple-500 flex-shrink-0" />}
+                      <span className={`text-sm truncate ${!notif.read ? "font-semibold" : "font-medium text-muted"}`}>{notif.title}</span>
+                      <span className="text-[10px] text-muted ml-auto flex-shrink-0">{timeAgo(notif.createdAt)}</span>
+                    </div>
+                    <span className="text-xs text-muted line-clamp-1">{notif.message}</span>
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild className="justify-center">
+                  <Link href="/activity" className="text-xs text-purple-400 hover:text-purple-300 text-center w-full">
+                    View all notifications
+                  </Link>
                 </DropdownMenuItem>
-              ))
+              </>
             )}
           </DropdownMenuContent>
         </DropdownMenu>

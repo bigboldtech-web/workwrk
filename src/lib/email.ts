@@ -124,25 +124,29 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
   let sent = 0;
   let failed = 0;
 
-  // Fetch up to 20 queued emails
-  const queued = await prisma.emailLog.findMany({
-    where: {
-      status: "QUEUED",
-      attempts: { lt: 3 }, // Max 3 attempts
-    },
+  // Atomically claim a batch: update QUEUED → SENDING in one query to prevent
+  // concurrent processors from picking up the same emails (race condition fix).
+  const claimed = await prisma.$queryRawUnsafe<{ id: string }[]>(`
+    UPDATE "EmailLog"
+    SET status = 'SENDING', attempts = attempts + 1
+    WHERE id IN (
+      SELECT id FROM "EmailLog"
+      WHERE status = 'QUEUED' AND attempts < 3
+      ORDER BY "createdAt" ASC
+      LIMIT 20
+    )
+    RETURNING id
+  `);
+
+  if (claimed.length === 0) return { sent: 0, failed: 0 };
+
+  const claimedIds = claimed.map((c) => c.id);
+  const emails = await prisma.emailLog.findMany({
+    where: { id: { in: claimedIds } },
     orderBy: { createdAt: "asc" },
-    take: 20,
   });
 
-  if (queued.length === 0) return { sent: 0, failed: 0 };
-
-  for (const email of queued) {
-    // Mark as sending
-    await prisma.emailLog.update({
-      where: { id: email.id },
-      data: { status: "SENDING", attempts: { increment: 1 } },
-    });
-
+  for (const email of emails) {
     try {
       if (!EMAIL_ENABLED || !transporter) {
         // Dev mode: log to console instead of sending
@@ -174,7 +178,7 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
       sent++;
     } catch (err: any) {
       console.error(`[Email] Failed to send to ${email.to}:`, err.message);
-      const newStatus = email.attempts + 1 >= 3 ? "FAILED" : "QUEUED";
+      const newStatus = email.attempts >= 3 ? "FAILED" : "QUEUED";
       await prisma.emailLog.update({
         where: { id: email.id },
         data: { status: newStatus, error: err.message },
