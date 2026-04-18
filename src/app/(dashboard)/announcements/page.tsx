@@ -74,7 +74,8 @@ export default function AnnouncementsPage() {
         const refreshRes = await fetch("/api/announcements");
         if (refreshRes.ok) {
           const refreshData = await refreshRes.json();
-          setAnnouncements(refreshData.data || []);
+          const items = refreshData?.data || refreshData || [];
+          setAnnouncements(Array.isArray(items) ? items : []);
         }
         setShowCreate(false);
         setForm({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
