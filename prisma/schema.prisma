@@ -112,6 +112,7 @@ model User {
   checkIns           CheckIn[]
   aiQueries          AIQuery[]
   notifications      Notification[]
+  consentRecords     ConsentRecord[]
   headOfDepartments  Department[] @relation("DepartmentHead")
   onboardingInstances OnboardingInstance[]
   buddyForOnboarding  OnboardingInstance[] @relation("OnboardingBuddy")
@@ -1563,4 +1564,44 @@ model CandorResponse {
   createdAt DateTime      @default(now())
 
   @@index([sessionId])
+}
+
+// ==========================================
+// COMPLIANCE & CONSENT
+// ==========================================
+
+/// Records user consent for cookies/tracking. GDPR/UK-GDPR require proof
+/// of consent including timestamp, method, scope, and text version.
+/// Never delete records — retain per legal retention policy.
+model ConsentRecord {
+  id               String    @id @default(cuid())
+  userId           String?   // null for pre-auth visitors
+  user             User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  sessionId        String?   // anonymous cookie identifier
+  organizationId   String?   // when consent tied to a tenant
+
+  // Consent scope
+  necessary        Boolean   @default(true)   // always true, but logged for record
+  preferences      Boolean   @default(false)
+  analytics        Boolean   @default(false)
+  marketing        Boolean   @default(false)
+  doNotSell        Boolean   @default(false)  // CCPA/CPRA opt-out flag
+
+  // Legal basis / region at time of consent
+  region           String?   // e.g. "EU", "UK", "US-CA", "BR", "IN", "ROW"
+  country          String?   // ISO 3166-1 alpha-2
+  policyVersion    String    // ties to versioned policy text
+  method           String    // "banner", "settings", "api", "withdrawn"
+
+  // Evidence
+  ipAddress        String?
+  userAgent        String?
+
+  withdrawnAt      DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([organizationId])
+  @@index([createdAt])
 }

@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 import { CurrencyProvider } from "./currency-provider";
+import { ConsentProvider } from "./consent-provider";
+import { ConsentBanner } from "./consent-banner";
 import type { Currency } from "@/lib/currency";
 
 export function Providers({
@@ -30,7 +32,12 @@ export function Providers({
     <SessionProvider>
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
         <QueryClientProvider client={queryClient}>
-          <CurrencyProvider initial={initialCurrency}>{children}</CurrencyProvider>
+          <CurrencyProvider initial={initialCurrency}>
+            <ConsentProvider>
+              {children}
+              <ConsentBanner />
+            </ConsentProvider>
+          </CurrencyProvider>
         </QueryClientProvider>
       </ThemeProvider>
     </SessionProvider>

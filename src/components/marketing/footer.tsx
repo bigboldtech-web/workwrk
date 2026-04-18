@@ -31,8 +31,13 @@ const companyLinks = [
   { href: "/blog", label: "Blog" },
   { href: "/faq", label: "FAQ" },
   { href: "/help-center", label: "Documentation" },
+];
+
+const legalLinks = [
   { href: "/terms", label: "Terms of Service" },
   { href: "/privacy", label: "Privacy Policy" },
+  { href: "/cookies", label: "Cookie Policy" },
+  { href: "/do-not-sell", label: "Do Not Sell or Share My Info" },
 ];
 
 function FooterColumn({ title, links: items }: { title: string; links: { href: string; label: string }[] }) {
@@ -93,9 +98,33 @@ export function MarketingFooter() {
           </StaggerContainer>
         </FadeIn>
 
+        {/* Legal row */}
+        <FadeIn delay={0.2}>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-6">
+            {legalLinks.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                className="text-xs text-muted transition-colors hover:text-foreground"
+              >
+                {l.label}
+              </Link>
+            ))}
+            <span className="text-xs text-muted">
+              DPO:{" "}
+              <a
+                href="mailto:dpo@workwrk.com"
+                className="underline hover:text-foreground"
+              >
+                dpo@workwrk.com
+              </a>
+            </span>
+          </div>
+        </FadeIn>
+
         {/* Bottom bar */}
         <FadeIn delay={0.3}>
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
             <p className="text-xs text-muted">
               © 2026 WorkwrK. All rights reserved.
             </p>

@@ -19,6 +19,7 @@ import { PERMISSION_MODULES, ACCESS_LEVELS, DEFAULT_PERMISSIONS, PROTECTED_ADMIN
 import { invalidatePermissionCache } from "@/hooks/use-permission";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/components/ui/toast";
+import { PrivacyControls } from "@/components/settings/privacy-controls";
 
 interface SettingsData {
   organization: {
@@ -1003,6 +1004,7 @@ export default function SettingsPage() {
           <TabsTrigger value="removed" className="gap-2" onClick={() => { if (removedPeople.length === 0) fetchRemovedPeople(); }}><UserX size={14} /> Removed People</TabsTrigger>
           <TabsTrigger value="billing" className="gap-2"><CreditCard size={14} /> Billing</TabsTrigger>
           <TabsTrigger value="data" className="gap-2"><Sliders size={14} /> Data</TabsTrigger>
+          <TabsTrigger value="privacy" className="gap-2"><Shield size={14} /> Privacy</TabsTrigger>
         </TabsList>
 
         {/* General */}
@@ -1606,6 +1608,11 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Privacy — user-level DSR controls (GDPR Art. 15/17, CCPA) */}
+        <TabsContent value="privacy" className="space-y-4 mt-4">
+          <PrivacyControls />
         </TabsContent>
       </Tabs>
 
