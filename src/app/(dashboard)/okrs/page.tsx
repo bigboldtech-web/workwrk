@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const STATUS_COLORS: Record<string, string> = {
   ON_TRACK: "bg-green-500/20 text-green-400",
@@ -79,6 +80,8 @@ export default function OKRsPage() {
   }, []);
   const [checkInOkr, setCheckInOkr] = useState<OKR | null>(null);
   const [checkInValues, setCheckInValues] = useState<Record<string, string>>({});
+  const [deleteOkr, setDeleteOkr] = useState<OKR | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { success: toastSuccess, error: toastError } = useToast();
 
   useEffect(() => {
@@ -125,6 +128,22 @@ export default function OKRsPage() {
     } catch { toastError("Failed"); } finally { setSaving(false); }
   }
 
+  async function handleDelete() {
+    if (!deleteOkr) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/okrs/${deleteOkr.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setOkrs((prev) => prev.filter((o) => o.id !== deleteOkr.id));
+        setExpanded((prev) => { const n = new Set(prev); n.delete(deleteOkr.id); return n; });
+        setDeleteOkr(null);
+        toastSuccess("OKR deleted");
+      } else {
+        toastError("Failed to delete");
+      }
+    } catch { toastError("Failed to delete"); } finally { setDeleting(false); }
+  }
+
   async function handleCheckIn(okrId: string) {
     const okr = okrs.find((o) => o.id === okrId);
     if (!okr) return;
@@ -164,11 +183,14 @@ export default function OKRsPage() {
           <Select value={quarter} onValueChange={setQuarter}>
             <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {Array.from({ length: 4 }, (_, i) => {
+              {Array.from({ length: 6 }, (_, i) => {
                 const now = new Date();
-                const q = Math.ceil((now.getMonth() + 1) / 3) - i;
-                const y = q <= 0 ? now.getFullYear() - 1 : now.getFullYear();
-                const qn = q <= 0 ? q + 4 : q;
+                const currentQ = Math.ceil((now.getMonth() + 1) / 3);
+                const offset = i - 2;
+                const raw = currentQ + offset;
+                const yearShift = Math.floor((raw - 1) / 4);
+                const qn = ((raw - 1) % 4 + 4) % 4 + 1;
+                const y = now.getFullYear() + yearShift;
                 return <SelectItem key={i} value={`Q${qn} ${y}`}>Q{qn} {y}</SelectItem>;
               })}
             </SelectContent>
@@ -250,7 +272,12 @@ export default function OKRsPage() {
                               ))}
                             </div>
                           )}
-                          <div className="flex justify-end pt-2">
+                          <div className="flex justify-end gap-2 pt-2">
+                            {isManager && (
+                              <Button size="sm" variant="outline" className="text-xs text-red-400 hover:text-red-300" onClick={(e) => { e.stopPropagation(); setDeleteOkr(okr); }}>
+                                <Trash2 size={12} className="mr-1" /> Delete
+                              </Button>
+                            )}
                             <Button size="sm" variant="outline" className="text-xs" onClick={(e) => { e.stopPropagation(); setCheckInOkr(okr); setCheckInValues({}); }}>
                               Update Progress
                             </Button>
@@ -370,6 +397,17 @@ export default function OKRsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteOkr}
+        onClose={() => !deleting && setDeleteOkr(null)}
+        onConfirm={handleDelete}
+        title="Delete this OKR?"
+        description={deleteOkr ? `"${deleteOkr.title}" and all its key results and check-ins will be permanently removed.` : ""}
+        confirmLabel="Delete OKR"
+        destructive
+        loading={deleting}
+      />
 
       {/* Check-in Dialog */}
       <Dialog open={!!checkInOkr} onOpenChange={(open) => { if (!open) setCheckInOkr(null); }}>
