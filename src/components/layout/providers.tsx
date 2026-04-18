@@ -4,8 +4,16 @@ import { SessionProvider } from "next-auth/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
+import { CurrencyProvider } from "./currency-provider";
+import type { Currency } from "@/lib/currency";
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({
+  children,
+  initialCurrency,
+}: {
+  children: React.ReactNode;
+  initialCurrency?: Currency;
+}) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -22,7 +30,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SessionProvider>
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
         <QueryClientProvider client={queryClient}>
-          {children}
+          <CurrencyProvider initial={initialCurrency}>{children}</CurrencyProvider>
         </QueryClientProvider>
       </ThemeProvider>
     </SessionProvider>

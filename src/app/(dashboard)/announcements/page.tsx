@@ -18,6 +18,7 @@ import {
   Megaphone, Plus, Pin, Trash2, AlertTriangle, PartyPopper, FileText, Calendar,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { useTranslations } from "next-intl";
 
 const TYPES = [
   { value: "INFO", label: "Information", icon: Megaphone },
@@ -42,6 +43,8 @@ export default function AnnouncementsPage() {
   const [form, setForm] = useState({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
   const [saving, setSaving] = useState(false);
   const { success: toastSuccess, error: toastError } = useToast();
+  const t = useTranslations("announcements");
+  const tCommon = useTranslations("common");
 
   useEffect(() => {
     fetch("/api/announcements", { cache: "no-store" })
@@ -88,12 +91,12 @@ export default function AnnouncementsPage() {
     <div className="space-y-4 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold tracking-tight">Announcements</h1>
-          <p className="text-muted text-sm mt-1">Publish company-wide announcements</p>
+          <h1 className="text-lg font-bold tracking-tight">{t("title")}</h1>
+          <p className="text-muted text-sm mt-1">{t("subtitle")}</p>
         </div>
         {isManager && (
           <Button onClick={() => setShowCreate(true)} className="gap-1.5">
-            <Plus size={14} /> New Announcement
+            <Plus size={14} /> {t("newAnnouncement")}
           </Button>
         )}
       </div>
@@ -103,8 +106,8 @@ export default function AnnouncementsPage() {
       ) : announcements.length === 0 ? (
         <Card><CardContent className="p-8 text-center">
           <Megaphone size={40} className="mx-auto text-muted mb-3" />
-          <p className="font-medium mb-1">No announcements</p>
-          <p className="text-sm text-muted">Publish your first announcement to communicate with your team.</p>
+          <p className="font-medium mb-1">{t("noAnnouncements")}</p>
+          <p className="text-sm text-muted">{t("noAnnouncementsHint")}</p>
         </CardContent></Card>
       ) : (
         <div className="space-y-3">
@@ -135,7 +138,7 @@ export default function AnnouncementsPage() {
 
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>
-          <DialogHeader><DialogTitle>New Announcement</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("newAnnouncement")}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Title <span className="text-red-400">*</span></Label>
@@ -185,9 +188,9 @@ export default function AnnouncementsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowCreate(false)}>{tCommon("cancel")}</Button>
             <Button onClick={handleCreate} disabled={saving || !form.title.trim() || !form.content.trim() || !form.expiresAt}>
-              {saving ? "Publishing..." : "Publish"}
+              {saving ? t("publishing") : t("publish")}
             </Button>
           </DialogFooter>
         </DialogContent>

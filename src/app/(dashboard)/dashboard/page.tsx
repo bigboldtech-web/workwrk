@@ -27,6 +27,7 @@ import { AdminSetupChecklist } from "@/components/admin-setup-checklist";
 import { DashboardOkrs } from "@/components/dashboard/dashboard-okrs";
 import { useRole } from "@/hooks/use-role";
 import { Trophy } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 interface DashboardStats {
   totalPeople: number;
@@ -163,6 +164,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const t = useTranslations("dashboard");
 
   useEffect(() => {
     fetch("/api/dashboard")
@@ -184,10 +186,8 @@ export default function DashboardPage() {
     return (
       <div className="space-y-4 animate-fade-in">
         <div>
-          <h1 className="text-lg font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted text-sm mt-1">
-            Overview of your business operating system
-          </p>
+          <h1 className="text-lg font-bold tracking-tight">{t("title")}</h1>
+          <p className="text-muted text-sm mt-1">{t("subtitle")}</p>
         </div>
         <AnnouncementsBanner />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -230,10 +230,8 @@ export default function DashboardPage() {
     return (
       <div className="space-y-4 animate-fade-in">
         <div>
-          <h1 className="text-lg font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted text-sm mt-1">
-            Overview of your business operating system
-          </p>
+          <h1 className="text-lg font-bold tracking-tight">{t("title")}</h1>
+          <p className="text-muted text-sm mt-1">{t("subtitle")}</p>
         </div>
         <ErrorState message={error ?? undefined} onRetry={() => window.location.reload()} />
       </div>

@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { Outfit, JetBrains_Mono, Syne } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages } from "next-intl/server";
 import { Providers } from "@/components/layout/providers";
+import { rtlLocales, type Locale } from "@/i18n/config";
+import { resolveCurrency } from "@/lib/currency-server";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -27,15 +31,27 @@ export const metadata: Metadata = {
     "Unify people, processes, KPIs, SOPs, and AI intelligence into one seamless platform.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = (await getLocale()) as Locale;
+  const messages = await getMessages();
+  const currency = await resolveCurrency();
+  const dir = rtlLocales.includes(locale) ? "rtl" : "ltr";
+
   return (
-    <html lang="en" className={`${outfit.variable} ${jetbrainsMono.variable} ${syne.variable}`} suppressHydrationWarning>
+    <html
+      lang={locale}
+      dir={dir}
+      className={`${outfit.variable} ${jetbrainsMono.variable} ${syne.variable}`}
+      suppressHydrationWarning
+    >
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
-        <Providers>{children}</Providers>
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          <Providers initialCurrency={currency}>{children}</Providers>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

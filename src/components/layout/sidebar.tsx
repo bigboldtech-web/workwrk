@@ -7,6 +7,7 @@ import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useRole } from "@/hooks/use-role";
+import { useTranslations } from "next-intl";
 import {
   LayoutDashboard,
   Users,
@@ -40,40 +41,41 @@ import {
 
 // moduleKey maps nav items to module keys from settings.enabledModules
 // Items without a moduleKey are always shown (Dashboard, Organization)
-const navigation: { name: string; href: string; icon: any; moduleKey?: string; managerOnly?: boolean; adminOnly?: boolean }[] = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Announcements", href: "/announcements", icon: Megaphone },
-  { name: "People", href: "/people", icon: Users, moduleKey: "people", managerOnly: true },
-  { name: "Organization", href: "/organization", icon: Building2 },
-  { name: "KRA & KPIs", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi" },
-  { name: "Work Calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks" },
-  { name: "SOPs", href: "/sops", icon: BookOpen, moduleKey: "sops" },
-  { name: "Process Runs", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true },
-  { name: "Reviews", href: "/reviews", icon: Star, moduleKey: "reviews" },
-  { name: "Meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings" },
-  { name: "Analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true },
-  { name: "Onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true },
-  { name: "Ideas", href: "/ideas", icon: Lightbulb },
-  { name: "OKRs", href: "/okrs", icon: Crosshair },
-  { name: "Talent Grid", href: "/talent", icon: Grid3x3, managerOnly: true },
-  { name: "Surveys", href: "/surveys", icon: ClipboardCheck },
-  { name: "Candor", href: "/candor", icon: MessageSquareHeart },
-  { name: "Policies", href: "/policies", icon: Shield },
-  { name: "Assets", href: "/assets", icon: Package, managerOnly: true },
-  { name: "Activity", href: "/activity", icon: Activity },
-  { name: "Tools", href: "/tools", icon: Wrench },
-  { name: "Integrations", href: "/integrations", icon: Link2, adminOnly: true },
-  { name: "AI Assistant", href: "/ai", icon: Bot, moduleKey: "ai" },
+const navigation: { name: string; key: string; href: string; icon: any; moduleKey?: string; managerOnly?: boolean; adminOnly?: boolean }[] = [
+  { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone },
+  { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true },
+  { name: "Organization", key: "organization", href: "/organization", icon: Building2 },
+  { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi" },
+  { name: "Work Calendar", key: "calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks" },
+  { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops" },
+  { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true },
+  { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews" },
+  { name: "Meetings", key: "meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings" },
+  { name: "Analytics", key: "analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true },
+  { name: "Onboarding", key: "onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true },
+  { name: "Ideas", key: "ideas", href: "/ideas", icon: Lightbulb },
+  { name: "OKRs", key: "okrs", href: "/okrs", icon: Crosshair },
+  { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true },
+  { name: "Surveys", key: "surveys", href: "/surveys", icon: ClipboardCheck },
+  { name: "Candor", key: "candor", href: "/candor", icon: MessageSquareHeart },
+  { name: "Policies", key: "policies", href: "/policies", icon: Shield },
+  { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true },
+  { name: "Activity", key: "activity", href: "/activity", icon: Activity },
+  { name: "Tools", key: "tools", href: "/tools", icon: Wrench },
+  { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true },
+  { name: "AI Assistant", key: "aiAssistant", href: "/ai", icon: Bot, moduleKey: "ai" },
 ];
 
 const bottomNav = [
-  { name: "Docs", href: "/docs", icon: FileText },
-  { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Docs", key: "docs", href: "/docs", icon: FileText },
+  { name: "Settings", key: "settings", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const tNav = useTranslations("nav");
 
   // Sync sidebar width to CSS variable so the content area can adjust
   useEffect(() => {
@@ -162,20 +164,20 @@ export function Sidebar() {
                     : "text-muted hover:bg-surface-2 hover:text-foreground",
                   collapsed && "justify-center px-2"
                 )}
-                title={collapsed ? item.name : undefined}
+                title={collapsed ? tNav(item.key) : undefined}
               >
                 <item.icon size={16} className={cn(isActive && "text-purple-400")} />
                 {!collapsed && (
                   <span className="flex-1 flex items-center justify-between">
-                    <span>{item.name}</span>
-                    {item.name === "Announcements" && announcementCount > 0 && (
+                    <span>{tNav(item.key)}</span>
+                    {item.key === "announcements" && announcementCount > 0 && (
                       <span className="flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
                         {announcementCount}
                       </span>
                     )}
                   </span>
                 )}
-                {collapsed && item.name === "Announcements" && announcementCount > 0 && (
+                {collapsed && item.key === "announcements" && announcementCount > 0 && (
                   <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
                 )}
               </Link>
@@ -200,7 +202,7 @@ export function Sidebar() {
                 )}
               >
                 <item.icon size={16} />
-                {!collapsed && <span>{item.name}</span>}
+                {!collapsed && <span>{tNav(item.key)}</span>}
               </Link>
             );
           })}
@@ -213,7 +215,7 @@ export function Sidebar() {
             )}
           >
             <LogOut size={16} />
-            {!collapsed && <span>Sign Out</span>}
+            {!collapsed && <span>{tNav("signOut")}</span>}
           </button>
         </div>
       </div>

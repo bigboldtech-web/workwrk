@@ -18,6 +18,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSession, signOut } from "next-auth/react";
 import { getInitials } from "@/lib/utils";
+import { useTranslations } from "next-intl";
+import { LanguageSwitcher } from "./language-switcher";
+import { CurrencySwitcher } from "./currency-switcher";
 
 interface SearchResult {
   type: "person" | "task" | "sop" | "department" | "meeting";
@@ -60,6 +63,9 @@ function timeAgo(dateStr: string): string {
 export function Topbar() {
   const { data: session } = useSession();
   const user = session?.user;
+  const tCommon = useTranslations("common");
+  const tNav = useTranslations("nav");
+  const tSettings = useTranslations("settings");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -172,7 +178,7 @@ export function Topbar() {
         <input
           id="global-search"
           type="text"
-          placeholder="Search people, tasks, SOPs..."
+          placeholder={tCommon("search") + "..."}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onFocus={() => searchResults.length > 0 && setShowSearch(true)}
@@ -226,6 +232,10 @@ export function Topbar() {
           <Plus size={16} />
           Quick Add
         </Button>
+
+        {/* Language & currency */}
+        <LanguageSwitcher />
+        <CurrencySwitcher />
 
         {/* Help / re-launch tour */}
         <HelpButton />
@@ -312,17 +322,17 @@ export function Topbar() {
             <DropdownMenuLabel>My Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link href="/settings">Profile</Link>
+              <Link href="/settings">{tSettings("profile")}</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/settings">Settings</Link>
+              <Link href="/settings">{tNav("settings")}</Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => signOut({ callbackUrl: "/login" })}
               className="text-red-400 focus:text-red-400"
             >
-              Sign Out
+              {tNav("signOut")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
