@@ -58,7 +58,7 @@ export default function AnnouncementsPage() {
   }, []);
 
   async function handleCreate() {
-    if (!form.title.trim() || !form.content.trim()) return;
+    if (!form.title.trim() || !form.content.trim() || !form.expiresAt) return;
     setSaving(true);
     try {
       const res = await fetch("/api/announcements", {
@@ -66,7 +66,7 @@ export default function AnnouncementsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          expiresAt: form.expiresAt || undefined,
+          expiresAt: form.expiresAt,
         }),
       });
       if (res.ok) {
@@ -167,8 +167,14 @@ export default function AnnouncementsPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Expires On (optional)</Label>
-                <Input type="date" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
+                <Label>Expires On <span className="text-red-400">*</span></Label>
+                <Input
+                  type="date"
+                  required
+                  min={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)}
+                  value={form.expiresAt}
+                  onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
+                />
               </div>
               <div className="flex items-end pb-2">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -180,7 +186,7 @@ export default function AnnouncementsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={saving || !form.title.trim() || !form.content.trim()}>
+            <Button onClick={handleCreate} disabled={saving || !form.title.trim() || !form.content.trim() || !form.expiresAt}>
               {saving ? "Publishing..." : "Publish"}
             </Button>
           </DialogFooter>

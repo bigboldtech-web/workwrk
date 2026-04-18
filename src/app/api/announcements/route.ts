@@ -45,6 +45,10 @@ export async function POST(req: NextRequest) {
   const { title, content, type, priority, pinned, expiresAt, targetAudience } = body;
 
   if (!title?.trim() || !content?.trim()) return jsonError("Title and content required");
+  if (!expiresAt) return jsonError("Expiry date is required");
+  const expiryDate = new Date(`${String(expiresAt).slice(0, 10)}T23:59:59.999Z`);
+  if (isNaN(expiryDate.getTime())) return jsonError("Invalid expiry date");
+  if (expiryDate.getTime() <= Date.now()) return jsonError("Expiry date must be in the future");
 
   try {
   const announcement = await prisma.announcement.create({
@@ -55,7 +59,7 @@ export async function POST(req: NextRequest) {
       priority: priority || "NORMAL",
       pinned: pinned === true,
       publishedAt: new Date(),
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      expiresAt: expiryDate,
       targetAudience: targetAudience || undefined,
       authorId: userId,
       organizationId: orgId,

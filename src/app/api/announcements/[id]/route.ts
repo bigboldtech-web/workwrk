@@ -14,7 +14,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.type !== undefined) data.type = body.type;
   if (body.priority !== undefined) data.priority = body.priority;
   if (body.pinned !== undefined) data.pinned = body.pinned;
-  if (body.expiresAt !== undefined) data.expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
+  if (body.expiresAt !== undefined) {
+    if (!body.expiresAt) return jsonError("Expiry date is required");
+    const expiryDate = new Date(`${String(body.expiresAt).slice(0, 10)}T23:59:59.999Z`);
+    if (isNaN(expiryDate.getTime())) return jsonError("Invalid expiry date");
+    if (expiryDate.getTime() <= Date.now()) return jsonError("Expiry date must be in the future");
+    data.expiresAt = expiryDate;
+  }
   const updated = await prisma.announcement.update({ where: { id }, data });
   return jsonSuccess(updated);
 }
