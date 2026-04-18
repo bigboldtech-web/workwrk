@@ -44,7 +44,7 @@ export default function AnnouncementsPage() {
   const { success: toastSuccess, error: toastError } = useToast();
 
   useEffect(() => {
-    fetch("/api/announcements")
+    fetch("/api/announcements", { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -71,7 +71,7 @@ export default function AnnouncementsPage() {
       });
       if (res.ok) {
         // Refetch all announcements to get consistent data
-        const refreshRes = await fetch("/api/announcements");
+        const refreshRes = await fetch("/api/announcements", { cache: "no-store" });
         if (refreshRes.ok) {
           const refreshData = await refreshRes.json();
           const items = refreshData?.data || refreshData || [];

@@ -29,7 +29,7 @@ export function AnnouncementsBanner() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
   useEffect(() => {
-    fetch("/api/announcements")
+    fetch("/api/announcements", { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
         const items = d?.data || d || [];

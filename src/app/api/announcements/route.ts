@@ -25,7 +25,7 @@ export async function GET() {
     });
 
     return NextResponse.json(announcements, {
-      headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
+      headers: { "Cache-Control": "no-store" },
     });
   } catch (err: any) {
     console.error("Announcements GET error:", err);
@@ -62,47 +62,50 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Notify all org users (skip the author)
-  const users = await prisma.user.findMany({
-    where: { organizationId: orgId, deletedAt: null, id: { not: userId } },
-    select: { id: true, email: true, firstName: true },
-  });
-  if (users.length > 0) {
-    await prisma.notification.createMany({
-      data: users.map((u) => ({
-        userId: u.id,
-        type: "announcement",
-        title: `${announcement.priority === "URGENT" ? "🚨 " : ""}New Announcement`,
-        message: announcement.title,
-        link: "/announcements",
-      })),
+  // Notify all org users (skip the author). Errors here must NOT roll back
+  // the announcement — it's already persisted. Log and move on.
+  try {
+    const users = await prisma.user.findMany({
+      where: { organizationId: orgId, deletedAt: null, id: { not: userId } },
+      select: { id: true, email: true, firstName: true },
     });
+    if (users.length > 0) {
+      await prisma.notification.createMany({
+        data: users.map((u) => ({
+          userId: u.id,
+          type: "announcement",
+          title: `${announcement.priority === "URGENT" ? "🚨 " : ""}New Announcement`,
+          message: announcement.title,
+          link: "/announcements",
+        })),
+      });
 
-    // Email every org member — queue all first, then process once to avoid race conditions
-    const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
-    const preview = announcement.content.length > 280
-      ? announcement.content.slice(0, 280) + "..."
-      : announcement.content;
-    for (const u of users) {
-      const { subject, html } = genericNotificationTemplate({
-        heading: announcement.priority === "URGENT" ? "🚨 Urgent Announcement" : "New Announcement",
-        recipientName: u.firstName,
-        subjectText: "A new announcement has been posted in your organization.",
-        itemTitle: announcement.title,
-        itemDetails: announcement.priority !== "NORMAL" ? `Priority: ${announcement.priority}` : undefined,
-        actionLabel: "View Announcement",
-        actionLink: `${baseUrl}/announcements`,
-        note: preview,
-      });
-      await queueEmail({
-        to: u.email, subject, html,
-        template: "announcement",
-        variables: { title: announcement.title, priority: announcement.priority },
-        organizationId: orgId, userId: u.id, category: "reminder",
-      });
+      const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
+      const preview = announcement.content.length > 280
+        ? announcement.content.slice(0, 280) + "..."
+        : announcement.content;
+      for (const u of users) {
+        const { subject, html } = genericNotificationTemplate({
+          heading: announcement.priority === "URGENT" ? "🚨 Urgent Announcement" : "New Announcement",
+          recipientName: u.firstName,
+          subjectText: "A new announcement has been posted in your organization.",
+          itemTitle: announcement.title,
+          itemDetails: announcement.priority !== "NORMAL" ? `Priority: ${announcement.priority}` : undefined,
+          actionLabel: "View Announcement",
+          actionLink: `${baseUrl}/announcements`,
+          note: preview,
+        });
+        await queueEmail({
+          to: u.email, subject, html,
+          template: "announcement",
+          variables: { title: announcement.title, priority: announcement.priority },
+          organizationId: orgId, userId: u.id, category: "reminder",
+        });
+      }
+      processEmailQueue().catch((err) => console.error("[Announcement] Queue processing failed:", err));
     }
-    // Process the queue once after all emails are queued
-    processEmailQueue().catch((err) => console.error("[Announcement] Queue processing failed:", err));
+  } catch (notifyErr) {
+    console.error("[Announcement] Notification/email step failed (announcement still saved):", notifyErr);
   }
 
   return jsonSuccess(announcement, 201);
