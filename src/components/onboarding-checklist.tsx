@@ -2,9 +2,6 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
 import {
   CheckCircle2,
   Circle,
@@ -37,7 +34,6 @@ export function OnboardingChecklist() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check if user dismissed the checklist
     const wasDismissed = localStorage.getItem("twrk-checklist-dismissed");
     if (wasDismissed === "true") {
       setDismissed(true);
@@ -50,7 +46,6 @@ export function OnboardingChecklist() {
       .then((json) => {
         const d = json.data || json;
         setData(d);
-        // Auto-dismiss if all done
         if (d.allDone) {
           setDismissed(true);
           localStorage.setItem("twrk-checklist-dismissed", "true");
@@ -63,75 +58,196 @@ export function OnboardingChecklist() {
   if (loading || dismissed || !data || data.allDone) return null;
 
   return (
-    <Card className="border-purple-500/20 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-surface dark:to-purple-950">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-500/10">
-              <Rocket size={18} className="text-purple-400" />
-            </div>
-            <div>
-              <CardTitle className="text-sm font-semibold">Get Started</CardTitle>
-              <p className="text-xs text-muted mt-0.5">
-                {data.completedCount} of {data.totalCount} completed
-              </p>
-            </div>
+    <div
+      style={{
+        background: "#141414",
+        border: "1px solid rgba(74, 158, 255, 0.25)",
+        borderRadius: 16,
+        padding: 20,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {/* Ambient blue glow */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: -50,
+          right: -40,
+          width: 200,
+          height: 200,
+          background: "radial-gradient(circle, rgba(74,158,255,0.15), transparent 70%)",
+          filter: "blur(40px)",
+          pointerEvents: "none",
+        }}
+      />
+
+      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 10,
+              background: "rgba(74, 158, 255, 0.12)",
+              border: "1px solid rgba(74, 158, 255, 0.3)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#4a9eff",
+              flexShrink: 0,
+            }}
+          >
+            <Rocket size={16} />
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-purple-400">{data.percentage}%</span>
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-foreground"
-            >
-              {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
-            <button
-              onClick={() => {
-                setDismissed(true);
-                localStorage.setItem("twrk-checklist-dismissed", "true");
-              }}
-              className="rounded-md p-1 text-muted-2 hover:bg-surface-2 hover:text-muted"
-              title="Dismiss"
-            >
-              <X size={14} />
-            </button>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "#fafafa", margin: 0 }}>Get started</p>
+            <p style={{ fontSize: 11.5, color: "#a0a0a0", margin: "2px 0 0" }}>
+              {data.completedCount} of {data.totalCount} completed
+            </p>
           </div>
         </div>
-        <Progress value={data.percentage} className="mt-3 h-2" />
-      </CardHeader>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span
+            style={{
+              fontFamily: "var(--font-geist-mono), monospace",
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#4a9eff",
+              letterSpacing: "-0.02em",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {data.percentage}%
+          </span>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            style={{
+              padding: 6,
+              color: "#a0a0a0",
+              background: "transparent",
+              border: 0,
+              borderRadius: 6,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          <button
+            onClick={() => {
+              setDismissed(true);
+              localStorage.setItem("twrk-checklist-dismissed", "true");
+            }}
+            style={{
+              padding: 6,
+              color: "#707070",
+              background: "transparent",
+              border: 0,
+              borderRadius: 6,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            title="Dismiss"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div
+        style={{
+          height: 5,
+          borderRadius: 100,
+          background: "rgba(255, 255, 255, 0.06)",
+          overflow: "hidden",
+          marginBottom: expanded ? 16 : 0,
+          position: "relative",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${data.percentage}%`,
+            background: "linear-gradient(90deg, #4a9eff, #5eead4)",
+            borderRadius: 100,
+            boxShadow: "0 0 10px rgba(74, 158, 255, 0.5)",
+            transition: "width 0.5s cubic-bezier(0.2, 0.9, 0.3, 1)",
+          }}
+        />
+      </div>
 
       {expanded && (
-        <CardContent className="pt-2 pb-4">
-          <div className="space-y-1">
-            {data.steps.map((step) => (
-              <Link
-                key={step.id}
-                href={step.completed ? "#" : step.href}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
-                  step.completed
-                    ? "opacity-60"
-                    : "hover:bg-purple-500/5"
-                }`}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, position: "relative" }}>
+          {data.steps.map((step) => (
+            <Link
+              key={step.id}
+              href={step.completed ? "#" : step.href}
+              style={{ textDecoration: "none" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  transition: "background 0.2s",
+                  opacity: step.completed ? 0.55 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!step.completed) e.currentTarget.style.background = "#1a1a1a";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                }}
               >
                 {step.completed ? (
-                  <CheckCircle2 size={18} className="text-green-400 shrink-0" />
+                  <CheckCircle2 size={16} style={{ color: "#d4ff2e", flexShrink: 0 }} />
                 ) : (
-                  <Circle size={18} className="text-border shrink-0" />
+                  <Circle size={16} style={{ color: "#707070", flexShrink: 0 }} />
                 )}
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm ${step.completed ? "line-through text-muted-2" : "text-foreground"}`}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 500,
+                      color: step.completed ? "#707070" : "#fafafa",
+                      textDecoration: step.completed ? "line-through" : "none",
+                      margin: 0,
+                    }}
+                  >
                     {step.label}
                   </p>
-                  <p className="text-xs text-muted-2">{step.description}</p>
+                  <p style={{ fontSize: 11.5, color: "#a0a0a0", margin: "2px 0 0" }}>
+                    {step.description}
+                  </p>
                 </div>
                 {!step.completed && (
-                  <span className="text-xs text-purple-400 shrink-0">Start</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: "#4a9eff",
+                      flexShrink: 0,
+                      fontFamily: "var(--font-geist-mono), monospace",
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Start →
+                  </span>
                 )}
-              </Link>
-            ))}
-          </div>
-        </CardContent>
+              </div>
+            </Link>
+          ))}
+        </div>
       )}
-    </Card>
+    </div>
   );
 }

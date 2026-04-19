@@ -25,18 +25,19 @@ export function BirthdayCard() {
   // Show special card if it's the current user's birthday
   if (isMyBirthday) {
     return (
-      <Card className="border-pink-500/30 bg-gradient-to-r from-pink-500/10 via-purple-500/10 to-yellow-500/10 overflow-hidden relative">
+      <Card className="border-[rgba(255,61,138,0.3)] bg-gradient-to-r from-[rgba(255,61,138,0.08)] via-[rgba(255,153,51,0.06)] to-[rgba(212,255,46,0.06)] overflow-hidden relative">
         <CardContent className="p-6 text-center relative z-10">
           <div className="flex justify-center gap-2 mb-3">
-            <PartyPopper size={28} className="text-yellow-400" />
-            <Cake size={28} className="text-pink-400" />
-            <Gift size={28} className="text-purple-400" />
+            <PartyPopper size={28} className="text-[#ff9933]" />
+            <Cake size={28} className="text-[#ff3d8a]" />
+            <Gift size={28} className="text-[#d4ff2e]" />
           </div>
-          <h2 className="text-xl font-bold mb-2">Happy Birthday! 🎂</h2>
-          <p className="text-sm text-muted mb-1">
-            Thank you for being a wonderful part of <span className="font-semibold text-purple-400">{companyName}</span>!
+          <h2 className="text-xl font-bold mb-2 text-[#fafafa]">Happy Birthday! 🎂</h2>
+          <p className="text-sm text-[#a0a0a0] mb-1">
+            Thank you for being a wonderful part of{" "}
+            <span className="font-semibold text-[#d4ff2e]">{companyName}</span>!
           </p>
-          <p className="text-xs text-muted">
+          <p className="text-xs text-[#a0a0a0]">
             We appreciate everything you do and wish you an amazing year ahead!
           </p>
         </CardContent>

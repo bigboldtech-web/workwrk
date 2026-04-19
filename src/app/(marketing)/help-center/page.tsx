@@ -1,237 +1,170 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import {
-  Rocket,
-  Users,
-  Target,
-  CheckSquare,
-  BookOpen,
-  Star,
-  BarChart3,
-  Brain,
-  Settings,
-  Link2,
-  Mail,
-  ArrowUpRight,
-} from "lucide-react";
-import {
-  FadeIn,
-  StaggerContainer,
-  StaggerItem,
-} from "@/components/marketing/motion";
+
+import { Reveal, SectionHeader } from "@/components/bento";
 
 export const metadata: Metadata = {
-  title: "Documentation — WorkwrK | Help Center",
+  title: "Help Center — WorkwrK",
   description:
-    "Browse WorkwrK documentation and help guides. Learn how to set up your organization, manage people, track KPIs, run performance reviews, and more.",
-  openGraph: {
-    title: "Documentation — WorkwrK Help Center",
-    description:
-      "Guides and documentation for every WorkwrK module — getting started, people management, KRAs, tasks, SOPs, reviews, scoring, AI, and integrations.",
-  },
+    "Guides, how-tos, and answers for every module of WorkwrK. Setup, onboarding, AI, integrations, security.",
+  alternates: { canonical: "https://workwrk.com/help-center" },
 };
 
-const docCategories = [
+const SECTIONS = [
   {
-    icon: <Rocket size={28} />,
-    color: "#6C5CE7",
-    title: "Getting Started",
+    variant: "lime" as const,
+    title: "Getting started",
+    desc: "From signup to first useful day in thirty minutes.",
     links: [
-      "Creating your account",
-      "Setting up your organization",
-      "Adding team members",
-      "Configuring departments & roles",
+      { label: "Bulk-import your team", href: "/features/people#lifecycle" },
+      { label: "First SOPs to assign", href: "/features/sops#written" },
+      { label: "AI-drafted KRAs walkthrough", href: "/features/kras" },
+      { label: "Inviting managers", href: "/features/people#access" },
     ],
   },
   {
-    icon: <Users size={28} />,
-    color: "#00D68F",
-    title: "People Management",
+    variant: "dark" as const,
+    title: "Performance",
+    desc: "Composite scoring, review cycles, and calibration.",
     links: [
-      "Managing employee profiles",
-      "Org chart & hierarchy",
-      "Bulk import employees",
-      "Onboarding workflows",
+      { label: "How composite scores work", href: "/features/reviews" },
+      { label: "Setting up a review cycle", href: "/features/reviews" },
+      { label: "Calibration across managers", href: "/features/reviews" },
+      { label: "Exporting HR-ready PDFs", href: "/features/reviews" },
     ],
   },
   {
-    icon: <Target size={28} />,
-    color: "#FF6B6B",
-    title: "KRAs & KPIs",
+    variant: "dark" as const,
+    title: "SOPs & tasks",
+    desc: "Playbooks, compliance, and auto-escalation.",
     links: [
-      "Setting up KRAs",
-      "Creating KPIs & targets",
-      "Assigning KRAs to employees",
-      "Tracking KPI scores",
+      { label: "Video → SOP extraction (Scribe)", href: "/features/sops#scribe" },
+      { label: "Versioning and audit trail", href: "/features/sops#written" },
+      { label: "Task SLAs and escalation", href: "/features/tasks" },
+      { label: "Nightly compliance jobs", href: "/features/sops" },
     ],
   },
   {
-    icon: <CheckSquare size={28} />,
-    color: "#FFA726",
-    title: "Tasks",
+    variant: "dark" as const,
+    title: "AI Engine",
+    desc: "Private-by-default reasoning across your data.",
     links: [
-      "Creating & assigning tasks",
-      "Priority levels (P0-P3)",
-      "Task workflows",
-      "Tracking completion",
+      { label: "What the AI can and can't do", href: "/features/ai-engine#prompts" },
+      { label: "Drafting KRAs from job descriptions", href: "/features/kras" },
+      { label: "Attrition-risk predictions", href: "/features/ai-engine#signals" },
+      { label: "Data privacy & training", href: "/security" },
     ],
   },
   {
-    icon: <BookOpen size={28} />,
-    color: "#26C6DA",
-    title: "SOPs",
+    variant: "dark" as const,
+    title: "Developers & integrations",
+    desc: "API, webhooks, and the OpenAPI spec.",
     links: [
-      "Creating SOPs",
-      "Assigning SOPs to teams",
-      "Tracking compliance",
-      "Version management",
+      { label: "Public API reference", href: "/developers" },
+      { label: "Webhook signatures (HMAC-SHA256)", href: "/developers#events" },
+      { label: "OpenAPI 3.1 spec", href: "/api/v1/openapi.json" },
+      { label: "Available integrations", href: "/features/integrations" },
     ],
   },
   {
-    icon: <Star size={28} />,
-    color: "#FFCA28",
-    title: "Performance Reviews",
+    variant: "dark" as const,
+    title: "Security & billing",
+    desc: "Access control, compliance, and subscriptions.",
     links: [
-      "Setting up review cycles",
-      "Self-assessment flow",
-      "Manager & peer reviews",
-      "Calibration process",
-    ],
-  },
-  {
-    icon: <BarChart3 size={28} />,
-    color: "#AB47BC",
-    title: "Composite Scores",
-    links: [
-      "How scoring works",
-      "Configuring weights",
-      "Score interpretation",
-      "Using scores for decisions",
-    ],
-  },
-  {
-    icon: <Brain size={28} />,
-    color: "#EC407A",
-    title: "AI Assistant",
-    links: [
-      "Asking questions",
-      "Performance insights",
-      "Generating reports",
-      "AI-powered recommendations",
-    ],
-  },
-  {
-    icon: <Settings size={28} />,
-    color: "#78909C",
-    title: "Settings & Admin",
-    links: [
-      "Organization settings",
-      "User permissions & roles",
-      "Module configuration",
-      "Security settings",
-    ],
-  },
-  {
-    icon: <Link2 size={28} />,
-    color: "#29B6F6",
-    title: "Integrations",
-    links: [
-      "Connecting HRMS",
-      "Slack integration",
-      "Google Workspace",
-      "Webhooks & API",
+      { label: "RBAC + field-level permissions", href: "/features/access" },
+      { label: "SOC 2, DPDPA, data residency", href: "/security" },
+      { label: "Pricing & plan caps", href: "/pricing" },
+      { label: "Contact support", href: "/contact" },
     ],
   },
 ];
 
-export default function DocsPage() {
+export default function HelpCenterPage() {
   return (
-    <div>
-      {/* Hero */}
-      <section className="pb-20 pt-36">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <FadeIn>
-            <p className="mkt-label">Help Center</p>
-            <h1 className="mkt-title mb-4 text-[clamp(2.2rem,5vw,3.5rem)]">
-              Documentation &<br />
-              <span className="text-gradient">guides.</span>
-            </h1>
-            <p className="mb-8 max-w-[560px] text-lg text-muted">
-              Everything you need to get the most out of WorkwrK. Browse by
-              topic or search for what you need.
-            </p>
-          </FadeIn>
-        </div>
-      </section>
+    <>
+      <section className="bento-section" style={{ paddingTop: 40 }}>
+        <div className="bento-container">
+          <Reveal>
+            <SectionHeader
+              label="Help center"
+              title={<>Short answers. <span className="hi">Zero fluff.</span></>}
+              subtitle="Grouped by module. If you can't find it, email hi@workwrk.com — we'll write it up and publish it."
+              aside={{
+                label: "Response",
+                stat: "<24h",
+                text: "Median first-response on support tickets. Same day, usually same hour.",
+              }}
+            />
+          </Reveal>
 
-      {/* Doc Categories Grid */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <StaggerContainer className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {docCategories.map((cat) => (
-              <StaggerItem key={cat.title}>
-                <div className="mkt-card flex h-full flex-col p-6">
-                  <div
-                    className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl"
-                    style={{
-                      backgroundColor: `${cat.color}15`,
-                      color: cat.color,
-                    }}
-                  >
-                    {cat.icon}
-                  </div>
-                  <h3 className="mb-3 text-lg font-semibold text-foreground">
-                    {cat.title}
-                  </h3>
-                  <ul className="flex flex-col gap-2">
-                    {cat.links.map((linkText) => (
-                      <li key={linkText}>
-                        <Link
-                          href="#"
-                          className="text-sm text-muted transition-colors hover:text-foreground"
-                        >
-                          {linkText}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
+          <Reveal stagger className="hc-grid">
+            {SECTIONS.map((s) => (
+              <article key={s.title} className={`hc hc-${s.variant}`}>
+                <div>
+                  <h3 className="hc-title">{s.title}</h3>
+                  <p className="hc-desc">{s.desc}</p>
                 </div>
-              </StaggerItem>
+                <ul className="hc-links">
+                  {s.links.map((l) => (
+                    <li key={l.label}>
+                      <Link href={l.href}>{l.label} <span className="arr">→</span></Link>
+                    </li>
+                  ))}
+                </ul>
+              </article>
             ))}
-          </StaggerContainer>
+          </Reveal>
         </div>
-      </section>
 
-      {/* Need Help CTA */}
-      <section className="pb-28">
-        <div className="mx-auto max-w-[1200px] px-6">
-          <FadeIn>
-            <div className="mkt-highlight text-center">
-              <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#6C5CE7]/10 text-[#6C5CE7]">
-                <Mail size={28} />
-              </div>
-              <h2 className="mkt-title mb-4 text-[clamp(1.8rem,3vw,2.5rem)]">
-                Need help?
-              </h2>
-              <p className="mx-auto mb-8 max-w-[440px] text-base text-muted">
-                Can&apos;t find what you&apos;re looking for? Our support team
-                is ready to help you out.
-              </p>
-              <div className="flex items-center justify-center gap-4">
-                <Link
-                  href="mailto:support@workwrk.com"
-                  className="btn-primary px-8 py-3.5"
-                >
-                  support@workwrk.com <ArrowUpRight size={16} />
-                </Link>
-                <Link href="/faq" className="btn-outline px-8 py-3.5">
-                  Browse FAQ
-                </Link>
-              </div>
-            </div>
-          </FadeIn>
-        </div>
+        <style>{`
+          .hc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+          .hc {
+            border-radius: 28px; padding: 32px;
+            min-height: 320px;
+            display: flex; flex-direction: column; justify-content: space-between;
+            transition: all 0.3s;
+            position: relative; overflow: hidden;
+          }
+          .hc:hover { transform: translateY(-4px); }
+          .hc::before {
+            content: ""; position: absolute; inset: 0;
+            background-image: radial-gradient(circle at 1px 1px, rgba(0,0,0,0.08) 1px, transparent 0);
+            background-size: 18px 18px; pointer-events: none; opacity: 0.35;
+          }
+          .hc > * { position: relative; }
+          .hc-lime { background: var(--b-lime); color: var(--b-bg); }
+          .hc-lime:hover { box-shadow: var(--b-shadow-lime); }
+          .hc-dark {
+            background: var(--b-card);
+            border: 1px solid var(--b-line);
+            color: var(--b-fg);
+          }
+          .hc-dark:hover { border-color: var(--b-line-2); background: var(--b-card-2); }
+          .hc-dark .hc-desc { color: var(--b-t2); }
+          .hc-dark .hc-links { border-top-color: var(--b-line) !important; }
+          .hc-dark .hc-links a { color: var(--b-off); }
+          .hc-dark .hc-links a:hover { color: var(--b-lime); }
+          .hc-title { font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin-bottom: 10px; }
+          .hc-desc { font-size: 14px; line-height: 1.55; font-weight: 500; max-width: 380px; }
+          .hc-links {
+            list-style: none; padding: 20px 0 0;
+            border-top: 1px solid rgba(0,0,0,0.15);
+            display: flex; flex-direction: column; gap: 9px;
+            margin-top: 20px;
+          }
+          .hc-links a {
+            display: flex; justify-content: space-between;
+            font-size: 13.5px; font-weight: 500;
+            padding: 4px 0;
+            color: inherit; text-decoration: none;
+            transition: transform 0.2s;
+          }
+          .hc-links a:hover { transform: translateX(3px); }
+          .hc-links .arr { opacity: 0.6; transition: transform 0.2s; }
+          .hc-links a:hover .arr { transform: translateX(3px); opacity: 1; }
+          @media (max-width: 900px) { .hc-grid { grid-template-columns: 1fr; } }
+        `}</style>
       </section>
-    </div>
+    </>
   );
 }

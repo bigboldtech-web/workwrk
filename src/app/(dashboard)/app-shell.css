@@ -1,0 +1,989 @@
+/* ==== Dashboard shell — bento system ==== */
+
+/* Shell ensures dark-mode tokens are always live on the app side. */
+.app-shell {
+  background: #0a0a0a;
+  color: #fafafa;
+  min-height: 100vh;
+  --b-bg: #0a0a0a;
+  --b-card: #141414;
+  --b-card-2: #1a1a1a;
+  --b-card-3: #222222;
+  --b-line: rgba(255, 255, 255, 0.08);
+  --b-line-2: rgba(255, 255, 255, 0.14);
+  --b-fg: #fafafa;
+  --b-off: #ededed;
+  --b-t2: #a0a0a0;
+  --b-t3: #707070;
+  --b-t4: #4a4a4a;
+  --b-lime: #d4ff2e;
+  --b-pink: #ff3d8a;
+  --b-blue: #4a9eff;
+  --b-amber: #ff9933;
+}
+
+/* ==== SIDEBAR ==== */
+
+.app-sidebar {
+  position: fixed;
+  top: 0; left: 0;
+  width: 232px;
+  height: 100vh;
+  background: #141414;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.app-sidebar.is-collapsed { width: 64px; }
+
+/* Brand row */
+.app-sidebar-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  min-height: 52px;
+}
+.app-sidebar.is-collapsed .app-sidebar-brand { padding: 14px 0 14px 16px; justify-content: flex-start; }
+.app-sidebar-brand-full,
+.app-sidebar-brand-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #fafafa;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.04em;
+  text-decoration: none;
+}
+.app-sidebar-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #d4ff2e;
+  box-shadow: 0 0 12px #d4ff2e;
+  flex-shrink: 0;
+  animation: appSidebarPulse 3s ease-in-out infinite;
+}
+@keyframes appSidebarPulse {
+  0%, 100% { box-shadow: 0 0 10px #d4ff2e; }
+  50% { box-shadow: 0 0 18px #d4ff2e; }
+}
+.app-sidebar-wordmark { color: #fafafa; }
+
+.app-sidebar-collapse {
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #a0a0a0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.app-sidebar-collapse:hover {
+  color: #fafafa;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: #1a1a1a;
+}
+.app-sidebar.is-collapsed .app-sidebar-collapse { margin-right: 12px; }
+
+/* Nav area */
+.app-sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.app-sidebar-nav::-webkit-scrollbar { width: 4px; }
+.app-sidebar-nav::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 2px; }
+
+.app-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #a0a0a0;
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+  border: 1px solid transparent;
+  position: relative;
+  white-space: nowrap;
+}
+.app-sidebar-link.is-collapsed { justify-content: center; padding: 10px; gap: 0; }
+.app-sidebar-link:hover {
+  background: #1a1a1a;
+  color: #fafafa;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.app-sidebar-link.is-active {
+  background: rgba(212, 255, 46, 0.08);
+  color: #d4ff2e;
+  border-color: rgba(212, 255, 46, 0.25);
+}
+.app-sidebar-link.is-active::before {
+  content: "";
+  position: absolute;
+  left: -10px; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 18px;
+  background: #d4ff2e;
+  border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 8px rgba(212, 255, 46, 0.6);
+}
+.app-sidebar-link.is-active.is-collapsed::before {
+  left: 0;
+}
+.app-sidebar-label {
+  flex: 1;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.app-sidebar-badge {
+  min-width: 18px; height: 18px;
+  padding: 0 6px;
+  background: #ff3d8a;
+  color: #0a0a0a;
+  border-radius: 100px;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.02em;
+}
+.app-sidebar-dot-pip {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #ff3d8a;
+  box-shadow: 0 0 6px #ff3d8a;
+}
+
+/* Bottom section */
+.app-sidebar-bottom {
+  padding: 10px 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: #141414;
+}
+.app-sidebar-signout {
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+.app-sidebar-signout:hover {
+  background: rgba(255, 61, 138, 0.08);
+  color: #ff3d8a;
+  border-color: rgba(255, 61, 138, 0.25);
+}
+
+/* ==== TOPBAR ==== */
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+  background: rgba(10, 10, 10, 0.82);
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.app-search-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 460px;
+}
+.app-search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #707070;
+  pointer-events: none;
+}
+.app-search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 48px 0 40px;
+  background: #141414;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 100px;
+  color: #fafafa;
+  font-family: inherit;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+.app-search-input:focus {
+  outline: none;
+  border-color: rgba(212, 255, 46, 0.4);
+  background: #1a1a1a;
+  box-shadow: 0 0 0 3px rgba(212, 255, 46, 0.08);
+}
+.app-search-input::placeholder { color: #707070; }
+.app-search-kbd {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 8px;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  color: #a0a0a0;
+  letter-spacing: 0.04em;
+}
+
+.app-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0; right: 0;
+  background: #141414;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  z-index: 50;
+}
+.app-search-empty { padding: 16px 18px; font-size: 13px; color: #a0a0a0; }
+.app-search-result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  text-decoration: none;
+  color: #ededed;
+  transition: background 0.15s;
+}
+.app-search-result:hover { background: #1a1a1a; }
+.app-search-result-title { font-size: 13px; font-weight: 500; color: #fafafa; }
+.app-search-result-sub {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10.5px;
+  color: #707070;
+}
+.app-search-result-type {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  color: #d4ff2e;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  background: rgba(212, 255, 46, 0.08);
+  border-radius: 100px;
+  flex-shrink: 0;
+}
+
+.app-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-icon-btn {
+  position: relative;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #a0a0a0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.app-icon-btn:hover {
+  background: #1a1a1a;
+  color: #fafafa;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.app-icon-btn-badge {
+  position: absolute;
+  top: 4px; right: 4px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  background: #ff3d8a;
+  color: #0a0a0a;
+  border-radius: 100px;
+  font-size: 9.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #0a0a0a;
+}
+
+.app-quick-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: #d4ff2e;
+  color: #0a0a0a;
+  border: 0;
+  border-radius: 100px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: 0 6px 14px -6px rgba(212, 255, 46, 0.5);
+  transition: all 0.2s;
+}
+.app-quick-add:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -6px rgba(212, 255, 46, 0.7);
+}
+
+.app-user-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 100px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.app-user-btn:hover {
+  background: #1a1a1a;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.app-user-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: #d4ff2e;
+  color: #0a0a0a;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-geist-mono), monospace;
+  letter-spacing: 0.04em;
+}
+.app-user-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #fafafa;
+}
+.app-user-org {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  color: #707070;
+  letter-spacing: 0.04em;
+}
+
+/* ==== Content area ==== */
+.app-content {
+  padding: 20px 24px;
+  min-height: calc(100vh - 56px);
+}
+
+/* ==== Loader ==== */
+.app-loader {
+  min-height: 100vh;
+  background: #0a0a0a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+}
+.app-loader-dot {
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  background: #d4ff2e;
+  animation: appLoaderPulse 1.2s ease-in-out infinite;
+}
+@keyframes appLoaderPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(212, 255, 46, 0.35); }
+  50% { transform: scale(1.3); box-shadow: 0 0 30px rgba(212, 255, 46, 0.55); }
+}
+.app-loader-text {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #707070;
+}
+
+/* ==== Shared primitives: card wrappers, etc. ==== */
+
+/* Override global card compact defaults for dashboard to use bento tokens */
+.app-shell [class*="Card"] {
+  background: #141414;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Override global h1/h2 sizes for app pages (bento style) */
+.app-shell h1.app-page-title,
+.app-shell h2.app-page-title {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: #fafafa;
+}
+.app-shell .app-page-sub {
+  font-size: 14px;
+  color: #a0a0a0;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+/* ==== Broad palette remap inside the shell ====
+ * The 25 interior pages were authored against purple / surface tokens.
+ * Remap the hottest Tailwind classes to bento equivalents so every page
+ * inherits the lime accent without per-page edits. Scoped to .app-shell
+ * so marketing pages stay unaffected. */
+
+.app-shell .text-purple-200,
+.app-shell .text-purple-300,
+.app-shell .text-purple-400,
+.app-shell .text-purple-500 { color: #d4ff2e !important; }
+.app-shell .text-purple-400:hover,
+.app-shell .hover\:text-purple-300:hover,
+.app-shell .hover\:text-purple-400:hover { color: #e2ff6b !important; }
+
+.app-shell .bg-purple-500\/5,
+.app-shell .bg-purple-500\/10,
+.app-shell .bg-purple-500\/15,
+.app-shell .bg-purple-500\/20,
+.app-shell .bg-purple-600\/10,
+.app-shell .bg-purple-600\/15,
+.app-shell .bg-purple-600\/20,
+.app-shell .bg-purple-600\/30,
+.app-shell .bg-purple-900\/5,
+.app-shell .bg-purple-950\/5,
+.app-shell .bg-purple-950 { background-color: rgba(212, 255, 46, 0.08) !important; }
+
+.app-shell .border-purple-500,
+.app-shell .border-purple-500\/20,
+.app-shell .border-purple-500\/30,
+.app-shell .border-purple-500\/40,
+.app-shell .border-purple-500\/50,
+.app-shell .border-purple-600,
+.app-shell .border-purple-600\/20,
+.app-shell .border-purple-600\/30,
+.app-shell .border-purple-600\/40 { border-color: rgba(212, 255, 46, 0.3) !important; }
+
+.app-shell .bg-purple-500,
+.app-shell .bg-purple-600,
+.app-shell .bg-purple-700 { background-color: #d4ff2e !important; color: #0a0a0a !important; }
+.app-shell .bg-purple-500:hover,
+.app-shell .bg-purple-600:hover,
+.app-shell .hover\:bg-purple-500:hover,
+.app-shell .hover\:bg-purple-700:hover { background-color: #e2ff6b !important; }
+
+.app-shell .from-purple-500\/5,
+.app-shell .from-purple-500\/10,
+.app-shell .from-purple-50,
+.app-shell .via-purple-300,
+.app-shell .via-purple-500\/5,
+.app-shell .via-purple-500\/10,
+.app-shell .to-purple-50,
+.app-shell .to-purple-100,
+.app-shell .to-purple-300,
+.app-shell .to-purple-900\/5,
+.app-shell .to-purple-950 {
+  --tw-gradient-from: rgba(212, 255, 46, 0.06) !important;
+  --tw-gradient-via: rgba(212, 255, 46, 0.08) !important;
+  --tw-gradient-to: rgba(212, 255, 46, 0.06) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-via), var(--tw-gradient-to) !important;
+}
+
+.app-shell .ring-purple-500,
+.app-shell .focus\:ring-purple-500:focus,
+.app-shell .focus-visible\:ring-purple-500:focus-visible { --tw-ring-color: rgba(212, 255, 46, 0.5) !important; }
+.app-shell .accent-purple-500 { accent-color: #d4ff2e !important; }
+
+/* Legacy green accents — map to bento lime where appropriate */
+.app-shell .text-green-300,
+.app-shell .text-green-400,
+.app-shell .text-green-500 { color: #d4ff2e !important; }
+.app-shell .bg-green-500\/5,
+.app-shell .bg-green-500\/10,
+.app-shell .bg-green-500\/20 { background-color: rgba(212, 255, 46, 0.08) !important; }
+.app-shell .border-green-500\/20,
+.app-shell .border-green-500\/30,
+.app-shell .border-green-500\/40,
+.app-shell .border-l-green-500 { border-color: rgba(212, 255, 46, 0.35) !important; }
+.app-shell .bg-green-500,
+.app-shell .bg-green-600 { background-color: #d4ff2e !important; color: #0a0a0a !important; }
+
+/* Amber → bento amber */
+.app-shell .text-amber-400,
+.app-shell .text-orange-400,
+.app-shell .text-orange-300 { color: #ff9933 !important; }
+.app-shell .bg-amber-500\/5,
+.app-shell .bg-amber-500\/10,
+.app-shell .bg-orange-500\/5,
+.app-shell .bg-orange-500\/10 { background-color: rgba(255, 153, 51, 0.08) !important; }
+.app-shell .border-amber-500\/20,
+.app-shell .border-amber-500\/30,
+.app-shell .border-orange-500\/20,
+.app-shell .border-l-orange-500 { border-color: rgba(255, 153, 51, 0.35) !important; }
+
+/* Red / pink → bento pink (keep destructive vibe without the Christmas-red glare) */
+.app-shell .text-red-300,
+.app-shell .text-red-400,
+.app-shell .text-pink-300,
+.app-shell .text-pink-400 { color: #ff3d8a !important; }
+.app-shell .bg-red-500\/5,
+.app-shell .bg-red-500\/10,
+.app-shell .bg-red-500\/20,
+.app-shell .bg-pink-500\/5,
+.app-shell .bg-pink-500\/10 { background-color: rgba(255, 61, 138, 0.08) !important; }
+.app-shell .border-red-500\/20,
+.app-shell .border-red-500\/30,
+.app-shell .border-pink-500\/20,
+.app-shell .border-l-red-500 { border-color: rgba(255, 61, 138, 0.35) !important; }
+.app-shell .bg-red-500,
+.app-shell .bg-red-600 { background-color: #ff3d8a !important; color: #0a0a0a !important; }
+
+/* Blue accents stay — they already align with bento blue */
+.app-shell .text-blue-300,
+.app-shell .text-blue-400 { color: #4a9eff !important; }
+.app-shell .bg-blue-500\/5,
+.app-shell .bg-blue-500\/10 { background-color: rgba(74, 158, 255, 0.08) !important; }
+.app-shell .border-blue-500\/20,
+.app-shell .border-blue-500\/30,
+.app-shell .border-l-blue-500 { border-color: rgba(74, 158, 255, 0.35) !important; }
+
+/* Yellow / gold (Employee of the Month) → bento amber */
+.app-shell .text-yellow-400,
+.app-shell .text-yellow-300 { color: #ff9933 !important; }
+.app-shell .bg-yellow-500\/5,
+.app-shell .bg-yellow-500\/10,
+.app-shell .bg-yellow-500\/20 { background-color: rgba(255, 153, 51, 0.08) !important; }
+.app-shell .border-yellow-500\/20 { border-color: rgba(255, 153, 51, 0.3) !important; }
+
+/* Purple gradient wordmarks (auth/dashboard old brand text) → solid lime */
+.app-shell .from-purple-500,
+.app-shell .via-purple-300,
+.app-shell .to-purple-300,
+.app-shell .from-purple-500\/5,
+.app-shell .via-purple-500\/5,
+.app-shell .to-green-400 {
+  --tw-gradient-from: #d4ff2e !important;
+  --tw-gradient-to: #d4ff2e !important;
+  --tw-gradient-stops: #d4ff2e !important;
+}
+
+/* Focus rings site-wide on dashboard inputs/buttons → lime */
+.app-shell .focus\:border-purple-500:focus,
+.app-shell .focus-visible\:ring-purple-500:focus-visible { border-color: #d4ff2e !important; }
+
+/* Shell h1 sizing — globals.css force-shrinks h1 to 1.25rem; give app
+ * pages room to breathe. :where() in globals keeps specificity low. */
+.app-shell h1 { font-size: 1.4rem; }
+.app-shell h2 { font-size: 1.15rem; }
+.app-shell h3 { font-size: 1rem; }
+
+/* ==== Auto-upgrade legacy headers ====
+ * Most dashboard pages use the pattern:
+ *   <h1 class="text-lg font-bold tracking-tight">Title</h1>
+ *   <p class="text-muted text-sm mt-1">Subtitle</p>
+ * Scoped to .app-shell so it only affects dashboard pages. */
+.app-shell h1.text-lg.font-bold.tracking-tight {
+  font-size: 28px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.032em !important;
+  line-height: 1.05 !important;
+  color: #fafafa !important;
+  margin: 0 !important;
+}
+.app-shell h1.text-lg.font-bold.tracking-tight + p.text-muted.text-sm.mt-1 {
+  font-size: 14px !important;
+  color: #a0a0a0 !important;
+  line-height: 1.55 !important;
+  max-width: 62ch !important;
+  margin: 8px 0 0 !important;
+}
+
+/* Also catch h1 with className variants that include .flex.items-center.gap-2 (candor page) */
+.app-shell h1.text-lg.font-bold.tracking-tight.flex {
+  display: flex !important;
+}
+
+/* ==== Shared dashboard page-header primitive ==== */
+.dash-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 24px;
+}
+.dash-page-header-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.dash-page-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #707070;
+  margin-bottom: 14px;
+}
+.dash-page-kicker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+.dash-page-title {
+  font-size: clamp(22px, 2.3vw, 28px) !important;
+  font-weight: 600;
+  letter-spacing: -0.032em;
+  line-height: 1.05;
+  color: #fafafa;
+  margin: 0;
+}
+.dash-page-sub {
+  font-size: 14px;
+  color: #a0a0a0;
+  line-height: 1.55;
+  max-width: 60ch;
+  margin: 8px 0 0;
+}
+.dash-page-inline-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin-top: 18px;
+}
+.dash-page-inline-stat {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dash-page-inline-stat-val {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: #fafafa;
+  font-variant-numeric: tabular-nums;
+}
+.dash-page-inline-stat-label {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #707070;
+}
+.dash-page-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.dash-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 100px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.dash-action-primary {
+  background: #d4ff2e;
+  color: #0a0a0a;
+  box-shadow: 0 6px 14px -6px rgba(212, 255, 46, 0.5);
+  font-weight: 600;
+}
+.dash-action-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px -6px rgba(212, 255, 46, 0.7);
+}
+.dash-action-ghost {
+  background: transparent;
+  color: #ededed;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.dash-action-ghost:hover {
+  background: #1a1a1a;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.dash-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ==== Stat tile grid (4-up) ==== */
+.dash-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.dash-stat-tile {
+  padding: 20px 22px;
+  background: #141414;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  border-left: 3px solid var(--tone, #d4ff2e);
+  transition: all 0.25s cubic-bezier(0.2, 0.9, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 108px;
+}
+.dash-stat-tile:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: #1a1a1a;
+}
+.dash-stat-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dash-stat-tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tone, #d4ff2e);
+}
+.dash-stat-tile-label {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #707070;
+}
+.dash-stat-tile-value {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--tone, #fafafa);
+  font-variant-numeric: tabular-nums;
+}
+.dash-stat-tile-delta {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #a0a0a0;
+  margin-top: auto;
+}
+
+/* Universal data-row (used by list pages) */
+.dash-data-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  background: #141414;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  transition: all 0.2s;
+}
+.dash-data-row:hover {
+  background: #1a1a1a;
+  border-color: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+.dash-data-row-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #fafafa;
+}
+.dash-data-row-sub {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10.5px;
+  color: #707070;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+/* Empty state standard */
+.app-shell .dash-empty {
+  padding: 56px 32px;
+  background: #141414;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  text-align: center;
+}
+.app-shell .dash-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(212, 255, 46, 0.08);
+  color: #d4ff2e;
+  margin-bottom: 14px;
+}
+.app-shell .dash-empty h3 {
+  font-size: 17px;
+  font-weight: 600;
+  color: #fafafa;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+.app-shell .dash-empty p {
+  font-size: 14px;
+  color: #a0a0a0;
+  line-height: 1.55;
+  max-width: 44ch;
+  margin: 0 auto 18px;
+}
+
+/* Default accent border/background tokens used by shadcn primitives */
+.app-shell .bg-surface { background-color: #141414 !important; }
+.app-shell .bg-surface-2 { background-color: #1a1a1a !important; }
+.app-shell .bg-surface-3 { background-color: #222222 !important; }
+.app-shell .border-border { border-color: rgba(255, 255, 255, 0.08) !important; }
+.app-shell .text-muted { color: #a0a0a0 !important; }
+.app-shell .bg-background { background-color: #0a0a0a !important; }
+.app-shell .text-foreground { color: #fafafa !important; }
+
+/* ==== Mobile hamburger + drawer ==== */
+.app-mobile-trigger {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 60;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(10, 10, 10, 0.85);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fafafa;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.app-mobile-trigger:hover {
+  background: #1a1a1a;
+  border-color: rgba(212, 255, 46, 0.3);
+}
+
+.app-mobile-scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 0;
+  cursor: default;
+  animation: appScrimIn 0.2s ease-out;
+}
+@keyframes appScrimIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Desktop medium — compact collapsed-only sidebar */
+@media (max-width: 960px) and (min-width: 641px) {
+  .app-sidebar { width: 64px; }
+  .app-sidebar .app-sidebar-brand-full,
+  .app-sidebar .app-sidebar-label,
+  .app-sidebar .app-sidebar-badge,
+  .app-sidebar .app-sidebar-collapse { display: none !important; }
+  .app-sidebar-link { justify-content: center; padding: 10px; gap: 0; }
+}
+
+/* Mobile ≤ 640px — full drawer behavior */
+@media (max-width: 640px) {
+  .app-mobile-trigger { display: inline-flex; }
+
+  .app-sidebar {
+    width: 264px !important;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+    z-index: 50;
+  }
+  .app-sidebar.is-mobile-open {
+    transform: translateX(0);
+    box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.7);
+  }
+  .app-sidebar .app-sidebar-collapse { display: none !important; }
+
+  /* When sidebar is out, main content fills full width — no padding-left */
+  .app-shell-main {
+    padding-left: 0 !important;
+  }
+
+  /* Topbar gets left padding to clear the hamburger */
+  .app-topbar {
+    padding-left: 64px !important;
+  }
+
+  /* Scrim only shown when drawer is open */
+  .app-sidebar.is-mobile-open ~ .app-mobile-scrim,
+  .app-mobile-scrim {
+    display: block;
+  }
+
+  /* Content padding tighter on mobile */
+  .app-content {
+    padding: 16px !important;
+  }
+
+  /* Dashboard page header stacks cleanly on phones */
+  .dash-page-header {
+    gap: 14px;
+  }
+  .dash-page-actions {
+    width: 100%;
+  }
+  .dash-stat-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 400px) {
+  .dash-stat-grid {
+    grid-template-columns: 1fr;
+  }
+}

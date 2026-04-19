@@ -109,5 +109,47 @@
     "upgrade": "Upgrade",
     "perMonth": "/mo",
     "perYear": "/yr"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Features",
+      "industries": "Industries",
+      "pricing": "Pricing",
+      "about": "About",
+      "faq": "FAQ",
+      "signIn": "Sign in",
+      "startFree": "Start free",
+      "dashboard": "Dashboard"
+    },
+    "hero": {
+      "kicker": "New · AI-drafted KRAs live",
+      "trust": "4.8 on G2 · No credit card · Setup in 30 min · 500+ teams"
+    },
+    "cta": {
+      "primary": "Start 14-day trial",
+      "secondary": "Book a walkthrough",
+      "seeProduct": "See the product"
+    },
+    "pricing": {
+      "recommended": "Recommended",
+      "perUser": "Per user",
+      "perUserSub": "pay only for active seats",
+      "flat": "Flat monthly",
+      "flatSub": "fixed price per tier",
+      "starter": "Starter",
+      "team": "Team",
+      "growth": "Growth",
+      "scale": "Scale",
+      "enterprise": "Enterprise",
+      "free": "Free",
+      "letsTalk": "Let's talk"
+    },
+    "footer": {
+      "product": "Product",
+      "company": "Company",
+      "resources": "Resources",
+      "legal": "Legal",
+      "copyright": "© WorkwrK. Built in Bengaluru."
+    }
   }
 }

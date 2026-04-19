@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/dashboard/page-header";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -325,15 +326,17 @@ export default function TasksPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Work Calendar</h1>
-          <p className="text-muted text-sm mt-1">
-            {completedCount}/{tasks.length} tasks &middot; {totalHours}h logged this week
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        kicker="Tasks · auto-escalating"
+        title="Work calendar"
+        subtitle="Tasks born from SOPs, reviews, and KR drift — with SLA timers and escalation paths."
+        stats={[
+          { label: "Completed", value: `${completedCount}/${tasks.length}` },
+          { label: "Hours this week", value: `${totalHours}h` },
+        ]}
+      />
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           {isManager && (
             <>
               <Button
@@ -366,7 +369,7 @@ export default function TasksPage() {
                         <span className="text-[10px] uppercase tracking-wider text-muted">Team Members</span>
                         <button
                           onClick={() => setSelectedMemberIds([])}
-                          className="text-[10px] text-purple-400 hover:text-purple-300"
+                          className="text-[10px] text-[#d4ff2e] hover:text-[#e2ff6b]"
                         >
                           Show all
                         </button>
@@ -387,7 +390,7 @@ export default function TasksPage() {
                                     checked ? prev.filter((id) => id !== m.id) : [...prev, m.id]
                                   );
                                 }}
-                                className="accent-purple-500"
+                                className="accent-[#d4ff2e]"
                               />
                               <span className="text-sm">
                                 {m.firstName} {m.lastName}
@@ -439,11 +442,11 @@ export default function TasksPage() {
             const isPast = date < new Date() && !today;
 
             return (
-              <div key={i} className={`min-h-[200px] rounded-lg border p-2 ${today ? "border-purple-500/50 bg-purple-500/5" : "border-border bg-surface"}`}>
+              <div key={i} className={`min-h-[200px] rounded-lg border p-2 ${today ? "border-[rgba(212,255,46,0.4)] bg-[rgba(212,255,46,0.06)]" : "border-border bg-surface"}`}>
                 <div className="flex items-center justify-between mb-2">
                   <div>
-                    <p className={`text-[10px] font-medium ${today ? "text-purple-400" : "text-muted"}`}>{DAY_NAMES[i]}</p>
-                    <p className={`text-lg font-bold ${today ? "text-purple-400" : ""}`}>{date.getDate()}</p>
+                    <p className={`text-[10px] font-medium ${today ? "text-[#d4ff2e]" : "text-muted"}`}>{DAY_NAMES[i]}</p>
+                    <p className={`text-lg font-bold ${today ? "text-[#d4ff2e]" : ""}`}>{date.getDate()}</p>
                   </div>
                   <button onClick={() => openNewTask(dateStr)} className="h-6 w-6 rounded-full flex items-center justify-center text-muted hover:bg-surface-2 hover:text-foreground">
                     <Plus size={12} />
@@ -462,7 +465,7 @@ export default function TasksPage() {
                           <p className={`text-[11px] font-medium truncate ${task.status === "COMPLETED" ? "line-through text-muted" : ""}`}>{task.title}</p>
                           <div className="flex items-center gap-1 mt-0.5">
                             {task.hoursSpent != null && <span className="text-[9px] text-muted-2">{task.hoursSpent}h</span>}
-                            {task.category && <span className="text-[9px] text-purple-400">{task.category}</span>}
+                            {task.category && <span className="text-[9px] text-[#d4ff2e]">{task.category}</span>}
                             {teamView && task.assignee && <span className="text-[9px] text-muted-2">{task.assignee.firstName}</span>}
                           </div>
                         </div>
@@ -621,7 +624,7 @@ export default function TasksPage() {
                         }}
                         className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
                           form.recurringDays.includes(i)
-                            ? "bg-purple-500 text-white"
+                            ? "bg-[#d4ff2e] text-[#0a0a0a]"
                             : "bg-surface-2 text-muted hover:text-foreground"
                         }`}
                       >

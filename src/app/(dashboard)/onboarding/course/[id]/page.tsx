@@ -135,7 +135,7 @@ export default function CourseDetailPage() {
       {/* Video Embed */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2"><Play size={14} className="text-purple-400" /> Course Video</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2"><Play size={14} className="text-[#d4ff2e]" /> Course Video</CardTitle>
         </CardHeader>
         <CardContent>
           {editing ? (
@@ -169,7 +169,7 @@ export default function CourseDetailPage() {
       {/* Course Content */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2"><BookOpen size={14} className="text-purple-400" /> Course Content</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2"><BookOpen size={14} className="text-[#d4ff2e]" /> Course Content</CardTitle>
         </CardHeader>
         <CardContent>
           {editing ? (
@@ -187,7 +187,7 @@ export default function CourseDetailPage() {
       {/* Enrollments */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2"><Users size={14} className="text-purple-400" /> Enrollments</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2"><Users size={14} className="text-[#d4ff2e]" /> Enrollments</CardTitle>
         </CardHeader>
         <CardContent>
           {course.enrollments && course.enrollments.length > 0 ? (

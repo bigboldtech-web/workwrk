@@ -15,6 +15,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { PageHeader } from "@/components/dashboard/page-header";
 import {
   Lightbulb, Plus, ThumbsUp, MessageSquare, Clock, CheckCircle2, XCircle,
   Award, Send, ChevronRight,
@@ -30,7 +31,7 @@ const STATUS_STYLES: Record<string, { color: string; label: string }> = {
   UNDER_REVIEW: { color: "bg-amber-500/20 text-amber-400", label: "Under Review" },
   APPROVED: { color: "bg-green-500/20 text-green-400", label: "Approved" },
   REJECTED: { color: "bg-red-500/20 text-red-400", label: "Rejected" },
-  IMPLEMENTED: { color: "bg-purple-500/20 text-purple-400", label: "Implemented" },
+  IMPLEMENTED: { color: "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]", label: "Implemented" },
   REWARDED: { color: "bg-yellow-500/20 text-yellow-400", label: "Rewarded" },
 };
 
@@ -164,15 +165,14 @@ export default function IdeasPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Ideas Board</h1>
-          <p className="text-muted text-sm mt-1">{ideas.length} ideas &middot; {submitted} pending &middot; {approved} approved</p>
-        </div>
-        <Button onClick={() => setShowSubmit(true)} className="gap-1.5">
-          <Lightbulb size={14} /> Submit Idea
-        </Button>
-      </div>
+      <PageHeader
+        kicker="Ideas · continuous improvement"
+        title="Ideas board"
+        subtitle={`${ideas.length} ideas · ${submitted} pending · ${approved} approved`}
+        actions={[
+          { label: "Submit idea", onClick: () => setShowSubmit(true), icon: <Lightbulb size={14} /> },
+        ]}
+      />
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap">
@@ -190,7 +190,7 @@ export default function IdeasPage() {
             { status: "SUBMITTED", label: "New Ideas", color: "border-blue-500/30" },
             { status: "UNDER_REVIEW", label: "Under Review", color: "border-amber-500/30" },
             { status: "APPROVED", label: "Approved", color: "border-green-500/30" },
-            { status: "IMPLEMENTED", label: "Implemented", color: "border-purple-500/30" },
+            { status: "IMPLEMENTED", label: "Implemented", color: "border-[rgba(212,255,46,0.3)]" },
           ].map((col) => {
             const colIdeas = ideas.filter((i) => i.status === col.status);
             return (
@@ -245,7 +245,7 @@ export default function IdeasPage() {
                     {/* Vote */}
                     <button
                       onClick={() => handleVote(idea.id)}
-                      className={`flex flex-col items-center gap-0.5 shrink-0 pt-1 ${hasVoted ? "text-purple-400" : "text-muted hover:text-purple-400"} transition-colors`}
+                      className={`flex flex-col items-center gap-0.5 shrink-0 pt-1 ${hasVoted ? "text-[#d4ff2e]" : "text-muted hover:text-[#e2ff6b]"} transition-colors`}
                     >
                       <ThumbsUp size={18} className={hasVoted ? "fill-purple-400" : ""} />
                       <span className="text-xs font-bold">{idea._count.votes}</span>
@@ -265,7 +265,7 @@ export default function IdeasPage() {
                         <span>{new Date(idea.createdAt).toLocaleDateString()}</span>
                         <button
                           onClick={() => setCommentIdeaId(commentIdeaId === idea.id ? null : idea.id)}
-                          className="flex items-center gap-1 hover:text-purple-400 transition-colors"
+                          className="flex items-center gap-1 hover:text-[#e2ff6b] transition-colors"
                         >
                           <MessageSquare size={11} /> {idea._count.comments}
                         </button>

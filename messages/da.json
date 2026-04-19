@@ -109,5 +109,47 @@
     "upgrade": "Opgrader",
     "perMonth": "/md",
     "perYear": "/år"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Funktioner",
+      "industries": "Brancher",
+      "pricing": "Priser",
+      "about": "Om os",
+      "faq": "FAQ",
+      "signIn": "Log ind",
+      "startFree": "Start gratis",
+      "dashboard": "Dashboard"
+    },
+    "hero": {
+      "kicker": "Nyt · KRAs skrevet af AI",
+      "trust": "4.8 på G2 · Intet kreditkort · 30 min at starte · 500+ teams"
+    },
+    "cta": {
+      "primary": "14-dages prøveperiode",
+      "secondary": "Book demo",
+      "seeProduct": "Se produktet"
+    },
+    "pricing": {
+      "recommended": "Anbefalet",
+      "perUser": "Per bruger",
+      "perUserSub": "betal kun for aktive konti",
+      "flat": "Månedlig fast",
+      "flatSub": "fast pris per niveau",
+      "starter": "Starter",
+      "team": "Team",
+      "growth": "Vækst",
+      "scale": "Skala",
+      "enterprise": "Enterprise",
+      "free": "Gratis",
+      "letsTalk": "Lad os snakke"
+    },
+    "footer": {
+      "product": "Produkt",
+      "company": "Firma",
+      "resources": "Ressourcer",
+      "legal": "Juridisk",
+      "copyright": "© WorkwrK. Lavet i Bengaluru."
+    }
   }
 }

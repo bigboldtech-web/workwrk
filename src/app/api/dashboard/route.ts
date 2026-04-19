@@ -114,7 +114,7 @@ export async function GET() {
   const deptPerformance = departments.map((d) => {
     const scores = deptAvgs.get(d.name) || [];
     const avg = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
-    return { name: d.name, score: avg, members: d._count.members, color: d.color || "#6C5CE7" };
+    return { name: d.name, score: avg, members: d._count.members, color: d.color || "#d4ff2e" };
   });
 
   // Alerts

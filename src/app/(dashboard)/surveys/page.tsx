@@ -18,6 +18,7 @@ import {
   ClipboardCheck, Plus, CheckCircle2, Send, BarChart3, Trash2,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { PageHeader } from "@/components/dashboard/page-header";
 import { useRole } from "@/hooks/use-role";
 
 interface SurveyQuestion { id: string; text: string; type: "rating" | "nps" | "text" }
@@ -89,15 +90,16 @@ export default function SurveysPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Pulse Surveys</h1>
-          <p className="text-muted text-sm mt-1">{surveys.length} surveys {pending > 0 && <span className="text-amber-400">&middot; {pending} pending</span>}</p>
-        </div>
-        {isManager && (
-          <Button onClick={() => setShowCreate(true)} className="gap-1.5"><Plus size={14} /> New Survey</Button>
-        )}
-      </div>
+      <PageHeader
+        kicker="Surveys · pulse"
+        title="Pulse surveys"
+        subtitle={`${surveys.length} surveys${pending > 0 ? ` · ${pending} pending` : ""}`}
+        actions={
+          isManager
+            ? [{ label: "New survey", onClick: () => setShowCreate(true), icon: <Plus size={14} /> }]
+            : undefined
+        }
+      />
 
       {loading ? (
         <div className="space-y-3">{[1,2].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-16 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>
@@ -115,7 +117,7 @@ export default function SurveysPage() {
               <Card key={survey.id} className={!survey.hasResponded && survey.status === "ACTIVE" ? "border-amber-500/20" : ""}>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
-                    <ClipboardCheck size={18} className="text-purple-400 shrink-0" />
+                    <ClipboardCheck size={18} className="text-[#d4ff2e] shrink-0" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="text-sm font-semibold">{survey.title}</h3>
@@ -153,7 +155,7 @@ export default function SurveysPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Questions</Label>
-                <Button variant="ghost" size="sm" className="text-xs text-purple-400 h-6" onClick={() => setForm({ ...form, questions: [...form.questions, { id: `q${form.questions.length + 1}`, text: "", type: "rating" }] })}>
+                <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6" onClick={() => setForm({ ...form, questions: [...form.questions, { id: `q${form.questions.length + 1}`, text: "", type: "rating" }] })}>
                   <Plus size={12} className="mr-1" /> Add
                 </Button>
               </div>
@@ -198,7 +200,7 @@ export default function SurveysPage() {
                   <div className="flex gap-2">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <button key={n} onClick={() => setAnswers({ ...answers, [q.id]: n })}
-                        className={`h-10 w-10 rounded-lg border text-sm font-bold transition-colors ${answers[q.id] === n ? "bg-purple-500 text-white border-purple-500" : "border-border hover:border-purple-400"}`}>
+                        className={`h-10 w-10 rounded-lg border text-sm font-bold transition-colors ${answers[q.id] === n ? "bg-[#d4ff2e] text-[#0a0a0a] border-[#d4ff2e]" : "border-border hover:border-[#d4ff2e]"}`}>
                         {n}
                       </button>
                     ))}
@@ -207,7 +209,7 @@ export default function SurveysPage() {
                   <div className="flex gap-1">
                     {Array.from({ length: 11 }, (_, n) => (
                       <button key={n} onClick={() => setAnswers({ ...answers, [q.id]: n })}
-                        className={`h-8 w-8 rounded text-xs font-bold transition-colors ${answers[q.id] === n ? "bg-purple-500 text-white" : "border border-border hover:border-purple-400"}`}>
+                        className={`h-8 w-8 rounded text-xs font-bold transition-colors ${answers[q.id] === n ? "bg-[#d4ff2e] text-[#0a0a0a]" : "border border-border hover:border-[#d4ff2e]"}`}>
                         {n}
                       </button>
                     ))}

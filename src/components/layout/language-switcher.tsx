@@ -44,7 +44,7 @@ export function LanguageSwitcher() {
             className="flex items-center justify-between gap-3"
           >
             <span>{localeNames[locale]}</span>
-            {locale === current && <Check size={14} className="text-purple-400" />}
+            {locale === current && <Check size={14} className="text-[#d4ff2e]" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

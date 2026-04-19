@@ -2,10 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -17,95 +13,94 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
-
     try {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Something went wrong");
       }
-
       setSent(true);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <Card className="border-border bg-surface/80 backdrop-blur">
-      <CardHeader className="text-center">
-        <div className="mb-4">
-          <span
-            className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-3xl font-extrabold tracking-tight text-transparent"
-            style={{ fontFamily: "'Syne', sans-serif" }}
+    <div className="auth-card">
+      <Link href="/" className="auth-brand" aria-label="WorkwrK home">
+        <span className="auth-brand-dot" />
+        workwrk
+      </Link>
+
+      <h1 className="auth-title">
+        {sent ? <>Check your <span className="hi">inbox.</span></> : <>Reset <span className="hi">your password.</span></>}
+      </h1>
+      <p className="auth-sub">
+        {sent
+          ? "If an account with that email exists, we've sent a reset link. It's good for 30 minutes."
+          : "Enter your email. We'll send a secure reset link that expires in 30 minutes."}
+      </p>
+
+      {sent ? (
+        <div className="auth-form">
+          <div
+            style={{
+              padding: "14px 16px",
+              background: "rgba(212, 255, 46, 0.08)",
+              border: "1px solid rgba(212, 255, 46, 0.3)",
+              borderRadius: 12,
+              fontSize: 13.5,
+              color: "var(--b-lime)",
+              lineHeight: 1.5,
+            }}
           >
-            workwrk
-          </span>
-          <span className="text-muted opacity-50 text-3xl font-extrabold">.</span>
-        </div>
-        <CardTitle className="text-xl">Reset your password</CardTitle>
-        <CardDescription>
-          {sent
-            ? "Check your email for a reset link"
-            : "Enter your email and we'll send you a reset link"}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {sent ? (
-          <div className="space-y-4">
-            <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-4 text-sm text-green-400">
-              If an account with that email exists, we've sent a password reset link. Check your inbox (and spam folder).
-            </div>
-            <p className="text-center text-sm text-muted">
-              <Link href="/login" className="text-purple-400 hover:text-purple-300">
-                Back to Sign In
-              </Link>
-            </p>
+            ✓ Sent to <strong>{email}</strong>. Check your inbox — and spam folder, just in case.
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400">
-                {error}
-              </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="auth-form" noValidate>
+          {error && <div className="auth-error">{error}</div>}
+          <div className="auth-field">
+            <label className="auth-label" htmlFor="email">Work email</label>
+            <input
+              id="email"
+              type="email"
+              className="auth-input"
+              placeholder="priya@company.in"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            className="bento-btn bento-btn-lime auth-submit"
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <span className="auth-spinner" aria-hidden />
+                Sending…
+              </>
+            ) : (
+              <>
+                Send reset link <span className="arr">→</span>
+              </>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Sending...
-                </span>
-              ) : (
-                "Send Reset Link"
-              )}
-            </Button>
-            <p className="text-center text-sm text-muted">
-              Remember your password?{" "}
-              <Link href="/login" className="text-purple-400 hover:text-purple-300">
-                Sign In
-              </Link>
-            </p>
-          </form>
-        )}
-      </CardContent>
-    </Card>
+          </button>
+        </form>
+      )}
+
+      <div className="auth-foot">
+        Remember it? <Link href="/login">Back to sign in</Link>
+      </div>
+    </div>
   );
 }

@@ -23,6 +23,7 @@ import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface SOPCompliance {
   stepsTotal: number;
@@ -62,14 +63,14 @@ function getStepsCount(sop: SOP): number {
 
 function getComplianceColor(score: number) {
   if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-purple-500";
+  if (score >= 70) return "bg-[#d4ff2e]";
   if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
 
 function getComplianceText(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-purple-400";
+  if (score >= 70) return "text-[#d4ff2e]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -164,19 +165,19 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
         <div className="space-y-2 text-sm">
           <p className="font-medium">How to record:</p>
           <div className="flex items-start gap-2 p-2 rounded bg-surface">
-            <span className="text-purple-400 font-bold">1.</span>
+            <span className="text-[#d4ff2e] font-bold">1.</span>
             <span>Click the <strong>WorkwrK icon</strong> in your browser toolbar</span>
           </div>
           <div className="flex items-start gap-2 p-2 rounded bg-surface">
-            <span className="text-purple-400 font-bold">2.</span>
+            <span className="text-[#d4ff2e] font-bold">2.</span>
             <span>Click <strong>Start Recording</strong></span>
           </div>
           <div className="flex items-start gap-2 p-2 rounded bg-surface">
-            <span className="text-purple-400 font-bold">3.</span>
+            <span className="text-[#d4ff2e] font-bold">3.</span>
             <span>Navigate through the process — each click captures a step with screenshot</span>
           </div>
           <div className="flex items-start gap-2 p-2 rounded bg-surface">
-            <span className="text-purple-400 font-bold">4.</span>
+            <span className="text-[#d4ff2e] font-bold">4.</span>
             <span>Click <strong>Stop Recording</strong> — SOP is saved automatically</span>
           </div>
         </div>
@@ -191,7 +192,7 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
     <div className="space-y-4 py-4">
       {checking ? (
         <div className="p-4 text-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-purple-500 border-t-transparent mx-auto mb-2" />
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent mx-auto mb-2" />
           <p className="text-xs text-muted">Checking for extension...</p>
         </div>
       ) : (
@@ -205,27 +206,27 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
       <div className="space-y-2 text-sm">
         <p className="font-medium">Setup Instructions:</p>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-purple-400 font-bold">1.</span>
+          <span className="text-[#d4ff2e] font-bold">1.</span>
           <span>Click <strong>Download Extension</strong> below to get the ZIP file</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-purple-400 font-bold">2.</span>
+          <span className="text-[#d4ff2e] font-bold">2.</span>
           <span>Extract/unzip the downloaded file — you will get an <strong>extension</strong> folder</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-purple-400 font-bold">3.</span>
+          <span className="text-[#d4ff2e] font-bold">3.</span>
           <span>Open Chrome and type <code className="text-xs bg-surface-2 px-1 rounded">chrome://extensions</code> in the address bar</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-purple-400 font-bold">4.</span>
+          <span className="text-[#d4ff2e] font-bold">4.</span>
           <span>Enable <strong>Developer mode</strong> toggle (top right corner)</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-purple-400 font-bold">5.</span>
+          <span className="text-[#d4ff2e] font-bold">5.</span>
           <span>Click <strong>Load unpacked</strong> → select the <strong>extension</strong> folder from the extracted ZIP</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-purple-400 font-bold">6.</span>
+          <span className="text-[#d4ff2e] font-bold">6.</span>
           <span>Refresh this page — the extension will be detected automatically</span>
         </div>
       </div>
@@ -519,7 +520,7 @@ export default function SOPsPage() {
   }, [isEmployee, router]);
 
   if (isEmployee) {
-    return <div className="flex items-center justify-center h-64"><div className="h-6 w-6 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" /></div>;
+    return <div className="flex items-center justify-center h-64"><div className="h-6 w-6 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent" /></div>;
   }
 
   const publishedSops = sops.filter(s => s.status === "PUBLISHED");
@@ -529,12 +530,18 @@ export default function SOPsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">SOPs</h1>
-          <p className="text-muted text-sm mt-1">{total} standard operating procedures &middot; {avgCompliance}% avg compliance</p>
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        kicker="SOPs · written · recorded · flows"
+        title="SOPs"
+        subtitle="Standard operating procedures — versioned, assignable, and nightly-audited."
+        stats={[
+          { label: "Published", value: total },
+          { label: "Avg compliance", value: `${avgCompliance}%` },
+        ]}
+      />
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div />
+        <div className="flex items-center gap-2 flex-wrap">
           <Link href="/sops/my-sops">
             <Button variant="outline" className="gap-2"><ClipboardList size={16} /> My SOPs</Button>
           </Link>
@@ -569,7 +576,7 @@ export default function SOPsPage() {
                       onClick={() => setSopType(opt.value)}
                       className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-all text-center ${
                         sopType === opt.value
-                          ? "border-purple-500 bg-purple-500/10 text-purple-400"
+                          ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
                           : "border-border hover:border-muted-2 text-muted"
                       }`}
                     >
@@ -689,7 +696,7 @@ export default function SOPsPage() {
                       <p className="text-xs font-medium truncate">{sop.title}</p>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
-                        {sop.subcategory && <Badge variant="outline" className="text-[9px] text-purple-400">{sop.subcategory}</Badge>}
+                        {sop.subcategory && <Badge variant="outline" className="text-[9px] text-[#d4ff2e]">{sop.subcategory}</Badge>}
                         <span className="text-[9px] text-muted">v{sop.version}</span>
                         <span className="text-[9px] text-muted">&middot; {formatDate(sop.createdAt)}</span>
                       </div>
@@ -787,7 +794,7 @@ export default function SOPsPage() {
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-1.5">
-                        <FileText size={14} className="text-purple-400 shrink-0" />
+                        <FileText size={14} className="text-[#d4ff2e] shrink-0" />
                         {getStatusBadge(sop.status)}
                       </div>
                       <Badge variant="outline" className="text-[9px]">v{sop.version}</Badge>
@@ -795,7 +802,7 @@ export default function SOPsPage() {
                     <h3 className="font-semibold text-xs mb-1 truncate">{sop.title}</h3>
                     <div className="flex items-center gap-1 mb-2">
                       {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
-                      {sop.subcategory && <Badge variant="outline" className="text-[9px] text-purple-400">{sop.subcategory}</Badge>}
+                      {sop.subcategory && <Badge variant="outline" className="text-[9px] text-[#d4ff2e]">{sop.subcategory}</Badge>}
                     </div>
                     {sop.status === "PUBLISHED" && (
                       <div className="flex items-center gap-2 mb-2">

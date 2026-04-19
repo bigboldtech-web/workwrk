@@ -61,7 +61,7 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-lg mx-4 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-surface to-surface-2 shadow-2xl">
+      <div className="relative w-full max-w-lg mx-4 rounded-2xl border border-[rgba(212,255,46,0.25)] bg-[#141414] shadow-2xl">
         {/* Close button */}
         <button
           onClick={handleSkip}
@@ -74,14 +74,14 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
         {/* Progress bar */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-surface-2 rounded-t-2xl overflow-hidden">
           <div
-            className="h-full bg-gradient-to-r from-purple-500 to-purple-400 transition-all duration-500"
+            className="h-full bg-gradient-to-r from-[#d4ff2e] to-[#5eead4] transition-all duration-500"
             style={{ width: `${progress}%` }}
           />
         </div>
 
         {/* Header */}
         <div className="px-6 pt-7 pb-3">
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-purple-400 mb-1.5">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#d4ff2e] mb-1.5">
             <Sparkles size={11} />
             <span>{title}</span>
             <span className="text-muted">·</span>
@@ -96,7 +96,7 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
         <div className="px-6 py-3">
           <div className="flex items-start gap-4">
             {step.icon && (
-              <div className="shrink-0 w-12 h-12 rounded-xl bg-purple-600/15 flex items-center justify-center text-purple-400">
+              <div className="shrink-0 w-12 h-12 rounded-xl bg-[rgba(212,255,46,0.12)] border border-[rgba(212,255,46,0.3)] flex items-center justify-center text-[#d4ff2e]">
                 {step.icon}
               </div>
             )}
@@ -104,9 +104,9 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
               <h2 className="text-lg font-bold text-foreground mb-1.5 leading-tight">{step.title}</h2>
               <p className="text-sm text-muted leading-relaxed whitespace-pre-line">{step.description}</p>
               {step.highlight && (
-                <div className="mt-3 rounded-lg border border-purple-500/20 bg-purple-500/5 px-3 py-2">
-                  <p className="text-xs text-purple-300">
-                    <strong className="text-purple-200">Tip:</strong> {step.highlight}
+                <div className="mt-3 rounded-lg border border-[rgba(212,255,46,0.25)] bg-[rgba(212,255,46,0.06)] px-3 py-2">
+                  <p className="text-xs text-[#d4ff2e]">
+                    <strong className="text-[#e2ff6b]">Tip:</strong> {step.highlight}
                   </p>
                 </div>
               )}
@@ -122,9 +122,9 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
                 key={i}
                 className={`h-1 rounded-full transition-all ${
                   i === currentStep
-                    ? "w-6 bg-purple-500"
+                    ? "w-6 bg-[#d4ff2e]"
                     : i < currentStep
-                    ? "w-1.5 bg-purple-500/60"
+                    ? "w-1.5 bg-[rgba(212,255,46,0.5)]"
                     : "w-1.5 bg-border"
                 }`}
               />

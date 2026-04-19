@@ -109,5 +109,47 @@
     "upgrade": "Améliorer",
     "perMonth": "/mois",
     "perYear": "/an"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Fonctionnalités",
+      "industries": "Secteurs",
+      "pricing": "Tarifs",
+      "about": "À propos",
+      "faq": "FAQ",
+      "signIn": "Se connecter",
+      "startFree": "Essai gratuit",
+      "dashboard": "Tableau de bord"
+    },
+    "hero": {
+      "kicker": "Nouveau · KRAs rédigés par IA",
+      "trust": "4.8 sur G2 · Sans CB · 30 min pour commencer · 500+ équipes"
+    },
+    "cta": {
+      "primary": "Essai 14 jours",
+      "secondary": "Réserver une démo",
+      "seeProduct": "Voir le produit"
+    },
+    "pricing": {
+      "recommended": "Recommandé",
+      "perUser": "Par utilisateur",
+      "perUserSub": "payez seulement les actifs",
+      "flat": "Mensuel fixe",
+      "flatSub": "prix fixe par palier",
+      "starter": "Starter",
+      "team": "Équipe",
+      "growth": "Croissance",
+      "scale": "Échelle",
+      "enterprise": "Entreprise",
+      "free": "Gratuit",
+      "letsTalk": "Parlons-en"
+    },
+    "footer": {
+      "product": "Produit",
+      "company": "Entreprise",
+      "resources": "Ressources",
+      "legal": "Mentions légales",
+      "copyright": "© WorkwrK. Conçu à Bengaluru."
+    }
   }
 }

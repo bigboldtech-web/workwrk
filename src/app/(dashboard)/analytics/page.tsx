@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
@@ -74,14 +75,14 @@ interface AnalyticsData {
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-purple-400";
+  if (score >= 70) return "text-[#d4ff2e]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
 
 function getScoreBg(score: number) {
   if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-purple-500";
+  if (score >= 70) return "bg-[#d4ff2e]";
   if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
@@ -89,13 +90,14 @@ function getScoreBg(score: number) {
 function LoadingSkeleton() {
   return (
     <div className="space-y-4 animate-fade-in">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Analytics</h1>
-        <p className="text-muted text-sm mt-1">Real-time dashboards and performance insights</p>
-      </div>
+      <PageHeader
+        kicker="Analytics · BI-ready warehouse"
+        title="Analytics"
+        subtitle="Real-time dashboards and performance insights."
+      />
 
       {/* Health score skeleton */}
-      <Card className="border-purple-500/20 bg-gradient-to-r from-purple-500/5 to-transparent">
+      <Card className="border-[rgba(212,255,46,0.2)] bg-gradient-to-r from-[rgba(212,255,46,0.04)] to-transparent">
         <CardContent className="p-6">
           <div className="animate-pulse space-y-4">
             <div className="flex items-center justify-between">
@@ -181,10 +183,11 @@ export default function AnalyticsPage() {
   if (!data || (data.keyMetrics.totalPeople === 0 && data.monthlyTrend.length === 0 && data.deptComparison.length === 0)) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Analytics</h1>
-          <p className="text-muted text-sm mt-1">Real-time dashboards and performance insights</p>
-        </div>
+        <PageHeader
+          kicker="Analytics · BI-ready warehouse"
+          title="Analytics"
+          subtitle="Real-time dashboards and performance insights."
+        />
         <EmptyState
           icon={BarChart3}
           title="No analytics data yet"
@@ -207,12 +210,13 @@ export default function AnalyticsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Analytics</h1>
-          <p className="text-muted text-sm mt-1">Performance insights and trends</p>
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        kicker="Analytics · BI-ready warehouse"
+        title="Analytics"
+        subtitle="Performance insights and trends — pulled live from the spine."
+      />
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1 bg-surface rounded-lg border border-border p-0.5">
             {[
               { value: "1m", label: "1M" },
@@ -222,7 +226,7 @@ export default function AnalyticsPage() {
             ].map((opt) => (
               <button key={opt.value} onClick={() => setDateRange(opt.value)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  dateRange === opt.value ? "bg-purple-500 text-white" : "text-muted hover:text-foreground"
+                  dateRange === opt.value ? "bg-[#d4ff2e] text-[#0a0a0a]" : "text-muted hover:text-foreground"
                 }`}>
                 {opt.label}
               </button>
@@ -242,7 +246,7 @@ export default function AnalyticsPage() {
       )}
 
       {/* Company Health Score */}
-      <Card className="border-purple-500/20 bg-gradient-to-r from-purple-500/5 to-transparent">
+      <Card className="border-[rgba(212,255,46,0.2)] bg-gradient-to-r from-[rgba(212,255,46,0.04)] to-transparent">
         <CardContent className="p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -302,7 +306,7 @@ export default function AnalyticsPage() {
               <Bar dataKey="score" radius={[4, 4, 0, 0]}>
                 {monthlyTrend.map((m, i) => {
                   const s = Math.round(m.avgKPI);
-                  return <Cell key={i} fill={s >= 90 ? "#22c55e" : s >= 70 ? "#6C5CE7" : s >= 50 ? "#f97316" : "#ef4444"} />;
+                  return <Cell key={i} fill={s >= 90 ? "#d4ff2e" : s >= 70 ? "#4a9eff" : s >= 50 ? "#ff9933" : "#ff3d8a"} />;
                 })}
               </Bar>
             </BarChart>
@@ -325,7 +329,7 @@ export default function AnalyticsPage() {
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--color-muted)" }} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "var(--color-muted)" }} />
                   <Tooltip contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
-                  <Line type="monotone" dataKey="avgScore" stroke="#6C5CE7" strokeWidth={2} dot={{ fill: "#6C5CE7", r: 4 }} />
+                  <Line type="monotone" dataKey="avgScore" stroke="#d4ff2e" strokeWidth={2} dot={{ fill: "#d4ff2e", r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
@@ -344,7 +348,7 @@ export default function AnalyticsPage() {
             <CardContent className="space-y-2">
               {topPerformers.map((person, i) => (
                 <div key={person.id} className="flex items-center gap-3 rounded-lg border border-border bg-background/50 p-3">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-purple-600/20 text-xs font-bold text-purple-400">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[rgba(212,255,46,0.12)] text-xs font-bold text-[#d4ff2e]">
                     {i + 1}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -382,7 +386,7 @@ export default function AnalyticsPage() {
                 <tr key={dept.name} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
                   <td className="p-4">
                     <div className="flex items-center gap-2">
-                      <Building2 size={14} className="text-purple-400" />
+                      <Building2 size={14} className="text-[#d4ff2e]" />
                       <span className="text-sm font-medium">{dept.name}</span>
                     </div>
                   </td>
@@ -411,7 +415,7 @@ export default function AnalyticsPage() {
               {mostRecognized.map((person, i) => (
                 <div key={person.id} className="flex items-center gap-3 rounded-lg border border-border bg-background/50 p-4">
                   <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
-                    i === 0 ? "bg-yellow-500/20 text-yellow-400" : i === 1 ? "bg-slate-400/20 text-slate-300" : i === 2 ? "bg-orange-700/20 text-orange-400" : "bg-purple-600/20 text-purple-400"
+                    i === 0 ? "bg-yellow-500/20 text-yellow-400" : i === 1 ? "bg-slate-400/20 text-slate-300" : i === 2 ? "bg-orange-700/20 text-orange-400" : "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]"
                   }`}>
                     {i + 1}
                   </div>

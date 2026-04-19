@@ -21,6 +21,7 @@ import Link from "next/link";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface Attendee {
   user: { firstName: string; lastName: string };
@@ -63,7 +64,7 @@ interface UserOption {
 function getMeetingTypeColor(type: string) {
   switch (type) {
     case "DAILY_STANDUP": return "bg-blue-500/20 text-blue-400";
-    case "WEEKLY_REVIEW": return "bg-purple-500/20 text-purple-400";
+    case "WEEKLY_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
     case "ONE_ON_ONE": return "bg-green-500/20 text-green-400";
     case "QUARTERLY_REVIEW": return "bg-orange-500/20 text-orange-400";
     default: return "bg-slate-500/20 text-slate-400";
@@ -267,11 +268,12 @@ export default function MeetingsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Meetings & Check-ins</h1>
-          <p className="text-muted text-sm mt-1">Structured meeting cadences and daily check-ins</p>
-        </div>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <PageHeader
+          kicker="Meetings · cadences"
+          title="Meetings & check-ins"
+          subtitle="Structured meeting cadences and daily check-ins."
+        />
         <Dialog open={showAddDialog} onOpenChange={(open) => { setShowAddDialog(open); if (!open) resetMeetingForm(); }}>
           <DialogTrigger asChild>
             <Button className="gap-2"><Plus size={16} /> Schedule Meeting</Button>

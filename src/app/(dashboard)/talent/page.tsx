@@ -10,12 +10,13 @@ import {
 } from "@/components/ui/select";
 import { Users, Grid3x3 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 const BOX_LABELS: Record<string, { label: string; color: string; action: string }> = {
   "3-3": { label: "Star", color: "bg-green-500/20 border-green-500/40", action: "Promote & Retain" },
   "3-2": { label: "High Performer", color: "bg-blue-500/20 border-blue-500/40", action: "Develop for Leadership" },
   "3-1": { label: "Specialist", color: "bg-cyan-500/20 border-cyan-500/40", action: "Leverage Expertise" },
-  "2-3": { label: "High Potential", color: "bg-purple-500/20 border-purple-500/40", action: "Invest in Growth" },
+  "2-3": { label: "High Potential", color: "bg-[rgba(212,255,46,0.12)] border-[rgba(212,255,46,0.35)]", action: "Invest in Growth" },
   "2-2": { label: "Core Player", color: "bg-amber-500/20 border-amber-500/40", action: "Coach & Develop" },
   "2-1": { label: "Average", color: "bg-slate-500/20 border-slate-500/40", action: "Set Clear Goals" },
   "1-3": { label: "Potential Gem", color: "bg-pink-500/20 border-pink-500/40", action: "Address Performance" },
@@ -73,11 +74,12 @@ export default function TalentPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">9-Box Talent Grid</h1>
-          <p className="text-muted text-sm mt-1">Performance vs Potential assessment</p>
-        </div>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <PageHeader
+          kicker="Talent · 9-box grid"
+          title="9-Box talent grid"
+          subtitle="Performance vs potential assessment by quarter."
+        />
         <Select value={period} onValueChange={setPeriod}>
           <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -112,7 +114,7 @@ export default function TalentPage() {
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
-            <Grid3x3 size={16} className="text-purple-400" />
+            <Grid3x3 size={16} className="text-[#d4ff2e]" />
             <CardTitle className="text-base">Talent Matrix</CardTitle>
           </div>
         </CardHeader>

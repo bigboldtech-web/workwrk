@@ -109,5 +109,47 @@
     "upgrade": "Aggiorna",
     "perMonth": "/mese",
     "perYear": "/anno"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Funzionalità",
+      "industries": "Settori",
+      "pricing": "Prezzi",
+      "about": "Chi siamo",
+      "faq": "FAQ",
+      "signIn": "Accedi",
+      "startFree": "Inizia gratis",
+      "dashboard": "Dashboard"
+    },
+    "hero": {
+      "kicker": "Nuovo · KRA redatti dall'IA",
+      "trust": "4.8 su G2 · Nessuna carta · Pronto in 30 min · 500+ team"
+    },
+    "cta": {
+      "primary": "Prova 14 giorni",
+      "secondary": "Prenota una demo",
+      "seeProduct": "Vedi il prodotto"
+    },
+    "pricing": {
+      "recommended": "Consigliato",
+      "perUser": "Per utente",
+      "perUserSub": "paghi solo per account attivi",
+      "flat": "Mensile fisso",
+      "flatSub": "prezzo fisso per livello",
+      "starter": "Starter",
+      "team": "Team",
+      "growth": "Crescita",
+      "scale": "Scala",
+      "enterprise": "Enterprise",
+      "free": "Gratis",
+      "letsTalk": "Parliamone"
+    },
+    "footer": {
+      "product": "Prodotto",
+      "company": "Azienda",
+      "resources": "Risorse",
+      "legal": "Legale",
+      "copyright": "© WorkwrK. Creato a Bengaluru."
+    }
   }
 }

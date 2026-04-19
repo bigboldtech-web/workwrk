@@ -16,6 +16,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface Integration {
   id: string;
@@ -278,20 +279,17 @@ export default function IntegrationsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Integrations</h1>
-          <p className="text-muted text-sm mt-1">
-            Connect your existing tools to pull data into WorkwrK for performance intelligence
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        kicker="Integrations · connectors"
+        title="Integrations"
+        subtitle="Connect your existing tools to pull data into WorkwrK for performance intelligence."
+      />
 
       {/* Philosophy banner */}
-      <Card className="border-purple-500/20 bg-purple-500/5">
+      <Card className="border-[rgba(212,255,46,0.2)] bg-[rgba(212,255,46,0.06)]">
         <CardContent className="p-5 flex items-start gap-4">
-          <div className="rounded-lg bg-purple-500/20 p-2.5 flex-shrink-0">
-            <Zap size={20} className="text-purple-400" />
+          <div className="rounded-lg bg-[rgba(212,255,46,0.12)] p-2.5 flex-shrink-0">
+            <Zap size={20} className="text-[#d4ff2e]" />
           </div>
           <div>
             <h3 className="text-sm font-semibold">WorkwrK connects, it doesn&apos;t replace</h3>
@@ -421,7 +419,7 @@ export default function IntegrationsPage() {
                   <div className="mt-3 space-y-1">
                     {integration.dataTypes.map((dt) => (
                       <div key={dt} className="flex items-center gap-1.5 text-[11px] text-muted">
-                        <ArrowRight size={10} className="text-purple-400 flex-shrink-0" />
+                        <ArrowRight size={10} className="text-[#d4ff2e] flex-shrink-0" />
                         <span>{dt}</span>
                       </div>
                     ))}
@@ -608,7 +606,7 @@ export default function IntegrationsPage() {
             {/* Incoming webhook URL */}
             <div className="rounded-lg border border-border bg-background p-3">
               <p className="text-xs font-medium text-muted mb-1">Incoming Webhook URL</p>
-              <code className="text-[10px] text-purple-300 break-all">
+              <code className="text-[10px] text-[#d4ff2e] break-all">
                 {typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/{detailIntegration?.id}
               </code>
               <p className="text-[10px] text-muted mt-1">Use this URL to send data to WorkwrK from external services.</p>

@@ -109,5 +109,47 @@
     "upgrade": "Päivitä",
     "perMonth": "/kk",
     "perYear": "/v"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Ominaisuudet",
+      "industries": "Toimialat",
+      "pricing": "Hinnoittelu",
+      "about": "Tietoa",
+      "faq": "UKK",
+      "signIn": "Kirjaudu",
+      "startFree": "Aloita ilmaiseksi",
+      "dashboard": "Hallintapaneeli"
+    },
+    "hero": {
+      "kicker": "Uutta · Tekoälyn laatimat KRAt",
+      "trust": "4.8 G2:ssa · Ei luottokorttia · 30 min aloitukseen · 500+ tiimiä"
+    },
+    "cta": {
+      "primary": "14 päivän kokeilu",
+      "secondary": "Varaa demo",
+      "seeProduct": "Katso tuote"
+    },
+    "pricing": {
+      "recommended": "Suositus",
+      "perUser": "Per käyttäjä",
+      "perUserSub": "maksa vain aktiivisista tileistä",
+      "flat": "Kuukausikiinteä",
+      "flatSub": "kiinteä hinta per taso",
+      "starter": "Aloitus",
+      "team": "Tiimi",
+      "growth": "Kasvu",
+      "scale": "Skaalaus",
+      "enterprise": "Yritys",
+      "free": "Ilmainen",
+      "letsTalk": "Puhutaan"
+    },
+    "footer": {
+      "product": "Tuote",
+      "company": "Yritys",
+      "resources": "Resurssit",
+      "legal": "Juridinen",
+      "copyright": "© WorkwrK. Tehty Bengalurussa."
+    }
   }
 }

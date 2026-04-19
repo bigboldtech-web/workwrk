@@ -1,15 +1,28 @@
+import { BentoRoot } from "@/components/bento/bento-root";
+import "./auth.css";
+
 export default function AuthLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="relative w-full max-w-md">
-        {/* Background glow */}
-        <div className="absolute -top-32 left-1/2 h-64 w-96 -translate-x-1/2 rounded-full bg-purple-600/10 blur-3xl" />
-        <div className="relative">{children}</div>
+    <BentoRoot>
+      <div className="auth-shell">
+        <div className="auth-bg" aria-hidden>
+          <span className="auth-glow auth-glow-1" />
+          <span className="auth-glow auth-glow-2" />
+          <svg className="auth-grid-svg" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+            <defs>
+              <pattern id="auth-grid" width="56" height="56" patternUnits="userSpaceOnUse">
+                <path d="M 56 0 L 0 0 0 56" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#auth-grid)" />
+          </svg>
+        </div>
+        <main className="auth-main">{children}</main>
       </div>
-    </div>
+    </BentoRoot>
   );
 }

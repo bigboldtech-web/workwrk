@@ -270,7 +270,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                   <div className="group/divider relative h-0">
                     <div className="absolute inset-x-0 -top-1 h-2 z-10 flex items-center justify-center opacity-0 group-hover/divider:opacity-100 transition-opacity cursor-pointer"
                       onClick={() => addSectionAt(sIdx)}>
-                      <div className="flex items-center gap-2 px-3 py-0.5 rounded-full bg-purple-500 text-white text-[10px] font-medium shadow-lg">
+                      <div className="flex items-center gap-2 px-3 py-0.5 rounded-full bg-[#d4ff2e] text-[#0a0a0a] text-[10px] font-medium shadow-lg">
                         <Plus size={10} /> Add Section
                       </div>
                     </div>
@@ -306,7 +306,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                       return (
                         <div key={step.id}
                           className={`flex items-center gap-2 px-4 py-2 cursor-pointer border-l-2 transition-all ${
-                            isSelected ? "border-l-purple-500 bg-purple-500/5" : "border-l-transparent hover:bg-surface-2"
+                            isSelected ? "border-l-[#d4ff2e] bg-[rgba(212,255,46,0.06)]" : "border-l-transparent hover:bg-surface-2"
                           }`}
                           onClick={() => setSelectedStep({ sectionId: section.id, stepId: step.id })}
                         >
@@ -335,7 +335,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                     {/* Add step */}
                     {editing && (
                       <button onClick={() => addStep(section.id)}
-                        className="w-full flex items-center gap-2 px-4 py-2 text-xs text-muted hover:text-purple-400 hover:bg-surface-2 transition-colors border-t border-border/50">
+                        className="w-full flex items-center gap-2 px-4 py-2 text-xs text-muted hover:text-[#d4ff2e] hover:bg-surface-2 transition-colors border-t border-border/50">
                         <Plus size={12} /> Add task
                       </button>
                     )}
@@ -348,7 +348,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
           {/* Final add section divider at bottom */}
           {editing && sections.length > 0 && (
             <div className="flex items-center justify-center py-3">
-              <button onClick={addSection} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-dashed border-border text-xs text-muted hover:text-purple-400 hover:border-purple-400 transition-colors">
+              <button onClick={addSection} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-dashed border-border text-xs text-muted hover:text-[#d4ff2e] hover:border-[#d4ff2e] transition-colors">
                 <Plus size={12} /> Add Section
               </button>
             </div>
@@ -390,7 +390,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                   onClick={() => editing && updateStep(selectedStep.sectionId, selectedStep.stepId, { type: t })}
                   className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
                     selectedStepObj.type === t
-                      ? t === "approval" ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                      ? t === "approval" ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] border border-[rgba(212,255,46,0.3)]"
                       : "bg-surface-2 text-muted border border-transparent hover:border-border"
                   }`}>
                   {t === "task" ? "Task" : "Needs Approval"}

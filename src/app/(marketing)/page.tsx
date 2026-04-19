@@ -167,7 +167,7 @@ export default async function Home() {
             name: "Can I use WorkwrK for my business in India?",
             acceptedAnswer: {
               "@type": "Answer",
-              text: "Yes. WorkwrK is built for growing businesses across India, UAE, Southeast Asia, and globally. It supports INR pricing, multi-location organizations, and is designed for the operational realities of businesses scaling from 10 to 500+ employees.",
+              text: "Yes. WorkwrK is built for growing businesses across India, UAE, Southeast Asia, and globally. It supports INR pricing, multi-location organizations, and is designed for the operational realities of businesses scaling from 10 to 500 employees.",
             },
           },
           {

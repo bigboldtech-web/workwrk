@@ -37,6 +37,10 @@ model Organization {
   onboardingTemplates OnboardingTemplate[]
   trainingCourses     TrainingCourse[]
   integrations        Integration[]
+  subscription        Subscription?
+  apiKeys             ApiKey[]
+  webhookSubscriptions WebhookSubscription[]
+  webhookDeliveries   WebhookDelivery[]
   employeeOfMonths    EmployeeOfMonth[]
   ideas               Idea[]
   offices             Office[]
@@ -58,6 +62,49 @@ enum Plan {
   GROWTH
   SCALE
   ENTERPRISE
+}
+
+// ==========================================
+// Billing + subscriptions
+// ==========================================
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String             @unique
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Canonical state
+  plan               Plan
+  status             SubscriptionStatus @default(TRIALING)
+  billingMode        BillingMode        @default(PER_USER)
+  seats              Int                @default(0)
+
+  // Stripe (null on self-hosted / trial / manual invoicing)
+  stripeCustomerId       String?        @unique
+  stripeSubscriptionId   String?        @unique
+  stripePriceId          String?
+  stripeCurrentPeriodEnd DateTime?
+
+  trialEndsAt        DateTime?
+  canceledAt         DateTime?
+
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([status])
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+}
+
+enum BillingMode {
+  PER_USER    // $4/user/month style
+  FLAT_TIER   // $50/100/300 per-band flat
 }
 
 enum OrgStatus {
@@ -92,6 +139,17 @@ model User {
   department     Department?  @relation("DepartmentMembers", fields: [departmentId], references: [id])
   accessLevel    AccessLevel  @default(EMPLOYEE)
 
+  // Email verification — signup sets verifyToken; user confirms via /verify-email.
+  emailVerifiedAt  DateTime?
+  verifyToken      String?  @unique
+  verifyExpiresAt  DateTime?
+
+  // MFA — TOTP (Google Authenticator / Authy / 1Password).
+  // Secret stored base32-encoded, only persisted when enrolment completes.
+  mfaEnabled       Boolean  @default(false)
+  mfaSecret        String?
+  mfaBackupCodes   String[] @default([])   // bcrypt-hashed one-time codes
+
   managerId      String?
   manager        User?    @relation("ManagerReports", fields: [managerId], references: [id])
   directReports  User[]   @relation("ManagerReports")
@@ -101,6 +159,7 @@ model User {
   kraAssignments KRAAssignment[]
   kpiRecords     KPIRecord[]
   tasks          Task[]   @relation("TaskAssignee")
+  tasksEscalated Task[]   @relation("TaskEscalatedTo")
   sopComplianceRecords SOPCompliance[]
   sopAssignments       SOPAssignment[]
   reviewsAsSubject   Review[]       @relation("ReviewSubject")
@@ -128,6 +187,8 @@ model User {
   ideaVotes           IdeaVote[]
   ideaComments        IdeaComment[]
   assignedAssets      Asset[]  @relation("AssetAssignee")
+  apiKeysCreated      ApiKey[] @relation("ApiKeyCreator")
+  webhooksCreated     WebhookSubscription[] @relation("WebhookCreator")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -408,6 +469,19 @@ model Task {
   incompleteReason String?
   recurringGroupId String?
   status           TaskStatus @default(PLANNED)
+
+  // ── SLA + escalation ──
+  // If set, task is considered overdue `slaHours` after `date`.
+  // Null = no SLA enforcement. Used by the escalation cron.
+  slaHours         Int?
+  priority         TaskPriority @default(NORMAL)
+  escalatedAt      DateTime?
+  escalatedToId    String?
+  escalatedTo      User?      @relation("TaskEscalatedTo", fields: [escalatedToId], references: [id])
+  // Source = how this task was spawned.
+  source           TaskSource @default(MANUAL)
+  sourceRef        String?    // opaque ID of the source (e.g. sopId, reviewId)
+
   organizationId   String
   organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   assigneeId       String
@@ -420,12 +494,29 @@ model Task {
   @@index([organizationId])
   @@index([assigneeId])
   @@index([date])
+  @@index([escalatedToId])
+  @@index([organizationId, status, date])
 }
 
 enum TaskStatus {
   PLANNED
   IN_PROGRESS
   COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TaskSource {
+  MANUAL
+  SOP
+  REVIEW
+  OKR
+  AI
 }
 
 // ==========================================
@@ -1604,4 +1695,133 @@ model ConsentRecord {
   @@index([sessionId])
   @@index([organizationId])
   @@index([createdAt])
+}
+
+// ==========================================
+// Public API — keys, webhooks, deliveries
+// ==========================================
+
+model ApiKey {
+  id             String    @id @default(cuid())
+  // Display name chosen by the admin — e.g. "Production · Backend"
+  name           String
+  // First 8 chars of the plaintext key, used for display + lookup hint.
+  // Full key is only shown once at creation time.
+  prefix         String
+  // SHA-256 hash of the plaintext key. We never store the raw key.
+  hashedKey      String    @unique
+  // Scopes granted to this key. READ = GET endpoints only.
+  // WRITE adds create/update. ADMIN is full control including key mgmt.
+  scopes         ApiKeyScope[] @default([READ])
+  // Windowed limits (requests / minute, day). Enforced in middleware.
+  rateLimitPerMinute Int    @default(120)
+  rateLimitPerDay    Int    @default(50000)
+  // Usage telemetry
+  lastUsedAt     DateTime?
+  lastUsedIp     String?
+  requestCount   Int       @default(0)
+  revokedAt      DateTime?
+  // Ownership
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User      @relation("ApiKeyCreator", fields: [createdById], references: [id])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  rateLimitBuckets ApiKeyRateBucket[]
+
+  @@index([organizationId])
+  @@index([hashedKey])
+  @@index([prefix])
+}
+
+enum ApiKeyScope {
+  READ
+  WRITE
+  ADMIN
+}
+
+/// Rolling-window rate limiter bucket. One row per (apiKey, windowKey).
+/// windowKey is a compact epoch-minute or epoch-day string.
+model ApiKeyRateBucket {
+  id         String  @id @default(cuid())
+  apiKeyId   String
+  apiKey     ApiKey  @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  windowKind RateWindow
+  windowKey  String
+  count      Int     @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([apiKeyId, windowKind, windowKey])
+  @@index([apiKeyId])
+}
+
+enum RateWindow {
+  MINUTE
+  DAY
+}
+
+/// Customer-registered webhook endpoint. Workwrk POSTs events to `url`
+/// with an HMAC-SHA256 signature in X-Workwrk-Signature.
+model WebhookSubscription {
+  id             String    @id @default(cuid())
+  url            String
+  // Event types this subscription is interested in (e.g. "kudos.created",
+  // "review.completed"). Wildcard "*" subscribes to everything.
+  events         String[]
+  // HMAC secret — generated at creation, shown once, hashed in storage.
+  secretHash     String
+  secretPrefix   String    // First 8 chars for identification (shown in UI).
+  status         WebhookStatus @default(ACTIVE)
+  // Rolling failure counter — deliveries auto-pause after too many 5xx.
+  failureCount   Int       @default(0)
+  lastSuccessAt  DateTime?
+  lastFailureAt  DateTime?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User      @relation("WebhookCreator", fields: [createdById], references: [id])
+  deliveries     WebhookDelivery[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+enum WebhookStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+/// Audit log + retry queue for individual webhook attempts.
+model WebhookDelivery {
+  id             String    @id @default(cuid())
+  subscriptionId String
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  event          String
+  payload        Json
+  status         DeliveryStatus @default(PENDING)
+  httpStatus     Int?
+  responseBody   String?
+  attemptCount   Int       @default(0)
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([subscriptionId])
+  @@index([organizationId])
+  @@index([status, nextAttemptAt])
+}
+
+enum DeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  RETRYING
 }

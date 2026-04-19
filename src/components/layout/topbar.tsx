@@ -5,9 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,7 +37,7 @@ interface Notification {
   createdAt: string;
 }
 
-const typeIcons: Record<string, React.ComponentType<any>> = {
+const typeIcons: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   person: Users,
   task: CheckSquare,
   sop: BookOpen,
@@ -62,7 +59,19 @@ function timeAgo(dateStr: string): string {
 
 export function Topbar() {
   const { data: session } = useSession();
-  const user = session?.user;
+  type ExtendedUser = {
+    name?: string | null;
+    firstName?: string;
+    lastName?: string;
+    avatar?: string;
+    organizationName?: string;
+  };
+  const user = session?.user as ExtendedUser | undefined;
+  const firstName = user?.firstName;
+  const lastName = user?.lastName;
+  const avatar = user?.avatar;
+  const organizationName = user?.organizationName;
+
   const tCommon = useTranslations("common");
   const tNav = useTranslations("nav");
   const tSettings = useTranslations("settings");
@@ -72,13 +81,12 @@ export function Topbar() {
   const [showSearch, setShowSearch] = useState(false);
   const [searching, setSearching] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
-  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Fetch notifications
   useEffect(() => {
     fetch("/api/notifications")
       .then((res) => res.json())
@@ -90,22 +98,21 @@ export function Topbar() {
       .catch(() => {});
   }, []);
 
-  const handleNotificationClick = useCallback((notif: Notification) => {
-    // Mark as read
-    if (!notif.read) {
-      fetch("/api/notifications", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: notif.id }),
-      }).catch(() => {});
-      setNotifications((prev) => prev.map((n) => n.id === notif.id ? { ...n, read: true } : n));
-      setUnreadCount((c) => Math.max(0, c - 1));
-    }
-    // Navigate to the linked page
-    if (notif.link) {
-      router.push(notif.link);
-    }
-  }, [router]);
+  const handleNotificationClick = useCallback(
+    (notif: Notification) => {
+      if (!notif.read) {
+        fetch("/api/notifications", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: notif.id }),
+        }).catch(() => {});
+        setNotifications((prev) => prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n)));
+        setUnreadCount((c) => Math.max(0, c - 1));
+      }
+      if (notif.link) router.push(notif.link);
+    },
+    [router],
+  );
 
   const handleMarkAllRead = useCallback(() => {
     fetch("/api/notifications", {
@@ -117,16 +124,13 @@ export function Topbar() {
     setUnreadCount(0);
   }, []);
 
-  // Search with debounce
   useEffect(() => {
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
-
     if (searchQuery.length < 2) {
       setSearchResults([]);
       setShowSearch(false);
       return;
     }
-
     setSearching(true);
     searchTimeout.current = setTimeout(async () => {
       try {
@@ -140,13 +144,11 @@ export function Topbar() {
         setSearching(false);
       }
     }, 300);
-
     return () => {
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
     };
   }, [searchQuery]);
 
-  // Close search on click outside
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
@@ -157,12 +159,11 @@ export function Topbar() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // Keyboard shortcut
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        const input = document.getElementById("global-search") as HTMLInputElement;
+        const input = document.getElementById("global-search") as HTMLInputElement | null;
         input?.focus();
       }
     }
@@ -170,11 +171,17 @@ export function Topbar() {
     return () => document.removeEventListener("keydown", handleKey);
   }, []);
 
+  const displayName = user?.name || "User";
+  const initials =
+    firstName || lastName
+      ? getInitials(firstName ?? "", lastName ?? "")
+      : displayName.charAt(0).toUpperCase();
+
   return (
-    <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-xl">
+    <header className="app-topbar">
       {/* Search */}
-      <div className="relative flex-1 max-w-md" ref={searchRef}>
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+      <div className="app-search-wrap" ref={searchRef}>
+        <Search className="app-search-icon" size={14} />
         <input
           id="global-search"
           type="text"
@@ -182,41 +189,36 @@ export function Topbar() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onFocus={() => searchResults.length > 0 && setShowSearch(true)}
-          className="h-9 w-full rounded-lg border border-border bg-surface pl-10 pr-4 text-sm text-foreground placeholder:text-muted focus:border-purple-500 focus:outline-none transition-colors"
+          className="app-search-input"
         />
-        <kbd className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted font-mono">
-          ⌘K
-        </kbd>
+        <kbd className="app-search-kbd">⌘K</kbd>
 
-        {/* Search Results Dropdown */}
         {showSearch && (
-          <div className="absolute left-0 right-0 top-full mt-1 rounded-lg border border-border bg-surface shadow-xl overflow-hidden z-50">
+          <div className="app-search-dropdown">
             {searching ? (
-              <div className="px-4 py-3 text-sm text-muted">Searching...</div>
+              <div className="app-search-empty">Searching…</div>
             ) : searchResults.length === 0 ? (
-              <div className="px-4 py-3 text-sm text-muted">No results found</div>
+              <div className="app-search-empty">No results</div>
             ) : (
-              <div className="max-h-80 overflow-y-auto">
-                {searchResults.map((result) => {
-                  const Icon = typeIcons[result.type] || Search;
+              <div style={{ maxHeight: 340, overflowY: "auto" }}>
+                {searchResults.map((r) => {
+                  const Icon = typeIcons[r.type] || Search;
                   return (
                     <Link
-                      key={`${result.type}-${result.id}`}
-                      href={result.href}
+                      key={`${r.type}-${r.id}`}
+                      href={r.href}
                       onClick={() => {
                         setShowSearch(false);
                         setSearchQuery("");
                       }}
-                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2 transition-colors"
+                      className="app-search-result"
                     >
-                      <Icon size={16} className="text-muted flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{result.title}</p>
-                        <p className="text-xs text-muted truncate">{result.subtitle}</p>
+                      <Icon size={14} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="app-search-result-title">{r.title}</div>
+                        <div className="app-search-result-sub">{r.subtitle}</div>
                       </div>
-                      <span className="text-[10px] text-muted uppercase tracking-wider flex-shrink-0">
-                        {result.type}
-                      </span>
+                      <span className="app-search-result-type">{r.type}</span>
                     </Link>
                   );
                 })}
@@ -226,27 +228,25 @@ export function Topbar() {
         )}
       </div>
 
-      {/* Right side */}
-      <div className="flex items-center gap-3">
-        <Button variant="outline" size="sm" className="gap-2">
-          <Plus size={16} />
-          Quick Add
-        </Button>
+      {/* Right */}
+      <div className="app-topbar-right">
+        <Link href="/tasks" className="app-quick-add">
+          <Plus size={14} />
+          Quick add
+        </Link>
 
-        {/* Language & currency */}
         <LanguageSwitcher />
         <CurrencySwitcher />
 
-        {/* Help / re-launch tour */}
         <HelpButton />
 
         {/* Notifications */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="relative rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-foreground transition-colors">
-              <Bell size={20} />
+            <button type="button" className="app-icon-btn" aria-label="Notifications">
+              <Bell size={16} />
               {unreadCount > 0 && (
-                <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                <span className="app-icon-btn-badge">
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
@@ -255,20 +255,21 @@ export function Topbar() {
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
               <span>Notifications</span>
-              <div className="flex items-center gap-2">
-                {unreadCount > 0 && (
-                  <>
-                    <Badge variant="secondary" className="text-[10px]">{unreadCount} new</Badge>
-                    <button onClick={handleMarkAllRead} className="text-[10px] text-muted hover:text-foreground flex items-center gap-1" title="Mark all as read">
-                      <CheckCheck size={12} />
-                    </button>
-                  </>
-                )}
-              </div>
+              {unreadCount > 0 && (
+                <button
+                  onClick={handleMarkAllRead}
+                  className="text-[10px] flex items-center gap-1"
+                  style={{ color: "#d4ff2e" }}
+                  title="Mark all as read"
+                >
+                  <CheckCheck size={12} />
+                  Mark all read
+                </button>
+              )}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {notifications.length === 0 ? (
-              <div className="px-3 py-6 text-center text-sm text-muted">
+              <div className="px-3 py-6 text-center text-sm" style={{ color: "#a0a0a0" }}>
                 No notifications yet
               </div>
             ) : (
@@ -276,21 +277,37 @@ export function Topbar() {
                 {notifications.slice(0, 5).map((notif) => (
                   <DropdownMenuItem
                     key={notif.id}
-                    className={`flex flex-col items-start gap-1 py-2 cursor-pointer ${!notif.read ? "bg-purple-500/5" : ""}`}
+                    className={`flex flex-col items-start gap-1 py-2 cursor-pointer ${!notif.read ? "bg-[rgba(212,255,46,0.06)]" : ""}`}
                     onClick={() => handleNotificationClick(notif)}
                   >
                     <div className="flex items-center gap-2 w-full">
-                      {!notif.read && <span className="h-2 w-2 rounded-full bg-purple-500 flex-shrink-0" />}
-                      <span className={`text-sm truncate ${!notif.read ? "font-semibold" : "font-medium text-muted"}`}>{notif.title}</span>
-                      <span className="text-[10px] text-muted ml-auto flex-shrink-0">{timeAgo(notif.createdAt)}</span>
+                      {!notif.read && (
+                        <span
+                          className="h-2 w-2 rounded-full flex-shrink-0"
+                          style={{ background: "#d4ff2e", boxShadow: "0 0 6px #d4ff2e" }}
+                        />
+                      )}
+                      <span
+                        className={`text-sm truncate ${!notif.read ? "font-semibold" : "font-medium"}`}
+                        style={!notif.read ? { color: "#fafafa" } : { color: "#a0a0a0" }}
+                      >
+                        {notif.title}
+                      </span>
+                      <span className="text-[10px] ml-auto flex-shrink-0" style={{ color: "#707070" }}>
+                        {timeAgo(notif.createdAt)}
+                      </span>
                     </div>
-                    <span className="text-xs text-muted line-clamp-1">{notif.message}</span>
+                    <span className="text-xs line-clamp-1" style={{ color: "#a0a0a0" }}>{notif.message}</span>
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild className="justify-center">
-                  <Link href="/activity" className="text-xs text-purple-400 hover:text-purple-300 text-center w-full">
-                    View all notifications
+                  <Link
+                    href="/activity"
+                    className="text-xs text-center w-full"
+                    style={{ color: "#d4ff2e" }}
+                  >
+                    View all notifications →
                   </Link>
                 </DropdownMenuItem>
               </>
@@ -298,31 +315,31 @@ export function Topbar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* User Menu */}
+        {/* User menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-3 rounded-lg p-1.5 hover:bg-surface-2 transition-colors">
-              <Avatar className="h-8 w-8">
-                <AvatarImage src={(user as any)?.avatar || undefined} />
-                <AvatarFallback>
-                  {user ? getInitials((user as any).firstName, (user as any).lastName) : "U"}
-                </AvatarFallback>
-              </Avatar>
-              <div className="hidden text-left md:block">
-                <p className="text-sm font-medium text-foreground">
-                  {user?.name || "User"}
-                </p>
-                <p className="text-xs text-muted">
-                  {(user as any)?.organizationName || "Organization"}
-                </p>
-              </div>
+            <button type="button" className="app-user-btn" aria-label="User menu">
+              <span className="app-user-avatar" aria-hidden>
+                {avatar ? (
+                  <img src={avatar} alt="" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />
+                ) : (
+                  initials
+                )}
+              </span>
+              <span style={{ display: "flex", flexDirection: "column", textAlign: "left" }} className="hidden md:flex">
+                <span className="app-user-name">{displayName}</span>
+                <span className="app-user-org">{organizationName || "Workspace"}</span>
+              </span>
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>My Account</DropdownMenuLabel>
+            <DropdownMenuLabel>My account</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
               <Link href="/settings">{tSettings("profile")}</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/account/security">Security &amp; 2FA</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/settings">{tNav("settings")}</Link>
@@ -330,7 +347,7 @@ export function Topbar() {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => signOut({ callbackUrl: "/login" })}
-              className="text-red-400 focus:text-red-400"
+              style={{ color: "#ff3d8a" }}
             >
               {tNav("signOut")}
             </DropdownMenuItem>
@@ -346,24 +363,20 @@ function HelpButton() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          className="rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-foreground transition-colors"
-          aria-label="Help"
-          title="Help & Tours"
-        >
-          <HelpCircle size={20} />
+        <button type="button" className="app-icon-btn" aria-label="Help & tours" title="Help & Tours">
+          <HelpCircle size={16} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel>Help & Tours</DropdownMenuLabel>
+        <DropdownMenuLabel>Help &amp; tours</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {isAdmin && (
           <DropdownMenuItem onClick={() => startTour("admin")} className="cursor-pointer">
-            <span className="text-sm">Replay Admin Setup Tour</span>
+            <span className="text-sm">Replay admin setup tour</span>
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={() => startTour("employee")} className="cursor-pointer">
-          <span className="text-sm">Replay New Member Tour</span>
+          <span className="text-sm">Replay new-member tour</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <Link href="/docs">

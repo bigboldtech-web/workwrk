@@ -5,6 +5,7 @@ import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import { sendEmail } from "@/lib/email";
 import { kudosTemplate } from "@/lib/email-templates";
+import { notifyKudosPosted } from "@/services/slackNotifier";
 
 // GET: Kudos feed (company-wide, paginated) or per-user
 export async function GET(req: NextRequest) {
@@ -136,6 +137,16 @@ export async function POST(req: NextRequest) {
 
   // Recalculate receiver's performance score (kudos bonus)
   triggerRecalculation(receiverId, orgId);
+
+  // Fan out to Slack if the org has a webhook configured. Non-blocking
+  // on failure — Slack hiccups never break the kudos flow.
+  notifyKudosPosted({
+    organizationId: orgId,
+    giverName: `${kudos.giver.firstName} ${kudos.giver.lastName}`,
+    receiverName: `${kudos.receiver.firstName} ${kudos.receiver.lastName}`,
+    value: companyValue?.trim() || null,
+    message: message.trim(),
+  }).catch(() => {});
 
   return jsonSuccess(kudos, 201);
 }

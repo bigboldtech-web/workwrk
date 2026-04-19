@@ -11,6 +11,7 @@ import {
   ArrowLeft, Building, Users, FileText, AlertTriangle,
   CheckCircle, Clock, BarChart3, TrendingDown,
 } from "lucide-react";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
@@ -19,14 +20,14 @@ function formatDate(dateStr: string | null): string {
 
 function rateColor(rate: number) {
   if (rate >= 90) return "text-green-400";
-  if (rate >= 70) return "text-purple-400";
+  if (rate >= 70) return "text-[#d4ff2e]";
   if (rate >= 50) return "text-orange-400";
   return "text-red-400";
 }
 
 function rateBarColor(rate: number) {
   if (rate >= 90) return "bg-green-500";
-  if (rate >= 70) return "bg-purple-500";
+  if (rate >= 70) return "bg-[#d4ff2e]";
   if (rate >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
@@ -81,10 +82,11 @@ export default function SOPCompliancePage() {
         <Button variant="ghost" size="icon" onClick={() => router.push("/sops")} className="shrink-0">
           <ArrowLeft size={18} />
         </Button>
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">SOP Compliance Dashboard</h1>
-          <p className="text-muted text-sm mt-1">Organization-wide SOP compliance tracking</p>
-        </div>
+        <PageHeader
+          kicker="SOPs · compliance"
+          title="SOP compliance dashboard"
+          subtitle="Organization-wide SOP compliance tracking."
+        />
       </div>
 
       {/* Overview Stats */}
@@ -105,7 +107,7 @@ export default function SOPCompliancePage() {
           <p className={`text-2xl font-bold ${overview.overdue > 0 ? "text-red-400" : "text-muted"}`}>{overview.overdue}</p>
           <p className="text-xs text-muted">Overdue</p>
         </CardContent></Card>
-        <Card className="border-purple-500/20 bg-purple-500/5"><CardContent className="p-4 text-center">
+        <Card className="border-[rgba(212,255,46,0.2)] bg-[rgba(212,255,46,0.06)]"><CardContent className="p-4 text-center">
           <p className={`text-2xl font-bold ${rateColor(overview.overallRate)}`}>{overview.overallRate}%</p>
           <p className="text-xs text-muted">Overall Rate</p>
         </CardContent></Card>
@@ -132,8 +134,8 @@ export default function SOPCompliancePage() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="rounded-lg bg-purple-500/10 p-2">
-                        <Building size={16} className="text-purple-400" />
+                      <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2">
+                        <Building size={16} className="text-[#d4ff2e]" />
                       </div>
                       <div>
                         <h3 className="font-semibold text-sm">{dept.name}</h3>
@@ -209,8 +211,8 @@ export default function SOPCompliancePage() {
             sopCompliance.map((s: any) => (
               <Card key={s.sopId} className="hover:border-muted-2 transition-all cursor-pointer" onClick={() => router.push(`/sops/${s.sopId}`)}>
                 <CardContent className="p-4 flex items-center gap-4">
-                  <div className="rounded-lg bg-purple-500/10 p-2 shrink-0">
-                    <FileText size={16} className="text-purple-400" />
+                  <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2 shrink-0">
+                    <FileText size={16} className="text-[#d4ff2e]" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-sm truncate">{s.title}</h3>

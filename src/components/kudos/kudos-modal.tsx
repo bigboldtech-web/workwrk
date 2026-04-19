@@ -163,7 +163,7 @@ export function KudosModal({
                     onClick={() => handleSelectPerson(person)}
                   >
                     <Avatar className="h-8 w-8">
-                      <AvatarFallback className="bg-purple-600/20 text-purple-400 text-xs">
+                      <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xs">
                         {person.firstName[0]}{person.lastName[0]}
                       </AvatarFallback>
                     </Avatar>
@@ -185,7 +185,7 @@ export function KudosModal({
             {/* Selected person */}
             <div className="flex items-center gap-3 p-3 rounded-lg bg-surface-2 border border-border">
               <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-purple-600/20 text-purple-400 text-sm">
+                <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-sm">
                   {selectedPerson.firstName[0]}{selectedPerson.lastName[0]}
                 </AvatarFallback>
               </Avatar>
@@ -222,7 +222,7 @@ export function KudosModal({
                     variant={selectedValue === value ? "default" : "outline"}
                     className={`cursor-pointer transition-colors ${
                       selectedValue === value
-                        ? "bg-purple-600 hover:bg-purple-700"
+                        ? "bg-[#d4ff2e] hover:bg-[#e2ff6b] text-[#0a0a0a]"
                         : "hover:bg-surface-2"
                     }`}
                     onClick={() => setSelectedValue(selectedValue === value ? null : value)}

@@ -93,11 +93,11 @@ const TEAM_SIZES = [
 ];
 
 const DEFAULT_DEPARTMENTS = [
-  { name: "Engineering", color: "#6C5CE7", description: "Product development and technical infrastructure" },
+  { name: "Engineering", color: "#d4ff2e", description: "Product development and technical infrastructure" },
   { name: "Sales", color: "#00D68F", description: "Revenue generation and client relationships" },
   { name: "Marketing", color: "#FF9F43", description: "Brand awareness and lead generation" },
   { name: "Operations", color: "#FF6B6B", description: "Day-to-day business operations" },
-  { name: "HR", color: "#A29BFE", description: "People management and culture" },
+  { name: "HR", color: "#d4ff2e", description: "People management and culture" },
   { name: "Finance", color: "#54A0FF", description: "Financial planning and compliance" },
 ];
 
@@ -270,7 +270,7 @@ export default function SetupPage() {
               <div
                 key={step.id}
                 className={`h-1.5 flex-1 rounded-full transition-colors ${
-                  i <= currentStep ? "bg-purple-500" : "bg-border"
+                  i <= currentStep ? "bg-[#d4ff2e]" : "bg-border"
                 }`}
               />
             ))}
@@ -289,7 +289,7 @@ export default function SetupPage() {
                   disabled={i > currentStep}
                   className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
                     i === currentStep
-                      ? "bg-purple-600/20 text-purple-400 border border-purple-600/30"
+                      ? "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] border border-[rgba(212,255,46,0.3)]"
                       : i < currentStep
                         ? "bg-green-600/10 text-green-400 cursor-pointer hover:bg-green-600/20"
                         : "bg-surface-2 text-muted"
@@ -326,14 +326,14 @@ export default function SetupPage() {
                   onClick={() => updateField("businessType", type.value)}
                   className={`flex flex-col items-start rounded-xl border p-5 text-left transition-all ${
                     setupData.businessType === type.value
-                      ? "border-purple-500 bg-purple-600/10"
+                      ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)]"
                       : "border-border bg-surface hover:border-muted-2"
                   }`}
                 >
                   <div className="flex w-full items-center justify-between">
                     <span className="text-base font-semibold">{type.label}</span>
                     {setupData.businessType === type.value && (
-                      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-500">
+                      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#d4ff2e]">
                         <Check size={12} className="text-white" />
                       </div>
                     )}
@@ -361,7 +361,7 @@ export default function SetupPage() {
                   onClick={() => updateField("industry", industry)}
                   className={`rounded-full border px-4 py-2 text-sm font-medium transition-all ${
                     setupData.industry === industry
-                      ? "border-purple-500 bg-purple-600/20 text-purple-300"
+                      ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]"
                       : "border-border bg-surface text-muted hover:border-muted-2 hover:text-foreground"
                   }`}
                 >
@@ -383,7 +383,7 @@ export default function SetupPage() {
                   onClick={() => updateField("useCase", uc.value)}
                   className={`flex flex-col items-start rounded-xl border p-4 text-left transition-all ${
                     setupData.useCase === uc.value
-                      ? "border-purple-500 bg-purple-600/10"
+                      ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)]"
                       : "border-border bg-surface hover:border-muted-2"
                   }`}
                 >
@@ -415,12 +415,12 @@ export default function SetupPage() {
                     disabled={mod.default}
                     className={`flex items-start gap-3 rounded-xl border p-4 text-left transition-all ${
                       enabled
-                        ? "border-purple-500/50 bg-purple-600/10"
+                        ? "border-[rgba(212,255,46,0.4)] bg-[rgba(212,255,46,0.08)]"
                         : "border-border bg-surface hover:border-muted-2"
                     } ${mod.default ? "opacity-80" : ""}`}
                   >
-                    <div className={`rounded-lg p-2 ${enabled ? "bg-purple-500/20" : "bg-surface-2"}`}>
-                      <Icon size={18} className={enabled ? "text-purple-400" : "text-muted"} />
+                    <div className={`rounded-lg p-2 ${enabled ? "bg-[rgba(212,255,46,0.12)]" : "bg-surface-2"}`}>
+                      <Icon size={18} className={enabled ? "text-[#d4ff2e]" : "text-muted"} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -432,7 +432,7 @@ export default function SetupPage() {
                       <span className="text-xs text-muted mt-0.5 block">{mod.desc}</span>
                     </div>
                     <div className={`mt-1 h-4 w-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                      enabled ? "border-purple-500 bg-purple-500" : "border-muted-2"
+                      enabled ? "border-[#d4ff2e] bg-[#d4ff2e]" : "border-muted-2"
                     }`}>
                       {enabled && <Check size={10} className="text-white" />}
                     </div>
@@ -459,11 +459,11 @@ export default function SetupPage() {
                   onClick={() => updateField("teamSize", size.value)}
                   className={`flex flex-col items-center rounded-xl border p-6 text-center transition-all ${
                     setupData.teamSize === size.value
-                      ? "border-purple-500 bg-purple-600/10"
+                      ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)]"
                       : "border-border bg-surface hover:border-muted-2"
                   }`}
                 >
-                  <Users size={24} className={setupData.teamSize === size.value ? "text-purple-400" : "text-muted"} />
+                  <Users size={24} className={setupData.teamSize === size.value ? "text-[#d4ff2e]" : "text-muted"} />
                   <span className="mt-3 text-lg font-bold">{size.label}</span>
                   <span className="mt-1 text-xs text-muted">{size.desc}</span>
                 </button>
@@ -491,7 +491,7 @@ export default function SetupPage() {
                     onClick={() => toggleDepartment(i)}
                     className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-all ${
                       dept.enabled
-                        ? "border-purple-500/50 bg-purple-600/5"
+                        ? "border-[rgba(212,255,46,0.4)] bg-[#d4ff2e]/5"
                         : "border-border bg-surface opacity-60"
                     }`}
                   >
@@ -503,7 +503,7 @@ export default function SetupPage() {
                       )}
                     </div>
                     <div className={`h-4 w-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                      dept.enabled ? "border-purple-500 bg-purple-500" : "border-muted-2"
+                      dept.enabled ? "border-[#d4ff2e] bg-[#d4ff2e]" : "border-muted-2"
                     }`}>
                       {dept.enabled && <Check size={10} className="text-white" />}
                     </div>
@@ -520,7 +520,7 @@ export default function SetupPage() {
                   {setupData.customDepartments.map((dept, i) => (
                     <div
                       key={i}
-                      className="flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-600/10 px-4 py-2"
+                      className="flex items-center gap-2 rounded-full border border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] px-4 py-2"
                     >
                       <div className="h-2 w-2 rounded-full" style={{ backgroundColor: dept.color }} />
                       <span className="text-sm font-medium">{dept.name}</span>
@@ -571,7 +571,7 @@ export default function SetupPage() {
                     <select
                       value={invite.role}
                       onChange={(e) => updateInvite(i, "role", e.target.value)}
-                      className="h-10 appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="h-10 appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]"
                     >
                       <option value="EMPLOYEE">Employee</option>
                       <option value="TEAM_LEAD">Team Lead</option>
@@ -604,8 +604,8 @@ export default function SetupPage() {
         {/* Step 6: Ready! */}
         {currentStep === STEPS.length - 1 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-purple-600/20 to-green-500/20 border border-purple-500/30">
-              <Sparkles size={40} className="text-purple-400" />
+            <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-[rgba(212,255,46,0.15)] to-[rgba(94,234,212,0.15)] border border-[rgba(212,255,46,0.3)]">
+              <Sparkles size={40} className="text-[#d4ff2e]" />
             </div>
             <h2 className="text-3xl font-bold">You&apos;re all set!</h2>
             <p className="mt-2 max-w-md text-muted">
@@ -619,7 +619,7 @@ export default function SetupPage() {
                 const Icon = mod.icon;
                 return (
                   <div key={modId} className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2">
-                    <Icon size={14} className="text-purple-400" />
+                    <Icon size={14} className="text-[#d4ff2e]" />
                     <span className="text-sm">{mod.name}</span>
                   </div>
                 );

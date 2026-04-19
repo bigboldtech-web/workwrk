@@ -109,5 +109,47 @@
     "upgrade": "升级",
     "perMonth": "/月",
     "perYear": "/年"
+  },
+  "marketing": {
+    "nav": {
+      "features": "功能",
+      "industries": "行业",
+      "pricing": "价格",
+      "about": "关于",
+      "faq": "FAQ",
+      "signIn": "登录",
+      "startFree": "免费开始",
+      "dashboard": "仪表板"
+    },
+    "hero": {
+      "kicker": "新功能 · AI 起草 KRA",
+      "trust": "G2 评分 4.8 · 无需信用卡 · 30 分钟内完成设置 · 500+ 团队"
+    },
+    "cta": {
+      "primary": "14 天试用",
+      "secondary": "预约演示",
+      "seeProduct": "查看产品"
+    },
+    "pricing": {
+      "recommended": "推荐",
+      "perUser": "按用户",
+      "perUserSub": "仅为活跃账户付费",
+      "flat": "月度固定",
+      "flatSub": "每层级固定价格",
+      "starter": "入门版",
+      "team": "团队版",
+      "growth": "成长版",
+      "scale": "规模版",
+      "enterprise": "企业版",
+      "free": "免费",
+      "letsTalk": "联系我们"
+    },
+    "footer": {
+      "product": "产品",
+      "company": "公司",
+      "resources": "资源",
+      "legal": "法律",
+      "copyright": "© WorkwrK. 在班加罗尔打造。"
+    }
   }
 }

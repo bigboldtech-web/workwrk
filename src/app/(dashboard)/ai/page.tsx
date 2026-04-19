@@ -10,6 +10,7 @@ import {
   TrendingUp, AlertTriangle, Users, CheckSquare, BarChart3, BookOpen,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 type Message = {
   id: string;
@@ -56,7 +57,7 @@ function renderMarkdown(text: string) {
         const content = line.slice(2);
         return (
           <div key={i} className="flex gap-2 ml-2">
-            <span className="text-purple-400 flex-shrink-0">•</span>
+            <span className="text-[#d4ff2e] flex-shrink-0">•</span>
             <span dangerouslySetInnerHTML={{ __html: boldify(content) }} />
           </div>
         );
@@ -67,7 +68,7 @@ function renderMarkdown(text: string) {
       if (numMatch) {
         return (
           <div key={i} className="flex gap-2 ml-2">
-            <span className="text-purple-400 flex-shrink-0 font-mono text-xs mt-0.5">{numMatch[1]}.</span>
+            <span className="text-[#d4ff2e] flex-shrink-0 font-mono text-xs mt-0.5">{numMatch[1]}.</span>
             <span dangerouslySetInnerHTML={{ __html: boldify(numMatch[2]) }} />
           </div>
         );
@@ -95,7 +96,7 @@ function boldify(text: string): string {
   const escaped = escapeHtml(text);
   return escaped
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')
-    .replace(/`(.+?)`/g, '<code class="bg-border px-1 py-0.5 rounded text-purple-300 text-xs font-mono">$1</code>');
+    .replace(/`(.+?)`/g, '<code class="bg-border px-1 py-0.5 rounded text-[#d4ff2e] text-xs font-mono">$1</code>');
 }
 
 export default function AIPage() {
@@ -226,17 +227,12 @@ export default function AIPage() {
 
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col animate-fade-in">
-      {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg bg-purple-500/10 p-2">
-            <Bot size={24} className="text-purple-400" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight">AI Assistant</h1>
-            <p className="text-muted text-sm">Ask anything about your organization in plain English</p>
-          </div>
-        </div>
+      <div className="mb-4 flex items-center justify-between gap-4 flex-wrap">
+        <PageHeader
+          kicker="AI · private-by-default"
+          title="AI assistant"
+          subtitle="Ask anything about your organization in plain English."
+        />
         {hasConversation && (
           <Button variant="outline" size="sm" onClick={handleClearHistory} className="gap-2 text-muted">
             <Trash2 size={14} /> Clear Chat
@@ -246,10 +242,10 @@ export default function AIPage() {
 
       {/* Digest Banner */}
       {!loadingDigest && digest && !hasConversation && (
-        <Card className="mb-4 border-purple-500/20 bg-purple-500/5">
+        <Card className="mb-4 border-[rgba(212,255,46,0.2)] bg-[rgba(212,255,46,0.06)]">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-3">
-              <BarChart3 size={16} className="text-purple-400" />
+              <BarChart3 size={16} className="text-[#d4ff2e]" />
               <span className="text-sm font-medium">Weekly Digest</span>
               <Badge variant="secondary" className="text-[10px]">{digest.period}</Badge>
             </div>
@@ -283,32 +279,32 @@ export default function AIPage() {
               className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               {msg.role === "assistant" && (
-                <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                  <Sparkles size={16} className="text-purple-400" />
+                <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-[rgba(212,255,46,0.08)] flex items-center justify-center">
+                  <Sparkles size={16} className="text-[#d4ff2e]" />
                 </div>
               )}
               <div
                 className={`max-w-[70%] rounded-xl px-4 py-3 ${
                   msg.role === "user"
-                    ? "bg-purple-600 text-white"
+                    ? "bg-[#d4ff2e] text-[#0a0a0a]"
                     : "bg-surface-2 border border-border text-foreground"
                 }`}
               >
                 {msg.role === "assistant" && (
-                  <p className="text-[10px] text-purple-400 font-mono mb-1 font-medium">workwrk AI</p>
+                  <p className="text-[10px] text-[#d4ff2e] font-mono mb-1 font-medium">workwrk AI</p>
                 )}
                 <div className="text-sm leading-relaxed">
                   {msg.role === "assistant" ? renderMarkdown(msg.content) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
                 </div>
-                <p className={`text-[10px] mt-1 ${msg.role === "user" ? "text-purple-200" : "text-muted"}`}>
+                <p className={`text-[10px] mt-1 ${msg.role === "user" ? "text-[#d4ff2e]" : "text-muted"}`}>
                   {msg.timestamp.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
               {msg.role === "user" && (
-                <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-purple-600/20 flex items-center justify-center">
-                  <User size={16} className="text-purple-400" />
+                <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-[rgba(212,255,46,0.12)] flex items-center justify-center">
+                  <User size={16} className="text-[#d4ff2e]" />
                 </div>
               )}
             </div>
@@ -316,8 +312,8 @@ export default function AIPage() {
 
           {loading && (
             <div className="flex gap-3 justify-start">
-              <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                <Sparkles size={16} className="text-purple-400" />
+              <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-[rgba(212,255,46,0.08)] flex items-center justify-center">
+                <Sparkles size={16} className="text-[#d4ff2e]" />
               </div>
               <div className="bg-surface-2 border border-border rounded-xl px-4 py-3">
                 <div className="flex items-center gap-2 text-sm text-muted">
@@ -342,7 +338,7 @@ export default function AIPage() {
                   <button
                     key={q.text}
                     onClick={() => handleSend(q.text)}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted hover:border-purple-500/40 hover:text-purple-400 transition-colors text-left"
+                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted hover:border-[#d4ff2e]/40 hover:text-[#e2ff6b] transition-colors text-left"
                   >
                     <Icon size={12} className="flex-shrink-0" />
                     <span className="line-clamp-2">{q.text}</span>

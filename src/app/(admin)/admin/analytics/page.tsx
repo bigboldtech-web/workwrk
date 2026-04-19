@@ -52,7 +52,7 @@ const planPrices: Record<string, number> = {
 
 const planColors: Record<string, string> = {
   STARTER: "bg-gray-500",
-  GROWTH: "bg-purple-500",
+  GROWTH: "bg-[#d4ff2e]",
   SCALE: "bg-blue-500",
   ENTERPRISE: "bg-amber-500",
 };
@@ -137,7 +137,7 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardContent className="p-5">
             <p className="text-xs text-muted mb-1">Avg. Revenue Per Org</p>
-            <p className="text-2xl font-bold text-purple-400">
+            <p className="text-2xl font-bold text-[#d4ff2e]">
               {stats && stats.activeOrgs > 0 ? formatCurrency(Math.round((stats.mrr) / stats.activeOrgs)) : "—"}
             </p>
             <p className="text-[10px] text-muted mt-1">ARPU across all plans</p>
@@ -215,7 +215,7 @@ export default function AdminAnalyticsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <BarChart3 size={16} className="text-purple-400" /> Most Active Organizations
+              <BarChart3 size={16} className="text-[#d4ff2e]" /> Most Active Organizations
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -245,7 +245,7 @@ export default function AdminAnalyticsPage() {
         <CardContent>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div className="rounded-lg bg-surface-2 p-4 text-center">
-              <p className="text-2xl font-bold text-purple-400">+{stats?.newOrgsThisMonth ?? 0}</p>
+              <p className="text-2xl font-bold text-[#d4ff2e]">+{stats?.newOrgsThisMonth ?? 0}</p>
               <p className="text-[10px] text-muted mt-1">New orgs this month</p>
             </div>
             <div className="rounded-lg bg-surface-2 p-4 text-center">

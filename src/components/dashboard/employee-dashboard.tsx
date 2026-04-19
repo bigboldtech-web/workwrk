@@ -12,7 +12,7 @@ import {
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-purple-400";
+  if (score >= 70) return "text-[#d4ff2e]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -55,7 +55,7 @@ export function EmployeeDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
-            <Zap size={20} className="mx-auto text-purple-400 mb-1" />
+            <Zap size={20} className="mx-auto text-[#d4ff2e] mb-1" />
             <p className={`text-2xl font-bold font-mono ${stats.compositeScore != null ? getScoreColor(stats.compositeScore) : "text-muted"}`}>
               {stats.compositeScore ?? "N/A"}
             </p>
@@ -117,7 +117,7 @@ export function EmployeeDashboard() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Target size={14} className="text-purple-400" /> My KRAs & KPIs
+              <Target size={14} className="text-[#d4ff2e]" /> My KRAs & KPIs
             </CardTitle>
             <Badge variant="outline" className="text-[10px]">{stats.completionRate}% complete this month</Badge>
           </div>
@@ -130,7 +130,7 @@ export function EmployeeDashboard() {
               <div key={a.id} className="rounded-lg border border-border bg-surface p-3">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <Target size={12} className="text-purple-400" />
+                    <Target size={12} className="text-[#d4ff2e]" />
                     <span className="text-sm font-medium">{a.kra.name}</span>
                     <Badge variant="outline" className="text-[9px]">{a.weightage}%</Badge>
                   </div>
@@ -177,7 +177,7 @@ export function EmployeeDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Target size={14} className="text-purple-400" /> My Goals (OKRs)
+              <Target size={14} className="text-[#d4ff2e]" /> My Goals (OKRs)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">

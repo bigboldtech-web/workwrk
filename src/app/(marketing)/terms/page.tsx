@@ -494,7 +494,7 @@ export default function TermsPage() {
                 Email:{" "}
                 <a
                   href="mailto:legal@workwrk.com"
-                  className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
+                  className="text-[#d4ff2e] underline underline-offset-4 hover:text-[#d4ff2e]"
                 >
                   legal@workwrk.com
                 </a>
@@ -502,7 +502,7 @@ export default function TermsPage() {
                 Website:{" "}
                 <a
                   href="https://workwrk.com"
-                  className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
+                  className="text-[#d4ff2e] underline underline-offset-4 hover:text-[#d4ff2e]"
                 >
                   https://workwrk.com
                 </a>

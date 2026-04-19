@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 const ACTIVITY_ICONS: Record<string, any> = {
   task_created: CheckSquare,
@@ -28,7 +29,7 @@ const ACTIVITY_ICONS: Record<string, any> = {
 const ACTIVITY_COLORS: Record<string, string> = {
   task_created: "text-blue-400 bg-blue-500/10",
   task_completed: "text-green-400 bg-green-500/10",
-  task_updated: "text-purple-400 bg-purple-500/10",
+  task_updated: "text-[#d4ff2e] bg-[rgba(212,255,46,0.08)]",
   user_added: "text-cyan-400 bg-cyan-500/10",
   sop_created: "text-orange-400 bg-orange-500/10",
   meeting_created: "text-yellow-400 bg-yellow-500/10",
@@ -135,10 +136,11 @@ export default function ActivityPage() {
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Activity Feed</h1>
-          <p className="text-muted text-sm mt-1">Track what's happening across your organization</p>
-        </div>
+        <PageHeader
+          kicker="Activity · org-wide feed"
+          title="Activity feed"
+          subtitle="Track what's happening across your organization."
+        />
         <ErrorState message={error} onRetry={() => fetchActivity()} />
       </div>
     );
@@ -146,11 +148,11 @@ export default function ActivityPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Header */}
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Activity Feed</h1>
-        <p className="text-muted text-sm mt-1">Track what's happening across your organization</p>
-      </div>
+      <PageHeader
+        kicker="Activity · org-wide feed"
+        title="Activity feed"
+        subtitle="Track what's happening across your organization."
+      />
 
       {/* Tabs for My / Team */}
       <Tabs value={scope} onValueChange={setScope}>
@@ -171,7 +173,7 @@ export default function ActivityPage() {
               onClick={() => setTypeFilter(f.value)}
               className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                 typeFilter === f.value
-                  ? "border-purple-500 bg-purple-500/10 text-purple-400"
+                  ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
                   : "border-border text-muted hover:border-muted-2"
               }`}
             >
@@ -186,7 +188,7 @@ export default function ActivityPage() {
                 onClick={() => setShowMemberPicker(!showMemberPicker)}
                 className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${
                   selectedActorIds.length > 0
-                    ? "border-purple-500 bg-purple-500/10 text-purple-400"
+                    ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
                     : "border-border text-muted hover:border-muted-2"
                 }`}
               >
@@ -201,7 +203,7 @@ export default function ActivityPage() {
                     <span className="text-[10px] uppercase tracking-wider text-muted">Show activity from</span>
                     <button
                       onClick={() => setSelectedActorIds([])}
-                      className="text-[10px] text-purple-400 hover:text-purple-300"
+                      className="text-[10px] text-[#d4ff2e] hover:text-[#e2ff6b]"
                     >
                       Show all
                     </button>
@@ -222,7 +224,7 @@ export default function ActivityPage() {
                                 checked ? prev.filter((id) => id !== m.id) : [...prev, m.id]
                               );
                             }}
-                            className="accent-purple-500"
+                            className="accent-[#d4ff2e]"
                           />
                           <span className="text-sm">
                             {m.firstName} {m.lastName}
@@ -233,7 +235,7 @@ export default function ActivityPage() {
                     })}
                   </div>
                   <div className="border-t border-border mt-2 pt-2 flex justify-end">
-                    <button onClick={() => setShowMemberPicker(false)} className="text-xs px-3 py-1 rounded-md bg-purple-500 text-white">Done</button>
+                    <button onClick={() => setShowMemberPicker(false)} className="text-xs px-3 py-1 rounded-md bg-[#d4ff2e] text-[#0a0a0a]">Done</button>
                   </div>
                 </div>
               )}

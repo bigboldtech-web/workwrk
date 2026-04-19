@@ -1,7 +1,66 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
+
+// Google OAuth is only registered when the env vars are present. This
+// keeps local dev painless — the app still boots with only credentials
+// if you haven't set GOOGLE_CLIENT_ID yet.
+const googleEnabled =
+  !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
+
+const providers = [
+  CredentialsProvider({
+    name: "credentials",
+    credentials: {
+      email: { label: "Email", type: "email" },
+      password: { label: "Password", type: "password" },
+    },
+    async authorize(credentials) {
+      if (!credentials?.email || !credentials?.password) {
+        throw new Error("Missing credentials");
+      }
+
+      const user = await prisma.user.findFirst({
+        where: { email: credentials.email },
+        include: { organization: true },
+      });
+
+      if (!user) {
+        throw new Error("Invalid credentials");
+      }
+
+      const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
+      if (!isValid) {
+        throw new Error("Invalid credentials");
+      }
+
+      return {
+        id: user.id,
+        email: user.email,
+        name: `${user.firstName} ${user.lastName}`,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        accessLevel: user.accessLevel,
+        organizationId: user.organizationId,
+        organizationName: user.organization.name,
+        avatar: user.avatar,
+      };
+    },
+  }),
+];
+
+if (googleEnabled) {
+  providers.push(
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      // Standard scope — we only need identity + email.
+      authorization: { params: { prompt: "select_account" } },
+    }) as unknown as (typeof providers)[number],
+  );
+}
 
 export const authOptions: NextAuthOptions = {
   session: {
@@ -11,56 +70,53 @@ export const authOptions: NextAuthOptions = {
     signIn: "/login",
     newUser: "/onboarding",
   },
-  providers: [
-    CredentialsProvider({
-      name: "credentials",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          throw new Error("Missing credentials");
-        }
-
-        const user = await prisma.user.findFirst({
-          where: { email: credentials.email },
-          include: { organization: true },
-        });
-
-        if (!user) {
-          throw new Error("Invalid credentials");
-        }
-
-        const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
-        if (!isValid) {
-          throw new Error("Invalid credentials");
-        }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: `${user.firstName} ${user.lastName}`,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          accessLevel: user.accessLevel,
-          organizationId: user.organizationId,
-          organizationName: user.organization.name,
-          avatar: user.avatar,
-        };
-      },
-    }),
-  ],
+  providers,
   callbacks: {
-    async jwt({ token, user }) {
+    /**
+     * Google sign-in rule: only admit users whose email already exists
+     * in the DB (via invitation or earlier credentials signup). We never
+     * auto-create an organization from an SSO attempt — that's a
+     * deliberate /register flow decision.
+     */
+    async signIn({ account, profile }) {
+      if (account?.provider !== "google") return true;
+      const email = (profile as { email?: string } | undefined)?.email?.toLowerCase();
+      if (!email) return false;
+      const existing = await prisma.user.findFirst({
+        where: { email, deletedAt: null },
+        select: { id: true },
+      });
+      return !!existing;
+    },
+
+    async jwt({ token, user, account }) {
       if (user) {
-        token.id = user.id;
+        token.id = (user as any).id;
         token.accessLevel = (user as any).accessLevel;
         token.organizationId = (user as any).organizationId;
         token.organizationName = (user as any).organizationName;
         token.firstName = (user as any).firstName;
         token.lastName = (user as any).lastName;
         token.avatar = (user as any).avatar;
+      }
+
+      // Google flow: first-time sign-in returns only minimal identity;
+      // hydrate the rest by email lookup so the rest of the app can rely
+      // on accessLevel / organizationId being populated.
+      if (account?.provider === "google" && !token.id && token.email) {
+        const dbUser = await prisma.user.findFirst({
+          where: { email: (token.email as string).toLowerCase(), deletedAt: null },
+          include: { organization: true },
+        });
+        if (dbUser) {
+          token.id = dbUser.id;
+          token.accessLevel = dbUser.accessLevel;
+          token.organizationId = dbUser.organizationId;
+          token.organizationName = dbUser.organization.name;
+          token.firstName = dbUser.firstName;
+          token.lastName = dbUser.lastName;
+          token.avatar = dbUser.avatar;
+        }
       }
       return token;
     },

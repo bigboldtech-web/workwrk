@@ -18,6 +18,7 @@ import {
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface ReviewCycle {
@@ -171,14 +172,15 @@ export default function ReviewsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Performance Reviews</h1>
-          <p className="text-muted text-sm mt-1">Manage review cycles, assessments, and outcomes</p>
-        </div>
+      <PageHeader
+        kicker="Reviews · 48-hour cycles"
+        title="Performance reviews"
+        subtitle="Manage review cycles, assessments, and outcomes. Pre-filled with the quarter's live data."
+      />
+      <div className="flex items-center justify-end gap-2 flex-wrap">
         <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
           <DialogTrigger asChild>
-            <Button className="gap-2"><Plus size={16} /> New Cycle</Button>
+            <Button className="gap-2"><Plus size={16} /> New cycle</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Create Review Cycle</DialogTitle></DialogHeader>
@@ -213,7 +215,7 @@ export default function ReviewsPage() {
       {/* Active Cycle Banner */}
       {!loading && activeCycle && (
         <Card
-          className="border-purple-500/30 bg-purple-500/5 cursor-pointer hover:border-purple-500/50 transition-colors"
+          className="border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.06)] cursor-pointer hover:border-[#d4ff2e]/50 transition-colors"
           onClick={() => router.push(`/reviews/${activeCycle.id}`)}
         >
           <CardContent className="p-5">
@@ -235,8 +237,8 @@ export default function ReviewsPage() {
               return (
                 <>
                   <div className="flex items-center gap-2 mb-2">
-                    <Progress value={pct} className="h-2 flex-1" indicatorClassName="bg-purple-500" />
-                    <span className="text-sm font-mono text-purple-400">{pct}%</span>
+                    <Progress value={pct} className="h-2 flex-1" indicatorClassName="bg-[#d4ff2e]" />
+                    <span className="text-sm font-mono text-[#d4ff2e]">{pct}%</span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted">
                     <span className="flex items-center gap-1"><Users size={12} /> {total} total</span>

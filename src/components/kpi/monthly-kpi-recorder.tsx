@@ -172,7 +172,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
     return (
       <Card>
         <CardContent className="p-8 text-center">
-          <Target size={40} className="mx-auto text-purple-400 mb-4" />
+          <Target size={40} className="mx-auto text-[#d4ff2e] mb-4" />
           <h3 className="text-lg font-semibold mb-2">Record Monthly KPIs</h3>
           <p className="text-sm text-muted mb-6">
             Select a period to record or update KPI scores
@@ -197,7 +197,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
     return (
       <Card>
         <CardContent className="p-8 text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent mx-auto" />
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent mx-auto" />
           <p className="text-sm text-muted mt-3">Loading KPIs...</p>
         </CardContent>
       </Card>
@@ -246,7 +246,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 min-w-[120px]">
                 <Progress value={overallProgress} className="h-2 flex-1" />
-                <span className="text-xs font-mono text-purple-400">{overallProgress}%</span>
+                <span className="text-xs font-mono text-[#d4ff2e]">{overallProgress}%</span>
               </div>
               <Button onClick={handleSaveAll} disabled={saving} className="gap-1.5">
                 <Save size={14} /> {saving ? "Saving..." : "Save All"}
@@ -333,7 +333,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                           <p className={`text-sm font-mono font-bold ${
                             score == null ? "text-muted-2"
                             : score >= 90 ? "text-green-400"
-                            : score >= 70 ? "text-purple-400"
+                            : score >= 70 ? "text-[#d4ff2e]"
                             : score >= 50 ? "text-orange-400"
                             : "text-red-400"
                           }`}>

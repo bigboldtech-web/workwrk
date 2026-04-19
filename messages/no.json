@@ -109,5 +109,47 @@
     "upgrade": "Oppgrader",
     "perMonth": "/mnd",
     "perYear": "/år"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Funksjoner",
+      "industries": "Bransjer",
+      "pricing": "Priser",
+      "about": "Om oss",
+      "faq": "FAQ",
+      "signIn": "Logg inn",
+      "startFree": "Start gratis",
+      "dashboard": "Dashbord"
+    },
+    "hero": {
+      "kicker": "Nytt · KRAs skrevet av AI",
+      "trust": "4.8 på G2 · Ingen kreditkort · 30 min for å starte · 500+ team"
+    },
+    "cta": {
+      "primary": "14-dagers prøveperiode",
+      "secondary": "Bestill demo",
+      "seeProduct": "Se produktet"
+    },
+    "pricing": {
+      "recommended": "Anbefalt",
+      "perUser": "Per bruker",
+      "perUserSub": "betal bare for aktive kontoer",
+      "flat": "Månedlig fast",
+      "flatSub": "fast pris per nivå",
+      "starter": "Starter",
+      "team": "Team",
+      "growth": "Vekst",
+      "scale": "Skala",
+      "enterprise": "Enterprise",
+      "free": "Gratis",
+      "letsTalk": "La oss snakke"
+    },
+    "footer": {
+      "product": "Produkt",
+      "company": "Selskap",
+      "resources": "Ressurser",
+      "legal": "Juridisk",
+      "copyright": "© WorkwrK. Laget i Bengaluru."
+    }
   }
 }

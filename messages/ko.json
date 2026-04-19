@@ -109,5 +109,47 @@
     "upgrade": "업그레이드",
     "perMonth": "/월",
     "perYear": "/년"
+  },
+  "marketing": {
+    "nav": {
+      "features": "기능",
+      "industries": "산업",
+      "pricing": "요금제",
+      "about": "소개",
+      "faq": "FAQ",
+      "signIn": "로그인",
+      "startFree": "무료 시작",
+      "dashboard": "대시보드"
+    },
+    "hero": {
+      "kicker": "신규 · AI가 작성한 KRA",
+      "trust": "G2에서 4.8 · 신용카드 불필요 · 30분 만에 시작 · 500+ 팀"
+    },
+    "cta": {
+      "primary": "14일 무료 체험",
+      "secondary": "데모 예약",
+      "seeProduct": "제품 보기"
+    },
+    "pricing": {
+      "recommended": "추천",
+      "perUser": "사용자별",
+      "perUserSub": "활성 계정만 지불",
+      "flat": "월정액",
+      "flatSub": "티어별 고정 가격",
+      "starter": "스타터",
+      "team": "팀",
+      "growth": "그로스",
+      "scale": "스케일",
+      "enterprise": "엔터프라이즈",
+      "free": "무료",
+      "letsTalk": "문의하기"
+    },
+    "footer": {
+      "product": "제품",
+      "company": "회사",
+      "resources": "리소스",
+      "legal": "법적",
+      "copyright": "© WorkwrK. 벵갈루루에서 제작."
+    }
   }
 }

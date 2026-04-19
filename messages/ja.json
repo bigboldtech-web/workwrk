@@ -109,5 +109,47 @@
     "upgrade": "アップグレード",
     "perMonth": "/月",
     "perYear": "/年"
+  },
+  "marketing": {
+    "nav": {
+      "features": "機能",
+      "industries": "業界",
+      "pricing": "料金",
+      "about": "会社情報",
+      "faq": "FAQ",
+      "signIn": "ログイン",
+      "startFree": "無料で始める",
+      "dashboard": "ダッシュボード"
+    },
+    "hero": {
+      "kicker": "新機能 · AIがKRAを作成",
+      "trust": "G2で4.8 · クレジットカード不要 · 30分で開始 · 500以上のチーム"
+    },
+    "cta": {
+      "primary": "14日間無料トライアル",
+      "secondary": "デモを予約",
+      "seeProduct": "製品を見る"
+    },
+    "pricing": {
+      "recommended": "おすすめ",
+      "perUser": "ユーザー単位",
+      "perUserSub": "アクティブアカウントのみ",
+      "flat": "月額固定",
+      "flatSub": "プラン別固定料金",
+      "starter": "スターター",
+      "team": "チーム",
+      "growth": "グロース",
+      "scale": "スケール",
+      "enterprise": "エンタープライズ",
+      "free": "無料",
+      "letsTalk": "ご相談ください"
+    },
+    "footer": {
+      "product": "製品",
+      "company": "会社",
+      "resources": "リソース",
+      "legal": "法的情報",
+      "copyright": "© WorkwrK. ベンガルール発。"
+    }
   }
 }

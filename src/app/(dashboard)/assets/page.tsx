@@ -15,6 +15,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageHeader } from "@/components/dashboard/page-header";
 import {
   Package, Plus, Search, Laptop, Monitor, Smartphone, Tablet, Keyboard,
   Mouse, Headphones, Video, Car, CreditCard, Armchair, Pencil, Trash2,
@@ -50,7 +51,7 @@ function getTypeIcon(type: string) {
 function getStatusColor(status: string) {
   switch (status) {
     case "AVAILABLE": return "bg-green-500/10 text-green-400 border-green-500/20";
-    case "ASSIGNED": return "bg-purple-500/10 text-purple-400 border-purple-500/20";
+    case "ASSIGNED": return "bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] border-[rgba(212,255,46,0.2)]";
     case "IN_REPAIR": return "bg-orange-500/10 text-orange-400 border-orange-500/20";
     case "RETIRED": return "bg-zinc-500/10 text-zinc-400 border-zinc-500/20";
     case "LOST": return "bg-red-500/10 text-red-400 border-red-500/20";
@@ -247,23 +248,25 @@ export default function AssetsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Assets</h1>
-          <p className="text-muted text-sm mt-1">Track and manage company assets assigned to employees</p>
-        </div>
-        {isManagerRole && (
-          <Button className="gap-2" onClick={() => { resetForm(); setShowAddDialog(true); }}>
-            <Plus size={16} /> Add Asset
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        kicker="Assets · inventory"
+        title="Assets"
+        subtitle="Track and manage company assets assigned to employees."
+        actions={
+          isManagerRole
+            ? [{
+                label: "Add asset",
+                onClick: () => { resetForm(); setShowAddDialog(true); },
+                icon: <Plus size={14} />,
+              }]
+            : undefined
+        }
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold">{totalAssets}</p><p className="text-xs text-muted">Total Assets</p></CardContent></Card>
-        <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-purple-400">{assigned}</p><p className="text-xs text-muted">Assigned</p></CardContent></Card>
+        <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-[#d4ff2e]">{assigned}</p><p className="text-xs text-muted">Assigned</p></CardContent></Card>
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-green-400">{available}</p><p className="text-xs text-muted">Available</p></CardContent></Card>
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-orange-400">{inRepair}</p><p className="text-xs text-muted">In Repair</p></CardContent></Card>
       </div>
@@ -314,7 +317,7 @@ export default function AssetsPage() {
               <button
                 key={asset.id}
                 onClick={() => setSelectedAsset(asset)}
-                className={`w-full text-left p-3 rounded-lg border transition-all ${isSelected ? "border-purple-500/40 bg-purple-600/5" : "border-border hover:bg-surface-2"}`}
+                className={`w-full text-left p-3 rounded-lg border transition-all ${isSelected ? "border-[rgba(212,255,46,0.35)] bg-[#d4ff2e]/5" : "border-border hover:bg-surface-2"}`}
               >
                 <div className="flex items-center gap-3">
                   <div className="shrink-0 w-8 h-8 rounded-lg bg-surface-2 flex items-center justify-center">
@@ -331,7 +334,7 @@ export default function AssetsPage() {
                       <span className="text-[11px] text-muted">{ASSET_TYPES.find((t) => t.value === asset.type)?.label}</span>
                       {asset.brand && <span className="text-[11px] text-muted">· {asset.brand}</span>}
                       {asset.assignedTo && (
-                        <span className="text-[11px] text-purple-400">· {asset.assignedTo.firstName} {asset.assignedTo.lastName}</span>
+                        <span className="text-[11px] text-[#d4ff2e]">· {asset.assignedTo.firstName} {asset.assignedTo.lastName}</span>
                       )}
                     </div>
                   </div>
@@ -394,7 +397,7 @@ export default function AssetsPage() {
                     <p className="text-[10px] uppercase tracking-wider text-muted mb-2">Assigned To</p>
                     <div className="flex items-center gap-3">
                       <Avatar className="h-8 w-8">
-                        <AvatarFallback className="text-xs bg-purple-600/20 text-purple-400">
+                        <AvatarFallback className="text-xs bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]">
                           {selectedAsset.assignedTo.firstName[0]}{selectedAsset.assignedTo.lastName[0]}
                         </AvatarFallback>
                       </Avatar>

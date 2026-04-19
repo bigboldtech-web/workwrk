@@ -49,7 +49,7 @@ function getStatusBadge(status: string) {
 function getPlanColor(plan: string) {
   switch (plan) {
     case "STARTER": return "text-gray-400";
-    case "GROWTH": return "text-purple-400";
+    case "GROWTH": return "text-[#d4ff2e]";
     case "SCALE": return "text-blue-400";
     case "ENTERPRISE": return "text-amber-400";
     default: return "text-gray-400";
@@ -190,7 +190,7 @@ export default function AdminCompaniesPage() {
                   <tr key={c.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
                     <td className="p-4">
                       <div className="flex items-center gap-2">
-                        <Building2 size={14} className="text-purple-400" />
+                        <Building2 size={14} className="text-[#d4ff2e]" />
                         <div>
                           <span className="text-sm font-medium">{c.name}</span>
                           <p className="text-[10px] text-muted">{c.slug}{c.domain ? ` · ${c.domain}` : ""}</p>
@@ -248,7 +248,7 @@ export default function AdminCompaniesPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Building2 size={18} className="text-purple-400" />
+              <Building2 size={18} className="text-[#d4ff2e]" />
               {selected?.name}
             </DialogTitle>
           </DialogHeader>
@@ -273,7 +273,7 @@ export default function AdminCompaniesPage() {
                   <p className="text-[10px] text-muted">KRAs</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
-                  <BookOpen size={14} className="mx-auto mb-1 text-purple-400" />
+                  <BookOpen size={14} className="mx-auto mb-1 text-[#d4ff2e]" />
                   <p className="text-lg font-bold">{selected._count.sops}</p>
                   <p className="text-[10px] text-muted">SOPs</p>
                 </div>

@@ -1,6 +1,7 @@
-import { MarketingNav } from "@/components/marketing/nav";
-import { MarketingFooter } from "@/components/marketing/footer";
-import "./marketing.css";
+import { BentoRoot } from "@/components/bento/bento-root";
+import { ScrollProgress } from "@/components/bento/scroll-progress";
+import { BentoNav } from "@/components/bento/bento-nav";
+import { BentoFooter } from "@/components/bento/bento-footer";
 
 export default function MarketingLayout({
   children,
@@ -8,10 +9,11 @@ export default function MarketingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="marketing-page relative min-h-screen bg-background font-[family-name:var(--font-outfit)]">
-      <MarketingNav />
-      <main className="relative z-[1]">{children}</main>
-      <MarketingFooter />
-    </div>
+    <BentoRoot>
+      <ScrollProgress />
+      <BentoNav />
+      <main>{children}</main>
+      <BentoFooter />
+    </BentoRoot>
   );
 }

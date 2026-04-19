@@ -2,34 +2,34 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Light theme (default) */
+/* Light theme (default) — lime-accented on a neutral white */
 :root {
   --color-background: #FFFFFF;
-  --color-foreground: #1A1A2E;
-  --color-surface: #F5F5F8;
-  --color-surface-2: #EBEBF0;
-  --color-surface-3: #E0E0E8;
-  --color-border: #D8D8E0;
-  --color-muted: #6B6B80;
-  --color-muted-2: #9898A8;
-  --color-accent: #6C5CE7;
-  --color-accent-light: #A29BFE;
-  --scrollbar-color: #D8D8E0;
+  --color-foreground: #0A0A0A;
+  --color-surface: #F7F7F6;
+  --color-surface-2: #EFEFED;
+  --color-surface-3: #E5E5E2;
+  --color-border: #DADAD7;
+  --color-muted: #707070;
+  --color-muted-2: #9A9A9A;
+  --color-accent: #d4ff2e;
+  --color-accent-light: #e2ff6b;
+  --scrollbar-color: #DADAD7;
 }
 
-/* Dark theme */
+/* Dark theme — bento palette */
 .dark {
-  --color-background: #0A0A0F;
-  --color-foreground: #E8E8F0;
-  --color-surface: #12121A;
-  --color-surface-2: #1A1A26;
-  --color-surface-3: #0D0D14;
-  --color-border: #2A2A3A;
-  --color-muted: #8888A0;
-  --color-muted-2: #6B6B80;
-  --color-accent: #6C5CE7;
-  --color-accent-light: #A29BFE;
-  --scrollbar-color: #2A2A3A;
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-surface: #141414;
+  --color-surface-2: #1a1a1a;
+  --color-surface-3: #222222;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-muted: #a0a0a0;
+  --color-muted-2: #707070;
+  --color-accent: #d4ff2e;
+  --color-accent-light: #e2ff6b;
+  --scrollbar-color: rgba(255, 255, 255, 0.14);
 }
 
 @theme inline {
@@ -45,6 +45,29 @@
   --color-accent-light: var(--color-accent-light);
   --font-sans: var(--font-outfit);
   --font-mono: var(--font-mono);
+
+  /* === Bento design system === */
+  --color-bento-bg: #0a0a0a;
+  --color-bento-card: #141414;
+  --color-bento-card-2: #1a1a1a;
+  --color-bento-card-3: #222222;
+  --color-bento-line: rgba(255, 255, 255, 0.08);
+  --color-bento-line-2: rgba(255, 255, 255, 0.14);
+  --color-bento-fg: #fafafa;
+  --color-bento-fg-off: #ededed;
+  --color-bento-t2: #a0a0a0;
+  --color-bento-t3: #707070;
+  --color-bento-t4: #4a4a4a;
+  --color-lime: #d4ff2e;
+  --color-lime-dim: #a8cc24;
+  --color-pink-accent: #ff3d8a;
+  --color-blue-accent: #4a9eff;
+  --color-amber-accent: #ff9933;
+  --color-violet-accent: #a67dff;
+  --color-mint-accent: #5eead4;
+
+  --font-geist: var(--font-geist);
+  --font-geist-mono: var(--font-geist-mono);
 }
 
 * {
@@ -73,10 +96,13 @@ body {
   font-size: 13px;
 }
 
-/* Compact global overrides */
-h1 { font-size: 1.25rem !important; }
-h2 { font-size: 1.1rem !important; }
-h3 { font-size: 0.95rem !important; }
+/* Compact global defaults for the dashboard.
+ * Wrapped in :where() so specificity is 0 — any class-based size wins.
+ * Without this, the global !important was crushing clamp() headlines on
+ * marketing pages to 20px/18px/15px. */
+:where(h1) { font-size: 1.25rem; }
+:where(h2) { font-size: 1.1rem; }
+:where(h3) { font-size: 0.95rem; }
 
 /* Compact cards */
 [class*="CardContent"] { padding: 12px !important; }
@@ -102,8 +128,8 @@ h3 { font-size: 0.95rem !important; }
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.4); }
-  50% { box-shadow: 0 0 20px 4px rgba(108, 92, 231, 0.2); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 255, 46, 0.4); }
+  50% { box-shadow: 0 0 20px 4px rgba(212, 255, 46, 0.2); }
 }
 
 .animate-pulse-glow {

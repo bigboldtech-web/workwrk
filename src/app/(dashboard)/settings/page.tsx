@@ -20,6 +20,7 @@ import { invalidatePermissionCache } from "@/hooks/use-permission";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/components/ui/toast";
 import { PrivacyControls } from "@/components/settings/privacy-controls";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface SettingsData {
   organization: {
@@ -190,7 +191,7 @@ function AccessControlManager() {
               <button
                 key={al.value}
                 onClick={() => setActiveLevel(al.value)}
-                className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${isActive ? "bg-purple-600/15 text-purple-300" : "hover:bg-surface-2 text-foreground"}`}
+                className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${isActive ? "bg-[rgba(212,255,46,0.1)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground"}`}
               >
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium">{al.label}</span>
@@ -403,7 +404,7 @@ function TeamMembersList() {
               return (
                 <div key={member.id} className="flex items-center gap-3 p-3 hover:bg-surface-2 transition-colors">
                   <Avatar className="h-9 w-9">
-                    <AvatarFallback className="bg-purple-600/20 text-purple-400 text-xs">
+                    <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xs">
                       {member.firstName?.[0]}{member.lastName?.[0]}
                     </AvatarFallback>
                   </Avatar>
@@ -525,7 +526,7 @@ function KRACategoriesManager() {
           <div className="flex items-center gap-1">
             {editingId === cat.id ? (
               <>
-                <Button variant="ghost" size="sm" className="h-6 text-xs text-purple-400" onClick={() => saveEdit(cat.id)}>Save</Button>
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-[#d4ff2e]" onClick={() => saveEdit(cat.id)}>Save</Button>
                 <Button variant="ghost" size="sm" className="h-6 text-xs text-muted" onClick={() => setEditingId(null)}>Cancel</Button>
               </>
             ) : (
@@ -591,7 +592,7 @@ function SOPCategoriesManager() {
             ))}
             <div className="flex items-center gap-1 mt-1">
               <Input value={newSubcats[cat.id] || ""} onChange={(e) => setNewSubcats({ ...newSubcats, [cat.id]: e.target.value })} placeholder="Add subcategory" className="h-6 text-[10px]" onKeyDown={(e) => e.key === "Enter" && addSubcategory(cat.id)} />
-              <Button variant="ghost" size="sm" className="h-6 text-[10px] text-purple-400" onClick={() => addSubcategory(cat.id)}>+</Button>
+              <Button variant="ghost" size="sm" className="h-6 text-[10px] text-[#d4ff2e]" onClick={() => addSubcategory(cat.id)}>+</Button>
             </div>
           </div>
         </div>
@@ -942,7 +943,7 @@ export default function SettingsPage() {
     return (
       <button
         onClick={onChange}
-        className={`h-6 w-11 rounded-full transition-colors ${checked ? "bg-purple-600" : "bg-border"}`}
+        className={`h-6 w-11 rounded-full transition-colors ${checked ? "bg-[#d4ff2e]" : "bg-border"}`}
       >
         <span className={`block h-5 w-5 rounded-full bg-white transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`} />
       </button>
@@ -970,10 +971,11 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Settings</h1>
-          <p className="text-muted text-sm mt-1">Manage your organization settings</p>
-        </div>
+        <PageHeader
+          kicker="Settings · organization"
+          title="Settings"
+          subtitle="Manage your organization settings and preferences."
+        />
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-48 animate-pulse rounded-xl bg-surface-2" />
@@ -987,10 +989,11 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Settings</h1>
-        <p className="text-muted text-sm mt-1">Manage your organization settings and preferences</p>
-      </div>
+      <PageHeader
+        kicker="Settings · organization"
+        title="Settings"
+        subtitle="Manage your organization settings and preferences."
+      />
 
       <Tabs defaultValue="general">
         <TabsList className="flex-wrap">
@@ -1018,7 +1021,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Timezone</Label>
-                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
+                  <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]">
                     <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
                     <option value="America/New_York">America/New_York (EST)</option>
                     <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
@@ -1029,7 +1032,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Currency</Label>
-                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
+                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]">
                     <option value="INR">INR (&#8377;)</option>
                     <option value="USD">USD ($)</option>
                     <option value="EUR">EUR (&euro;)</option>
@@ -1040,7 +1043,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Fiscal Year Start</Label>
-                  <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(parseInt(e.target.value))} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
+                  <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(parseInt(e.target.value))} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]">
                     {MONTH_NAMES.map((name, i) => (
                       <option key={i} value={i + 1}>{name}</option>
                     ))}
@@ -1059,7 +1062,7 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Default Review Frequency</Label>
-                <select value={reviewFrequency} onChange={(e) => setReviewFrequency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500">
+                <select value={reviewFrequency} onChange={(e) => setReviewFrequency(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]">
                   <option value="MONTHLY">Monthly</option>
                   <option value="QUARTERLY">Quarterly</option>
                   <option value="ANNUALLY">Annually</option>
@@ -1314,7 +1317,7 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {/* Global email toggle */}
-              <div className="flex items-center justify-between rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
+              <div className="flex items-center justify-between rounded-lg border border-[rgba(212,255,46,0.2)] bg-[rgba(212,255,46,0.06)] p-3">
                 <div>
                   <span className="text-sm font-medium">Enable email notifications globally</span>
                   <p className="text-xs text-muted">Turn off to disable all email notifications for the company</p>
@@ -1446,7 +1449,7 @@ export default function SettingsPage() {
               <CardTitle className="text-base">Current Plan</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between rounded-lg border border-purple-500/30 bg-purple-500/5 p-4">
+              <div className="flex items-center justify-between rounded-lg border border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.06)] p-4">
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold text-lg">{plan}</h3>
@@ -1473,7 +1476,7 @@ export default function SettingsPage() {
                       </p>
                       <div className="mt-2 h-1.5 w-full rounded-full bg-border">
                         <div
-                          className={`h-full rounded-full transition-all ${isOver ? "bg-red-500" : "bg-purple-500"}`}
+                          className={`h-full rounded-full transition-all ${isOver ? "bg-red-500" : "bg-[#d4ff2e]"}`}
                           style={{ width: `${Math.min(pct, 100)}%` }}
                         />
                       </div>

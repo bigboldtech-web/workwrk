@@ -109,7 +109,7 @@ export function KraCategoryPicker({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-500"
+        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]"
       >
         <span className="flex-1 truncate text-left">
           {value || <span className="text-muted">{placeholder}</span>}
@@ -136,9 +136,9 @@ export function KraCategoryPicker({
                         if (e.key === "Escape") setEditingId(null);
                       }}
                       autoFocus
-                      className="flex-1 bg-transparent text-sm outline-none border-b border-purple-500 py-1.5 px-1"
+                      className="flex-1 bg-transparent text-sm outline-none border-b border-[#d4ff2e] py-1.5 px-1"
                     />
-                    <button onClick={() => saveEdit(c.id, c.name)} className="p-1 text-purple-400 hover:text-purple-300">
+                    <button onClick={() => saveEdit(c.id, c.name)} className="p-1 text-[#d4ff2e] hover:text-[#d4ff2e]">
                       <Check size={14} />
                     </button>
                     <button onClick={() => setEditingId(null)} className="p-1 text-muted hover:text-foreground">
@@ -150,10 +150,10 @@ export function KraCategoryPicker({
                     <button
                       type="button"
                       onClick={() => { onChange(c.name); setOpen(false); }}
-                      className={`flex-1 text-left text-sm py-1.5 px-1 rounded ${value === c.name ? "text-purple-300" : "text-foreground"}`}
+                      className={`flex-1 text-left text-sm py-1.5 px-1 rounded ${value === c.name ? "text-[#d4ff2e]" : "text-foreground"}`}
                     >
                       {c.name}
-                      {value === c.name && <span className="ml-2 text-purple-400 text-xs">✓</span>}
+                      {value === c.name && <span className="ml-2 text-[#d4ff2e] text-xs">✓</span>}
                     </button>
                     <button
                       onClick={() => { setEditingId(c.id); setEditName(c.name); }}
@@ -188,12 +188,12 @@ export function KraCategoryPicker({
                   }}
                   placeholder="Category name"
                   autoFocus
-                  className="flex-1 h-8 rounded-md border border-border bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-purple-500"
+                  className="flex-1 h-8 rounded-md border border-border bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-[#d4ff2e]"
                 />
                 <button
                   onClick={addCategory}
                   disabled={busy || !newName.trim()}
-                  className="px-2 h-8 rounded-md bg-purple-500 text-white text-xs disabled:opacity-50"
+                  className="px-2 h-8 rounded-md bg-[#d4ff2e] text-[#0a0a0a] text-xs disabled:opacity-50"
                 >
                   Add
                 </button>
@@ -208,7 +208,7 @@ export function KraCategoryPicker({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-purple-400 hover:bg-surface-2"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[#d4ff2e] hover:bg-surface-2"
               >
                 <Plus size={12} /> New category
               </button>

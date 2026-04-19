@@ -72,7 +72,7 @@ export function PrivacyControls() {
       <Card>
         <CardContent className="p-4 space-y-3">
           <div className="flex items-start gap-3">
-            <Cookie size={18} className="mt-1 text-purple-400 shrink-0" />
+            <Cookie size={18} className="mt-1 text-[#d4ff2e] shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-semibold">Cookie preferences</p>
               <p className="text-xs text-muted mt-0.5">
@@ -91,7 +91,7 @@ export function PrivacyControls() {
             </Button>
           </div>
           <div className="flex items-start gap-3">
-            <ShieldCheck size={18} className="mt-1 text-purple-400 shrink-0" />
+            <ShieldCheck size={18} className="mt-1 text-[#d4ff2e] shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-semibold">Withdraw all consent</p>
               <p className="text-xs text-muted mt-0.5">
@@ -108,7 +108,7 @@ export function PrivacyControls() {
       <Card>
         <CardContent className="p-4 space-y-3">
           <div className="flex items-start gap-3">
-            <Download size={18} className="mt-1 text-purple-400 shrink-0" />
+            <Download size={18} className="mt-1 text-[#d4ff2e] shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-semibold">Download my data</p>
               <p className="text-xs text-muted mt-0.5">

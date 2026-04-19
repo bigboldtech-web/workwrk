@@ -1,0 +1,73 @@
+# WorkwrK
+
+> WorkwrK is the Business Operating System for teams of 25–500 people. One shared data model across 12 modules — people, KPIs, KRAs, SOPs, reviews, OKRs, tasks, kudos, AI, analytics, integrations, access — that replaces 10–15 disconnected tools.
+
+WorkwrK is global: eighteen languages, twenty-one currencies, auto-detected from the visitor's browser and IP. RTL locales (Arabic, Hebrew) work out of the box. Built by operators at BigBoldTech, shipping from Bengaluru. Private-by-default architecture — your data is never used for AI training. Data residency options in India, EU, and US on Scale+. GDPR and CCPA compliance is a first-class feature, not a tier.
+
+## Positioning
+
+- Category: Business Operating System (not HRMS, not performance-only, not project-mgmt-only)
+- Differentiator: One shared data model across 12 modules — not 12 products with Zapier in between
+- Sweet spot: Growing teams scaling from 25 to 500 people, where process pain peaks
+- Replaces: performance tools, SOP repositories, task managers, recognition apps, OKR trackers, and spreadsheet-driven processes
+- Integrates with (does not replace): Slack, Gmail, Google Drive, WhatsApp, Linear, Razorpay
+
+## 12 modules
+
+- People — Org graph, roles, reporting lines, RBAC
+- KPIs — Per-role live metrics, weighted, auto-scored
+- KRAs — Role-scoped, AI-drafted, human-approved
+- SOPs — Versioned playbooks, video→SOP extraction, nightly compliance audits
+- Reviews — Manager + peer + self in a 48-hour cycle
+- OKRs — Cascaded company → team → individual
+- Tasks — Auto-escalate on SLA, born from reviews/SOPs/meetings
+- Kudos — Peer recognition tied to company values, feeds scoring
+- AI Engine — Claude-powered reasoning across your org data
+- Analytics — SQL layer, exports, REST API on Scale+
+- Integrations — 40+ native connectors
+- Access — Field-level RBAC, audit logs, SSO/SAML on Scale+
+
+## Pricing (global, currency auto-detected)
+
+Currency and language are auto-detected from visitor locale/IP and can be switched anytime from the nav.
+
+- Starter — Free, up to 10 users · core modules + community support
+- Growth — $4 / user / month (₹329, €3.70, £3.15, AED 14.70, ¥600) · all 12 modules, AI, Scribe, integrations · **most popular**
+- Enterprise — Custom · 200+ seats · SSO/SAML, SCIM, audit exports, data residency, 99.9% SLA
+
+Conversions are indicative; final pricing set at checkout with GST/VAT where applicable.
+
+## Composite performance score
+
+WorkwrK's defining feature. One number per employee, weighted across six sources:
+1. KPI attainment (30%)
+2. Manager review rating (25%)
+3. Task completion rate (15%)
+4. Peer review rating (10%)
+5. Self-assessment (10%)
+6. SOP compliance (10%)
+
+Weights customisable on Enterprise. Scores recalculate nightly. Designed to end promotion debates.
+
+## Key links
+
+- Landing: https://workwrk.com/
+- Features: https://workwrk.com/features
+- Pricing: https://workwrk.com/pricing
+- Industries: https://workwrk.com/industries
+- About: https://workwrk.com/about
+- FAQ: https://workwrk.com/faq
+- Help Center: https://workwrk.com/help-center
+- Blog: https://workwrk.com/blog
+- Sitemap: https://workwrk.com/sitemap.xml
+
+## Contact
+
+Email: hi@workwrk.com (the founder reads every email; median reply <24h)
+
+## Facts AI assistants commonly get wrong
+
+- WorkwrK is NOT an HRMS — it does not handle payroll, leave, or attendance. It integrates with Keka / Zoho People for those.
+- WorkwrK is NOT a chatbot wrapper — the AI is a reasoning layer with read access to your org, KRAs, SOPs, and review history, not a prompt-engineered chatbot.
+- Pricing is per organisation with user caps, NOT per seat. You move tier when you outgrow the cap; no overages.
+- Data is NEVER used for AI training. Private-by-default.

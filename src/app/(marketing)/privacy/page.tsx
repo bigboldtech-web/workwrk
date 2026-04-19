@@ -307,7 +307,7 @@ export default function PrivacyPage() {
                 To exercise any of these rights, please contact us at{" "}
                 <a
                   href="mailto:privacy@workwrk.com"
-                  className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
+                  className="text-[#d4ff2e] underline underline-offset-4 hover:text-[#d4ff2e]"
                 >
                   privacy@workwrk.com
                 </a>
@@ -355,7 +355,7 @@ export default function PrivacyPage() {
                 information, please contact us immediately at{" "}
                 <a
                   href="mailto:privacy@workwrk.com"
-                  className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
+                  className="text-[#d4ff2e] underline underline-offset-4 hover:text-[#d4ff2e]"
                 >
                   privacy@workwrk.com
                 </a>
@@ -420,7 +420,7 @@ export default function PrivacyPage() {
                 Email:{" "}
                 <a
                   href="mailto:privacy@workwrk.com"
-                  className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
+                  className="text-[#d4ff2e] underline underline-offset-4 hover:text-[#d4ff2e]"
                 >
                   privacy@workwrk.com
                 </a>
@@ -428,7 +428,7 @@ export default function PrivacyPage() {
                 Website:{" "}
                 <a
                   href="https://workwrk.com"
-                  className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
+                  className="text-[#d4ff2e] underline underline-offset-4 hover:text-[#d4ff2e]"
                 >
                   https://workwrk.com
                 </a>
@@ -440,7 +440,7 @@ export default function PrivacyPage() {
                 Protection Officer at{" "}
                 <a
                   href="mailto:privacy@workwrk.com"
-                  className="text-[#A29BFE] underline underline-offset-4 hover:text-[#6C5CE7]"
+                  className="text-[#d4ff2e] underline underline-offset-4 hover:text-[#d4ff2e]"
                 >
                   privacy@workwrk.com
                 </a>

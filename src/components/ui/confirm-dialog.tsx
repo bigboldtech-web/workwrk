@@ -39,13 +39,13 @@ export function ConfirmDialog({
         <DialogHeader>
           <div className="flex items-center gap-3">
             {destructive && (
-              <div className="h-10 w-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
-                <AlertTriangle size={20} className="text-red-400" />
+              <div className="h-10 w-10 rounded-xl bg-[rgba(255,61,138,0.1)] border border-[rgba(255,61,138,0.3)] flex items-center justify-center shrink-0">
+                <AlertTriangle size={18} className="text-[#ff3d8a]" />
               </div>
             )}
             <div>
               <DialogTitle>{title}</DialogTitle>
-              <p className="text-sm text-muted mt-1">{description}</p>
+              <p className="text-[13px] text-[#a0a0a0] mt-1 leading-relaxed">{description}</p>
             </div>
           </div>
         </DialogHeader>
@@ -54,15 +54,11 @@ export function ConfirmDialog({
             {cancelLabel}
           </Button>
           <Button
+            variant={destructive ? "destructive" : "default"}
             onClick={onConfirm}
             disabled={loading}
-            className={
-              destructive
-                ? "bg-red-600 hover:bg-red-700 text-white"
-                : "bg-purple-600 hover:bg-purple-700 text-white"
-            }
           >
-            {loading ? "Processing..." : confirmLabel}
+            {loading ? "Processing…" : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

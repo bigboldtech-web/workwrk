@@ -28,6 +28,8 @@ import { DashboardOkrs } from "@/components/dashboard/dashboard-okrs";
 import { useRole } from "@/hooks/use-role";
 import { Trophy } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { AISignals } from "@/components/dashboard/ai-signals";
 
 interface DashboardStats {
   totalPeople: number;
@@ -96,25 +98,18 @@ interface DashboardData {
 }
 
 function getScoreColor(score: number) {
-  if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-purple-400";
-  if (score >= 50) return "text-orange-400";
-  return "text-red-400";
-}
-
-function getScoreBgColor(score: number) {
-  if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-purple-500";
-  if (score >= 50) return "bg-orange-500";
-  return "bg-red-500";
+  if (score >= 90) return "text-[#d4ff2e]";
+  if (score >= 70) return "text-[#4a9eff]";
+  if (score >= 50) return "text-[#ff9933]";
+  return "text-[#ff3d8a]";
 }
 
 function getAlertStyle(type: string) {
   switch (type) {
-    case "warning": return "border-l-orange-500 bg-orange-500/5";
-    case "danger": return "border-l-red-500 bg-red-500/5";
-    case "success": return "border-l-green-500 bg-green-500/5";
-    default: return "border-l-blue-500 bg-blue-500/5";
+    case "warning": return "border-l-[#ff9933] bg-[rgba(255,153,51,0.06)]";
+    case "danger": return "border-l-[#ff3d8a] bg-[rgba(255,61,138,0.06)]";
+    case "success": return "border-l-[#d4ff2e] bg-[rgba(212,255,46,0.06)]";
+    default: return "border-l-[#4a9eff] bg-[rgba(74,158,255,0.06)]";
   }
 }
 
@@ -185,10 +180,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">{t("title")}</h1>
-          <p className="text-muted text-sm mt-1">{t("subtitle")}</p>
-        </div>
+        <PageHeader kicker="Your workspace · live" title={t("title")} subtitle={t("subtitle")} />
         <AnnouncementsBanner />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
@@ -229,10 +221,7 @@ export default function DashboardPage() {
   if (error || !data) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">{t("title")}</h1>
-          <p className="text-muted text-sm mt-1">{t("subtitle")}</p>
-        </div>
+        <PageHeader kicker="Your workspace · live" title={t("title")} subtitle={t("subtitle")} />
         <ErrorState message={error ?? undefined} onRetry={() => window.location.reload()} />
       </div>
     );
@@ -252,8 +241,8 @@ export default function DashboardPage() {
       change: `+${apiStats.newPeopleThisMonth} this month`,
       trend: apiStats.newPeopleThisMonth > 0 ? "up" : "neutral",
       icon: Users,
-      color: "text-purple-400",
-      bgColor: "bg-purple-500/10",
+      color: "text-[#d4ff2e]",
+      bgColor: "bg-[rgba(212,255,46,0.08)]",
     },
     {
       title: "Avg Performance",
@@ -261,8 +250,8 @@ export default function DashboardPage() {
       change: topPerformers.length > 0 ? `from ${topPerformers.length} performers` : "No data",
       trend: "up",
       icon: Target,
-      color: "text-green-400",
-      bgColor: "bg-green-500/10",
+      color: "text-[#ff3d8a]",
+      bgColor: "bg-[rgba(255,61,138,0.08)]",
     },
     {
       title: "Active SOPs",
@@ -270,8 +259,8 @@ export default function DashboardPage() {
       change: "published",
       trend: "neutral",
       icon: BookOpen,
-      color: "text-blue-400",
-      bgColor: "bg-blue-500/10",
+      color: "text-[#4a9eff]",
+      bgColor: "bg-[rgba(74,158,255,0.08)]",
     },
     {
       title: "SOP Compliance",
@@ -279,26 +268,30 @@ export default function DashboardPage() {
       change: `${apiStats.sopCount} published`,
       trend: apiStats.sopCompliance >= 80 ? "up" : "down",
       icon: BookOpen,
-      color: "text-orange-400",
-      bgColor: "bg-orange-500/10",
+      color: "text-[#ff9933]",
+      bgColor: "bg-[rgba(255,153,51,0.08)]",
     },
   ];
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      {/* Header */}
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted text-sm mt-1">
-          Overview of your business operating system
-        </p>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <PageHeader
+        kicker="Your workspace · live"
+        title="Dashboard"
+        subtitle="Everything that happened in your org today — KPIs, SOPs, kudos, and the people driving them."
+        actions={[
+          { label: "Ask the AI Engine", href: "/ai", variant: "ghost", icon: <span aria-hidden>✦</span> },
+        ]}
+      />
 
       {/* Announcements — pinned at the very top so everyone sees them */}
       <AnnouncementsBanner />
 
       {/* Admin setup checklist (only for admins, auto-hides when complete) */}
       <AdminSetupChecklist />
+
+      {/* AI Signals — cross-module attention-worthy events */}
+      <AISignals />
 
       {/* OKRs */}
       <DashboardOkrs />
@@ -364,7 +357,7 @@ export default function DashboardPage() {
                 key={person.id}
                 className="flex items-center gap-3 rounded-lg border border-border bg-background/50 p-3"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-600/20 text-xs font-bold text-purple-400">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(212,255,46,0.12)] text-xs font-bold text-[#d4ff2e]">
                   {i + 1}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -389,7 +382,7 @@ export default function DashboardPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">KPI Updates</CardTitle>
-              <Link href="/kra-kpi" className="text-xs text-purple-400 hover:text-purple-300">
+              <Link href="/kra-kpi" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b]">
                 View all
               </Link>
             </div>
@@ -404,13 +397,13 @@ export default function DashboardPage() {
                   key={record.id}
                   className="flex items-start gap-3 rounded-lg border border-border bg-background/50 p-3"
                 >
-                  <Target size={14} className="text-purple-400 mt-0.5 flex-shrink-0" />
+                  <Target size={14} className="text-[#d4ff2e] mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{record.kpiName}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] text-muted">{record.userName}</span>
                       {achievement != null && (
-                        <span className={`text-[10px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-purple-400" : "text-orange-400"}`}>
+                        <span className={`text-[10px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-[#d4ff2e]" : "text-orange-400"}`}>
                           {achievement}%
                         </span>
                       )}
@@ -456,7 +449,7 @@ export default function DashboardPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Recent Activity</CardTitle>
-              <Link href="/activity" className="text-xs text-purple-400 hover:text-purple-300">
+              <Link href="/activity" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b]">
                 View all
               </Link>
             </div>
@@ -484,7 +477,7 @@ export default function DashboardPage() {
 
                 return (
                   <div key={item.id} className="flex items-start gap-2.5 rounded-lg border border-border bg-background/50 p-2.5">
-                    <Icon size={12} className="text-purple-400 mt-0.5 flex-shrink-0" />
+                    <Icon size={12} className="text-[#d4ff2e] mt-0.5 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs leading-snug line-clamp-2">{item.description}</p>
                       <p className="text-[10px] text-muted mt-0.5">

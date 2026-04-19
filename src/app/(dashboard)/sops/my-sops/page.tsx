@@ -12,6 +12,7 @@ import {
   BookOpen, CheckCircle, Clock, AlertTriangle, FileText, ChevronRight,
   CheckSquare, Square, Award,
 } from "lucide-react";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface SOPStep {
   id: string;
@@ -149,12 +150,11 @@ export default function MySOPsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">My SOPs</h1>
-        <p className="text-muted text-sm mt-1">
-          {assignments.length} assigned &middot; {pending.length} pending &middot; {completed.length} completed
-        </p>
-      </div>
+      <PageHeader
+        kicker="SOPs · personal queue"
+        title="My SOPs"
+        subtitle={`${assignments.length} assigned · ${pending.length} pending · ${completed.length} completed`}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
@@ -199,8 +199,8 @@ export default function MySOPsPage() {
             return (
               <Card key={a.id} className="hover:border-muted-2 transition-all cursor-pointer" onClick={() => setActiveAssignment(a)}>
                 <CardContent className="p-4 flex items-center gap-4">
-                  <div className="rounded-lg bg-purple-500/10 p-2.5 shrink-0">
-                    <FileText size={18} className="text-purple-400" />
+                  <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2.5 shrink-0">
+                    <FileText size={18} className="text-[#d4ff2e]" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -267,7 +267,7 @@ export default function MySOPsPage() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <FileText size={18} className="text-purple-400" />
+                  <FileText size={18} className="text-[#d4ff2e]" />
                   {activeAssignment.sop.title}
                 </DialogTitle>
               </DialogHeader>
@@ -323,7 +323,7 @@ export default function MySOPsPage() {
                           {isComplete ? (
                             <CheckSquare size={18} className="text-green-400" />
                           ) : (
-                            <Square size={18} className="text-muted hover:text-purple-400" />
+                            <Square size={18} className="text-muted hover:text-[#e2ff6b]" />
                           )}
                         </button>
                         <div className="flex-1">
@@ -344,7 +344,7 @@ export default function MySOPsPage() {
                   <div className="space-y-3 border-t border-border pt-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <Award size={14} className="text-purple-400" /> Knowledge Quiz
+                        <Award size={14} className="text-[#d4ff2e]" /> Knowledge Quiz
                       </h3>
                       {activeAssignment.progress?.quizScore != null && (
                         <Badge variant={activeAssignment.progress.quizScore >= 70 ? "success" : "destructive"}>
@@ -378,7 +378,7 @@ export default function MySOPsPage() {
                                     value={opt}
                                     checked={quizAnswers[qi] === opt}
                                     onChange={() => setQuizAnswers({ ...quizAnswers, [qi]: opt })}
-                                    className="text-purple-500"
+                                    className="text-[#d4ff2e]"
                                   />
                                   {opt}
                                 </label>

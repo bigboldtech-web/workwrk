@@ -58,7 +58,7 @@ function getStatusBadge(status: string) {
 function getPlanBadge(plan: string) {
   const colors: Record<string, string> = {
     STARTER: "bg-gray-500/10 text-gray-400 border-gray-500/20",
-    GROWTH: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+    GROWTH: "bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] border-[rgba(212,255,46,0.2)]",
     SCALE: "bg-blue-500/10 text-blue-400 border-blue-500/20",
     ENTERPRISE: "bg-amber-500/10 text-amber-400 border-amber-500/20",
   };
@@ -115,8 +115,8 @@ export default function AdminDashboard() {
       value: stats?.totalOrgs ?? 0,
       change: `+${stats?.newOrgsThisMonth ?? 0} this month`,
       icon: Building2,
-      color: "text-purple-400",
-      bg: "bg-purple-500/10",
+      color: "text-[#d4ff2e]",
+      bg: "bg-[rgba(212,255,46,0.08)]",
     },
     {
       title: "Total Users",
@@ -197,7 +197,7 @@ export default function AdminDashboard() {
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-base">Subscriber Companies</CardTitle>
-          <a href="/admin/companies" className="text-xs text-purple-400 hover:text-purple-300 transition-colors">
+          <a href="/admin/companies" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b] transition-colors">
             View all →
           </a>
         </CardHeader>
@@ -223,7 +223,7 @@ export default function AdminDashboard() {
                   <tr key={company.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
                     <td className="p-4">
                       <div className="flex items-center gap-2">
-                        <Building2 size={14} className="text-purple-400" />
+                        <Building2 size={14} className="text-[#d4ff2e]" />
                         <div>
                           <span className="text-sm font-medium">{company.name}</span>
                           <p className="text-[10px] text-muted">{company.slug}</p>
@@ -255,7 +255,7 @@ export default function AdminDashboard() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <Activity size={16} className="text-purple-400" /> System Info
+            <Activity size={16} className="text-[#d4ff2e]" /> System Info
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted">

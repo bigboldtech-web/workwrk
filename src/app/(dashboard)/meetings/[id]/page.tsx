@@ -67,7 +67,7 @@ function getMeetingTypeLabel(type: string) {
 function getMeetingTypeColor(type: string) {
   switch (type) {
     case "DAILY_STANDUP": return "bg-blue-500/20 text-blue-400";
-    case "WEEKLY_REVIEW": return "bg-purple-500/20 text-purple-400";
+    case "WEEKLY_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
     case "ONE_ON_ONE": return "bg-green-500/20 text-green-400";
     case "QUARTERLY_REVIEW": return "bg-orange-500/20 text-orange-400";
     default: return "bg-slate-500/20 text-slate-400";
@@ -744,8 +744,8 @@ export default function MeetingDetailPage() {
                 <div className="space-y-2">
                   {decisions.map((d, i) => (
                     <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-border bg-surface-3 group">
-                      <div className="rounded-full bg-purple-500/10 p-1.5 mt-0.5 shrink-0">
-                        <MessageSquare size={12} className="text-purple-400" />
+                      <div className="rounded-full bg-[rgba(212,255,46,0.08)] p-1.5 mt-0.5 shrink-0">
+                        <MessageSquare size={12} className="text-[#d4ff2e]" />
                       </div>
                       <div className="flex-1">
                         <p className="text-sm">{d.text}</p>
@@ -788,7 +788,7 @@ export default function MeetingDetailPage() {
                         {item.status === "COMPLETED" ? (
                           <CheckCircle size={18} className="text-green-400" />
                         ) : (
-                          <Square size={18} className="text-muted hover:text-purple-400" />
+                          <Square size={18} className="text-muted hover:text-[#e2ff6b]" />
                         )}
                       </button>
                       <div className="flex-1 min-w-0">
@@ -802,7 +802,7 @@ export default function MeetingDetailPage() {
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                         <Button variant="ghost" size="icon" className="h-6 w-6" title="Convert to Task" onClick={() => convertToTask(item.id)}>
-                          <ExternalLink size={12} className="text-purple-400" />
+                          <ExternalLink size={12} className="text-[#d4ff2e]" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => deleteActionItem(item.id)}>
                           <Trash2 size={12} />

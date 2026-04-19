@@ -8,11 +8,11 @@ import {
 } from "lucide-react";
 
 const TYPE_STYLES: Record<string, { icon: typeof Megaphone; border: string; bg: string }> = {
-  INFO: { icon: Megaphone, border: "border-blue-500/30", bg: "bg-blue-500/5" },
-  WARNING: { icon: AlertTriangle, border: "border-amber-500/30", bg: "bg-amber-500/5" },
-  CELEBRATION: { icon: PartyPopper, border: "border-pink-500/30", bg: "bg-pink-500/5" },
-  POLICY: { icon: FileText, border: "border-purple-500/30", bg: "bg-purple-500/5" },
-  EVENT: { icon: Calendar, border: "border-green-500/30", bg: "bg-green-500/5" },
+  INFO: { icon: Megaphone, border: "border-[rgba(74,158,255,0.3)]", bg: "bg-[rgba(74,158,255,0.06)]" },
+  WARNING: { icon: AlertTriangle, border: "border-[rgba(255,153,51,0.3)]", bg: "bg-[rgba(255,153,51,0.06)]" },
+  CELEBRATION: { icon: PartyPopper, border: "border-[rgba(255,61,138,0.3)]", bg: "bg-[rgba(255,61,138,0.06)]" },
+  POLICY: { icon: FileText, border: "border-[rgba(212,255,46,0.3)]", bg: "bg-[rgba(212,255,46,0.06)]" },
+  EVENT: { icon: Calendar, border: "border-[rgba(94,234,212,0.3)]", bg: "bg-[rgba(94,234,212,0.06)]" },
 };
 
 interface Announcement {
@@ -60,7 +60,7 @@ export function AnnouncementsBanner() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold">{a.title}</p>
-                    {a.pinned && <Pin size={12} className="text-purple-400" />}
+                    {a.pinned && <Pin size={12} className="text-[#d4ff2e]" />}
                     {isUrgent && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">Urgent</span>}
                   </div>
                   <p className="text-xs text-muted mt-0.5">{a.content}</p>

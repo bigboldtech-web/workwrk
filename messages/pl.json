@@ -109,5 +109,47 @@
     "upgrade": "Ulepsz",
     "perMonth": "/mies",
     "perYear": "/rok"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Funkcje",
+      "industries": "Branże",
+      "pricing": "Cennik",
+      "about": "O nas",
+      "faq": "FAQ",
+      "signIn": "Zaloguj",
+      "startFree": "Rozpocznij bezpłatnie",
+      "dashboard": "Panel"
+    },
+    "hero": {
+      "kicker": "Nowość · KRAs tworzone przez AI",
+      "trust": "4.8 w G2 · Bez karty · 30 min do startu · 500+ zespołów"
+    },
+    "cta": {
+      "primary": "14-dniowy okres próbny",
+      "secondary": "Zarezerwuj demo",
+      "seeProduct": "Zobacz produkt"
+    },
+    "pricing": {
+      "recommended": "Polecane",
+      "perUser": "Za użytkownika",
+      "perUserSub": "płać tylko za aktywne konta",
+      "flat": "Miesięcznie stałe",
+      "flatSub": "stała cena za poziom",
+      "starter": "Starter",
+      "team": "Zespół",
+      "growth": "Wzrost",
+      "scale": "Skala",
+      "enterprise": "Enterprise",
+      "free": "Za darmo",
+      "letsTalk": "Porozmawiajmy"
+    },
+    "footer": {
+      "product": "Produkt",
+      "company": "Firma",
+      "resources": "Zasoby",
+      "legal": "Prawne",
+      "copyright": "© WorkwrK. Stworzone w Bengaluru."
+    }
   }
 }

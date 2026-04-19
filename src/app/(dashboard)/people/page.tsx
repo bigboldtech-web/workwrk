@@ -26,6 +26,7 @@ import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface Person {
   id: string;
@@ -57,7 +58,7 @@ interface Role {
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-purple-400";
+  if (score >= 70) return "text-[#d4ff2e]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -408,11 +409,16 @@ export default function PeoplePage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">People</h1>
-          <p className="text-muted text-sm mt-1">{total} team members across your organization</p>
-        </div>
+      <PageHeader
+        kicker="People · the org graph"
+        title="People"
+        subtitle={`${total} team members across your organization.`}
+        stats={[
+          { label: "Total", value: total },
+          { label: "Departments", value: (departments?.length ?? 0) },
+        ]}
+      />
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleExport} className="gap-2">
             <Download size={14} /> Export
@@ -598,13 +604,13 @@ export default function PeoplePage() {
           {filtered.map((person) => {
             const isSelected = selectedIds.has(person.id);
             return (
-              <Card key={person.id} className={`hover:border-muted-2 transition-all group cursor-pointer ${isSelected ? "border-purple-500/50 bg-purple-500/5" : ""}`} onClick={() => router.push(`/people/${person.id}`)}>
+              <Card key={person.id} className={`hover:border-muted-2 transition-all group cursor-pointer ${isSelected ? "border-[rgba(212,255,46,0.4)] bg-[rgba(212,255,46,0.06)]" : ""}`} onClick={() => router.push(`/people/${person.id}`)}>
                 <CardContent className="p-5">
                   <div className="flex items-start gap-3">
                     {canManagePeople && <button
                       onClick={(e) => { e.stopPropagation(); toggleSelect(person.id); }}
                       className={`mt-1 h-5 w-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-                        isSelected ? "border-purple-500 bg-purple-500" : "border-border hover:border-muted"
+                        isSelected ? "border-[#d4ff2e] bg-[#d4ff2e]" : "border-border hover:border-muted"
                       }`}
                     >
                       {isSelected && <span className="text-white text-xs font-bold">&#10003;</span>}
@@ -726,7 +732,7 @@ export default function PeoplePage() {
       {/* Floating Bulk Action Bar */}
       {selectedIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-surface px-5 py-3 shadow-2xl">
-          <span className="text-sm font-medium text-purple-400">{selectedIds.size} selected</span>
+          <span className="text-sm font-medium text-[#d4ff2e]">{selectedIds.size} selected</span>
           <div className="h-5 w-px bg-border" />
           <Button variant="outline" size="sm" onClick={() => { setBulkAction("change_department"); setBulkPayload({}); }}>
             <Building2 size={14} className="mr-1" /> Department
@@ -781,7 +787,7 @@ export default function PeoplePage() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label>KRAs & Weightage</Label>
-                    <Button variant="ghost" size="sm" className="text-xs text-purple-400 h-6" onClick={() => {
+                    <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6" onClick={() => {
                       const current = bulkPayload.kraEntries || [];
                       setBulkPayload({ ...bulkPayload, kraEntries: [...current, { kraId: "", weightage: "" }] });
                     }}>
@@ -890,7 +896,7 @@ export default function PeoplePage() {
                     <input type="file" className="hidden" accept=".csv" onChange={handleFileSelect} />
                   </label>
                 </div>
-                <a href="/api/people/bulk-import" download className="text-xs text-purple-400 hover:underline flex items-center gap-1">
+                <a href="/api/people/bulk-import" download className="text-xs text-[#d4ff2e] hover:underline flex items-center gap-1">
                   <Download size={12} /> Download CSV template
                 </a>
               </>

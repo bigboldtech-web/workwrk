@@ -36,7 +36,7 @@ export function RichEditor({
       Underline,
       LinkExtension.configure({
         openOnClick: false,
-        HTMLAttributes: { class: "text-purple-400 underline cursor-pointer" },
+        HTMLAttributes: { class: "text-[#d4ff2e] underline cursor-pointer hover:text-[#e2ff6b]" },
       }),
       ImageExtension.configure({ inline: true }),
       Placeholder.configure({ placeholder }),
@@ -118,7 +118,9 @@ function ToolBtn({ onClick, active, title, children }: { onClick: () => void; ac
       onClick={onClick}
       title={title}
       className={`p-1.5 rounded transition-colors ${
-        active ? "bg-purple-500/20 text-purple-400" : "text-muted hover:text-foreground hover:bg-surface-2"
+        active
+          ? "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] border border-[rgba(212,255,46,0.3)]"
+          : "text-[#a0a0a0] hover:text-[#fafafa] hover:bg-[#1a1a1a] border border-transparent"
       }`}
     >
       {children}

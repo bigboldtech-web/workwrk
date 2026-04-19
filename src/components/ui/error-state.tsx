@@ -8,7 +8,8 @@ interface ErrorStateProps {
 }
 
 export function ErrorState({ status, message, onRetry }: ErrorStateProps) {
-  const isOffline = message?.toLowerCase().includes("fetch") || message?.toLowerCase().includes("network");
+  const isOffline =
+    message?.toLowerCase().includes("fetch") || message?.toLowerCase().includes("network");
 
   let icon = AlertCircle;
   let title = "Something went wrong";
@@ -29,12 +30,44 @@ export function ErrorState({ status, message, onRetry }: ErrorStateProps) {
   const Icon = icon;
 
   return (
-    <div className="flex flex-col items-center justify-center py-20 px-4">
-      <div className="h-16 w-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-5">
-        <Icon size={28} className="text-red-400" />
+    <div
+      className="flex flex-col items-center justify-center py-16 px-6 rounded-2xl"
+      style={{
+        background: "#141414",
+        border: "1px dashed rgba(255, 61, 138, 0.25)",
+      }}
+    >
+      <div
+        className="h-14 w-14 rounded-2xl flex items-center justify-center mb-4"
+        style={{
+          background: "rgba(255, 61, 138, 0.08)",
+          border: "1px solid rgba(255, 61, 138, 0.25)",
+          color: "#ff3d8a",
+        }}
+      >
+        <Icon size={26} />
       </div>
-      <h3 className="text-lg font-semibold text-foreground mb-1">{title}</h3>
-      <p className="text-sm text-muted text-center max-w-sm mb-6">{desc}</p>
+      <h3
+        className="mb-1.5 text-center"
+        style={{
+          fontSize: 18,
+          fontWeight: 600,
+          color: "#fafafa",
+          letterSpacing: "-0.02em",
+        }}
+      >
+        {title}
+      </h3>
+      <p
+        className="text-center max-w-md mb-6"
+        style={{
+          fontSize: 14,
+          color: "#a0a0a0",
+          lineHeight: 1.55,
+        }}
+      >
+        {desc}
+      </p>
       {onRetry && (
         <Button onClick={onRetry} variant="outline" className="gap-2">
           <RefreshCw size={14} /> Try again

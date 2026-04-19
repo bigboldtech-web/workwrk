@@ -1,0 +1,36 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/tasks/run-sla-check",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/webhook-retry",
+      "schedule": "*/5 * * * *"
+    }
+  ],
+  "functions": {
+    "src/app/api/billing/webhook/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/ai/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/ai/signals/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/sops/ai-generate/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/kras/ai-generate/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/tasks/run-sla-check/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/webhook-retry/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

@@ -37,10 +37,10 @@ const icons: Record<ToastType, typeof CheckCircle> = {
 };
 
 const styles: Record<ToastType, string> = {
-  success: "border-green-500/30 bg-green-500/10 text-green-400",
-  error: "border-red-500/30 bg-red-500/10 text-red-400",
-  warning: "border-yellow-500/30 bg-yellow-500/10 text-yellow-400",
-  info: "border-blue-500/30 bg-blue-500/10 text-blue-400",
+  success: "border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]",
+  error: "border-[rgba(255,61,138,0.3)] bg-[rgba(255,61,138,0.08)] text-[#ff3d8a]",
+  warning: "border-[rgba(255,153,51,0.3)] bg-[rgba(255,153,51,0.08)] text-[#ff9933]",
+  info: "border-[rgba(74,158,255,0.3)] bg-[rgba(74,158,255,0.08)] text-[#4a9eff]",
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -79,8 +79,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div
               key={t.id}
               className={cn(
-                "flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm animate-in slide-in-from-bottom-2 fade-in duration-200",
-                styles[t.type]
+                "flex items-start gap-3 rounded-xl border px-4 py-3 shadow-[0_12px_30px_-8px_rgba(0,0,0,0.6)] backdrop-blur-md bg-[#141414] animate-in slide-in-from-bottom-2 fade-in duration-200",
+                styles[t.type],
               )}
             >
               <Icon size={18} className="mt-0.5 shrink-0" />

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useTranslations } from "next-intl";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 const TYPES = [
   { value: "INFO", label: "Information", icon: Megaphone },
@@ -89,17 +90,16 @@ export default function AnnouncementsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">{t("title")}</h1>
-          <p className="text-muted text-sm mt-1">{t("subtitle")}</p>
-        </div>
-        {isManager && (
-          <Button onClick={() => setShowCreate(true)} className="gap-1.5">
-            <Plus size={14} /> {t("newAnnouncement")}
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        kicker="Comms · announcements"
+        title={t("title")}
+        subtitle={t("subtitle")}
+        actions={
+          isManager
+            ? [{ label: t("newAnnouncement"), onClick: () => setShowCreate(true), icon: <Plus size={14} /> }]
+            : undefined
+        }
+      />
 
       {loading ? (
         <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-16 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>
@@ -115,13 +115,13 @@ export default function AnnouncementsPage() {
             <Card key={a.id}>
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
-                  <Megaphone size={16} className="mt-1 text-purple-400 shrink-0" />
+                  <Megaphone size={16} className="mt-1 text-[#d4ff2e] shrink-0" />
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="text-sm font-semibold">{a.title}</h3>
                       <Badge variant="outline" className="text-[10px]">{a.type}</Badge>
                       <Badge variant={a.priority === "URGENT" ? "destructive" : "secondary"} className="text-[10px]">{a.priority}</Badge>
-                      {a.pinned && <Pin size={12} className="text-purple-400" />}
+                      {a.pinned && <Pin size={12} className="text-[#d4ff2e]" />}
                     </div>
                     <p className="text-xs text-muted">{a.content}</p>
                     <p className="text-[10px] text-muted-2 mt-2">

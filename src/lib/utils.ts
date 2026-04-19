@@ -29,23 +29,23 @@ export function formatDateTime(date: Date | string) {
 
 export function getScoreColor(score: number): string {
   if (score >= 90) return "text-green-500";
-  if (score >= 70) return "text-purple-400";
+  if (score >= 70) return "text-[#d4ff2e]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
 
 export function getScoreBgColor(score: number): string {
-  if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-purple-400";
-  if (score >= 50) return "bg-orange-400";
-  return "bg-red-400";
+  if (score >= 90) return "bg-[#d4ff2e]";
+  if (score >= 70) return "bg-[#4a9eff]";
+  if (score >= 50) return "bg-[#ff9933]";
+  return "bg-[#ff3d8a]";
 }
 
 export function getPriorityColor(priority: string): string {
   switch (priority) {
     case "P0": return "bg-red-500/20 text-red-400";
     case "P1": return "bg-orange-500/20 text-orange-400";
-    case "P2": return "bg-purple-500/20 text-purple-400";
+    case "P2": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
     case "P3": return "bg-slate-500/20 text-slate-400";
     default: return "bg-slate-500/20 text-slate-400";
   }
@@ -55,7 +55,7 @@ export function getStatusColor(status: string): string {
   switch (status) {
     case "COMPLETED": return "bg-green-500/20 text-green-400";
     case "IN_PROGRESS": return "bg-blue-500/20 text-blue-400";
-    case "IN_REVIEW": return "bg-purple-500/20 text-purple-400";
+    case "IN_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
     case "BLOCKED": return "bg-red-500/20 text-red-400";
     case "NOT_STARTED": return "bg-slate-500/20 text-slate-400";
     default: return "bg-slate-500/20 text-slate-400";

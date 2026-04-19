@@ -27,7 +27,7 @@ import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-purple-400";
+  if (score >= 70) return "text-[#d4ff2e]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -48,7 +48,7 @@ function getPriorityStyle(p: string) {
   switch (p) {
     case "P0": return "bg-red-500/20 text-red-400";
     case "P1": return "bg-orange-500/20 text-orange-400";
-    case "P2": return "bg-purple-500/20 text-purple-400";
+    case "P2": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
     default: return "bg-slate-500/20 text-slate-400";
   }
 }
@@ -57,7 +57,7 @@ function getTaskStatusStyle(s: string) {
   switch (s) {
     case "COMPLETED": return "bg-green-500/20 text-green-400";
     case "IN_PROGRESS": return "bg-blue-500/20 text-blue-400";
-    case "IN_REVIEW": return "bg-purple-500/20 text-purple-400";
+    case "IN_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
     default: return "bg-slate-500/20 text-slate-400";
   }
 }
@@ -72,7 +72,7 @@ function getProgressColor(pct: number) {
 
 function getScoreBg(score: number) {
   if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-purple-500";
+  if (score >= 70) return "bg-[#d4ff2e]";
   if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
@@ -169,7 +169,7 @@ const FREQ_LABELS: Record<string, string> = {
 const FREQ_COLORS: Record<string, string> = {
   DAILY: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
   WEEKLY: "bg-blue-500/15 text-blue-400 border-blue-500/20",
-  MONTHLY: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+  MONTHLY: "bg-[rgba(212,255,46,0.1)] text-[#d4ff2e] border-[rgba(212,255,46,0.2)]",
   QUARTERLY: "bg-amber-500/15 text-amber-400 border-amber-500/20",
   ANNUALLY: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
 };
@@ -279,7 +279,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <Target size={15} className="text-purple-400 shrink-0" />
+                  <Target size={15} className="text-[#d4ff2e] shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold truncate">{a.kra?.name}</p>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -300,7 +300,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                     </div>
                   )}
                   <div className="text-right">
-                    <p className="text-lg font-bold font-mono text-purple-400">{a.weightage}%</p>
+                    <p className="text-lg font-bold font-mono text-[#d4ff2e]">{a.weightage}%</p>
                     <p className="text-[9px] text-muted">weight</p>
                   </div>
                   {isExpanded ? <ChevronUp size={14} className="text-muted" /> : <ChevronDown size={14} className="text-muted" />}
@@ -567,7 +567,7 @@ export default function UserProfilePage() {
                 {user.avatar ? (
                   <img src={user.avatar} alt="" className="h-full w-full object-cover rounded-full" />
                 ) : (
-                  <AvatarFallback className="bg-purple-600/20 text-purple-400 text-xl font-bold">
+                  <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xl font-bold">
                     {initials}
                   </AvatarFallback>
                 )}
@@ -705,11 +705,11 @@ export default function UserProfilePage() {
 
       {/* Composite Performance Score */}
       {perf.compositeScore != null && (
-        <Card className="border-purple-500/20 bg-gradient-to-r from-purple-500/5 to-transparent">
+        <Card className="border-[rgba(212,255,46,0.2)] bg-gradient-to-r from-[rgba(212,255,46,0.04)] to-transparent">
           <CardContent className="p-6">
             <div className="flex items-start gap-6">
               <div className="text-center">
-                <Zap size={20} className="mx-auto text-purple-400 mb-1" />
+                <Zap size={20} className="mx-auto text-[#d4ff2e] mb-1" />
                 <p className={`text-4xl font-bold font-mono ${getScoreColor(perf.compositeScore)}`}>
                   {perf.compositeScore}
                 </p>
@@ -740,7 +740,7 @@ export default function UserProfilePage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
-            <Target size={20} className="mx-auto text-purple-400 mb-1" />
+            <Target size={20} className="mx-auto text-[#d4ff2e] mb-1" />
             <p className={`text-2xl font-bold font-mono ${perf.avgKPI ? getScoreColor(perf.avgKPI) : "text-muted"}`}>
               {perf.avgKPI ?? "N/A"}
             </p>
@@ -810,7 +810,7 @@ export default function UserProfilePage() {
                       </span>
                     )}
                     {t.kra?.name && (
-                      <span className="text-[10px] text-purple-400">{t.kra.name}</span>
+                      <span className="text-[10px] text-[#d4ff2e]">{t.kra.name}</span>
                     )}
                   </div>
                 </div>
@@ -862,7 +862,7 @@ export default function UserProfilePage() {
                     <p className="text-sm font-medium">{s.name}</p>
                     <span className="text-xs text-muted">{s.selfRating}/10</span>
                   </div>
-                  <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-purple-500" />
+                  <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-[#d4ff2e]" />
                   {s.managerRating && (
                     <p className="text-[10px] text-muted mt-1">Manager rating: {s.managerRating}/10</p>
                   )}
@@ -958,7 +958,7 @@ export default function UserProfilePage() {
                   onClick={() => router.push(`/people/${r.id}`)}
                 >
                   <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-purple-600/20 text-purple-400 text-sm">
+                    <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-sm">
                       {r.firstName[0]}{r.lastName[0]}
                     </AvatarFallback>
                   </Avatar>

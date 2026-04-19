@@ -187,7 +187,7 @@ export default function ProcessRunPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent" />
       </div>
     );
   }
@@ -340,12 +340,12 @@ export default function ProcessRunPage() {
             {fileUrl ? (
               <div className="flex items-center gap-2 p-2 rounded border border-border bg-surface">
                 <Upload size={14} className="text-green-400" />
-                <a href={fileUrl} target="_blank" rel="noopener" className="text-xs text-purple-400 hover:underline truncate flex-1">
+                <a href={fileUrl} target="_blank" rel="noopener" className="text-xs text-[#d4ff2e] hover:underline truncate flex-1">
                   {fileUrl.split("/").pop()}
                 </a>
               </div>
             ) : (
-              <label className={`flex items-center gap-2 p-3 rounded border border-dashed border-border cursor-pointer hover:border-purple-400 transition-colors ${disabled ? "pointer-events-none" : ""}`}>
+              <label className={`flex items-center gap-2 p-3 rounded border border-dashed border-border cursor-pointer hover:border-[#d4ff2e] transition-colors ${disabled ? "pointer-events-none" : ""}`}>
                 <Upload size={16} className="text-muted" />
                 <span className="text-xs text-muted">Click to upload file (max 10MB)</span>
                 <input type="file" className="hidden" disabled={disabled} onChange={async (e) => {
@@ -388,7 +388,7 @@ export default function ProcessRunPage() {
       <div className="border-b border-border bg-surface">
         <div className="mx-auto max-w-3xl px-6 py-6">
           <div className="flex items-center gap-2 text-xs text-muted mb-2">
-            <span className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-transparent font-bold text-sm">
+            <span className="bg-gradient-to-r text-[#d4ff2e] font-bold text-sm">
               WorkwrK
             </span>
             <span>/</span>
@@ -402,7 +402,7 @@ export default function ProcessRunPage() {
             <div className="flex-1">
               <Progress value={data.progress} className="h-2.5" />
             </div>
-            <span className="text-sm font-bold text-purple-400">{data.progress}%</span>
+            <span className="text-sm font-bold text-[#d4ff2e]">{data.progress}%</span>
           </div>
           {data.dueDate && (
             <div className="flex items-center gap-1 mt-2 text-xs text-muted">
@@ -489,7 +489,7 @@ export default function ProcessRunPage() {
                             }
                           >
                             {completing === step.id ? (
-                              <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
+                              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent" />
                             ) : isStepComplete ? (
                               <CheckCircle2 size={20} className="text-green-400" />
                             ) : isApproval ? (
@@ -499,7 +499,7 @@ export default function ProcessRunPage() {
                                 size={20}
                                 className={`transition-colors ${
                                   canComplete
-                                    ? "text-border hover:text-purple-400"
+                                    ? "text-border hover:text-[#d4ff2e]"
                                     : "text-border"
                                 }`}
                               />

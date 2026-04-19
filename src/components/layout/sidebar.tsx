@@ -5,9 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useRole } from "@/hooks/use-role";
 import { useTranslations } from "next-intl";
+import { Menu } from "lucide-react";
 import {
   LayoutDashboard,
   Users,
@@ -39,9 +39,17 @@ import {
   MessageSquareHeart,
 } from "lucide-react";
 
-// moduleKey maps nav items to module keys from settings.enabledModules
-// Items without a moduleKey are always shown (Dashboard, Organization)
-const navigation: { name: string; key: string; href: string; icon: any; moduleKey?: string; managerOnly?: boolean; adminOnly?: boolean }[] = [
+type NavItem = {
+  name: string;
+  key: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  moduleKey?: string;
+  managerOnly?: boolean;
+  adminOnly?: boolean;
+};
+
+const navigation: NavItem[] = [
   { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone },
   { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true },
@@ -75,12 +83,29 @@ const bottomNav = [
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const tNav = useTranslations("nav");
 
-  // Sync sidebar width to CSS variable so the content area can adjust
   useEffect(() => {
-    document.documentElement.style.setProperty("--sidebar-width", collapsed ? "56px" : "220px");
+    document.documentElement.style.setProperty("--sidebar-width", collapsed ? "64px" : "232px");
   }, [collapsed]);
+
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  // Lock body scroll when mobile drawer is open
+  useEffect(() => {
+    if (mobileOpen) {
+      const original = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = original;
+      };
+    }
+  }, [mobileOpen]);
+
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null);
   const [announcementCount, setAnnouncementCount] = useState(0);
 
@@ -94,10 +119,8 @@ export function Sidebar() {
       })
       .catch(() => {});
 
-    // Fetch unread announcement count (browser-cached for 60s, so this is
-    // free if the banner already fetched it)
     fetch("/api/announcements")
-      .then((r) => r.ok ? r.json() : null)
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const items = Array.isArray(d) ? d : d?.data || [];
         setAnnouncementCount(items.length);
@@ -115,110 +138,110 @@ export function Sidebar() {
   });
 
   return (
-    <aside
-      className={cn(
-        "fixed left-0 top-0 z-40 h-screen border-r border-border bg-background transition-all duration-300",
-        collapsed ? "w-[56px]" : "w-[220px]"
+    <>
+      {/* Mobile hamburger — only visible on small screens */}
+      <button
+        type="button"
+        onClick={() => setMobileOpen(true)}
+        className="app-mobile-trigger"
+        aria-label="Open navigation"
+      >
+        <Menu size={18} />
+      </button>
+
+      {/* Mobile scrim — click-anywhere-to-close */}
+      {mobileOpen && (
+        <button
+          type="button"
+          className="app-mobile-scrim"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Close navigation"
+        />
       )}
+
+    <aside
+      className={cn("app-sidebar", collapsed && "is-collapsed", mobileOpen && "is-mobile-open")}
+      aria-label="Dashboard navigation"
     >
-      <div className="flex h-full flex-col">
-        {/* Logo */}
-        <div className="flex h-12 items-center justify-between border-b border-border px-3">
-          {!collapsed && (
-            <Link href="/dashboard" className="flex items-center gap-2">
-              <span className="bg-gradient-to-r from-purple-500 via-purple-300 to-green-400 bg-clip-text text-base font-bold tracking-tight text-transparent"
-                style={{ fontFamily: "'Syne', sans-serif" }}>
-                workwrk
-              </span>
-              <span className="text-muted opacity-50">.</span>
-            </Link>
-          )}
-          {collapsed && (
-            <Link href="/dashboard" className="mx-auto">
-              <span className="bg-gradient-to-r from-purple-500 to-green-400 bg-clip-text text-base font-bold text-transparent"
-                style={{ fontFamily: "'Syne', sans-serif" }}>
-                W
-              </span>
-            </Link>
-          )}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-foreground transition-colors"
-          >
-            {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-          </button>
-        </div>
+      {/* Brand */}
+      <div className="app-sidebar-brand">
+        {!collapsed ? (
+          <Link href="/dashboard" className="app-sidebar-brand-full" aria-label="workwrk home">
+            <span className="app-sidebar-dot" aria-hidden />
+            <span className="app-sidebar-wordmark">workwrk</span>
+          </Link>
+        ) : (
+          <Link href="/dashboard" className="app-sidebar-brand-mini" aria-label="workwrk home">
+            <span className="app-sidebar-dot" aria-hidden />
+          </Link>
+        )}
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="app-sidebar-collapse"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+        </button>
+      </div>
 
-        {/* Main Navigation */}
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {visibleNav.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={cn(
-                  "relative flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
-                  isActive
-                    ? "bg-purple-600/10 text-purple-400 border border-purple-600/20"
-                    : "text-muted hover:bg-surface-2 hover:text-foreground",
-                  collapsed && "justify-center px-2"
-                )}
-                title={collapsed ? tNav(item.key) : undefined}
-              >
-                <item.icon size={16} className={cn(isActive && "text-purple-400")} />
-                {!collapsed && (
-                  <span className="flex-1 flex items-center justify-between">
-                    <span>{tNav(item.key)}</span>
-                    {item.key === "announcements" && announcementCount > 0 && (
-                      <span className="flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
-                        {announcementCount}
-                      </span>
-                    )}
-                  </span>
-                )}
-                {collapsed && item.key === "announcements" && announcementCount > 0 && (
-                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
-                )}
-              </Link>
-            );
-          })}
-        </nav>
+      {/* Main nav */}
+      <nav className="app-sidebar-nav">
+        {visibleNav.map((item) => {
+          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.name}
+              href={item.href}
+              className={cn("app-sidebar-link", isActive && "is-active", collapsed && "is-collapsed")}
+              title={collapsed ? tNav(item.key) : undefined}
+            >
+              <Icon size={16} />
+              {!collapsed && (
+                <>
+                  <span className="app-sidebar-label">{tNav(item.key)}</span>
+                  {item.key === "announcements" && announcementCount > 0 && (
+                    <span className="app-sidebar-badge">{announcementCount}</span>
+                  )}
+                </>
+              )}
+              {collapsed && item.key === "announcements" && announcementCount > 0 && (
+                <span className="app-sidebar-dot-pip" aria-hidden />
+              )}
+            </Link>
+          );
+        })}
+      </nav>
 
-        {/* Bottom Navigation */}
-        <div className="border-t border-border px-3 py-4 space-y-1">
-          {bottomNav.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
-                  isActive
-                    ? "bg-purple-600/10 text-purple-400"
-                    : "text-muted hover:bg-surface-2 hover:text-foreground",
-                  collapsed && "justify-center px-2"
-                )}
-              >
-                <item.icon size={16} />
-                {!collapsed && <span>{tNav(item.key)}</span>}
-              </Link>
-            );
-          })}
-          <ThemeToggle collapsed={collapsed} />
-          <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted hover:bg-red-500/10 hover:text-red-400 transition-all",
-              collapsed && "justify-center px-2"
-            )}
-          >
-            <LogOut size={16} />
-            {!collapsed && <span>{tNav("signOut")}</span>}
-          </button>
-        </div>
+      {/* Bottom */}
+      <div className="app-sidebar-bottom">
+        {bottomNav.map((item) => {
+          const isActive = pathname === item.href;
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.name}
+              href={item.href}
+              className={cn("app-sidebar-link", isActive && "is-active", collapsed && "is-collapsed")}
+              title={collapsed ? tNav(item.key) : undefined}
+            >
+              <Icon size={16} />
+              {!collapsed && <span className="app-sidebar-label">{tNav(item.key)}</span>}
+            </Link>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className={cn("app-sidebar-link app-sidebar-signout", collapsed && "is-collapsed")}
+          aria-label={tNav("signOut")}
+        >
+          <LogOut size={16} />
+          {!collapsed && <span className="app-sidebar-label">{tNav("signOut")}</span>}
+        </button>
       </div>
     </aside>
+    </>
   );
 }

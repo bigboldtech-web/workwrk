@@ -62,7 +62,7 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-500"
+        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]"
       >
         <span className="flex-1 min-w-0 text-left">
           {selected ? (
@@ -115,11 +115,11 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
                     onClick={() => { onChange(k.id); setOpen(false); setSearch(""); }}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left transition-colors hover:bg-surface-2",
-                      k.id === value && "bg-purple-600/10 text-purple-400"
+                      k.id === value && "bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
                     )}
                   >
                     <span className="flex-1 truncate">{k.name}</span>
-                    {k.id === value && <span className="text-purple-400 text-xs">✓</span>}
+                    {k.id === value && <span className="text-[#d4ff2e] text-xs">✓</span>}
                   </button>
                 ))}
               </div>

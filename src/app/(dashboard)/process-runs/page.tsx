@@ -28,6 +28,7 @@ import {
 import Link from "next/link";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface ProcessRun {
   id: string;
@@ -142,12 +143,11 @@ export default function ProcessRunsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Process Runs</h1>
-        <p className="text-muted text-sm mt-1">
-          Track active and completed checklist executions
-        </p>
-      </div>
+      <PageHeader
+        kicker="SOPs · process runs"
+        title="Process runs"
+        subtitle="Track active and completed checklist executions."
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
@@ -237,7 +237,7 @@ export default function ProcessRunsPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
                     {/* Status Icon */}
-                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-purple-500/10 shrink-0">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-[rgba(212,255,46,0.08)] shrink-0">
                       {getStatusIcon(isOverdue ? "OVERDUE" : run.status)}
                     </div>
 
@@ -252,7 +252,7 @@ export default function ProcessRunsPage() {
                       <div className="flex items-center gap-3 text-xs text-muted">
                         <Link
                           href={`/sops/${run.sop.id}`}
-                          className="hover:text-purple-400 transition-colors"
+                          className="hover:text-[#e2ff6b] transition-colors"
                         >
                           {run.sop.title}
                         </Link>
@@ -277,7 +277,7 @@ export default function ProcessRunsPage() {
                     {/* Progress */}
                     <div className="flex items-center gap-3 shrink-0 min-w-[160px]">
                       <Progress value={run.progress} className="h-2 flex-1" />
-                      <span className="text-xs font-mono font-bold text-purple-400 w-10 text-right">
+                      <span className="text-xs font-mono font-bold text-[#d4ff2e] w-10 text-right">
                         {run.progress}%
                       </span>
                     </div>

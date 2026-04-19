@@ -13,14 +13,14 @@ import {
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-purple-400";
+  if (score >= 70) return "text-[#d4ff2e]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
 
 function getScoreBg(score: number) {
   if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-purple-500";
+  if (score >= 70) return "bg-[#d4ff2e]";
   if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
@@ -57,7 +57,7 @@ export function ManagerTeamDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
-            <Users size={20} className="mx-auto text-purple-400 mb-1" />
+            <Users size={20} className="mx-auto text-[#d4ff2e] mb-1" />
             <p className="text-2xl font-bold">{stats.teamSize}</p>
             <p className="text-xs text-muted">Team Size</p>
           </CardContent>
@@ -91,7 +91,7 @@ export function ManagerTeamDashboard() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Users size={14} className="text-purple-400" /> My Team
+            <Users size={14} className="text-[#d4ff2e]" /> My Team
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">

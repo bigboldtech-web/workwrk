@@ -109,5 +109,47 @@
     "upgrade": "अपग्रेड करें",
     "perMonth": "/माह",
     "perYear": "/वर्ष"
+  },
+  "marketing": {
+    "nav": {
+      "features": "विशेषताएँ",
+      "industries": "उद्योग",
+      "pricing": "मूल्य",
+      "about": "हमारे बारे में",
+      "faq": "सामान्य प्रश्न",
+      "signIn": "साइन इन",
+      "startFree": "मुफ्त शुरू करें",
+      "dashboard": "डैशबोर्ड"
+    },
+    "hero": {
+      "kicker": "नया · AI द्वारा तैयार KRA",
+      "trust": "G2 पर 4.8 · कोई क्रेडिट कार्ड नहीं · 30 मिनट में तैयार · 500+ टीमें"
+    },
+    "cta": {
+      "primary": "14 दिन का ट्रायल",
+      "secondary": "डेमो बुक करें",
+      "seeProduct": "प्रोडक्ट देखें"
+    },
+    "pricing": {
+      "recommended": "अनुशंसित",
+      "perUser": "प्रति उपयोगकर्ता",
+      "perUserSub": "केवल सक्रिय सीट्स के लिए भुगतान",
+      "flat": "मासिक फ्लैट",
+      "flatSub": "प्रति टियर निश्चित मूल्य",
+      "starter": "स्टार्टर",
+      "team": "टीम",
+      "growth": "ग्रोथ",
+      "scale": "स्केल",
+      "enterprise": "एंटरप्राइज़",
+      "free": "मुफ्त",
+      "letsTalk": "बात करें"
+    },
+    "footer": {
+      "product": "उत्पाद",
+      "company": "कंपनी",
+      "resources": "संसाधन",
+      "legal": "कानूनी",
+      "copyright": "© WorkwrK. बेंगलुरु में बना।"
+    }
   }
 }

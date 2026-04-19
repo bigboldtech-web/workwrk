@@ -20,6 +20,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 // ============================================
 // Dynamic Org Chart Component
@@ -38,15 +39,15 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
   const directReports = allUsers
     .filter((u) => u.manager?.id === user.id)
     .sort((a: any, b: any) => (ACCESS_LEVEL_ORDER[a.accessLevel] ?? 7) - (ACCESS_LEVEL_ORDER[b.accessLevel] ?? 7));
-  const borderColor = depth === 0 ? "border-purple-500/30" : "border-border";
-  const bgColor = depth === 0 ? "bg-purple-500/10" : "bg-surface";
+  const borderColor = depth === 0 ? "border-[rgba(212,255,46,0.3)]" : "border-border";
+  const bgColor = depth === 0 ? "bg-[rgba(212,255,46,0.08)]" : "bg-surface";
 
   return (
     <div className="flex flex-col items-center">
       {/* Node */}
       <div className={`rounded-xl border ${borderColor} ${bgColor} p-4 min-w-[180px] max-w-[220px] text-center`}>
         <Avatar className="h-10 w-10 mx-auto mb-2">
-          <AvatarFallback className={`text-sm font-bold ${depth === 0 ? "bg-purple-600/20 text-purple-400" : "bg-border text-muted"}`}>
+          <AvatarFallback className={`text-sm font-bold ${depth === 0 ? "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]" : "bg-border text-muted"}`}>
             {user.firstName?.[0]}{user.lastName?.[0]}
           </AvatarFallback>
         </Avatar>
@@ -56,7 +57,7 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
           <Badge variant="outline" className="text-[9px] mt-1.5">{user.department.name}</Badge>
         )}
         {directReports.length > 0 && (
-          <p className="text-[10px] text-purple-400 mt-1">{directReports.length} report{directReports.length !== 1 ? "s" : ""}</p>
+          <p className="text-[10px] text-[#d4ff2e] mt-1">{directReports.length} report{directReports.length !== 1 ? "s" : ""}</p>
         )}
       </div>
 
@@ -311,7 +312,7 @@ export default function OrganizationPage() {
   const [loading, setLoading] = useState(true);
   const [showAddDeptDialog, setShowAddDeptDialog] = useState(false);
   const [showAddRoleDialog, setShowAddRoleDialog] = useState(false);
-  const [deptForm, setDeptForm] = useState({ name: "", description: "", color: "#6C5CE7" });
+  const [deptForm, setDeptForm] = useState({ name: "", description: "", color: "#d4ff2e" });
   const [roleForm, setRoleForm] = useState({ title: "", description: "", departmentId: "", level: "EMPLOYEE" });
 
   const { success: toastSuccess, error: toastError } = useToast();
@@ -453,7 +454,7 @@ export default function OrganizationPage() {
       });
       if (res.ok) {
         setShowAddDeptDialog(false);
-        setDeptForm({ name: "", description: "", color: "#6C5CE7" });
+        setDeptForm({ name: "", description: "", color: "#d4ff2e" });
         fetchData();
         toastSuccess("Department created");
       }
@@ -482,7 +483,7 @@ export default function OrganizationPage() {
 
   function openEditDept(dept: any) {
     setEditingDept(dept);
-    setDeptForm({ name: dept.name, description: dept.description || "", color: dept.color || "#6C5CE7" });
+    setDeptForm({ name: dept.name, description: dept.description || "", color: dept.color || "#d4ff2e" });
     setShowEditDeptDialog(true);
   }
 
@@ -497,7 +498,7 @@ export default function OrganizationPage() {
       if (res.ok) {
         setShowEditDeptDialog(false);
         setEditingDept(null);
-        setDeptForm({ name: "", description: "", color: "#6C5CE7" });
+        setDeptForm({ name: "", description: "", color: "#d4ff2e" });
         fetchData();
         toastSuccess("Department updated");
       }
@@ -582,10 +583,11 @@ export default function OrganizationPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div>
-        <h1 className="text-lg font-bold tracking-tight">Organization</h1>
-        <p className="text-muted text-sm mt-1">Manage your company structure, departments, and roles</p>
-      </div>
+      <PageHeader
+        kicker="Organization · structure"
+        title="Organization"
+        subtitle="Manage your company structure, departments, roles, and offices."
+      />
 
       <Tabs defaultValue="about">
         <TabsList>
@@ -614,7 +616,7 @@ export default function OrganizationPage() {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="gap-1 border-purple-500/30 text-purple-400 hover:bg-purple-500/10" onClick={aiGenerateProfile} disabled={aiGenerating}>
+                <Button variant="outline" size="sm" className="gap-1 border-[rgba(212,255,46,0.3)] text-[#d4ff2e] hover:bg-[rgba(212,255,46,0.08)]" onClick={aiGenerateProfile} disabled={aiGenerating}>
                   <Sparkles size={14} /> {aiGenerating ? "Generating..." : "AI Assist"}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setEditingProfile(true)}>
@@ -629,7 +631,7 @@ export default function OrganizationPage() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Target size={14} className="text-purple-400" /> Mission
+                  <Target size={14} className="text-[#d4ff2e]" /> Mission
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -650,7 +652,7 @@ export default function OrganizationPage() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Eye size={14} className="text-purple-400" /> Vision
+                  <Eye size={14} className="text-[#d4ff2e]" /> Vision
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -673,7 +675,7 @@ export default function OrganizationPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
-                <Building2 size={14} className="text-purple-400" /> About the Company
+                <Building2 size={14} className="text-[#d4ff2e]" /> About the Company
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -691,7 +693,7 @@ export default function OrganizationPage() {
                 <div className="text-center py-4">
                   <p className="text-sm text-muted mb-2">No company description added yet.</p>
                   <p className="text-xs text-muted mb-3">A strong company description helps AI generate better KRAs, KPIs, and align everything to your business.</p>
-                  <Button variant="outline" size="sm" className="gap-1 border-purple-500/30 text-purple-400" onClick={aiGenerateProfile} disabled={aiGenerating}>
+                  <Button variant="outline" size="sm" className="gap-1 border-[rgba(212,255,46,0.3)] text-[#d4ff2e]" onClick={aiGenerateProfile} disabled={aiGenerating}>
                     <Sparkles size={14} /> {aiGenerating ? "Generating..." : "Generate with AI"}
                   </Button>
                 </div>
@@ -704,7 +706,7 @@ export default function OrganizationPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Heart size={14} className="text-purple-400" /> Our Values
+                  <Heart size={14} className="text-[#d4ff2e]" /> Our Values
                 </CardTitle>
               </div>
             </CardHeader>
@@ -714,8 +716,8 @@ export default function OrganizationPage() {
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {companyProfile.values.map((value, i) => (
-                    <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20">
-                      <Sparkles size={12} className="text-purple-400" />
+                    <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[rgba(212,255,46,0.08)] border border-[rgba(212,255,46,0.2)]">
+                      <Sparkles size={12} className="text-[#d4ff2e]" />
                       <span className="text-sm">{value}</span>
                       {editingProfile && (
                         <button onClick={() => removeValue(i)} className="ml-1 text-red-400 hover:text-red-300">
@@ -826,7 +828,7 @@ export default function OrganizationPage() {
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
-                <p className="text-2xl font-bold text-purple-400">{companyProfile.values.length}</p>
+                <p className="text-2xl font-bold text-[#d4ff2e]">{companyProfile.values.length}</p>
                 <p className="text-xs text-muted">Core Values</p>
               </CardContent>
             </Card>
@@ -881,8 +883,8 @@ export default function OrganizationPage() {
                   <CardContent className="p-5">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: (dept.color || "#6C5CE7") + "20" }}>
-                          <Building2 size={20} style={{ color: dept.color || "#6C5CE7" }} />
+                        <div className="h-10 w-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: (dept.color || "#d4ff2e") + "20" }}>
+                          <Building2 size={20} style={{ color: dept.color || "#d4ff2e" }} />
                         </div>
                         <div>
                           <h3 className="font-semibold">{dept.name}</h3>
@@ -945,14 +947,14 @@ export default function OrganizationPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Department</Label>
-                    <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.departmentId} onChange={(e) => setRoleForm({ ...roleForm, departmentId: e.target.value })}>
+                    <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]" value={roleForm.departmentId} onChange={(e) => setRoleForm({ ...roleForm, departmentId: e.target.value })}>
                       <option value="">Select department...</option>
                       {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   </div>
                   <div className="space-y-2">
                     <Label>Level</Label>
-                    <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
+                    <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
                       {levels.map((l) => <option key={l} value={l}>{l.replace(/_/g, " ")}</option>)}
                     </select>
                   </div>
@@ -991,7 +993,7 @@ export default function OrganizationPage() {
                     <tr key={role.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors cursor-pointer">
                       <td className="p-4">
                         <div className="flex items-center gap-2">
-                          <Briefcase size={14} className="text-purple-400" />
+                          <Briefcase size={14} className="text-[#d4ff2e]" />
                           <span className="text-sm font-medium">{role.title}</span>
                         </div>
                       </td>
@@ -1075,7 +1077,7 @@ export default function OrganizationPage() {
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <Globe size={16} className="text-purple-400" />
+                        <Globe size={16} className="text-[#d4ff2e]" />
                         <h3 className="font-semibold text-sm">{office.name}</h3>
                         {office.isHeadquarters && <Badge variant="secondary" className="text-[10px]">HQ</Badge>}
                       </div>
@@ -1139,14 +1141,14 @@ export default function OrganizationPage() {
             </div>
             <div className="space-y-2">
               <Label>Department</Label>
-              <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.departmentId} onChange={(e) => setRoleForm({ ...roleForm, departmentId: e.target.value })}>
+              <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]" value={roleForm.departmentId} onChange={(e) => setRoleForm({ ...roleForm, departmentId: e.target.value })}>
                 <option value="">Select department...</option>
                 {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
             <div className="space-y-2">
               <Label>Level</Label>
-              <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-purple-500" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
+              <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
                 {levels.map((l) => <option key={l} value={l}>{l.replace(/_/g, " ")}</option>)}
               </select>
             </div>

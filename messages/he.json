@@ -109,5 +109,47 @@
     "upgrade": "שדרג",
     "perMonth": "/חודש",
     "perYear": "/שנה"
+  },
+  "marketing": {
+    "nav": {
+      "features": "תכונות",
+      "industries": "תעשיות",
+      "pricing": "תמחור",
+      "about": "אודות",
+      "faq": "שאלות נפוצות",
+      "signIn": "התחברות",
+      "startFree": "התחל חינם",
+      "dashboard": "לוח בקרה"
+    },
+    "hero": {
+      "kicker": "חדש · KRAs שנכתבו על ידי AI",
+      "trust": "4.8 ב-G2 · ללא כרטיס אשראי · הגדרה ב-30 דקות · 500+ צוותים"
+    },
+    "cta": {
+      "primary": "תקופת ניסיון 14 יום",
+      "secondary": "הזמן הדגמה",
+      "seeProduct": "ראה מוצר"
+    },
+    "pricing": {
+      "recommended": "מומלץ",
+      "perUser": "לכל משתמש",
+      "perUserSub": "שלם רק על חשבונות פעילים",
+      "flat": "חודשי קבוע",
+      "flatSub": "מחיר קבוע לכל דרג",
+      "starter": "התחלה",
+      "team": "צוות",
+      "growth": "צמיחה",
+      "scale": "קנה מידה",
+      "enterprise": "ארגוני",
+      "free": "חינם",
+      "letsTalk": "בואו נדבר"
+    },
+    "footer": {
+      "product": "מוצר",
+      "company": "חברה",
+      "resources": "משאבים",
+      "legal": "משפטי",
+      "copyright": "© WorkwrK. נבנה בבנגלור."
+    }
   }
 }

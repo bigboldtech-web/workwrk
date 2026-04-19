@@ -9,6 +9,7 @@ import { TourProvider } from "@/components/tour-provider";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import "./app-shell.css";
 
 export default function DashboardLayout({
   children,
@@ -25,7 +26,6 @@ export default function DashboardLayout({
     }
   }, [status, router]);
 
-  // Check if setup is completed
   useEffect(() => {
     if (status === "authenticated") {
       fetch("/api/setup")
@@ -41,13 +41,16 @@ export default function DashboardLayout({
     }
   }, [status, router]);
 
+  useEffect(() => {
+    // Lock the dashboard to dark mode; it's where the bento palette lives.
+    document.documentElement.classList.add("dark");
+  }, []);
+
   if (status === "loading" || (status === "authenticated" && !setupChecked)) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
-          <span className="text-sm text-muted">Loading...</span>
-        </div>
+      <div className="app-loader">
+        <span className="app-loader-dot" aria-hidden />
+        <span className="app-loader-text">Loading workspace</span>
       </div>
     );
   }
@@ -57,11 +60,21 @@ export default function DashboardLayout({
   return (
     <ToastProvider>
       <TourProvider>
-        <div className="flex h-screen">
+        <div className="app-shell" style={{ display: "flex", minHeight: "100vh" }}>
           <Sidebar />
-          <div className="flex flex-1 flex-col transition-all duration-300" style={{ paddingLeft: "var(--sidebar-width, 220px)" }}>
+          <div
+            className="app-shell-main"
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              paddingLeft: "var(--sidebar-width, 232px)",
+              transition: "padding-left 0.3s cubic-bezier(0.2, 0.9, 0.3, 1)",
+              minWidth: 0,
+            }}
+          >
             <Topbar />
-            <main className="flex-1 overflow-y-auto p-4">{children}</main>
+            <main className="app-content">{children}</main>
           </div>
           <KudosFab />
           <ScreenProtection />

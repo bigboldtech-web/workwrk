@@ -44,9 +44,11 @@ import {
   Link2,
   Copy,
   ExternalLink,
+  GitBranch,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-builder";
+import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { RichEditor } from "@/components/ui/rich-editor";
 import { useRole } from "@/hooks/use-role";
 
@@ -91,7 +93,7 @@ interface SOP {
   description: string | null;
   category: string | null;
   sopType: "WRITTEN" | "RECORDED" | "CHECKLIST";
-  content: { type?: string; steps?: SOPStep[] | RecordedStep[]; sections?: ChecklistSection[] };
+  content: { type?: string; steps?: SOPStep[] | RecordedStep[]; sections?: ChecklistSection[]; flow?: ProcessFlow };
   version: number;
   status: string;
   publishedAt: string | null;
@@ -195,8 +197,8 @@ function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: strin
       <CardContent>
         <div className="space-y-3">
           {/* Current version */}
-          <div className="flex items-center gap-3 p-3 rounded-lg border border-purple-500/30 bg-purple-500/5">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/20 text-purple-400 text-xs font-bold">v{currentVersion}</div>
+          <div className="flex items-center gap-3 p-3 rounded-lg border border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.06)]">
+            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xs font-bold">v{currentVersion}</div>
             <div className="flex-1">
               <p className="text-sm font-medium">Current Version</p>
               <p className="text-xs text-muted">Live version</p>
@@ -244,6 +246,7 @@ export default function SOPDetailPage() {
   const [description, setDescription] = useState("");
   const [steps, setSteps] = useState<SOPStep[]>([]);
   const [checklistSections, setChecklistSections] = useState<ChecklistSection[]>([]);
+  const [processFlow, setProcessFlow] = useState<ProcessFlow>({ type: "process_flow", steps: [] });
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   const [showPublishDialog, setShowPublishDialog] = useState(false);
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
@@ -353,6 +356,11 @@ export default function SOPDetailPage() {
       setDescription(data.description || "");
       if (data.sopType === "CHECKLIST") {
         setChecklistSections((data.content?.sections || []) as ChecklistSection[]);
+      } else if (data.content?.type === "process_flow") {
+        setProcessFlow({
+          type: "process_flow",
+          steps: Array.isArray(data.content?.flow?.steps) ? data.content.flow.steps : [],
+        });
       } else {
         setSteps((data.content?.type === "recorded" ? [] : data.content?.steps || []) as SOPStep[]);
       }
@@ -376,6 +384,9 @@ export default function SOPDetailPage() {
     // For richtext SOPs, preserve existing content (it's saved via its own Save button)
     if (sop?.content && (sop.content as any).type === "richtext") {
       return sop.content;
+    }
+    if (sop?.content && (sop.content as any).type === "process_flow") {
+      return { type: "process_flow", flow: processFlow };
     }
     return { steps };
   };
@@ -595,8 +606,8 @@ export default function SOPDetailPage() {
             <ArrowLeft size={18} />
           </Button>
           <div className="flex items-center gap-3 min-w-0">
-            <div className="rounded-lg bg-purple-500/10 p-2 shrink-0">
-              <FileText size={20} className="text-purple-400" />
+            <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2 shrink-0">
+              <FileText size={20} className="text-[#d4ff2e]" />
             </div>
             <div className="min-w-0">
               {editing ? (
@@ -676,8 +687,8 @@ export default function SOPDetailPage() {
                       Share this link with anyone who needs to complete this process:
                     </p>
                     <div className="flex items-center gap-2 p-3 rounded-lg bg-surface-3 border border-border">
-                      <Link2 size={14} className="text-purple-400 shrink-0" />
-                      <code className="text-xs text-purple-300 flex-1 break-all">{shareLink}</code>
+                      <Link2 size={14} className="text-[#d4ff2e] shrink-0" />
+                      <code className="text-xs text-[#d4ff2e] flex-1 break-all">{shareLink}</code>
                       <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copyShareLink}>
                         <Copy size={12} />
                       </Button>
@@ -945,7 +956,7 @@ export default function SOPDetailPage() {
               {sop.sopType === "CHECKLIST" ? (
                 <div>
                   {aiGenerating && (
-                    <p className="text-xs text-purple-400 animate-pulse mb-2">Generating with AI...</p>
+                    <p className="text-xs text-[#d4ff2e] animate-pulse mb-2">Generating with AI...</p>
                   )}
                   <ChecklistBuilder
                     sections={checklistSections}
@@ -954,13 +965,67 @@ export default function SOPDetailPage() {
                     onAiGenerate={handleAiGenerate}
                   />
                 </div>
+              ) : sop.content?.type === "process_flow" ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm">
+                        Process flow ({processFlow.steps.length} step{processFlow.steps.length === 1 ? "" : "s"})
+                      </CardTitle>
+                      {editing && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const converted: SOPStep[] = processFlow.steps.map((s) => ({
+                              id: s.id,
+                              title: s.title,
+                              description: s.description,
+                            }));
+                            setSteps(converted);
+                            setSop({ ...(sop as SOP), content: { ...(sop.content || {}), type: undefined, flow: undefined } });
+                          }}
+                          className="gap-1.5 text-xs"
+                        >
+                          Convert to simple steps
+                        </Button>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <ProcessFlowBuilder
+                      flow={processFlow}
+                      onChange={setProcessFlow}
+                      editing={editing}
+                    />
+                  </CardContent>
+                </Card>
               ) : (
               <Card>
                 <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <CardTitle className="text-sm">
                       Steps ({sop?.content?.type === "recorded" ? (sop.content.steps as any[])?.length || 0 : steps.length})
                     </CardTitle>
+                    {editing && sop?.sopType === "WRITTEN" && sop?.content?.type !== "recorded" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const flowSteps = steps.map((s) => ({
+                            id: s.id,
+                            title: s.title || "Untitled",
+                            description: s.description,
+                            type: "action" as const,
+                          }));
+                          setProcessFlow({ type: "process_flow", steps: flowSteps });
+                          setSop({ ...(sop as SOP), content: { ...(sop.content || {}), type: "process_flow", flow: { type: "process_flow", steps: flowSteps } } });
+                        }}
+                        className="gap-1.5 text-xs text-muted hover:text-[#d4ff2e]"
+                      >
+                        <GitBranch size={12} /> Switch to process flow
+                      </Button>
+                    )}
                     {editing && (
                       <Button
                         variant="outline"
@@ -999,7 +1064,7 @@ export default function SOPDetailPage() {
                                 updateRecordedSteps(s);
                               }}>▲</button>
                             )}
-                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 text-sm font-bold">
+                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] text-sm font-bold">
                               {index + 1}
                             </div>
                             {editing && index < totalSteps - 1 && (
@@ -1016,7 +1081,7 @@ export default function SOPDetailPage() {
                               <input
                                 type="text"
                                 defaultValue={step.description || `Step ${index + 1}`}
-                                className="w-full text-sm font-medium bg-transparent border-b border-border pb-1 focus:border-purple-400 focus:outline-none"
+                                className="w-full text-sm font-medium bg-transparent border-b border-border pb-1 focus:border-[#d4ff2e] focus:outline-none"
                                 onBlur={(e) => {
                                   const newSteps = [...(sop.content.steps as RecordedStep[])];
                                   newSteps[index] = { ...newSteps[index], description: e.target.value };
@@ -1049,7 +1114,7 @@ export default function SOPDetailPage() {
                     })}
                     {/* Add Step button for recorded SOPs */}
                     {editing && (
-                      <Button variant="ghost" size="sm" className="w-full border border-dashed border-border text-muted hover:text-purple-400 gap-1.5 mt-2" onClick={() => {
+                      <Button variant="ghost" size="sm" className="w-full border border-dashed border-border text-muted hover:text-[#e2ff6b] gap-1.5 mt-2" onClick={() => {
                         const newSteps = [...(sop.content.steps as RecordedStep[]), {
                           order: (sop.content.steps as RecordedStep[]).length + 1,
                           action: "manual",
@@ -1098,7 +1163,7 @@ export default function SOPDetailPage() {
                         <div className="pt-0.5 text-muted opacity-30">
                           <GripVertical size={16} />
                         </div>
-                        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-purple-500/10 text-purple-400 text-xs font-bold shrink-0 mt-0.5">
+                        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] text-xs font-bold shrink-0 mt-0.5">
                           {index + 1}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -1227,7 +1292,7 @@ export default function SOPDetailPage() {
                               >
                                 <td className="py-3 pr-4">
                                   <div className="flex items-center gap-2">
-                                    <div className="w-7 h-7 rounded-full bg-purple-500/10 flex items-center justify-center text-xs font-bold text-purple-400">
+                                    <div className="w-7 h-7 rounded-full bg-[rgba(212,255,46,0.08)] flex items-center justify-center text-xs font-bold text-[#d4ff2e]">
                                       {record.user.firstName[0]}
                                       {record.user.lastName[0]}
                                     </div>
@@ -1326,7 +1391,7 @@ export default function SOPDetailPage() {
                               <tr key={a.id} className="border-b border-border/50">
                                 <td className="py-3 pr-4">
                                   <div className="flex items-center gap-2">
-                                    <div className="w-7 h-7 rounded-full bg-purple-500/10 flex items-center justify-center text-xs font-bold text-purple-400">
+                                    <div className="w-7 h-7 rounded-full bg-[rgba(212,255,46,0.08)] flex items-center justify-center text-xs font-bold text-[#d4ff2e]">
                                       {a.user.firstName[0]}{a.user.lastName[0]}
                                     </div>
                                     <div>
@@ -1489,7 +1554,7 @@ export default function SOPDetailPage() {
                     <span className="text-xs text-muted">
                       Completion Rate
                     </span>
-                    <span className="text-sm font-mono font-bold text-purple-400">
+                    <span className="text-sm font-mono font-bold text-[#d4ff2e]">
                       {Math.round(
                         (complianceCompleted.length / sop.compliance.length) *
                           100

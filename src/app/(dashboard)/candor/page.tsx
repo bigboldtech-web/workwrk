@@ -15,6 +15,7 @@ import {
   MessageSquareHeart, Plus, Send, Lock, Eye, BarChart3, X,
   Star, MessageSquare, ArrowRight, CheckCircle2, Trash2,
 } from "lucide-react";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface CandorSession {
   id: string;
@@ -211,20 +212,20 @@ export default function CandorPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight flex items-center gap-2">
-            <MessageSquareHeart size={20} className="text-purple-400" /> Candor
-          </h1>
-          <p className="text-muted text-sm mt-1">Anonymous team feedback sessions. Honest, safe, actionable.</p>
-        </div>
-        {isManager && (
-          <Button className="gap-2" onClick={() => { resetCreateForm(); setShowCreate(true); }}>
-            <Plus size={16} /> New Session
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        kicker="Candor · anonymous feedback"
+        title="Candor"
+        subtitle="Anonymous team feedback sessions. Honest, safe, actionable."
+        actions={
+          isManager
+            ? [{
+                label: "New session",
+                onClick: () => { resetCreateForm(); setShowCreate(true); },
+                icon: <Plus size={14} />,
+              }]
+            : undefined
+        }
+      />
 
       {/* Active Sessions — respond */}
       {activeSessions.length > 0 && (
@@ -363,7 +364,7 @@ export default function CandorPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold">Prompts / Questions</Label>
-                <Button variant="ghost" size="sm" className="text-xs text-purple-400 h-6 gap-1" onClick={addPrompt}><Plus size={12} /> Add</Button>
+                <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6 gap-1" onClick={addPrompt}><Plus size={12} /> Add</Button>
               </div>
               {createPrompts.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 bg-surface-2 rounded-lg p-2">
@@ -426,7 +427,7 @@ export default function CandorPage() {
                           onClick={() => setAnswers({ ...answers, [prompt.id]: String(n) })}
                           className={`h-10 w-10 rounded-lg border text-sm font-bold transition-colors ${
                             answers[prompt.id] === String(n)
-                              ? "border-purple-500 bg-purple-500/20 text-purple-300"
+                              ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]"
                               : "border-border hover:border-muted-2 text-muted"
                           }`}
                         >
@@ -464,7 +465,7 @@ export default function CandorPage() {
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <BarChart3 size={16} className="text-purple-400" /> Results: {viewResults?.session?.title}
+              <BarChart3 size={16} className="text-[#d4ff2e]" /> Results: {viewResults?.session?.title}
             </DialogTitle>
           </DialogHeader>
           {viewResults && (
@@ -481,13 +482,13 @@ export default function CandorPage() {
                     {r.type === "rating" ? (
                       <div className="space-y-2">
                         <div className="flex items-center gap-3">
-                          <p className="text-3xl font-bold font-mono text-purple-400">{r.average || "—"}</p>
+                          <p className="text-3xl font-bold font-mono text-[#d4ff2e]">{r.average || "—"}</p>
                           <div className="flex-1">
                             <div className="flex items-center gap-1">
                               {(r.distribution || []).map((d: any) => (
                                 <div key={d.value} className="flex-1 text-center">
                                   <div
-                                    className="mx-auto rounded-sm bg-purple-500/30"
+                                    className="mx-auto rounded-sm bg-[rgba(212,255,46,0.18)]"
                                     style={{ height: `${Math.max(4, (d.count / Math.max(r.count, 1)) * 40)}px` }}
                                   />
                                   <p className="text-[10px] text-muted mt-1">{d.value}</p>

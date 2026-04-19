@@ -109,5 +109,47 @@
     "upgrade": "Upgraden",
     "perMonth": "/Monat",
     "perYear": "/Jahr"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Funktionen",
+      "industries": "Branchen",
+      "pricing": "Preise",
+      "about": "Über uns",
+      "faq": "FAQ",
+      "signIn": "Anmelden",
+      "startFree": "Kostenlos starten",
+      "dashboard": "Dashboard"
+    },
+    "hero": {
+      "kicker": "Neu · KI-entworfene KRAs",
+      "trust": "4.8 auf G2 · Keine Kreditkarte · 30 min zum Start · 500+ Teams"
+    },
+    "cta": {
+      "primary": "14-Tage-Testversion",
+      "secondary": "Demo buchen",
+      "seeProduct": "Produkt ansehen"
+    },
+    "pricing": {
+      "recommended": "Empfohlen",
+      "perUser": "Pro Nutzer",
+      "perUserSub": "nur aktive Konten zahlen",
+      "flat": "Monatlich pauschal",
+      "flatSub": "Festpreis pro Stufe",
+      "starter": "Starter",
+      "team": "Team",
+      "growth": "Wachstum",
+      "scale": "Skalierung",
+      "enterprise": "Enterprise",
+      "free": "Kostenlos",
+      "letsTalk": "Sprechen Sie uns an"
+    },
+    "footer": {
+      "product": "Produkt",
+      "company": "Unternehmen",
+      "resources": "Ressourcen",
+      "legal": "Rechtliches",
+      "copyright": "© WorkwrK. Aus Bengaluru."
+    }
   }
 }

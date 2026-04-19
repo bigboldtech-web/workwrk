@@ -109,5 +109,47 @@
     "upgrade": "Upgraden",
     "perMonth": "/mnd",
     "perYear": "/jr"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Functies",
+      "industries": "Sectoren",
+      "pricing": "Prijzen",
+      "about": "Over ons",
+      "faq": "FAQ",
+      "signIn": "Inloggen",
+      "startFree": "Gratis starten",
+      "dashboard": "Dashboard"
+    },
+    "hero": {
+      "kicker": "Nieuw · KRAs door AI opgesteld",
+      "trust": "4.8 op G2 · Geen creditcard · 30 min om te starten · 500+ teams"
+    },
+    "cta": {
+      "primary": "14-daagse proef",
+      "secondary": "Demo boeken",
+      "seeProduct": "Bekijk product"
+    },
+    "pricing": {
+      "recommended": "Aanbevolen",
+      "perUser": "Per gebruiker",
+      "perUserSub": "betaal alleen voor actieve accounts",
+      "flat": "Maandelijks vast",
+      "flatSub": "vaste prijs per tier",
+      "starter": "Starter",
+      "team": "Team",
+      "growth": "Groei",
+      "scale": "Schaal",
+      "enterprise": "Enterprise",
+      "free": "Gratis",
+      "letsTalk": "Laten we praten"
+    },
+    "footer": {
+      "product": "Product",
+      "company": "Bedrijf",
+      "resources": "Bronnen",
+      "legal": "Juridisch",
+      "copyright": "© WorkwrK. Gemaakt in Bengaluru."
+    }
   }
 }

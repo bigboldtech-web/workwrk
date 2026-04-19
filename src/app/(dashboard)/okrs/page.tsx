@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/dashboard/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,7 +27,7 @@ const STATUS_COLORS: Record<string, string> = {
   ON_TRACK: "bg-green-500/20 text-green-400",
   AT_RISK: "bg-amber-500/20 text-amber-400",
   BEHIND: "bg-red-500/20 text-red-400",
-  COMPLETED: "bg-purple-500/20 text-purple-400",
+  COMPLETED: "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]",
 };
 
 const LEVEL_ICONS: Record<string, typeof Globe> = {
@@ -174,12 +175,17 @@ export default function OKRsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">OKRs</h1>
-          <p className="text-muted text-sm mt-1">{okrs.length} objectives &middot; {avgProgress}% avg progress</p>
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        kicker="OKRs · cascaded quarterly"
+        title="OKRs"
+        subtitle="Company → team → individual. Progress auto-computed from KPI readings."
+        stats={[
+          { label: "Objectives", value: okrs.length },
+          { label: "Avg progress", value: `${avgProgress}%` },
+        ]}
+      />
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <Select value={quarter} onValueChange={setQuarter}>
             <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -239,7 +245,7 @@ export default function OKRsPage() {
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
                             <div className="text-right">
-                              <p className="text-lg font-bold font-mono text-purple-400">{okr.progress}%</p>
+                              <p className="text-lg font-bold font-mono text-[#d4ff2e]">{okr.progress}%</p>
                               <p className="text-[10px] text-muted">{okr.keyResults.length} KRs</p>
                             </div>
                           </div>
@@ -364,7 +370,7 @@ export default function OKRsPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Key Results</Label>
-                <Button variant="ghost" size="sm" className="text-xs text-purple-400 h-6" onClick={() => setForm({ ...form, keyResults: [...form.keyResults, { title: "", targetValue: "100", unit: "%" }] })}>
+                <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6" onClick={() => setForm({ ...form, keyResults: [...form.keyResults, { title: "", targetValue: "100", unit: "%" }] })}>
                   <Plus size={12} className="mr-1" /> Add KR
                 </Button>
               </div>

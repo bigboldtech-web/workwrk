@@ -109,5 +109,47 @@
     "upgrade": "Mejorar",
     "perMonth": "/mes",
     "perYear": "/año"
+  },
+  "marketing": {
+    "nav": {
+      "features": "Funciones",
+      "industries": "Industrias",
+      "pricing": "Precios",
+      "about": "Nosotros",
+      "faq": "FAQ",
+      "signIn": "Iniciar sesión",
+      "startFree": "Empezar gratis",
+      "dashboard": "Panel"
+    },
+    "hero": {
+      "kicker": "Nuevo · KRAs generados por IA",
+      "trust": "4.8 en G2 · Sin tarjeta · Listo en 30 min · 500+ equipos"
+    },
+    "cta": {
+      "primary": "Prueba de 14 días",
+      "secondary": "Reservar demo",
+      "seeProduct": "Ver el producto"
+    },
+    "pricing": {
+      "recommended": "Recomendado",
+      "perUser": "Por usuario",
+      "perUserSub": "paga solo por cuentas activas",
+      "flat": "Mensual fijo",
+      "flatSub": "precio fijo por nivel",
+      "starter": "Inicial",
+      "team": "Equipo",
+      "growth": "Crecimiento",
+      "scale": "Escala",
+      "enterprise": "Empresa",
+      "free": "Gratis",
+      "letsTalk": "Hablemos"
+    },
+    "footer": {
+      "product": "Producto",
+      "company": "Empresa",
+      "resources": "Recursos",
+      "legal": "Legal",
+      "copyright": "© WorkwrK. Hecho en Bengaluru."
+    }
   }
 }

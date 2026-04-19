@@ -18,10 +18,10 @@ interface OKR {
 }
 
 function progressColor(p: number) {
-  if (p >= 80) return "bg-green-500";
-  if (p >= 50) return "bg-blue-500";
-  if (p >= 25) return "bg-amber-500";
-  return "bg-red-500";
+  if (p >= 80) return "bg-[#d4ff2e]";
+  if (p >= 50) return "bg-[#4a9eff]";
+  if (p >= 25) return "bg-[#ff9933]";
+  return "bg-[#ff3d8a]";
 }
 
 function levelIcon(level: string) {
@@ -37,9 +37,9 @@ function levelLabel(level: string) {
 }
 
 function levelStyle(level: string) {
-  if (level === "COMPANY") return "bg-purple-500/15 text-purple-300 border-purple-500/30";
-  if (level === "TEAM") return "bg-blue-500/15 text-blue-300 border-blue-500/30";
-  return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
+  if (level === "COMPANY") return "bg-[rgba(212,255,46,0.1)] text-[#d4ff2e] border-[rgba(212,255,46,0.3)]";
+  if (level === "TEAM") return "bg-[rgba(74,158,255,0.1)] text-[#4a9eff] border-[rgba(74,158,255,0.3)]";
+  return "bg-[rgba(255,153,51,0.1)] text-[#ff9933] border-[rgba(255,153,51,0.3)]";
 }
 
 export function DashboardOkrs() {
@@ -68,15 +68,15 @@ export function DashboardOkrs() {
   const sorted = [...okrs].sort((a, b) => order[a.level] - order[b.level]);
 
   return (
-    <Card className="border-purple-500/20 bg-gradient-to-br from-purple-500/5 to-blue-500/5">
+    <Card className="border-[rgba(212,255,46,0.2)] bg-gradient-to-br from-[rgba(212,255,46,0.04)] to-[rgba(74,158,255,0.04)]">
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Crosshair size={16} className="text-purple-400" />
-            <h3 className="text-sm font-bold">Your OKRs — {quarter}</h3>
+            <Crosshair size={16} className="text-[#d4ff2e]" />
+            <h3 className="text-sm font-bold text-[#fafafa]">Your OKRs — {quarter}</h3>
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">{okrs.length}</Badge>
           </div>
-          <Link href="/okrs" className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1">
+          <Link href="/okrs" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b] flex items-center gap-1">
             View all <ChevronRight size={12} />
           </Link>
         </div>
@@ -102,7 +102,7 @@ export function DashboardOkrs() {
                     <p className="text-[10px] text-muted mt-0.5">{okr.keyResults.length} Key Result{okr.keyResults.length !== 1 ? "s" : ""}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="text-lg font-bold font-mono" style={{ color: okr.progress >= 80 ? "#10b981" : okr.progress >= 50 ? "#3b82f6" : okr.progress >= 25 ? "#f59e0b" : "#ef4444" }}>
+                    <p className="text-lg font-bold font-mono" style={{ color: okr.progress >= 80 ? "#d4ff2e" : okr.progress >= 50 ? "#4a9eff" : okr.progress >= 25 ? "#ff9933" : "#ff3d8a" }}>
                       {okr.progress}%
                     </p>
                   </div>
@@ -115,7 +115,7 @@ export function DashboardOkrs() {
           ))}
         </div>
         {sorted.length > 5 && (
-          <Link href="/okrs" className="block mt-2 text-center text-xs text-muted hover:text-purple-400">
+          <Link href="/okrs" className="block mt-2 text-center text-xs text-[#a0a0a0] hover:text-[#d4ff2e] transition-colors">
             +{sorted.length - 5} more
           </Link>
         )}

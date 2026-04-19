@@ -19,6 +19,7 @@ import {
   Award,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 interface DocSection {
   id: string;
@@ -36,7 +37,7 @@ const docs: DocSection[] = [
   {
     id: "getting-started",
     icon: <Rocket size={22} />,
-    color: "#6C5CE7",
+    color: "#d4ff2e",
     title: "Getting Started",
     description: "Set up your organization and start using WorkwrK",
     articles: [
@@ -141,7 +142,7 @@ Employees use the Work Calendar to log what they're working on each day. Manager
   {
     id: "dashboard",
     icon: <LayoutDashboard size={22} />,
-    color: "#00D68F",
+    color: "#5eead4",
     title: "Dashboard",
     description: "Your daily overview and quick actions",
     articles: [
@@ -175,7 +176,7 @@ Employees use the Work Calendar to log what they're working on each day. Manager
   {
     id: "people",
     icon: <Users size={22} />,
-    color: "#00D68F",
+    color: "#5eead4",
     title: "People Management",
     description: "Manage your team members and profiles",
     articles: [
@@ -219,7 +220,7 @@ Employees use the Work Calendar to log what they're working on each day. Manager
   {
     id: "kra-kpi",
     icon: <Target size={22} />,
-    color: "#FF6B6B",
+    color: "#ff3d8a",
     title: "KRAs & KPIs",
     description: "The core of WorkwrK — define responsibilities and measure success",
     articles: [
@@ -313,7 +314,7 @@ Every KRA should have at least one KPI that defines "what does good look like?"
   {
     id: "work-calendar",
     icon: <CalendarDays size={22} />,
-    color: "#FFA726",
+    color: "#ff9933",
     title: "Work Calendar",
     description: "Plan and track daily work activities",
     articles: [
@@ -355,7 +356,7 @@ Unlike traditional task management, the Work Calendar is for tracking daily acti
   {
     id: "sops",
     icon: <BookOpen size={22} />,
-    color: "#26C6DA",
+    color: "#4a9eff",
     title: "SOPs",
     description: "Standard Operating Procedures and compliance tracking",
     articles: [
@@ -420,7 +421,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
   {
     id: "reviews",
     icon: <Star size={22} />,
-    color: "#FFCA28",
+    color: "#ff9933",
     title: "Performance Reviews",
     description: "Run review cycles with self, manager, and peer assessments",
     articles: [
@@ -481,7 +482,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
   {
     id: "scores",
     icon: <BarChart3 size={22} />,
-    color: "#AB47BC",
+    color: "#d4ff2e",
     title: "Performance Scores & Analytics",
     description: "Understand how performance scoring works",
     articles: [
@@ -526,7 +527,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
   {
     id: "meetings",
     icon: <CalendarDays size={22} />,
-    color: "#29B6F6",
+    color: "#4a9eff",
     title: "Meetings",
     description: "Schedule meetings and track action items",
     articles: [
@@ -560,7 +561,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
   {
     id: "kudos",
     icon: <Award size={22} />,
-    color: "#FF6B81",
+    color: "#ff3d8a",
     title: "Kudos & Recognition",
     description: "Recognize team members for great work",
     articles: [
@@ -592,7 +593,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
   {
     id: "ai",
     icon: <Brain size={22} />,
-    color: "#EC407A",
+    color: "#ff3d8a",
     title: "AI Assistant",
     description: "Get AI-powered insights about your organization",
     articles: [
@@ -627,7 +628,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
   {
     id: "integrations",
     icon: <Link2 size={22} />,
-    color: "#29B6F6",
+    color: "#4a9eff",
     title: "Integrations",
     description: "Connect WorkwrK with external services",
     articles: [
@@ -656,7 +657,7 @@ SOPs can be linked to KRAs — this way, a KRA defines "what" someone is respons
   {
     id: "settings",
     icon: <Settings size={22} />,
-    color: "#78909C",
+    color: "#a0a0a0",
     title: "Settings & Administration",
     description: "Configure your organization and manage access",
     articles: [
@@ -737,10 +738,11 @@ export default function DocsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Documentation</h1>
-        <p className="text-muted">Learn how to use every feature in WorkwrK</p>
-      </div>
+      <PageHeader
+        kicker="Help · in-app docs"
+        title="Documentation"
+        subtitle="Learn how to use every feature in WorkwrK."
+      />
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
@@ -782,7 +784,7 @@ export default function DocsPage() {
                 }}
                 className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left transition-colors ${
                   selectedSection === section.id
-                    ? "bg-purple-500/10 text-purple-400"
+                    ? "bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
                     : "text-muted hover:bg-surface-2 hover:text-foreground"
                 }`}
               >
@@ -797,7 +799,7 @@ export default function DocsPage() {
                       onClick={() => setSelectedArticle(idx)}
                       className={`w-full text-left text-xs rounded px-2 py-1.5 transition-colors ${
                         selectedArticle === idx
-                          ? "text-purple-300 bg-purple-500/5"
+                          ? "text-[#d4ff2e] bg-[rgba(212,255,46,0.06)]"
                           : "text-muted-2 hover:text-muted"
                       }`}
                     >
@@ -847,11 +849,11 @@ export default function DocsPage() {
                   if (line.match(/^\d+\.\s/)) {
                     return (
                       <div key={i} className="flex gap-2 text-sm text-muted ml-2 mb-1">
-                        <span className="text-purple-400 font-mono text-xs mt-0.5">{line.match(/^(\d+)\./)?.[1]}.</span>
+                        <span className="text-[#d4ff2e] font-mono text-xs mt-0.5">{line.match(/^(\d+)\./)?.[1]}.</span>
                         <span dangerouslySetInnerHTML={{
                           __html: line.replace(/^\d+\.\s/, "")
                             .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
-                            .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-purple-400 hover:text-purple-300">$1</a>'),
+                            .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-[#d4ff2e] hover:text-[#e2ff6b]">$1</a>'),
                         }} />
                       </div>
                     );
@@ -860,11 +862,11 @@ export default function DocsPage() {
                     const indent = line.startsWith("   - ");
                     return (
                       <div key={i} className={`flex gap-2 text-sm text-muted mb-1 ${indent ? "ml-6" : "ml-2"}`}>
-                        <span className="text-purple-400 mt-1.5"><div className="w-1 h-1 rounded-full bg-current" /></span>
+                        <span className="text-[#d4ff2e] mt-1.5"><div className="w-1 h-1 rounded-full bg-current" /></span>
                         <span dangerouslySetInnerHTML={{
                           __html: line.replace(/^-\s+/, "").replace(/^\s+-\s+/, "")
                             .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
-                            .replace(/`(.+?)`/g, '<code class="text-purple-300 bg-purple-500/10 px-1 rounded text-xs">$1</code>'),
+                            .replace(/`(.+?)`/g, '<code class="text-[#d4ff2e] bg-[rgba(212,255,46,0.08)] px-1 rounded text-xs">$1</code>'),
                         }} />
                       </div>
                     );
@@ -874,8 +876,8 @@ export default function DocsPage() {
                       <p key={i} className="text-sm text-muted mb-3 leading-relaxed" dangerouslySetInnerHTML={{
                         __html: line
                           .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
-                          .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-purple-400 hover:text-purple-300">$1</a>')
-                          .replace(/`(.+?)`/g, '<code class="text-purple-300 bg-purple-500/10 px-1 rounded text-xs">$1</code>'),
+                          .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-[#d4ff2e] hover:text-[#e2ff6b]">$1</a>')
+                          .replace(/`(.+?)`/g, '<code class="text-[#d4ff2e] bg-[rgba(212,255,46,0.08)] px-1 rounded text-xs">$1</code>'),
                       }} />
                     );
                   }

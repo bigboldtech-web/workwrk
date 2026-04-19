@@ -109,5 +109,47 @@
     "upgrade": "ترقية",
     "perMonth": "/شهر",
     "perYear": "/سنة"
+  },
+  "marketing": {
+    "nav": {
+      "features": "الميزات",
+      "industries": "القطاعات",
+      "pricing": "الأسعار",
+      "about": "عنا",
+      "faq": "الأسئلة الشائعة",
+      "signIn": "تسجيل الدخول",
+      "startFree": "ابدأ مجاناً",
+      "dashboard": "لوحة التحكم"
+    },
+    "hero": {
+      "kicker": "جديد · KRAs صاغتها الذكاء الاصطناعي",
+      "trust": "4.8 على G2 · بدون بطاقة ائتمان · إعداد في 30 دقيقة · +500 فريق"
+    },
+    "cta": {
+      "primary": "تجربة 14 يوماً",
+      "secondary": "احجز جولة",
+      "seeProduct": "شاهد المنتج"
+    },
+    "pricing": {
+      "recommended": "موصى به",
+      "perUser": "لكل مستخدم",
+      "perUserSub": "ادفع فقط للحسابات النشطة",
+      "flat": "شهري ثابت",
+      "flatSub": "سعر ثابت لكل فئة",
+      "starter": "البداية",
+      "team": "الفريق",
+      "growth": "النمو",
+      "scale": "التوسع",
+      "enterprise": "المؤسسات",
+      "free": "مجاني",
+      "letsTalk": "لنتحدث"
+    },
+    "footer": {
+      "product": "المنتج",
+      "company": "الشركة",
+      "resources": "الموارد",
+      "legal": "قانوني",
+      "copyright": "© WorkwrK. صُنع في بنغالور."
+    }
   }
 }
