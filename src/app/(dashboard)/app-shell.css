@@ -122,6 +122,8 @@
   border: 1px solid transparent;
   position: relative;
   white-space: nowrap;
+  text-align: left;
+  width: 100%;
 }
 .app-sidebar-link.is-collapsed { justify-content: center; padding: 10px; gap: 0; }
 .app-sidebar-link:hover {

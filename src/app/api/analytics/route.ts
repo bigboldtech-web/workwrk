@@ -6,6 +6,7 @@ export async function GET(req: Request) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
+  try {
   const orgId = getOrgId(session);
   const now = new Date();
 
@@ -180,4 +181,18 @@ export async function GET(req: Request) {
     mostRecognized,
     totalKudosThisMonth: monthlyKudos.length,
   });
+  } catch (err) {
+    console.error("[analytics] failed:", err);
+    const msg = err instanceof Error ? err.message : "Analytics query failed";
+    const isSchema = /does not exist|relation .* does not exist|column .* does not exist|P2021|P2022/.test(msg);
+    return Response.json(
+      {
+        error: isSchema
+          ? "Database is out of date. Run `npx prisma migrate deploy` on the server to apply pending migrations."
+          : msg,
+        detail: msg,
+      },
+      { status: 500 },
+    );
+  }
 }

@@ -161,8 +161,8 @@ export default function AnalyticsPage() {
         setError(null);
         setLoading(true);
         const res = await fetch(`/api/analytics?range=${dateRange}`);
-        if (!res.ok) throw new Error("Failed to load analytics data");
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || "Failed to load analytics data");
         setData(json);
       } catch (err) {
         console.error("Failed to fetch analytics:", err);

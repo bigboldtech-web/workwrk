@@ -7,7 +7,8 @@ import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { useRole } from "@/hooks/use-role";
 import { useTranslations } from "next-intl";
-import { Menu } from "lucide-react";
+import { useTheme } from "next-themes";
+import { Menu, Sun, Moon } from "lucide-react";
 import {
   LayoutDashboard,
   Users,
@@ -84,7 +85,13 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [themeMounted, setThemeMounted] = useState(false);
   const tNav = useTranslations("nav");
+  const { theme, resolvedTheme, setTheme } = useTheme();
+
+  useEffect(() => {
+    setThemeMounted(true);
+  }, []);
 
   useEffect(() => {
     document.documentElement.style.setProperty("--sidebar-width", collapsed ? "64px" : "232px");
@@ -231,6 +238,22 @@ export function Sidebar() {
             </Link>
           );
         })}
+        {themeMounted && (() => {
+          const isDark = (resolvedTheme ?? theme) === "dark";
+          const label = isDark ? tNav("lightMode") : tNav("darkMode");
+          return (
+            <button
+              type="button"
+              onClick={() => setTheme(isDark ? "light" : "dark")}
+              className={cn("app-sidebar-link", collapsed && "is-collapsed")}
+              aria-label={label}
+              title={collapsed ? label : undefined}
+            >
+              {isDark ? <Sun size={16} /> : <Moon size={16} />}
+              {!collapsed && <span className="app-sidebar-label">{label}</span>}
+            </button>
+          );
+        })()}
         <button
           type="button"
           onClick={() => signOut({ callbackUrl: "/login" })}

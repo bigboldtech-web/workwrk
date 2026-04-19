@@ -17,9 +17,11 @@ import {
   LayoutDashboard,
   CalendarDays,
   Award,
+  Info,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { useLocale } from "next-intl";
 
 interface DocSection {
   id: string;
@@ -719,6 +721,7 @@ export default function DocsPage() {
   const [selectedSection, setSelectedSection] = useState<string>("getting-started");
   const [selectedArticle, setSelectedArticle] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const locale = useLocale();
 
   const currentSection = docs.find((d) => d.id === selectedSection) || docs[0];
   const currentArticle = currentSection.articles[selectedArticle] || currentSection.articles[0];
@@ -743,6 +746,20 @@ export default function DocsPage() {
         title="Documentation"
         subtitle="Learn how to use every feature in WorkwrK."
       />
+
+      {locale !== "en" && (
+        <div
+          className="rounded-xl border border-[rgba(74,158,255,0.25)] bg-[rgba(74,158,255,0.06)] p-4 flex items-start gap-3"
+          role="note"
+        >
+          <Info size={18} className="text-[#4a9eff] shrink-0 mt-0.5" />
+          <div className="text-sm text-muted leading-relaxed">
+            <strong className="text-foreground">Documentation is in English.</strong> The rest of the
+            app is localized, but we keep help content in English so it stays accurate as features
+            change. Use your browser&apos;s translate feature if you need it in another language.
+          </div>
+        </div>
+      )}
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
