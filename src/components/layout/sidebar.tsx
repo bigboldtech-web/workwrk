@@ -9,6 +9,7 @@ import { useRole } from "@/hooks/use-role";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import { Menu, Sun, Moon } from "lucide-react";
+import { LogoMark } from "@/components/brand/logo";
 import {
   LayoutDashboard,
   Users,
@@ -174,12 +175,12 @@ export function Sidebar() {
       <div className="app-sidebar-brand">
         {!collapsed ? (
           <Link href="/dashboard" className="app-sidebar-brand-full" aria-label="workwrk home">
-            <span className="app-sidebar-dot" aria-hidden />
+            <LogoMark size={22} />
             <span className="app-sidebar-wordmark">workwrk</span>
           </Link>
         ) : (
           <Link href="/dashboard" className="app-sidebar-brand-mini" aria-label="workwrk home">
-            <span className="app-sidebar-dot" aria-hidden />
+            <LogoMark size={26} />
           </Link>
         )}
         <button

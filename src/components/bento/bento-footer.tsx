@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LogoMark } from "@/components/brand/logo";
 
 type Col = { heading: string; links: { href: string; label: string }[] };
 
@@ -82,16 +83,7 @@ export function BentoFooter() {
                   letterSpacing: "-0.04em",
                 }}
               >
-                <span
-                  aria-hidden
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 4,
-                    background: "var(--b-lime)",
-                    boxShadow: "0 0 14px var(--b-lime)",
-                  }}
-                />
+                <LogoMark size={22} />
                 workwrk
               </div>
               <p

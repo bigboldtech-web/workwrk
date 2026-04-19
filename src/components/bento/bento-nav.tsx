@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import { LocaleSwitcher } from "./locale-switcher";
 import { CurrencySwitcher } from "./currency-switcher";
+import { LogoMark } from "@/components/brand/logo";
 
 type NavLink = { href: string; labelKey: string };
 
@@ -55,18 +56,7 @@ export function BentoNav({ links = defaultLinks }: { links?: NavLink[] }) {
           }}
           aria-label="WorkwrK — Home"
         >
-          <span
-            aria-hidden
-            style={{
-              width: 14,
-              height: 14,
-              borderRadius: 4,
-              background: "var(--b-lime)",
-              display: "inline-block",
-              boxShadow: "0 0 14px var(--b-lime)",
-              animation: "bentoBrandPulse 3s ease-in-out infinite",
-            }}
-          />
+          <LogoMark size={22} />
           workwrk
         </Link>
 

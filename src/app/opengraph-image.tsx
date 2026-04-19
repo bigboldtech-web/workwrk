@@ -23,15 +23,16 @@ export default function OgImage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
-              background: "#d4ff2e",
-              boxShadow: "0 0 24px #d4ff2e",
-            }}
-          />
+          <svg
+            width="36"
+            height="36"
+            viewBox="0 0 48 48"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect x="0" y="0" width="28" height="22" rx="6" fill="#d4ff2e" />
+            <rect x="31" y="0" width="17" height="22" rx="6" fill="#d4ff2e" />
+            <rect x="0" y="25" width="48" height="23" rx="6" fill="#d4ff2e" />
+          </svg>
           <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-0.04em" }}>
             workwrk
           </div>

@@ -84,11 +84,12 @@
   margin-bottom: 32px;
 }
 .auth-brand-dot {
-  width: 14px; height: 14px;
-  border-radius: 4px;
-  background: var(--b-lime);
-  box-shadow: 0 0 14px var(--b-lime);
-  animation: bentoBrandPulse 3s ease-in-out infinite;
+  width: 24px;
+  height: 24px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><rect x='0' y='0' width='28' height='22' rx='6' fill='%23d4ff2e'/><rect x='31' y='0' width='17' height='22' rx='6' fill='%23d4ff2e'/><rect x='0' y='25' width='48' height='23' rx='6' fill='%23d4ff2e'/></svg>");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
 }
 
 .auth-title {
