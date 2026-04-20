@@ -84,6 +84,26 @@ const bottomNav = [
   { name: "Settings", key: "settings", href: "/settings", icon: Settings },
 ];
 
+// Maps a sidebar nav `key` to the `Notification.type` that signals
+// "something new for this section." The backend already stamps these
+// strings on Notification rows (see kudos/route.ts, pulse-surveys/route.ts,
+// sop-assignments/route.ts).
+const NAV_KEY_TO_NOTIFICATION_TYPE: Record<string, string> = {
+  kudos: "KUDOS",
+  surveys: "SURVEY",
+  sops: "SOP",
+  reviews: "REVIEW",
+};
+
+// Reverse lookup: when the pathname matches one of these, we clear that
+// type's unread count (arriving at the section counts as "seeing it").
+const PATH_TO_NOTIFICATION_TYPE: Record<string, string> = {
+  "/kudos": "KUDOS",
+  "/surveys": "SURVEY",
+  "/sops": "SOP",
+  "/reviews": "REVIEW",
+};
+
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -118,6 +138,7 @@ export function Sidebar() {
 
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null);
   const [announcementCount, setAnnouncementCount] = useState(0);
+  const [unreadByType, setUnreadByType] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetch("/api/settings")
@@ -137,6 +158,46 @@ export function Sidebar() {
       })
       .catch(() => {});
   }, []);
+
+  // Poll unread-by-type so sidebar section badges (Kudos / Surveys / SOPs)
+  // reflect newly-arrived notifications without a page reload. 60s cadence
+  // matches the topbar notification bell.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/notifications")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!cancelled && d?.unreadByType) setUnreadByType(d.unreadByType);
+        })
+        .catch(() => {});
+    };
+    load();
+    const interval = setInterval(load, 60_000);
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  // When the user navigates into a section with unread items, mark that
+  // type as read. Fire-and-forget — the sidebar's poll picks up the new
+  // zero on next tick, but we also optimistically clear locally so the
+  // red dot vanishes immediately.
+  useEffect(() => {
+    const type = PATH_TO_NOTIFICATION_TYPE[pathname];
+    if (!type) return;
+    if ((unreadByType[type] ?? 0) === 0) return;
+    setUnreadByType((prev) => ({ ...prev, [type]: 0 }));
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markAllReadOfType: type }),
+    }).catch(() => {});
+  }, [pathname, unreadByType]);
 
   const { isManager: isManagerRole, isAdmin: isAdminRole } = useRole();
 
@@ -200,6 +261,11 @@ export function Sidebar() {
         {visibleNav.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
+          const notifType = NAV_KEY_TO_NOTIFICATION_TYPE[item.key];
+          const sectionUnread = notifType ? unreadByType[notifType] ?? 0 : 0;
+          const announcementBadge = item.key === "announcements" ? announcementCount : 0;
+          const badgeCount = sectionUnread || announcementBadge;
+          const hasBadge = badgeCount > 0;
           return (
             <Link
               key={item.name}
@@ -211,12 +277,12 @@ export function Sidebar() {
               {!collapsed && (
                 <>
                   <span className="app-sidebar-label">{tNav(item.key)}</span>
-                  {item.key === "announcements" && announcementCount > 0 && (
-                    <span className="app-sidebar-badge">{announcementCount}</span>
+                  {hasBadge && (
+                    <span className="app-sidebar-badge">{badgeCount > 9 ? "9+" : badgeCount}</span>
                   )}
                 </>
               )}
-              {collapsed && item.key === "announcements" && announcementCount > 0 && (
+              {collapsed && hasBadge && (
                 <span className="app-sidebar-dot-pip" aria-hidden />
               )}
             </Link>
