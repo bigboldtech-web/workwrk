@@ -45,7 +45,7 @@ export function ConfirmDialog({
             )}
             <div>
               <DialogTitle>{title}</DialogTitle>
-              <p className="text-[13px] text-[#a0a0a0] mt-1 leading-relaxed">{description}</p>
+              <p className="text-[13px] text-muted mt-1 leading-relaxed">{description}</p>
             </div>
           </div>
         </DialogHeader>

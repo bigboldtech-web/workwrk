@@ -17,8 +17,8 @@ const SelectTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       "flex h-10 w-full items-center gap-2 rounded-lg px-3.5 py-2 text-[13.5px] outline-none transition-all",
-      "border border-[rgba(255,255,255,0.08)] bg-[#1a1a1a] text-[#fafafa] placeholder:text-[#707070]",
-      "hover:border-[rgba(255,255,255,0.14)]",
+      "border border-border bg-surface-2 text-foreground placeholder:text-muted-2",
+      "hover:border-[color:var(--b-line-2)]",
       "focus:outline-none focus:border-[#d4ff2e] focus:ring-[3px] focus:ring-[rgba(212,255,46,0.15)]",
       "disabled:cursor-not-allowed disabled:opacity-50",
       "[&>span]:min-w-0 [&>span]:truncate",
@@ -28,7 +28,7 @@ const SelectTrigger = React.forwardRef<
   >
     <span className="flex min-w-0 flex-1 items-center gap-2 truncate">{children}</span>
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 shrink-0 text-[#707070]" />
+      <ChevronDown className="h-4 w-4 shrink-0 text-muted-2" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -43,8 +43,8 @@ const SelectContent = React.forwardRef<
       ref={ref}
       className={cn(
         "relative z-50 max-h-96 min-w-[10rem] overflow-hidden rounded-xl",
-        "border border-[rgba(255,255,255,0.1)] bg-[#141414]",
-        "shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)]",
+        "border border-border bg-surface",
+        "shadow-[0_20px_50px_-12px_rgba(0,0,0,0.35)]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
@@ -74,7 +74,7 @@ const SelectItem = React.forwardRef<
     ref={ref}
     className={cn(
       "relative flex w-full cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-3 text-[13px] outline-none transition-all",
-      "text-[#ededed] hover:bg-[#1a1a1a] hover:text-[#fafafa] focus:bg-[#1a1a1a] focus:text-[#fafafa]",
+      "text-foreground hover:bg-surface-2 focus:bg-surface-2",
       "data-[state=checked]:text-[#d4ff2e]",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,

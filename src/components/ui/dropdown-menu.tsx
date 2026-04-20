@@ -18,8 +18,8 @@ const DropdownMenuContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         "z-50 min-w-[10rem] overflow-hidden rounded-xl p-1.5",
-        "border border-[rgba(255,255,255,0.1)] bg-[#141414]",
-        "shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)]",
+        "border border-border bg-surface",
+        "shadow-[0_20px_50px_-12px_rgba(0,0,0,0.35)]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className,
       )}
@@ -36,9 +36,9 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-[#ededed] outline-none transition-all",
-      "hover:bg-[#1a1a1a] hover:text-[#fafafa]",
-      "focus:bg-[#1a1a1a] focus:text-[#fafafa]",
+      "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-foreground outline-none transition-all",
+      "hover:bg-surface-2",
+      "focus:bg-surface-2",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
@@ -53,7 +53,7 @@ const DropdownMenuSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Separator
     ref={ref}
-    className={cn("-mx-1 my-1 h-px bg-[rgba(255,255,255,0.06)]", className)}
+    className={cn("-mx-1 my-1 h-px bg-border", className)}
     {...props}
   />
 ));
@@ -66,7 +66,7 @@ const DropdownMenuLabel = React.forwardRef<
   <DropdownMenuPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2.5 pt-2 pb-1.5 text-[10.5px] font-medium text-[#707070] tracking-[0.12em] uppercase font-mono",
+      "px-2.5 pt-2 pb-1.5 text-[10.5px] font-medium text-muted-2 tracking-[0.12em] uppercase font-mono",
       className,
     )}
     style={{ fontFamily: "var(--font-geist-mono), monospace" }}
