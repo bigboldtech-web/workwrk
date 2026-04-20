@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -151,11 +151,8 @@ export default function TalentPage() {
                         {people.map((p: any) => (
                           <div key={p.userId} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-background/60 border border-white/10" title={`${p.user?.firstName} ${p.user?.lastName} — ${p.user?.role?.title || ""} ${p.user?.department?.name || ""}`}>
                             <Avatar className="h-6 w-6">
-                              {p.user?.avatar ? (
-                                <img src={p.user.avatar} alt="" className="h-full w-full object-cover rounded-full" />
-                              ) : (
-                                <AvatarFallback className="text-[10px] font-bold">{p.user?.firstName?.[0]}{p.user?.lastName?.[0]}</AvatarFallback>
-                              )}
+                              {p.user?.avatar ? <AvatarImage src={p.user.avatar} alt="" /> : null}
+                              <AvatarFallback className="text-[10px] font-bold">{p.user?.firstName?.[0]}{p.user?.lastName?.[0]}</AvatarFallback>
                             </Avatar>
                             <span className="text-xs font-medium truncate max-w-[80px]">{p.user?.firstName} {p.user?.lastName?.[0]}.</span>
                           </div>

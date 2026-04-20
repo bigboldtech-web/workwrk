@@ -8,6 +8,14 @@
     {
       "path": "/api/cron/webhook-retry",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/email-queue",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/ratelimit-cleanup",
+      "schedule": "0 3 * * *"
     }
   ],
   "functions": {
@@ -30,6 +38,12 @@
       "maxDuration": 60
     },
     "src/app/api/cron/webhook-retry/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/email-queue/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/ratelimit-cleanup/route.ts": {
       "maxDuration": 60
     }
   }

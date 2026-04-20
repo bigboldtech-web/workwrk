@@ -439,7 +439,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                     : <p className="flex-1 text-xs text-muted whitespace-pre-wrap">{cb.content}</p>
                    ) : (
                     editing ? <Input value={cb.content} onChange={(e) => updateContentBlock(cb.id, e.target.value)} placeholder={cb.type === "image" ? "Image URL..." : "Video URL..."} className="flex-1 h-7 text-xs" />
-                    : cb.content ? (cb.type === "image" ? <img src={cb.content} alt="" className="max-w-full rounded border border-border" /> : <video src={cb.content} controls className="max-w-full rounded" />) : null
+                    : cb.content ? (cb.type === "image" ? <img src={cb.content} alt="" loading="lazy" decoding="async" className="max-w-full rounded border border-border" /> : <video src={cb.content} controls preload="metadata" className="max-w-full rounded" />) : null
                    )}
                   {editing && <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 shrink-0" onClick={() => removeContentBlock(cb.id)}><X size={10} /></Button>}
                 </div>

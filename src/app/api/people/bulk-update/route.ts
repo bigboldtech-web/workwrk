@@ -75,46 +75,63 @@ export async function POST(req: NextRequest) {
 
     case "assign_kra": {
       // Support multi-KRA assignment via kraEntries array
-      const entries = payload?.kraEntries || (payload?.kraId ? [{ kraId: payload.kraId, weightage: payload.weightage }] : []);
+      const entries = (payload?.kraEntries || (payload?.kraId ? [{ kraId: payload.kraId, weightage: payload.weightage }] : []))
+        .filter((e: any) => e?.kraId && e?.weightage);
       if (entries.length === 0) return jsonError("At least one KRA is required");
 
-      let totalAssigned = 0;
+      const kraIds: string[] = Array.from(new Set(entries.map((e: any) => e.kraId as string)));
+      // Pre-fetch existing assignments and KRA metadata in two queries,
+      // regardless of entry count — was previously 2 queries per entry.
+      const [existingAll, kraInfos] = await Promise.all([
+        prisma.kRAAssignment.findMany({
+          where: { userId: { in: validIds }, kraId: { in: kraIds } },
+          select: { userId: true, kraId: true },
+        }),
+        prisma.kRA.findMany({
+          where: { id: { in: kraIds } },
+          select: { id: true, name: true },
+        }),
+      ]);
+      const existingByKra = new Map<string, Set<string>>();
+      for (const e of existingAll) {
+        if (!existingByKra.has(e.kraId)) existingByKra.set(e.kraId, new Set());
+        existingByKra.get(e.kraId)!.add(e.userId);
+      }
+      const kraNameById = new Map(kraInfos.map((k) => [k.id, k.name]));
+
+      const period = payload.period || "Q1 2026";
+      const allAssignments: { userId: string; kraId: string; weightage: number; period: string; status: "ACTIVE" }[] = [];
+      const allNotifications: { userId: string; type: string; title: string; message: string; link: string }[] = [];
+
       for (const entry of entries) {
-        if (!entry.kraId || !entry.weightage) continue;
-        const existing = await prisma.kRAAssignment.findMany({
-          where: { userId: { in: validIds }, kraId: entry.kraId },
-          select: { userId: true },
-        });
-        const existingUserIds = new Set(existing.map((e: any) => e.userId));
-        const newIds = validIds.filter((id: string) => !existingUserIds.has(id));
-
-        if (newIds.length > 0) {
-          await prisma.kRAAssignment.createMany({
-            data: newIds.map((userId: string) => ({
+        const taken = existingByKra.get(entry.kraId) ?? new Set<string>();
+        const newIds = validIds.filter((id: string) => !taken.has(id));
+        if (newIds.length === 0) continue;
+        const weightage = parseFloat(entry.weightage) || 0;
+        for (const userId of newIds) {
+          allAssignments.push({ userId, kraId: entry.kraId, weightage, period, status: "ACTIVE" });
+        }
+        const kraName = kraNameById.get(entry.kraId);
+        if (kraName) {
+          for (const userId of newIds) {
+            allNotifications.push({
               userId,
-              kraId: entry.kraId,
-              weightage: parseFloat(entry.weightage) || 0,
-              period: payload.period || "Q1 2026",
-              status: "ACTIVE",
-            })),
-          });
-
-          // Notify newly assigned users
-          const kraInfo = await prisma.kRA.findUnique({ where: { id: entry.kraId }, select: { name: true } });
-          if (kraInfo) {
-            await prisma.notification.createMany({
-              data: newIds.map((userId: string) => ({
-                userId,
-                type: "kra_assigned",
-                title: "New KRA Assigned",
-                message: `You have been assigned the KRA: ${kraInfo.name} (${entry.weightage}% weightage)`,
-                link: "/kra-kpi",
-              })),
+              type: "kra_assigned",
+              title: "New KRA Assigned",
+              message: `You have been assigned the KRA: ${kraName} (${entry.weightage}% weightage)`,
+              link: "/kra-kpi",
             });
           }
-
-          totalAssigned += newIds.length;
         }
+      }
+
+      if (allAssignments.length > 0) {
+        await Promise.all([
+          prisma.kRAAssignment.createMany({ data: allAssignments }),
+          allNotifications.length > 0
+            ? prisma.notification.createMany({ data: allNotifications })
+            : Promise.resolve(),
+        ]);
       }
       description = `Assigned ${entries.length} KRA${entries.length > 1 ? "s" : ""} to ${validIds.length} people`;
       break;

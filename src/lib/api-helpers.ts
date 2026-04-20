@@ -42,9 +42,20 @@ export function jsonError(message: string, status: number = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-export function jsonSuccess(data: any, status: number = 200) {
-  return NextResponse.json(data, { status });
+export function jsonSuccess(data: any, status: number = 200, headers?: HeadersInit) {
+  return NextResponse.json(data, headers ? { status, headers } : { status });
 }
+
+/**
+ * Common Cache-Control header for authed, read-only endpoints that return
+ * lookup/reference data (departments, roles, categories, offices, etc.)
+ * which change infrequently. Keeps per-user caching (`private`), short
+ * fresh window, and a longer stale-while-revalidate tail so navigation
+ * feels instant while still self-healing after writes.
+ */
+export const LOOKUP_CACHE_HEADERS = {
+  "Cache-Control": "private, max-age=30, stale-while-revalidate=120",
+} as const;
 
 // ============================================
 // Permission checks

@@ -39,20 +39,22 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    for (const mgr of managers) {
-      if (mgr.directReports.length === 0) continue;
-      const { subject, html } = evaluationReminderTemplate({
-        managerName: mgr.firstName,
-        teamMembers: mgr.directReports.map((r) => `${r.firstName} ${r.lastName}`),
-        month: `${lastMonth} ${year}`,
-        evaluationLink: `${baseUrl}/kra-kpi`,
-      });
-      try {
-        await sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
-          variables: { month: `${lastMonth} ${year}`, teamCount: mgr.directReports.length },
-          organizationId: mgr.organizationId, category: "reminder" });
-      } catch (err: any) { console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message); }
-    }
+    await Promise.all(
+      managers
+        .filter((mgr) => mgr.directReports.length > 0)
+        .map((mgr) => {
+          const { subject, html } = evaluationReminderTemplate({
+            managerName: mgr.firstName,
+            teamMembers: mgr.directReports.map((r) => `${r.firstName} ${r.lastName}`),
+            month: `${lastMonth} ${year}`,
+            evaluationLink: `${baseUrl}/kra-kpi`,
+          });
+          return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
+            variables: { month: `${lastMonth} ${year}`, teamCount: mgr.directReports.length },
+            organizationId: mgr.organizationId, category: "reminder" })
+            .catch((err: any) => console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message));
+        }),
+    );
     results.push(`Monthly evaluation: ${managers.length} managers`);
   }
 
@@ -71,19 +73,20 @@ export async function POST(req: NextRequest) {
     });
 
     // Notify users
-    for (const a of overdueSops) {
-      const days = Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000);
-      const { subject, html } = reminderTemplate({
-        itemType: "SOP", itemTitle: a.sop.title,
-        dueInfo: `overdue by ${days} day${days > 1 ? "s" : ""}`,
-        itemLink: `${baseUrl}/sops/my-sops`,
-      });
-      try {
-        await sendEmail({ to: a.user.email, subject, html, template: "overdue-sop",
+    await Promise.all(
+      overdueSops.map((a) => {
+        const days = Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000);
+        const { subject, html } = reminderTemplate({
+          itemType: "SOP", itemTitle: a.sop.title,
+          dueInfo: `overdue by ${days} day${days > 1 ? "s" : ""}`,
+          itemLink: `${baseUrl}/sops/my-sops`,
+        });
+        return sendEmail({ to: a.user.email, subject, html, template: "overdue-sop",
           variables: { itemTitle: a.sop.title, daysOverdue: days },
-          organizationId: a.sop.organizationId, userId: a.user.id, category: "sop" });
-      } catch {}
-    }
+          organizationId: a.sop.organizationId, userId: a.user.id, category: "sop" })
+          .catch(() => {});
+      }),
+    );
 
     // Manager summary
     const mgrMap = new Map<string, { mgr: any; items: any[] }>();
@@ -97,15 +100,16 @@ export async function POST(req: NextRequest) {
         daysOverdue: Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000),
       });
     }
-    for (const [, e] of mgrMap) {
-      const { subject, html } = overdueManagerTemplate({
-        managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/dashboard`,
-      });
-      try {
-        await sendEmail({ to: e.mgr.email, subject, html, template: "overdue-manager",
-          variables: { count: e.items.length }, category: "reminder" });
-      } catch {}
-    }
+    await Promise.all(
+      Array.from(mgrMap.values()).map((e) => {
+        const { subject, html } = overdueManagerTemplate({
+          managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/dashboard`,
+        });
+        return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-manager",
+          variables: { count: e.items.length }, category: "reminder" })
+          .catch(() => {});
+      }),
+    );
     results.push(`Overdue SOPs: ${overdueSops.length} users, ${mgrMap.size} managers`);
   }
 
@@ -133,15 +137,16 @@ export async function POST(req: NextRequest) {
         daysOverdue: Math.floor((now.getTime() - new Date(t.date).getTime()) / 86400000),
       });
     }
-    for (const [, e] of mgrMap) {
-      const { subject, html } = overdueManagerTemplate({
-        managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/tasks`,
-      });
-      try {
-        await sendEmail({ to: e.mgr.email, subject, html, template: "overdue-tasks-manager",
-          variables: { count: e.items.length }, category: "reminder" });
-      } catch {}
-    }
+    await Promise.all(
+      Array.from(mgrMap.values()).map((e) => {
+        const { subject, html } = overdueManagerTemplate({
+          managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/tasks`,
+        });
+        return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-tasks-manager",
+          variables: { count: e.items.length }, category: "reminder" })
+          .catch(() => {});
+      }),
+    );
     results.push(`Overdue tasks: ${overdueTasks.length} tasks, ${mgrMap.size} managers`);
   }
 
@@ -187,10 +192,19 @@ export async function POST(req: NextRequest) {
     const uniqueUsers = new Map<string, any>();
     for (const a of assignments) uniqueUsers.set(a.userId, a.user);
 
-    let sent = 0;
-    for (const [userId, user] of uniqueUsers) {
-      const existing = await prisma.kPIRecord.count({ where: { userId, period: currentPeriod } });
-      if (existing === 0) {
+    // Fetch all users' existing KPI records for the period in ONE query
+    // instead of N per-user counts (previously: 500 users = 500 round trips).
+    const usersWithRecords = new Set(
+      (await prisma.kPIRecord.findMany({
+        where: { userId: { in: Array.from(uniqueUsers.keys()) }, period: currentPeriod },
+        select: { userId: true },
+        distinct: ["userId"],
+      })).map((r) => r.userId),
+    );
+
+    const toRemind = Array.from(uniqueUsers.entries()).filter(([userId]) => !usersWithRecords.has(userId));
+    const sendResults = await Promise.all(
+      toRemind.map(async ([userId, user]) => {
         const { subject, html } = reminderTemplate({
           itemType: "KPI Recording", itemTitle: `Monthly update for ${currentPeriod}`,
           dueInfo: "due this month", itemLink: `${baseUrl}/kra-kpi`,
@@ -199,10 +213,11 @@ export async function POST(req: NextRequest) {
           await sendEmail({ to: user.email, subject: "Time to record your KPIs", html,
             template: "kpi-recording", variables: { period: currentPeriod },
             organizationId: user.organizationId, userId, category: "kra" });
-          sent++;
-        } catch {}
-      }
-    }
+          return 1 as number;
+        } catch { return 0 as number; }
+      }),
+    );
+    const sent = sendResults.reduce((a, b) => a + b, 0);
     results.push(`KPI recording reminders: ${sent} of ${uniqueUsers.size} users`);
   }
 
@@ -214,29 +229,38 @@ export async function POST(req: NextRequest) {
       where: { status: "PUBLISHED", requiresAck: true },
       select: { id: true, title: true, organizationId: true },
     });
-    let reminded = 0;
-    for (const p of policies) {
-      const allUsers = await prisma.user.findMany({
-        where: { organizationId: p.organizationId, deletedAt: null },
-        select: { id: true, email: true },
-      });
-      const acked = new Set((await prisma.policyAcknowledgment.findMany({
-        where: { policyId: p.id }, select: { userId: true },
-      })).map((a) => a.userId));
-
-      for (const u of allUsers.filter((u) => !acked.has(u.id))) {
-        const { subject, html } = reminderTemplate({
-          itemType: "Policy", itemTitle: p.title,
-          dueInfo: "pending acknowledgment", itemLink: `${baseUrl}/policies`,
-        });
-        try {
-          await sendEmail({ to: u.email, subject: `Please acknowledge: ${p.title}`, html,
-            template: "policy-ack", variables: { title: p.title },
-            organizationId: p.organizationId, userId: u.id, category: "reminder" });
-          reminded++;
-        } catch {}
-      }
-    }
+    // Fan out across policies, and within each policy fan out across users.
+    const perPolicyCounts = await Promise.all(
+      policies.map(async (p) => {
+        const [allUsers, ackRows] = await Promise.all([
+          prisma.user.findMany({
+            where: { organizationId: p.organizationId, deletedAt: null },
+            select: { id: true, email: true },
+          }),
+          prisma.policyAcknowledgment.findMany({
+            where: { policyId: p.id }, select: { userId: true },
+          }),
+        ]);
+        const acked = new Set(ackRows.map((a) => a.userId));
+        const pending = allUsers.filter((u) => !acked.has(u.id));
+        const results = await Promise.all(
+          pending.map(async (u) => {
+            const { subject, html } = reminderTemplate({
+              itemType: "Policy", itemTitle: p.title,
+              dueInfo: "pending acknowledgment", itemLink: `${baseUrl}/policies`,
+            });
+            try {
+              await sendEmail({ to: u.email, subject: `Please acknowledge: ${p.title}`, html,
+                template: "policy-ack", variables: { title: p.title },
+                organizationId: p.organizationId, userId: u.id, category: "reminder" });
+              return 1 as number;
+            } catch { return 0 as number; }
+          }),
+        );
+        return results.reduce((a, b) => a + b, 0);
+      }),
+    );
+    const reminded = perPolicyCounts.reduce((a, b) => a + b, 0);
     results.push(`Policy ack reminders: ${reminded} users`);
   }
 

@@ -68,61 +68,57 @@ export async function POST(req: NextRequest) {
     return deadline < now;
   });
 
-  let escalatedCount = 0;
-  const results: { id: string; escalatedTo: string | null }[] = [];
+  // Escalations are independent across tasks — run them in parallel so
+  // one slow Slack call doesn't hold up 500 subsequent tasks.
+  const results = await Promise.all(
+    toEscalate.map(async (t) => {
+      const targetId = t.assignee.managerId;
 
-  for (const t of toEscalate) {
-    const targetId = t.assignee.managerId;
+      const notifyPayload = [
+        {
+          userId: t.assignee.id,
+          title: "Your task just escalated",
+          message: `"${t.title}" is past its ${t.slaHours}h SLA. ${
+            targetId ? "Escalated to your manager." : "Visible to admins."
+          }`,
+          type: "TASK_ESCALATED",
+          link: `/tasks?id=${t.id}`,
+        },
+      ];
+      if (targetId) {
+        notifyPayload.push({
+          userId: targetId,
+          title: "A direct report's task escalated",
+          message: `"${t.title}" breached its ${t.slaHours}h SLA — it's now on your plate.`,
+          type: "TASK_ESCALATED",
+          link: `/tasks?id=${t.id}`,
+        });
+      }
 
-    // Even without a manager we mark it as escalated so we don't churn.
-    await prisma.task.update({
-      where: { id: t.id },
-      data: {
-        escalatedAt: now,
-        escalatedToId: targetId,
-        priority: t.priority === "URGENT" ? "URGENT" : "HIGH",
-      },
-    });
+      await Promise.all([
+        prisma.task.update({
+          where: { id: t.id },
+          data: {
+            escalatedAt: now,
+            escalatedToId: targetId,
+            priority: t.priority === "URGENT" ? "URGENT" : "HIGH",
+          },
+        }),
+        prisma.notification.createMany({ data: notifyPayload }),
+        notifySlack({
+          organizationId: t.organizationId,
+          text: `🔺 *Task escalated*: _${t.title}_ · SLA ${t.slaHours}h breached · assignee ${t.assignee.firstName} ${t.assignee.lastName}${
+            targetId ? " · now routed up the chain" : ""
+          }`,
+        }).catch(() => {
+          // Non-fatal — Slack failures never break the SLA job.
+        }),
+      ]);
 
-    // Drop notifications on both the original assignee and the manager.
-    const notifyPayload = [
-      {
-        userId: t.assignee.id,
-        title: "Your task just escalated",
-        message: `"${t.title}" is past its ${t.slaHours}h SLA. ${
-          targetId ? "Escalated to your manager." : "Visible to admins."
-        }`,
-        type: "TASK_ESCALATED",
-        link: `/tasks?id=${t.id}`,
-      },
-    ];
-    if (targetId) {
-      notifyPayload.push({
-        userId: targetId,
-        title: "A direct report's task escalated",
-        message: `"${t.title}" breached its ${t.slaHours}h SLA — it's now on your plate.`,
-        type: "TASK_ESCALATED",
-        link: `/tasks?id=${t.id}`,
-      });
-    }
-
-    await prisma.notification.createMany({
-      data: notifyPayload,
-    });
-
-    // Fire Slack webhook if configured.
-    await notifySlack({
-      organizationId: t.organizationId,
-      text: `🔺 *Task escalated*: _${t.title}_ · SLA ${t.slaHours}h breached · assignee ${t.assignee.firstName} ${t.assignee.lastName}${
-        targetId ? " · now routed up the chain" : ""
-      }`,
-    }).catch(() => {
-      // Non-fatal — Slack failures never break the SLA job.
-    });
-
-    escalatedCount++;
-    results.push({ id: t.id, escalatedTo: targetId });
-  }
+      return { id: t.id, escalatedTo: targetId };
+    }),
+  );
+  const escalatedCount = results.length;
 
   return Response.json({
     ran: true,

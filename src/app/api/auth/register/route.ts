@@ -65,16 +65,11 @@ export async function POST(req: Request) {
         },
       });
 
-      // Create default departments
+      // Create default departments in one round-trip
       const defaultDepts = ["Engineering", "Sales", "Marketing", "Operations", "HR", "Finance"];
-      for (const deptName of defaultDepts) {
-        await tx.department.create({
-          data: {
-            name: deptName,
-            organizationId: organization.id,
-          },
-        });
-      }
+      await tx.department.createMany({
+        data: defaultDepts.map((name) => ({ name, organizationId: organization.id })),
+      });
 
       return { organization, user };
     });

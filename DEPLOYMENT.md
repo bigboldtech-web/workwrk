@@ -42,15 +42,22 @@ Optional (features gracefully no-op without them):
 ## 3 · Scheduled jobs
 
 `vercel.json` is pre-wired. On Vercel, the platform reads it and
-registers the two crons automatically:
+registers the crons automatically:
 
 - `POST /api/tasks/run-sla-check` — every **15 min** · escalates
   overdue tasks up the reporting chain, posts to Slack if configured,
   fires `task.escalated` webhook.
 - `POST /api/cron/webhook-retry` — every **5 min** · retries failed
   webhook deliveries with exponential backoff up to 8 attempts.
+- `POST /api/cron/email-queue` — every **1 min** · drains the
+  `EmailLog` queue. Safety net behind the inline fire-and-forget
+  `processEmailQueue()` calls, which can be terminated early by the
+  serverless runtime before they finish sending.
+- `POST /api/cron/ratelimit-cleanup` — daily at **03:00 UTC** ·
+  prunes stale `ApiKeyRateBucket` rows (minute buckets >24 h old,
+  day buckets >30 days old) so the table doesn't grow unbounded.
 
-Both endpoints are guarded by `CRON_SECRET`. If you're not on Vercel,
+All endpoints are guarded by `CRON_SECRET`. If you're not on Vercel,
 wire equivalents via GitHub Actions, AWS EventBridge, or Upstash.
 
 ```yaml

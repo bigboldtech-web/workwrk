@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Cake, PartyPopper, Gift, Calendar } from "lucide-react";
 
 export function BirthdayCard() {
@@ -59,11 +59,8 @@ export function BirthdayCard() {
               {todayBirthdays.map((u: any) => (
                 <div key={u.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pink-500/5 border border-pink-500/10">
                   <Avatar className="h-8 w-8">
-                    {u.avatar ? (
-                      <img src={u.avatar} alt="" className="h-full w-full object-cover rounded-full" />
-                    ) : (
-                      <AvatarFallback className="text-xs bg-pink-500/20 text-pink-400">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
-                    )}
+                    {u.avatar ? <AvatarImage src={u.avatar} alt="" /> : null}
+                    <AvatarFallback className="text-xs bg-pink-500/20 text-pink-400">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
                   </Avatar>
                   <div>
                     <p className="text-sm font-medium">{u.firstName} {u.lastName} 🎂</p>

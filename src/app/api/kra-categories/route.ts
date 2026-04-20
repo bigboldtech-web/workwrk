@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -12,7 +12,7 @@ export async function GET() {
     orderBy: { name: "asc" },
   });
 
-  return jsonSuccess(categories);
+  return jsonSuccess(categories, 200, LOOKUP_CACHE_HEADERS);
 }
 
 export async function POST(req: NextRequest) {

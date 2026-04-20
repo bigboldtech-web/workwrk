@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Users,
@@ -570,13 +570,10 @@ export default function UserProfilePage() {
           <div className="flex items-start gap-6">
             <div className="relative group">
               <Avatar className="h-20 w-20 text-2xl">
-                {user.avatar ? (
-                  <img src={user.avatar} alt="" className="h-full w-full object-cover rounded-full" />
-                ) : (
-                  <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xl font-bold">
-                    {initials}
-                  </AvatarFallback>
-                )}
+                {user.avatar ? <AvatarImage src={user.avatar} alt="" /> : null}
+                <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xl font-bold">
+                  {initials}
+                </AvatarFallback>
               </Avatar>
               <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
                 <span className="text-[#0a0a0a] text-[10px]">{uploadingAvatar ? "..." : "Upload"}</span>

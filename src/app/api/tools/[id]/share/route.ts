@@ -17,20 +17,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const tool = await prisma.tool.findFirst({ where: { id: toolId, organizationId: getOrgId(session) } });
   if (!tool) return jsonError("Tool not found", 404);
 
-  // Create shares, skip duplicates
-  let created = 0;
-  for (const userId of userIds) {
-    try {
-      await prisma.toolShare.create({ data: { toolId, userId, sharedBy } });
-      // Notify the user
-      await prisma.notification.create({
-        data: { userId, type: "tool_shared", title: `Tool shared: ${tool.name}`, message: `You now have access to ${tool.name}. Check your Tools section.`, link: "/tools" },
-      });
-      created++;
-    } catch {} // Skip duplicates
-  }
+  // Filter out users who already have a share, then batch-insert the rest.
+  const existing = await prisma.toolShare.findMany({
+    where: { toolId, userId: { in: userIds as string[] } },
+    select: { userId: true },
+  });
+  const existingIds = new Set(existing.map((e) => e.userId));
+  const newIds = (userIds as string[]).filter((id) => !existingIds.has(id));
 
-  return jsonSuccess({ shared: created });
+  if (newIds.length === 0) return jsonSuccess({ shared: 0 });
+
+  await Promise.all([
+    prisma.toolShare.createMany({
+      data: newIds.map((userId) => ({ toolId, userId, sharedBy })),
+      skipDuplicates: true,
+    }),
+    prisma.notification.createMany({
+      data: newIds.map((userId) => ({
+        userId,
+        type: "tool_shared",
+        title: `Tool shared: ${tool.name}`,
+        message: `You now have access to ${tool.name}. Check your Tools section.`,
+        link: "/tools",
+      })),
+    }),
+  ]);
+
+  return jsonSuccess({ shared: newIds.length });
 }
 
 // DELETE: Revoke tool access

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 
 // GET: List all categories with subcategories
 export async function GET() {
@@ -15,7 +15,7 @@ export async function GET() {
     orderBy: { name: "asc" },
   });
 
-  return jsonSuccess(categories);
+  return jsonSuccess(categories, 200, LOOKUP_CACHE_HEADERS);
 }
 
 // POST: Create category or subcategory

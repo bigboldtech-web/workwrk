@@ -1106,7 +1106,7 @@ export default function SOPDetailPage() {
                         </div>
                         {step.screenshot && (
                           <div className="px-4 pb-4">
-                            <img src={step.screenshot} alt={`Step ${index + 1}`} className="w-full rounded-lg border border-border" />
+                            <img src={step.screenshot} alt={`Step ${index + 1}`} loading="lazy" decoding="async" className="w-full rounded-lg border border-border" />
                           </div>
                         )}
                       </div>
