@@ -943,10 +943,12 @@ export default function SettingsPage() {
   };
 
   function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+    // Uses `--color-lime-dim` (#a8cc24) for the checked state. Full-saturation
+    // brand lime (#d4ff2e) on a small pill next to a white thumb was too harsh.
     return (
       <button
         onClick={onChange}
-        className={`h-6 w-11 rounded-full transition-colors ${checked ? "bg-[#d4ff2e]" : "bg-border"}`}
+        className={`h-6 w-11 rounded-full transition-colors ${checked ? "bg-[#a8cc24]" : "bg-border"}`}
       >
         <span className={`block h-5 w-5 rounded-full bg-white transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`} />
       </button>
