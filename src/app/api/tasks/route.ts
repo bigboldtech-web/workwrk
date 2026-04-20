@@ -5,6 +5,8 @@ import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { getTeamUserIds } from "@/lib/team";
+import { pushTaskToGoogle, deleteTaskFromGoogle } from "@/services/googleCalendarPush";
+import { GOOGLE_CAL_SOURCE } from "@/services/googleCalendar";
 
 // GET: List tasks (calendar view)
 // Query params: userId, startDate, endDate, kraId
@@ -40,8 +42,39 @@ export async function GET(req: NextRequest) {
     where.assigneeId = currentUserId;
   }
 
-  if (startDate) where.date = { ...(where.date as object || {}), gte: new Date(startDate) };
-  if (endDate) where.date = { ...(where.date as object || {}), lte: new Date(endDate) };
+  // Range filter overlaps multi-day spans correctly. A task is in the
+  // [from, to] window if:
+  //   - its legacy `date` falls in the window, OR
+  //   - its [startAt, endAt] span overlaps the window (open-ended endAt
+  //     is treated as "still in progress", so it always qualifies if
+  //     startAt <= to).
+  if (startDate || endDate) {
+    const from = startDate ? new Date(startDate) : null;
+    const to = endDate ? new Date(endDate) : null;
+    const spanFilter: any = {};
+    if (from && to) {
+      spanFilter.OR = [
+        { date: { gte: from, lte: to } },
+        {
+          AND: [
+            { startAt: { lte: to } },
+            { OR: [{ endAt: null }, { endAt: { gte: from } }] },
+          ],
+        },
+      ];
+    } else if (from) {
+      spanFilter.OR = [
+        { date: { gte: from } },
+        { OR: [{ endAt: null }, { endAt: { gte: from } }] },
+      ];
+    } else if (to) {
+      spanFilter.OR = [
+        { date: { lte: to } },
+        { startAt: { lte: to } },
+      ];
+    }
+    Object.assign(where, spanFilter);
+  }
   if (kraId) where.kraId = kraId;
 
   const tasks = await prisma.task.findMany({
@@ -49,8 +82,10 @@ export async function GET(req: NextRequest) {
     include: {
       assignee: { select: { id: true, firstName: true, lastName: true, avatar: true } },
       kra: { select: { id: true, name: true } },
+      labels: { include: { label: true } },
+      _count: { select: { subTasks: true, comments: true } },
     },
-    orderBy: { date: "asc" },
+    orderBy: [{ startAt: "asc" }, { date: "asc" }],
   });
 
   return jsonSuccess(tasks);
@@ -65,10 +100,24 @@ export async function POST(req: NextRequest) {
   const currentUserId = getUserId(session);
   const body = await req.json();
 
-  const { title, description, date, startTime, endTime, hoursSpent, category, assigneeId, kraId } = body;
+  const {
+    title, description, date, startAt, endAt, allDay,
+    estimateHours, hoursSpent, category, assigneeId, kraId,
+    parentTaskId, labelIds,
+  } = body;
 
   if (!title?.trim() || !date) {
     return jsonError("Title and date are required");
+  }
+
+  // Enforce the 1-level sub-task rule: a sub-task can't itself have children.
+  if (parentTaskId) {
+    const parent = await prisma.task.findFirst({
+      where: { id: parentTaskId, organizationId: orgId },
+      select: { parentTaskId: true },
+    });
+    if (!parent) return jsonError("Parent task not found", 404);
+    if (parent.parentTaskId) return jsonError("Sub-tasks cannot have their own sub-tasks", 400);
   }
 
   const task = await prisma.task.create({
@@ -76,17 +125,25 @@ export async function POST(req: NextRequest) {
       title: title.trim(),
       description: description?.trim() || null,
       date: new Date(date),
-      startTime: startTime || null,
-      endTime: endTime || null,
+      startAt: startAt ? new Date(startAt) : null,
+      endAt: endAt ? new Date(endAt) : null,
+      allDay: allDay === false ? false : true,
+      estimateHours: estimateHours != null ? Number(estimateHours) : null,
       hoursSpent: hoursSpent != null ? Number(hoursSpent) : null,
       category: category || null,
       assigneeId: assigneeId || currentUserId,
       kraId: kraId || null,
+      parentTaskId: parentTaskId || null,
       organizationId: orgId,
+      labels: Array.isArray(labelIds) && labelIds.length > 0
+        ? { create: labelIds.map((labelId: string) => ({ labelId })) }
+        : undefined,
     },
     include: {
       assignee: { select: { id: true, firstName: true, lastName: true, avatar: true } },
       kra: { select: { id: true, name: true } },
+      labels: { include: { label: true } },
+      _count: { select: { subTasks: true, comments: true } },
     },
   });
 
@@ -140,6 +197,10 @@ export async function POST(req: NextRequest) {
     } catch (err) { console.error("[Task] Email failed:", err); }
   }
 
+  // Push to Google if the assignee has an OUT/BOTH subscription. Fire-and-forget
+  // so the response isn't blocked on external I/O.
+  pushTaskToGoogle(task.id).catch(() => {});
+
   return jsonSuccess(task, 201);
 }
 
@@ -160,14 +221,61 @@ export async function PATCH(req: NextRequest) {
 
   if (!task) return jsonError("Task not found", 404);
 
+  // Google Calendar events are read-only in Workwrk. Only status toggles
+  // are allowed through — the user may want to mark an event "done" even
+  // though the underlying event data stays authoritative in Google.
+  if (task.externalSource === GOOGLE_CAL_SOURCE) {
+    const allowedKeys = new Set(["id", "status", "completedAt"]);
+    for (const key of Object.keys(updates)) {
+      if (!allowedKeys.has(key)) {
+        return jsonError(
+          "Google Calendar events can't be edited here. Edit them on Google and they'll sync over.",
+          403,
+        );
+      }
+    }
+  }
+
   if (updates.date) updates.date = new Date(updates.date);
+  if (updates.startAt) updates.startAt = new Date(updates.startAt);
+  if (updates.endAt) updates.endAt = new Date(updates.endAt);
+
+  // Stamp completedAt on COMPLETED transitions, clear on reopen.
+  // The Gantt view reads completedAt directly to render elapsed-time bars,
+  // so it must be accurate on every status change.
+  if (updates.status && updates.status !== task.status) {
+    if (updates.status === "COMPLETED" && task.status !== "COMPLETED") {
+      updates.completedAt = new Date();
+    } else if (task.status === "COMPLETED" && updates.status !== "COMPLETED") {
+      updates.completedAt = null;
+    }
+  }
+
+  // Label updates come in as labelIds[]; translate to a full resync of the
+  // join table so callers don't have to compute diffs.
+  const incomingLabelIds: string[] | undefined = Array.isArray(updates.labelIds)
+    ? updates.labelIds
+    : undefined;
+  delete updates.labelIds;
 
   const updated = await prisma.task.update({
     where: { id },
-    data: updates,
+    data: {
+      ...updates,
+      ...(incomingLabelIds !== undefined
+        ? {
+            labels: {
+              deleteMany: {},
+              create: incomingLabelIds.map((labelId) => ({ labelId })),
+            },
+          }
+        : {}),
+    },
     include: {
       assignee: { select: { id: true, firstName: true, lastName: true, avatar: true } },
       kra: { select: { id: true, name: true } },
+      labels: { include: { label: true } },
+      _count: { select: { subTasks: true, comments: true } },
     },
   });
 
@@ -197,6 +305,9 @@ export async function PATCH(req: NextRequest) {
     }).catch((err) => console.error("[Task] Notification failed:", err));
   }
 
+  // Echo the update to Google if the task already has a GCAL shadow.
+  pushTaskToGoogle(updated.id).catch(() => {});
+
   return jsonSuccess(updated);
 }
 
@@ -215,6 +326,18 @@ export async function DELETE(req: NextRequest) {
   });
 
   if (!task) return jsonError("Task not found", 404);
+  if (task.externalSource === GOOGLE_CAL_SOURCE) {
+    return jsonError(
+      "Google Calendar events can't be deleted here. Remove them from Google and they'll disappear on next sync.",
+      403,
+    );
+  }
+
+  // Snapshot externalId before we delete so we can clean up the Google
+  // shadow. Fire-and-forget.
+  const googleShadow = task.externalId
+    ? { id: task.id, externalId: task.externalId, externalSource: task.externalSource, assigneeId: task.assigneeId }
+    : null;
 
   // Delete all future recurring tasks in the same group
   if (deleteAll) {
@@ -237,6 +360,10 @@ export async function DELETE(req: NextRequest) {
 
   // Delete single task
   await prisma.task.delete({ where: { id } });
+
+  if (googleShadow) {
+    deleteTaskFromGoogle(googleShadow).catch(() => {});
+  }
 
   return jsonSuccess({ message: "Task deleted" });
 }

@@ -56,6 +56,10 @@ registers the crons automatically:
 - `POST /api/cron/ratelimit-cleanup` — daily at **03:00 UTC** ·
   prunes stale `ApiKeyRateBucket` rows (minute buckets >24 h old,
   day buckets >30 days old) so the table doesn't grow unbounded.
+- `POST /api/cron/calendar-sync` — every **5 min** · pulls deltas
+  from every connected Google Calendar subscription and upserts
+  the events as read-only Tasks (`externalSource = "GCAL"`). No-ops
+  if `GOOGLE_CLIENT_ID` isn't configured.
 
 All endpoints are guarded by `CRON_SECRET`. If you're not on Vercel,
 wire equivalents via GitHub Actions, AWS EventBridge, or Upstash.

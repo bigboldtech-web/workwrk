@@ -53,6 +53,7 @@ model Organization {
   tools               Tool[]
   assets              Asset[]
   candorSessions      CandorSession[]
+  taskLabels          TaskLabel[]
 
   @@index([slug])
 }
@@ -190,6 +191,8 @@ model User {
   assignedAssets      Asset[]  @relation("AssetAssignee")
   apiKeysCreated      ApiKey[] @relation("ApiKeyCreator")
   webhooksCreated     WebhookSubscription[] @relation("WebhookCreator")
+  taskComments        TaskComment[] @relation("TaskCommentAuthor")
+  calendarSubscriptions CalendarSubscription[] @relation("CalendarSubscriptionUser")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -463,14 +466,38 @@ model Task {
   id               String     @id @default(cuid())
   title            String
   description      String?
+
+  // ── Scheduling ──
+  // `date` is the legacy day-level anchor (kept for backwards compat).
+  // `startAt` / `endAt` are the full timestamps for hour-precise or
+  // multi-day tasks. `allDay` mirrors Google Calendar semantics —
+  // when true, time-of-day is ignored and the task renders as a pill.
   date             DateTime
-  startTime        String?
-  endTime          String?
+  startAt          DateTime?
+  endAt            DateTime?
+  allDay           Boolean    @default(true)
+  estimateHours    Float?
   hoursSpent       Float?
+  completedAt      DateTime?
   category         String?
   incompleteReason String?
   recurringGroupId String?
   status           TaskStatus @default(PLANNED)
+
+  // ── Sub-tasks ──
+  // One level deep only — validated at API layer. Sub-tasks roll up
+  // into the parent's Gantt bar and complete the parent when all children
+  // are done.
+  parentTaskId     String?
+  parent           Task?      @relation("TaskSubTasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subTasks         Task[]     @relation("TaskSubTasks")
+
+  // ── External calendar sync ──
+  // `externalId` + `externalSource` form the idempotency key for
+  // two-way sync. Null on Workwrk-native tasks.
+  externalId       String?
+  externalSource   String?
+  syncedAt         DateTime?
 
   // ── SLA + escalation ──
   // If set, task is considered overdue `slaHours` after `date`.
@@ -490,6 +517,10 @@ model Task {
   assignee         User       @relation("TaskAssignee", fields: [assigneeId], references: [id])
   kraId            String?
   kra              KRA?       @relation(fields: [kraId], references: [id])
+
+  comments         TaskComment[]
+  labels           TaskLabelOnTask[]
+
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
@@ -498,6 +529,77 @@ model Task {
   @@index([date])
   @@index([escalatedToId])
   @@index([organizationId, status, date])
+  @@index([parentTaskId])
+  @@index([externalSource, externalId])
+  @@index([organizationId, assigneeId, startAt])
+}
+
+model TaskComment {
+  id         String   @id @default(cuid())
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User     @relation("TaskCommentAuthor", fields: [authorId], references: [id])
+  body       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([taskId])
+  @@index([authorId])
+}
+
+model TaskLabel {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  color          String   @default("#d4ff2e")
+  createdAt      DateTime @default(now())
+
+  tasks          TaskLabelOnTask[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model TaskLabelOnTask {
+  taskId   String
+  task     Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  labelId  String
+  label    TaskLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, labelId])
+  @@index([labelId])
+}
+
+model CalendarSubscription {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation("CalendarSubscriptionUser", fields: [userId], references: [id], onDelete: Cascade)
+  provider        String   // "GOOGLE" | "ICS_EXPORT"
+  // Foreign calendar identifier (Google calendar ID, etc.). Null for
+  // ICS_EXPORT subscriptions — those use a per-user signed feed token.
+  externalCalendarId String?
+  // Whether the user opted in to sharing event titles with their
+  // manager. When false, events come through as generic "Busy" pills.
+  shareTitles     Boolean  @default(false)
+  // OAuth credentials for providers that need them. Encrypted at rest
+  // is future work; for now, only accessible via this model.
+  accessToken     String?
+  refreshToken    String?
+  expiresAt       DateTime?
+  // Google's incremental sync token — lets us pull deltas only.
+  syncToken       String?
+  lastSyncAt      DateTime?
+  // "IN" = pull events into Workwrk, "OUT" = push Workwrk tasks to the
+  // provider, "BOTH" = two-way. ICS_EXPORT is always OUT.
+  direction       String   @default("BOTH")
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, provider, externalCalendarId])
+  @@index([userId])
 }
 
 enum TaskStatus {
