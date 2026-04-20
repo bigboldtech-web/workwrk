@@ -241,7 +241,10 @@ function AccessControlManager() {
                               width: "36px",
                               height: "20px",
                               borderRadius: "9999px",
-                              backgroundColor: value ? "#d4ff2e" : "#3f3f46",
+                              // `--color-lime-dim` (#a8cc24) — muted variant of the
+                              // brand lime. Full-saturation #d4ff2e on a small pill
+                              // with a white thumb was too harsh on dark UI.
+                              backgroundColor: value ? "#a8cc24" : "#3f3f46",
                               position: "relative",
                               flexShrink: 0,
                               border: "none",
