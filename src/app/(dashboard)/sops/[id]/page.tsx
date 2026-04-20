@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -235,6 +235,36 @@ export default function SOPDetailPage() {
 
   const { canManageSOPs } = useRole();
   const [sop, setSop] = useState<SOP | null>(null);
+
+  // Debounced server persistence for recorded-SOP step mutations
+  // (reorder / edit description / add / delete). Reorders and edits
+  // update local state immediately and collapse rapid-fire PATCH
+  // requests into one trailing save, so the UI feels instant even when
+  // S3 URL regeneration makes the server round-trip slow.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingContentRef = useRef<any>(null);
+
+  const persistRecordedStepsDebounced = useCallback((newSteps: RecordedStep[]) => {
+    setSop((prev) => {
+      if (!prev) return prev;
+      const nextContent = { ...(prev.content as any), steps: newSteps };
+      pendingContentRef.current = nextContent;
+      return { ...prev, content: nextContent } as SOP;
+    });
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const content = pendingContentRef.current;
+      pendingContentRef.current = null;
+      saveTimerRef.current = null;
+      if (!content) return;
+      fetch(`/api/sops/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      }).catch(() => {});
+    }, 400);
+  }, [id]);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -1044,13 +1074,6 @@ export default function SOPDetailPage() {
                     {/* Recorded SOP — editable steps with add/delete/reorder */}
                     {((sop.content.steps || []) as RecordedStep[]).map((step, index) => {
                       const totalSteps = (sop.content.steps as RecordedStep[]).length;
-                      const updateRecordedSteps = (newSteps: RecordedStep[]) => {
-                        fetch(`/api/sops/${id}`, {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ content: { ...sop.content, steps: newSteps } }),
-                        }).then(() => fetchSOP());
-                      };
                       return (
                       <div key={index} className="rounded-lg border border-border bg-surface-3 overflow-hidden group">
                         <div className="flex items-start gap-3 p-4">
@@ -1061,7 +1084,7 @@ export default function SOPDetailPage() {
                                 const s = [...(sop.content.steps as RecordedStep[])];
                                 [s[index - 1], s[index]] = [s[index], s[index - 1]];
                                 s.forEach((st, i) => { st.order = i + 1; });
-                                updateRecordedSteps(s);
+                                persistRecordedStepsDebounced(s);
                               }}>▲</button>
                             )}
                             <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] text-sm font-bold">
@@ -1072,7 +1095,7 @@ export default function SOPDetailPage() {
                                 const s = [...(sop.content.steps as RecordedStep[])];
                                 [s[index], s[index + 1]] = [s[index + 1], s[index]];
                                 s.forEach((st, i) => { st.order = i + 1; });
-                                updateRecordedSteps(s);
+                                persistRecordedStepsDebounced(s);
                               }}>▼</button>
                             )}
                           </div>
@@ -1085,7 +1108,7 @@ export default function SOPDetailPage() {
                                 onBlur={(e) => {
                                   const newSteps = [...(sop.content.steps as RecordedStep[])];
                                   newSteps[index] = { ...newSteps[index], description: e.target.value };
-                                  updateRecordedSteps(newSteps);
+                                  persistRecordedStepsDebounced(newSteps);
                                 }}
                               />
                             ) : (
@@ -1098,7 +1121,7 @@ export default function SOPDetailPage() {
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 shrink-0" onClick={() => {
                               const newSteps = (sop.content.steps as RecordedStep[]).filter((_, i) => i !== index);
                               newSteps.forEach((st, i) => { st.order = i + 1; });
-                              updateRecordedSteps(newSteps);
+                              persistRecordedStepsDebounced(newSteps);
                             }}>
                               <X size={14} />
                             </Button>
@@ -1124,11 +1147,7 @@ export default function SOPDetailPage() {
                           elementText: "",
                           elementTag: "",
                         }];
-                        fetch(`/api/sops/${id}`, {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ content: { ...sop.content, steps: newSteps } }),
-                        }).then(() => fetchSOP());
+                        persistRecordedStepsDebounced(newSteps);
                       }}>
                         <Plus size={14} /> Add Step
                       </Button>
