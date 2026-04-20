@@ -148,7 +148,7 @@ export default function ToolsPage() {
           <div className="divide-y divide-border">
             {tools.map((tool) => (
               <button key={tool.id} onClick={() => setSelectedTool(tool)}
-                className={`w-full text-left p-3 hover:bg-surface-2 transition-colors ${selectedTool?.id === tool.id ? "bg-[rgba(212,255,46,0.06)] border-l-2 border-l-purple-500" : ""}`}>
+                className={`w-full text-left p-3 hover:bg-surface-2 transition-colors ${selectedTool?.id === tool.id ? "bg-[rgba(212,255,46,0.06)] border-l-2 border-l-[#d4ff2e]" : ""}`}>
                 <div className="flex items-center gap-2 mb-0.5">
                   <span className="text-lg">{tool.icon || "🔧"}</span>
                   <span className="text-xs font-semibold truncate flex-1">{tool.name}</span>

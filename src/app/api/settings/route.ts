@@ -67,7 +67,7 @@ export async function GET() {
         scoringBands: settings.scoringBands || [
           { label: "Exceptional", min: 90, max: 100, color: "green" },
           { label: "Good", min: 75, max: 89, color: "blue" },
-          { label: "Meets Expectations", min: 60, max: 74, color: "purple" },
+          { label: "Meets Expectations", min: 60, max: 74, color: "lime" },
           { label: "Needs Improvement", min: 40, max: 59, color: "orange" },
           { label: "Underperforming", min: 0, max: 39, color: "red" },
         ],

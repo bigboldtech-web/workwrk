@@ -155,7 +155,7 @@ export default function PoliciesPage() {
           <div className="divide-y divide-border">
             {policies.map((p) => (
               <button key={p.id} onClick={() => { setSelectedPolicy(p); setCreating(false); }}
-                className={`w-full text-left p-3 hover:bg-surface-2 transition-colors ${selectedPolicy?.id === p.id ? "bg-[rgba(212,255,46,0.06)] border-l-2 border-l-purple-500" : ""}`}>
+                className={`w-full text-left p-3 hover:bg-surface-2 transition-colors ${selectedPolicy?.id === p.id ? "bg-[rgba(212,255,46,0.06)] border-l-2 border-l-[#d4ff2e]" : ""}`}>
                 <div className="flex items-center gap-2 mb-0.5">
                   <Shield size={11} className="text-[#d4ff2e] shrink-0" />
                   <span className="text-xs font-semibold truncate flex-1">{p.title}</span>

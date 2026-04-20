@@ -247,7 +247,7 @@ export default function IdeasPage() {
                       onClick={() => handleVote(idea.id)}
                       className={`flex flex-col items-center gap-0.5 shrink-0 pt-1 ${hasVoted ? "text-[#d4ff2e]" : "text-muted hover:text-[#e2ff6b]"} transition-colors`}
                     >
-                      <ThumbsUp size={18} className={hasVoted ? "fill-purple-400" : ""} />
+                      <ThumbsUp size={18} className={hasVoted ? "fill-[#d4ff2e] text-[#d4ff2e]" : ""} />
                       <span className="text-xs font-bold">{idea._count.votes}</span>
                     </button>
 
