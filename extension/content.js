@@ -2,8 +2,23 @@ let isRecording = false;
 let highlightEl = null;
 
 // Inject detection flag so the web app knows the extension is installed
-window.postMessage({ type: "WORKWRK_EXTENSION_INSTALLED", version: "1.0.0" }, "*");
+window.postMessage({ type: "WORKWRK_EXTENSION_INSTALLED", version: "1.1.0" }, "*");
 document.documentElement.setAttribute("data-workwrk-extension", "true");
+
+// Auto-learn the server URL. When the user visits a WorkwrK page while the
+// extension is loaded, the app posts back its origin so the popup's "save
+// SOP" request hits the right server — no manual setup needed on staging /
+// self-hosted / custom domain deployments.
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (data?.type === "WORKWRK_APP_ORIGIN" && typeof data.origin === "string") {
+    try {
+      const origin = new URL(data.origin).origin;
+      chrome.storage.local.set({ workwrkOrigin: origin });
+    } catch {}
+  }
+});
 
 // Check recording state on load
 chrome.storage.local.get(["isRecording"], (result) => {

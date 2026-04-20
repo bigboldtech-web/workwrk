@@ -39,6 +39,51 @@ Optional (features gracefully no-op without them):
 | `RESEND_API_KEY` / SMTP              | Transactional email       |
 | `S3_*`                               | File uploads (avatars, Scribe) |
 
+### S3-compatible storage (Linode, R2, AWS)
+
+Scribe stores recorded SOP screenshots as S3 objects so the Postgres
+rows stay small. The client works against any S3-compatible provider.
+
+Required env vars:
+
+| Var                      | Example (Linode, Chennai)                 |
+| ------------------------ | ----------------------------------------- |
+| `S3_ACCESS_KEY_ID`       | From provider's Access Keys page          |
+| `S3_SECRET_ACCESS_KEY`   | From provider's Access Keys page          |
+| `S3_BUCKET`              | `workwrk-scribe` (whatever you created)   |
+| `S3_REGION`              | `in-maa-1`                                |
+| `S3_ENDPOINT`            | `https://in-maa-1.linodeobjects.com`      |
+
+For AWS S3, omit `S3_ENDPOINT`. For Cloudflare R2, set
+`S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com` and
+`S3_FORCE_PATH_STYLE=true`.
+
+**Bucket CORS** — the Chrome extension PUTs directly from
+`chrome-extension://*`, so the bucket needs these CORS rules:
+
+```json
+[
+  {
+    "AllowedOrigins": ["*"],
+    "AllowedMethods": ["PUT", "GET"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+`*` is safe here because uploads are gated by presigned URLs — an
+attacker without a presigned URL can't upload regardless of origin.
+
+**Bucket ACL** — keep the bucket **private**. Workwrk generates
+short-lived presigned GET URLs at read time. No public-read policy
+needed.
+
+**Backfill** — if you have existing RECORDED SOPs stored inline, run
+`npm run scribe:backfill` once after provisioning S3. Idempotent; safe
+to rerun. Use `--dry-run` first.
+
 ## 3 · Scheduled jobs
 
 `vercel.json` is pre-wired. On Vercel, the platform reads it and

@@ -118,23 +118,31 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // Check if extension is installed by looking for the data attribute
+    // Announce our origin back to the extension. On staging / localhost /
+    // self-hosted, this tells the recorder popup which server to POST to
+    // so users don't have to configure it manually.
+    const announceOrigin = () => {
+      try {
+        window.postMessage({ type: "WORKWRK_APP_ORIGIN", origin: window.location.origin }, "*");
+      } catch {}
+    };
+
     const check = () => {
       const detected = document.documentElement.getAttribute("data-workwrk-extension") === "true";
       setExtensionDetected(detected);
       setChecking(false);
+      if (detected) announceOrigin();
     };
 
-    // Listen for extension message
     const handler = (event: MessageEvent) => {
       if (event.data?.type === "WORKWRK_EXTENSION_INSTALLED") {
         setExtensionDetected(true);
         setChecking(false);
+        announceOrigin();
       }
     };
     window.addEventListener("message", handler);
 
-    // Check after a short delay (extension might take time to inject)
     setTimeout(check, 500);
 
     return () => window.removeEventListener("message", handler);

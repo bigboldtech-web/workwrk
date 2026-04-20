@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { broadcastWebhook } from "@/lib/webhooks";
+import { enrichScribeScreenshots } from "@/lib/scribe-enrich";
 
 export async function GET(
   _req: NextRequest,
@@ -28,7 +29,8 @@ export async function GET(
 
   if (!sop) return jsonError("SOP not found", 404);
 
-  return jsonSuccess(sop);
+  const enriched = await enrichScribeScreenshots(sop as any);
+  return jsonSuccess(enriched);
 }
 
 export async function PATCH(
@@ -98,7 +100,8 @@ export async function PATCH(
     });
   }
 
-  return jsonSuccess(updated);
+  const enriched = await enrichScribeScreenshots(updated as any);
+  return jsonSuccess(enriched);
 }
 
 export async function DELETE(

@@ -7,7 +7,12 @@ interface RecordedStep {
   action: string;
   description: string;
   url: string;
+  // One of these two will be set. `screenshotKey` means the image was
+  // uploaded to S3 by the extension (preferred — keeps JSON small).
+  // `screenshot` (base64 data URL) is the fallback when S3 isn't
+  // configured or the upload failed.
   screenshot: string | null;
+  screenshotKey?: string | null;
   elementText: string;
   elementTag: string;
 }
@@ -34,8 +39,11 @@ export async function POST(req: NextRequest) {
     return jsonError("No steps recorded");
   }
 
-  // Build SOP content from recorded steps
-  // Store steps as structured JSON in the content field
+  // Build SOP content from recorded steps. `screenshot` is kept as-is
+  // when it came in as a base64 data URL (legacy path); when the
+  // extension uploaded to S3 it's null and `screenshotKey` holds the
+  // object key. Read-side enrichment turns the key into a presigned
+  // GET URL when serving the SOP.
   const content = {
     type: "recorded",
     steps: steps.map((step) => ({
@@ -43,7 +51,8 @@ export async function POST(req: NextRequest) {
       action: step.action,
       description: step.description,
       url: step.url,
-      screenshot: step.screenshot, // base64 data URL
+      screenshot: step.screenshot ?? null,
+      screenshotKey: step.screenshotKey ?? null,
       elementText: step.elementText,
       elementTag: step.elementTag,
     })),
