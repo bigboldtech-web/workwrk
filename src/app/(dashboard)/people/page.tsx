@@ -613,7 +613,7 @@ export default function PeoplePage() {
                         isSelected ? "border-[#d4ff2e] bg-[#d4ff2e]" : "border-border hover:border-muted"
                       }`}
                     >
-                      {isSelected && <span className="text-white text-xs font-bold">&#10003;</span>}
+                      {isSelected && <span className="text-[#0a0a0a] text-xs font-bold">&#10003;</span>}
                     </button>}
                     <Avatar className="h-12 w-12">
                       <AvatarFallback className="text-base">{person.firstName[0]}{person.lastName[0]}</AvatarFallback>

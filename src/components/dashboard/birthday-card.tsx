@@ -32,12 +32,12 @@ export function BirthdayCard() {
             <Cake size={28} className="text-[#ff3d8a]" />
             <Gift size={28} className="text-[#d4ff2e]" />
           </div>
-          <h2 className="text-xl font-bold mb-2 text-[#fafafa]">Happy Birthday! 🎂</h2>
-          <p className="text-sm text-[#a0a0a0] mb-1">
+          <h2 className="text-xl font-bold mb-2 text-foreground">Happy Birthday! 🎂</h2>
+          <p className="text-sm text-muted mb-1">
             Thank you for being a wonderful part of{" "}
             <span className="font-semibold text-[#d4ff2e]">{companyName}</span>!
           </p>
-          <p className="text-xs text-[#a0a0a0]">
+          <p className="text-xs text-muted">
             We appreciate everything you do and wish you an amazing year ahead!
           </p>
         </CardContent>

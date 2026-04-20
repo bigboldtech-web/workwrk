@@ -121,8 +121,8 @@ export function AISignals() {
 
       <style>{`
         .sig-card {
-          background: #141414;
-          border: 1px solid rgba(212, 255, 46, 0.2);
+          background: var(--b-card);
+          border: 1px solid var(--b-accent-border);
           border-radius: 16px;
           padding: 20px;
           display: flex;
@@ -151,7 +151,7 @@ export function AISignals() {
         .sig-title {
           font-size: 13px;
           font-weight: 600;
-          color: #fafafa;
+          color: var(--b-fg);
           letter-spacing: -0.01em;
         }
         .sig-count {
@@ -159,7 +159,7 @@ export function AISignals() {
           font-family: var(--font-geist-mono), monospace;
           font-size: 10.5px;
           color: #ff3d8a;
-          background: rgba(255, 61, 138, 0.1);
+          background: rgba(255, 61, 138, 0.12);
           border: 1px solid rgba(255, 61, 138, 0.3);
           padding: 2px 8px;
           border-radius: 100px;
@@ -169,23 +169,23 @@ export function AISignals() {
           margin-left: auto;
           font-family: var(--font-geist-mono), monospace;
           font-size: 10.5px;
-          color: #d4ff2e;
-          background: rgba(212, 255, 46, 0.08);
-          border: 1px solid rgba(212, 255, 46, 0.3);
+          color: var(--b-accent-text);
+          background: var(--b-accent-tint);
+          border: 1px solid var(--b-accent-border);
           padding: 2px 10px;
           border-radius: 100px;
           letter-spacing: 0.06em;
         }
         .sig-empty-body {
           font-size: 13px;
-          color: #a0a0a0;
+          color: var(--b-t2);
           line-height: 1.55;
           margin: 0;
           position: relative;
         }
         .sig-skeleton {
           height: 80px;
-          background: rgba(255, 255, 255, 0.04);
+          background: var(--b-hover-tint);
           border-radius: 10px;
           animation: sig-pulse 1.4s ease-in-out infinite;
         }
@@ -204,22 +204,22 @@ export function AISignals() {
           grid-template-columns: 26px 1fr auto;
           gap: 10px;
           padding: 10px 12px;
-          background: #1a1a1a;
-          border: 1px solid rgba(255, 255, 255, 0.06);
+          background: var(--b-card-2);
+          border: 1px solid var(--b-line);
           border-left: 2px solid var(--c);
           border-radius: 10px;
           text-decoration: none;
           transition: all 0.2s;
         }
         .sig-row:hover {
-          background: #222222;
+          background: var(--b-card-3);
           transform: translateX(2px);
         }
         .sig-icon {
           width: 24px;
           height: 24px;
           border-radius: 6px;
-          background: rgba(255, 255, 255, 0.04);
+          background: var(--b-hover-tint);
           color: var(--c);
           display: inline-flex;
           align-items: center;
@@ -245,19 +245,19 @@ export function AISignals() {
         .sig-target {
           font-size: 13px;
           font-weight: 600;
-          color: #fafafa;
+          color: var(--b-fg);
           letter-spacing: -0.01em;
         }
         .sig-reason {
           font-size: 12px;
-          color: #a0a0a0;
+          color: var(--b-t2);
           line-height: 1.45;
           margin: 0;
         }
         .sig-foot {
           font-family: var(--font-geist-mono), monospace;
           font-size: 10.5px;
-          color: #707070;
+          color: var(--b-t3);
           letter-spacing: 0.08em;
           text-align: center;
           padding-top: 4px;

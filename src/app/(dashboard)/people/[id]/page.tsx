@@ -573,7 +573,7 @@ export default function UserProfilePage() {
                 )}
               </Avatar>
               <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                <span className="text-white text-[10px]">{uploadingAvatar ? "..." : "Upload"}</span>
+                <span className="text-[#0a0a0a] text-[10px]">{uploadingAvatar ? "..." : "Upload"}</span>
                 <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} />
               </label>
             </div>
@@ -912,7 +912,7 @@ export default function UserProfilePage() {
                   <Heart size={14} className="text-pink-400 mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-muted">
-                      From <span className="text-white font-medium">{k.giver.firstName} {k.giver.lastName}</span>
+                      From <span className="text-foreground font-medium">{k.giver.firstName} {k.giver.lastName}</span>
                     </p>
                     <p className="text-sm mt-1 text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
                     <div className="flex items-center gap-2 mt-2">

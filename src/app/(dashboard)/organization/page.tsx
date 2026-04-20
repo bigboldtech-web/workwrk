@@ -57,7 +57,7 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
           <Badge variant="outline" className="text-[9px] mt-1.5">{user.department.name}</Badge>
         )}
         {directReports.length > 0 && (
-          <p className="text-[10px] text-[#d4ff2e] mt-1">{directReports.length} report{directReports.length !== 1 ? "s" : ""}</p>
+          <p className="text-[10px] text-muted mt-1">{directReports.length} report{directReports.length !== 1 ? "s" : ""}</p>
         )}
       </div>
 
@@ -65,7 +65,7 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
       {directReports.length > 0 && (
         <div className="flex flex-col items-center">
           {/* Vertical line from parent down */}
-          <div style={{ width: "2px", height: "24px", background: "#52525b" }} />
+          <div style={{ width: "2px", height: "24px", background: "var(--b-t4)" }} />
 
           {directReports.length === 1 ? (
             <OrgChartNode user={directReports[0]} allUsers={allUsers} depth={depth + 1} />
@@ -81,14 +81,14 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
                     <div style={{ position: "relative", width: "100%", height: "24px", overflow: "visible" }}>
                       {/* Left half — extends 16px into the gap between columns */}
                       {!isFirst && (
-                        <div style={{ position: "absolute", top: 0, left: "-16px", right: "50%", height: "2px", background: "#52525b" }} />
+                        <div style={{ position: "absolute", top: 0, left: "-16px", right: "50%", height: "2px", background: "var(--b-t4)" }} />
                       )}
                       {/* Right half — extends 16px into the gap between columns */}
                       {!isLast && (
-                        <div style={{ position: "absolute", top: 0, left: "50%", right: "-16px", height: "2px", background: "#52525b" }} />
+                        <div style={{ position: "absolute", top: 0, left: "50%", right: "-16px", height: "2px", background: "var(--b-t4)" }} />
                       )}
                       {/* Vertical drop */}
-                      <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: "2px", height: "100%", background: "#52525b" }} />
+                      <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: "2px", height: "100%", background: "var(--b-t4)" }} />
                     </div>
                     <OrgChartNode user={report} allUsers={allUsers} depth={depth + 1} />
                   </div>

@@ -595,7 +595,7 @@ function OneTimeReveal({
           {heading}
         </span>
       </div>
-      <p style={{ fontSize: 13, color: "#a0a0a0", margin: "0 0 12px", lineHeight: 1.5 }}>
+      <p style={{ fontSize: 13, color: "var(--b-t2)", margin: "0 0 12px", lineHeight: 1.5 }}>
         {body}
       </p>
       <div
@@ -604,8 +604,8 @@ function OneTimeReveal({
           gap: 10,
           alignItems: "center",
           padding: "12px 14px",
-          background: "#0a0a0a",
-          border: "1px solid rgba(255,255,255,0.08)",
+          background: "var(--b-bg)",
+          border: "1px solid var(--b-line)",
           borderRadius: 10,
         }}
       >
@@ -614,7 +614,7 @@ function OneTimeReveal({
             flex: 1,
             fontFamily: "var(--font-geist-mono), monospace",
             fontSize: 12.5,
-            color: "#fafafa",
+            color: "var(--b-fg)",
             wordBreak: "break-all",
           }}
         >
@@ -649,8 +649,8 @@ function OneTimeReveal({
           marginTop: 12,
           padding: "4px 12px",
           background: "transparent",
-          border: "1px solid rgba(255,255,255,0.08)",
-          color: "#a0a0a0",
+          border: "1px solid var(--b-line)",
+          color: "var(--b-t2)",
           borderRadius: 100,
           fontFamily: "inherit",
           fontSize: 11,

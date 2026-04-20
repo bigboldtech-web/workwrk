@@ -61,7 +61,7 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-lg mx-4 rounded-2xl border border-[rgba(212,255,46,0.25)] bg-[#141414] shadow-2xl">
+      <div className="relative w-full max-w-lg mx-4 rounded-2xl border border-[rgba(212,255,46,0.25)] bg-surface shadow-2xl">
         {/* Close button */}
         <button
           onClick={handleSkip}

@@ -120,7 +120,7 @@ function ToolBtn({ onClick, active, title, children }: { onClick: () => void; ac
       className={`p-1.5 rounded transition-colors ${
         active
           ? "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] border border-[rgba(212,255,46,0.3)]"
-          : "text-[#a0a0a0] hover:text-[#fafafa] hover:bg-[#1a1a1a] border border-transparent"
+          : "text-muted hover:text-foreground hover:bg-surface-2 border border-transparent"
       }`}
     >
       {children}

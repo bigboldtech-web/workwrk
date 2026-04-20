@@ -73,7 +73,7 @@ export function DashboardOkrs() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Crosshair size={16} className="text-[#d4ff2e]" />
-            <h3 className="text-sm font-bold text-[#fafafa]">Your OKRs — {quarter}</h3>
+            <h3 className="text-sm font-bold text-foreground">Your OKRs — {quarter}</h3>
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">{okrs.length}</Badge>
           </div>
           <Link href="/okrs" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b] flex items-center gap-1">
@@ -115,7 +115,7 @@ export function DashboardOkrs() {
           ))}
         </div>
         {sorted.length > 5 && (
-          <Link href="/okrs" className="block mt-2 text-center text-xs text-[#a0a0a0] hover:text-[#d4ff2e] transition-colors">
+          <Link href="/okrs" className="block mt-2 text-center text-xs text-muted hover:text-[#d4ff2e] transition-colors">
             +{sorted.length - 5} more
           </Link>
         )}

@@ -95,7 +95,7 @@ function boldify(text: string): string {
   // Escape HTML first to prevent XSS, then apply formatting
   const escaped = escapeHtml(text);
   return escaped
-    .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground font-semibold">$1</strong>')
     .replace(/`(.+?)`/g, '<code class="bg-border px-1 py-0.5 rounded text-[#d4ff2e] text-xs font-mono">$1</code>');
 }
 
