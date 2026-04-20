@@ -2,7 +2,10 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Light theme (default) — lime-accented on a neutral white */
+/* Light theme (default) — lime-accented on a neutral white.
+ * The raw lime (#d4ff2e) is too bright for white surfaces. We use a slightly
+ * darkened fill for primary buttons, a muted "strong" tone for lime text on
+ * light backgrounds, and a low-glow shadow so the UI never feels pricky. */
 :root {
   --color-background: #FFFFFF;
   --color-foreground: #0A0A0A;
@@ -12,8 +15,13 @@
   --color-border: #DADAD7;
   --color-muted: #707070;
   --color-muted-2: #9A9A9A;
-  --color-accent: #d4ff2e;
-  --color-accent-light: #e2ff6b;
+  --color-accent: #c2eb1a;           /* button fill: a touch darker than lime */
+  --color-accent-light: #d4ff2e;
+  --accent: #c2eb1a;                 /* alias used in new components */
+  --accent-strong: #6b8c00;          /* readable lime-as-text on white */
+  --accent-soft: rgba(194, 235, 26, 0.14);
+  --accent-contrast: #0a0a0a;        /* foreground on any lime fill */
+  --accent-glow: 0 2px 10px -4px rgba(107, 140, 0, 0.35);
   --scrollbar-color: #DADAD7;
 }
 
@@ -29,6 +37,11 @@
   --color-muted-2: #707070;
   --color-accent: #d4ff2e;
   --color-accent-light: #e2ff6b;
+  --accent: #d4ff2e;
+  --accent-strong: #d4ff2e;          /* lime pops against black, no dimming */
+  --accent-soft: rgba(212, 255, 46, 0.12);
+  --accent-contrast: #0a0a0a;
+  --accent-glow: 0 6px 18px -6px rgba(212, 255, 46, 0.55);
   --scrollbar-color: rgba(255, 255, 255, 0.14);
 }
 
@@ -89,6 +102,20 @@
   border-radius: 3px;
 }
 
+/* Avatar fallback — adapts to theme so initials are always readable.
+ * Dark mode: lime tint on subtle lime fill (signature look).
+ * Light mode: light gray fill with dark initials. */
+.avatar-fallback-tone {
+  background: #E5E5E2;
+  color: #4a4a4a;
+  border: 1px solid #DADAD7;
+}
+.dark .avatar-fallback-tone {
+  background: rgba(212, 255, 46, 0.12);
+  color: #d4ff2e;
+  border: 1px solid rgba(212, 255, 46, 0.25);
+}
+
 body {
   background: var(--color-background);
   color: var(--color-foreground);
@@ -132,8 +159,17 @@ body {
   50% { box-shadow: 0 0 20px 4px rgba(212, 255, 46, 0.2); }
 }
 
+@keyframes pulse-glow-light {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(107, 140, 0, 0.28); }
+  50% { box-shadow: 0 0 14px 3px rgba(107, 140, 0, 0.14); }
+}
+
 .animate-pulse-glow {
   animation: pulse-glow 2s infinite;
+}
+
+:root:not(.dark) .animate-pulse-glow {
+  animation: pulse-glow-light 2s infinite;
 }
 
 /* Security: prevent printing */
@@ -147,4 +183,147 @@ body {
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
+}
+
+/* Focus ring — softer in light mode so lime halos don't scream on white.
+ * Applies globally so dialogs/inputs outside .app-shell also get it. */
+:root:not(.dark) input:focus-visible,
+:root:not(.dark) textarea:focus-visible,
+:root:not(.dark) button:focus-visible,
+:root:not(.dark) [role="combobox"]:focus,
+:root:not(.dark) select:focus {
+  box-shadow: 0 0 0 3px rgba(168, 204, 36, 0.25) !important;
+}
+
+/* Drop the inline lime focus-ring classes that render radioactive on white */
+:root:not(.dark) .focus-visible\:ring-\[rgba\(212\,255\,46\,0\.15\)\]:focus-visible,
+:root:not(.dark) .focus\:ring-\[rgba\(212\,255\,46\,0\.15\)\]:focus {
+  --tw-ring-color: rgba(168, 204, 36, 0.25) !important;
+}
+
+/* ================================================================
+ * Light-mode contrast guardrails.
+ *
+ * Raw #d4ff2e (lime), #ff3d8a (pink), #4a9eff (blue), #ff9933 (amber)
+ * are hardcoded as Tailwind arbitrary values in 500+ places across the
+ * codebase. They were designed against a black bento canvas. On white,
+ * lime as text is unreadable ("pricky") and the glow shadows radioactive.
+ *
+ * Rather than rewriting every file, we remap those utility classes in
+ * light mode only. Dark mode is untouched. We use attribute selectors
+ * as catch-alls so every alpha variant (0.06, 0.08, 0.1, 0.12, 0.15…)
+ * gets normalized without enumerating each one. Dark token values
+ * (#0a0a0a as text on bright fills) are kept — they're correct in both
+ * modes.
+ * ================================================================ */
+
+/* --- Lime (primary accent) --------------------------------------- */
+
+/* Any utility that SETS lime as text color */
+:root:not(.dark) [class*="text-[#d4ff2e]"],
+:root:not(.dark) [class*="text-[#e2ff6b]"],
+:root:not(.dark) [class*="hover:text-[#d4ff2e]"]:hover,
+:root:not(.dark) [class*="group-hover:text-[#d4ff2e]"]:where(.group:hover *) {
+  color: var(--accent-strong) !important;
+}
+
+/* Lime as border — dark olive so edges don't scream */
+:root:not(.dark) [class*="border-[#d4ff2e]"],
+:root:not(.dark) [class*="hover:border-[#d4ff2e]"]:hover,
+:root:not(.dark) [class*="focus:border-[#d4ff2e]"]:focus,
+:root:not(.dark) [class*="focus-visible:border-[#d4ff2e]"]:focus-visible {
+  border-color: var(--accent-strong) !important;
+}
+
+/* Lime tint borders — any alpha */
+:root:not(.dark) [class*="border-[rgba(212,255,46"] {
+  border-color: rgba(107, 140, 0, 0.3) !important;
+}
+
+/* Lime fill — slightly darkened, always dark text on top */
+:root:not(.dark) [class*="bg-[#d4ff2e]"],
+:root:not(.dark) [class*="hover:bg-[#d4ff2e]"]:hover {
+  background-color: var(--accent) !important;
+}
+:root:not(.dark) [class*="bg-[#e2ff6b]"],
+:root:not(.dark) [class*="hover:bg-[#e2ff6b]"]:hover {
+  background-color: var(--color-accent-light) !important;
+}
+
+/* Lime tint fill — any alpha — squash to a single calm soft token */
+:root:not(.dark) [class*="bg-[rgba(212,255,46"] {
+  background-color: var(--accent-soft) !important;
+}
+
+/* Lime rings / focus rings */
+:root:not(.dark) [class*="ring-[#d4ff2e]"],
+:root:not(.dark) [class*="focus:ring-[#d4ff2e]"]:focus,
+:root:not(.dark) [class*="focus-visible:ring-[#d4ff2e]"]:focus-visible {
+  --tw-ring-color: rgba(107, 140, 0, 0.4) !important;
+}
+:root:not(.dark) [class*="ring-[rgba(212,255,46"] {
+  --tw-ring-color: rgba(107, 140, 0, 0.25) !important;
+}
+
+/* Lime drop-shadows — any size / alpha. Replace with subtle glow */
+:root:not(.dark) [class*="shadow-[0_6px_18px_-6px_rgba(212,255,46"],
+:root:not(.dark) [class*="shadow-[0_10px_22px_-6px_rgba(212,255,46"],
+:root:not(.dark) [class*="hover:shadow-[0_10px_22px_-6px_rgba(212,255,46"]:hover,
+:root:not(.dark) [class*="shadow-[0_0_20px"][class*="rgba(212,255,46"] {
+  box-shadow: var(--accent-glow) !important;
+}
+
+/* --- Pink (destructive / emphasis) -------------------------------- */
+
+/* Pink text — keep the hue but darken for readability on white */
+:root:not(.dark) [class*="text-[#ff3d8a]"] {
+  color: #c71c64 !important;
+}
+:root:not(.dark) [class*="border-[#ff3d8a]"],
+:root:not(.dark) [class*="border-[rgba(255,61,138"] {
+  border-color: rgba(199, 28, 100, 0.35) !important;
+}
+:root:not(.dark) [class*="bg-[rgba(255,61,138"] {
+  background-color: rgba(255, 61, 138, 0.09) !important;
+}
+:root:not(.dark) [class*="shadow-[0_6px_18px_-6px_rgba(255,61,138"] {
+  box-shadow: 0 2px 10px -4px rgba(199, 28, 100, 0.35) !important;
+}
+
+/* --- Blue (informational) ---------------------------------------- */
+
+:root:not(.dark) [class*="text-[#4a9eff]"] {
+  color: #1e6fcf !important;
+}
+:root:not(.dark) [class*="border-[#4a9eff]"],
+:root:not(.dark) [class*="border-[rgba(74,158,255"] {
+  border-color: rgba(30, 111, 207, 0.35) !important;
+}
+:root:not(.dark) [class*="bg-[rgba(74,158,255"] {
+  background-color: rgba(74, 158, 255, 0.08) !important;
+}
+
+/* --- Amber / orange (warnings) ----------------------------------- */
+
+:root:not(.dark) [class*="text-[#ff9933]"] {
+  color: #b66908 !important;
+}
+:root:not(.dark) [class*="border-[#ff9933]"],
+:root:not(.dark) [class*="border-[rgba(255,153,51"] {
+  border-color: rgba(182, 105, 8, 0.35) !important;
+}
+:root:not(.dark) [class*="bg-[rgba(255,153,51"] {
+  background-color: rgba(255, 153, 51, 0.1) !important;
+}
+
+/* --- Dark / neutral hex leftovers --------------------------------- */
+
+/* #C0C0D0 (off-white kudos quote text) → readable gray on white */
+:root:not(.dark) [class*="text-[#C0C0D0]"] {
+  color: #4a4a4a !important;
+}
+
+/* ring-offset-[#0a0a0a] assumes a dark canvas — flip to the real bg */
+:root:not(.dark) [class*="ring-offset-[#0a0a0a]"] {
+  --tw-ring-offset-color: var(--color-background) !important;
 }

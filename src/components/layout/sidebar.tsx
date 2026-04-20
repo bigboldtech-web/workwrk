@@ -39,6 +39,7 @@ import {
   ListChecks,
   Package,
   MessageSquareHeart,
+  Heart,
 } from "lucide-react";
 
 type NavItem = {
@@ -64,6 +65,7 @@ const navigation: NavItem[] = [
   { name: "Meetings", key: "meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings" },
   { name: "Analytics", key: "analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true },
   { name: "Onboarding", key: "onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true },
+  { name: "Kudos", key: "kudos", href: "/kudos", icon: Heart },
   { name: "Ideas", key: "ideas", href: "/ideas", icon: Lightbulb },
   { name: "OKRs", key: "okrs", href: "/okrs", icon: Crosshair },
   { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true },

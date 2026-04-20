@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
+import { KudosReactions } from "@/components/kudos/kudos-reactions";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
@@ -914,12 +915,20 @@ export default function UserProfilePage() {
                     <p className="text-xs text-muted">
                       From <span className="text-foreground font-medium">{k.giver.firstName} {k.giver.lastName}</span>
                     </p>
-                    <p className="text-sm mt-1 text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
+                    <p className="text-sm mt-1 italic text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
                     <div className="flex items-center gap-2 mt-2">
                       {k.companyValue && (
-                        <Badge variant="secondary" className="text-[10px]">{k.companyValue}</Badge>
+                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[#d4ff2e]">{k.companyValue}</Badge>
                       )}
                       <span className="text-[10px] text-muted">{new Date(k.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-border/60">
+                      <KudosReactions
+                        kudosId={k.id}
+                        initialCounts={k.reactionCounts || []}
+                        initialMine={k.myReactions || []}
+                        compact
+                      />
                     </div>
                   </div>
                 </div>

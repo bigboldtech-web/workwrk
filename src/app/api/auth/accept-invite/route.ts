@@ -91,6 +91,7 @@ export async function POST(req: Request) {
           departmentId: invitation.departmentId,
           roleId: invitation.roleId,
           managerId: invitation.managerId,
+          officeId: invitation.officeId,
         },
       });
 

@@ -9,6 +9,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (error) return error;
 
   const orgId = getOrgId(session);
+  const currentUserId = getUserId(session);
   const { id } = await params;
 
   const user = await prisma.user.findFirst({
@@ -48,6 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       kudosReceived: {
         include: {
           giver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+          reactions: { select: { emoji: true, userId: true } },
         },
         orderBy: { createdAt: "desc" },
         take: 10,
@@ -71,8 +73,26 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     getScoreHistory(id, 6),
   ]);
 
+  const kudosReceived = user.kudosReceived.map((k) => {
+    const byEmoji = new Map<string, number>();
+    const mine: string[] = [];
+    for (const r of k.reactions) {
+      byEmoji.set(r.emoji, (byEmoji.get(r.emoji) || 0) + 1);
+      if (r.userId === currentUserId) mine.push(r.emoji);
+    }
+    return {
+      ...k,
+      reactionCounts: Array.from(byEmoji.entries())
+        .map(([emoji, count]) => ({ emoji, count }))
+        .sort((a, b) => b.count - a.count),
+      totalReactions: k.reactions.length,
+      myReactions: mine,
+    };
+  });
+
   return jsonSuccess({
     ...user,
+    kudosReceived,
     passwordHash: undefined,
     performanceSummary: {
       avgKPI,

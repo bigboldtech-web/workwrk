@@ -181,6 +181,7 @@ model User {
   performanceScores   PerformanceScore[]
   kudosGiven          Kudos[] @relation("KudosGiver")
   kudosReceived       Kudos[] @relation("KudosReceiver")
+  kudosReactions      KudosReaction[] @relation("KudosReactionUser")
   employeeOfMonthWins EmployeeOfMonth[]
   ideasSubmitted      Idea[] @relation("IdeaSubmitter")
   ideasReviewed       Idea[] @relation("IdeaReviewer")
@@ -230,6 +231,7 @@ model Invitation {
   departmentId   String?
   roleId         String?
   managerId      String?
+  officeId       String?
   createdAt      DateTime @default(now())
 
   @@index([token])
@@ -1175,11 +1177,26 @@ model Kudos {
   receiver       User     @relation("KudosReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
   organizationId String
   createdAt      DateTime @default(now())
+  reactions      KudosReaction[]
 
   @@index([organizationId])
   @@index([receiverId])
   @@index([giverId])
   @@index([createdAt])
+}
+
+model KudosReaction {
+  id        String   @id @default(cuid())
+  kudosId   String
+  kudos     Kudos    @relation(fields: [kudosId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("KudosReactionUser", fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([kudosId, userId, emoji])
+  @@index([kudosId])
+  @@index([userId])
 }
 
 // ==========================================
@@ -1484,6 +1501,10 @@ model PulseSurvey {
   questions      Json            // [{id, text, type: "rating"|"text"|"nps"}]
   status         String          @default("DRAFT")  // DRAFT, ACTIVE, CLOSED
   frequency      String?         // WEEKLY, MONTHLY, QUARTERLY
+  audienceType   String          @default("ALL")    // ALL, OFFICES, DEPARTMENTS, USERS
+  officeIds      String[]        @default([])
+  departmentIds  String[]        @default([])
+  userIds        String[]        @default([])
   organizationId String
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses      SurveyResponse[]

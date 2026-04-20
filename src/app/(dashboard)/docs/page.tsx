@@ -792,41 +792,53 @@ export default function DocsPage() {
       <div className="grid grid-cols-12 gap-6">
         {/* Sidebar */}
         <div className="col-span-3 space-y-1">
-          {filteredDocs.map((section) => (
-            <div key={section.id}>
-              <button
-                onClick={() => {
-                  setSelectedSection(section.id);
-                  setSelectedArticle(0);
-                }}
-                className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left transition-colors ${
-                  selectedSection === section.id
-                    ? "bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
-                    : "text-muted hover:bg-surface-2 hover:text-foreground"
-                }`}
-              >
-                <span style={{ color: section.color }}>{section.icon}</span>
-                <span className="truncate">{section.title}</span>
-              </button>
-              {selectedSection === section.id && (
-                <div className="ml-8 mt-1 space-y-0.5">
-                  {section.articles.map((article, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setSelectedArticle(idx)}
-                      className={`w-full text-left text-xs rounded px-2 py-1.5 transition-colors ${
-                        selectedArticle === idx
-                          ? "text-[#d4ff2e] bg-[rgba(212,255,46,0.06)]"
-                          : "text-muted-2 hover:text-muted"
-                      }`}
-                    >
-                      {article.title}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+          {filteredDocs.map((section) => {
+            const isActive = selectedSection === section.id;
+            return (
+              <div key={section.id}>
+                <button
+                  onClick={() => {
+                    setSelectedSection(section.id);
+                    setSelectedArticle(0);
+                  }}
+                  className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left transition-colors"
+                  style={
+                    isActive
+                      ? {
+                          background: "var(--b-accent-tint)",
+                          color: "var(--b-accent-text)",
+                          border: "1px solid var(--b-accent-border)",
+                        }
+                      : undefined
+                  }
+                >
+                  <span style={{ color: isActive ? "var(--b-accent-text)" : "var(--b-t2)" }}>
+                    {section.icon}
+                  </span>
+                  <span className={`truncate ${isActive ? "font-semibold" : "text-muted hover:text-foreground"}`}>
+                    {section.title}
+                  </span>
+                </button>
+                {isActive && (
+                  <div className="ml-8 mt-1 space-y-0.5">
+                    {section.articles.map((article, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setSelectedArticle(idx)}
+                        className={`w-full text-left text-xs rounded px-2 py-1.5 transition-colors ${
+                          selectedArticle === idx
+                            ? "font-medium text-foreground bg-surface-2"
+                            : "text-muted-2 hover:text-muted"
+                        }`}
+                      >
+                        {article.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Content */}
@@ -834,7 +846,7 @@ export default function DocsPage() {
           <Card className="border-border bg-surface">
             <CardContent className="p-8">
               <div className="flex items-center gap-2 text-xs text-muted-2 mb-4">
-                <span style={{ color: currentSection.color }}>{currentSection.icon}</span>
+                <span className="text-muted">{currentSection.icon}</span>
                 <span>{currentSection.title}</span>
                 <ChevronRight size={12} />
                 <span className="text-muted">{currentArticle.title}</span>
@@ -883,7 +895,7 @@ export default function DocsPage() {
                         <span dangerouslySetInnerHTML={{
                           __html: line.replace(/^-\s+/, "").replace(/^\s+-\s+/, "")
                             .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
-                            .replace(/`(.+?)`/g, '<code class="text-[#d4ff2e] bg-[rgba(212,255,46,0.08)] px-1 rounded text-xs">$1</code>'),
+                            .replace(/`(.+?)`/g, '<code class="font-mono text-foreground bg-surface-2 px-1 rounded text-xs">$1</code>'),
                         }} />
                       </div>
                     );
@@ -894,7 +906,7 @@ export default function DocsPage() {
                         __html: line
                           .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
                           .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-[#d4ff2e] hover:text-[#e2ff6b]">$1</a>')
-                          .replace(/`(.+?)`/g, '<code class="text-[#d4ff2e] bg-[rgba(212,255,46,0.08)] px-1 rounded text-xs">$1</code>'),
+                          .replace(/`(.+?)`/g, '<code class="font-mono text-foreground bg-surface-2 px-1 rounded text-xs">$1</code>'),
                       }} />
                     );
                   }

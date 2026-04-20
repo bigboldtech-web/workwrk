@@ -258,8 +258,7 @@ export function Topbar() {
               {unreadCount > 0 && (
                 <button
                   onClick={handleMarkAllRead}
-                  className="text-[10px] flex items-center gap-1"
-                  style={{ color: "#d4ff2e" }}
+                  className="text-[10px] flex items-center gap-1 text-[color:var(--accent-strong)]"
                   title="Mark all as read"
                 >
                   <CheckCheck size={12} />
@@ -284,28 +283,26 @@ export function Topbar() {
                       {!notif.read && (
                         <span
                           className="h-2 w-2 rounded-full flex-shrink-0"
-                          style={{ background: "#d4ff2e", boxShadow: "0 0 6px #d4ff2e" }}
+                          style={{ background: "var(--b-accent-text)" }}
                         />
                       )}
                       <span
-                        className={`text-sm truncate ${!notif.read ? "font-semibold" : "font-medium"}`}
-                        style={!notif.read ? { color: "#fafafa" } : { color: "#a0a0a0" }}
+                        className={`text-sm truncate ${!notif.read ? "font-semibold text-foreground" : "font-medium text-muted"}`}
                       >
                         {notif.title}
                       </span>
-                      <span className="text-[10px] ml-auto flex-shrink-0" style={{ color: "#707070" }}>
+                      <span className="text-[10px] ml-auto flex-shrink-0 text-muted-2">
                         {timeAgo(notif.createdAt)}
                       </span>
                     </div>
-                    <span className="text-xs line-clamp-1" style={{ color: "#a0a0a0" }}>{notif.message}</span>
+                    <span className="text-xs line-clamp-1 text-muted">{notif.message}</span>
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild className="justify-center">
                   <Link
                     href="/activity"
-                    className="text-xs text-center w-full"
-                    style={{ color: "#d4ff2e" }}
+                    className="text-xs text-center w-full text-[color:var(--accent-strong)]"
                   >
                     View all notifications →
                   </Link>

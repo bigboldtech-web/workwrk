@@ -16,7 +16,7 @@ import { KraPicker } from "@/components/ui/kra-picker";
 import {
   Search, Plus, Users, TrendingUp, TrendingDown, Minus,
   MoreHorizontal, Mail, Building2, UserCheck, Download, Upload, Trash2,
-  UserMinus, Target, BookOpen,
+  UserMinus, Target, BookOpen, Globe,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
@@ -113,6 +113,8 @@ export default function PeoplePage() {
   const [formRoleId, setFormRoleId] = useState("");
   const [formAccessLevel, setFormAccessLevel] = useState("");
   const [formManagerId, setFormManagerId] = useState("");
+  const [formOfficeId, setFormOfficeId] = useState("");
+  const [offices, setOffices] = useState<{ id: string; name: string; city?: string | null; country?: string | null }[]>([]);
 
   // Inline creation state
   const [showNewRole, setShowNewRole] = useState(false);
@@ -281,11 +283,13 @@ export default function PeoplePage() {
       fetch("/api/roles").then((r) => r.ok ? r.json() : []),
       fetch("/api/kras?limit=100").then((r) => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
       fetch("/api/sops?status=PUBLISHED&limit=100").then((r) => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
-    ]).then(([depts, rls, krasData, sopsData]) => {
+      fetch("/api/offices").then((r) => r.ok ? r.json() : []).catch(() => []),
+    ]).then(([depts, rls, krasData, sopsData, officesData]) => {
       setDepartments(depts);
       setRoles(rls);
       setKras(Array.isArray(krasData) ? krasData : krasData?.data || []);
       setSops(Array.isArray(sopsData) ? sopsData : sopsData?.data || []);
+      setOffices(Array.isArray(officesData) ? officesData : officesData?.data || []);
     });
   }, []);
 
@@ -309,7 +313,7 @@ export default function PeoplePage() {
 
   const resetForm = () => {
     setFormEmail("");
-    setFormDepartmentId(""); setFormRoleId(""); setFormAccessLevel(""); setFormManagerId("");
+    setFormDepartmentId(""); setFormRoleId(""); setFormAccessLevel(""); setFormManagerId(""); setFormOfficeId("");
   };
 
   const handleAddPerson = async () => {
@@ -324,6 +328,7 @@ export default function PeoplePage() {
           departmentId: formDepartmentId || undefined,
           roleId: formRoleId || undefined,
           managerId: formManagerId || undefined,
+          officeId: formOfficeId || undefined,
         }),
       });
       if (!res.ok) {
@@ -513,6 +518,20 @@ export default function PeoplePage() {
                       <SelectItem value="VP">VP</SelectItem>
                       <SelectItem value="HR">HR</SelectItem>
                       <SelectItem value="AGENT">Agent</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Office / Location</Label>
+                  <Select value={formOfficeId} onValueChange={setFormOfficeId}>
+                    <SelectTrigger><SelectValue placeholder="Select office (optional)" /></SelectTrigger>
+                    <SelectContent>
+                      {offices.length === 0 && <SelectItem value="none" disabled>No offices — add one in Organization</SelectItem>}
+                      {offices.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.name}{o.city ? ` · ${o.city}` : ""}{o.country ? `, ${o.country}` : ""}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -740,6 +759,9 @@ export default function PeoplePage() {
           <Button variant="outline" size="sm" onClick={() => { setBulkAction("change_manager"); setBulkPayload({}); }}>
             <Users size={14} className="mr-1" /> Manager
           </Button>
+          <Button variant="outline" size="sm" onClick={() => { setBulkAction("change_office"); setBulkPayload({}); }}>
+            <Globe size={14} className="mr-1" /> Office
+          </Button>
           <Button variant="outline" size="sm" onClick={() => { setBulkAction("assign_kra"); setBulkPayload({ weightage: 100, period: "Q1 2026" }); }}>
             <Target size={14} className="mr-1" /> KRA
           </Button>
@@ -758,6 +780,7 @@ export default function PeoplePage() {
             <DialogTitle>
               {bulkAction === "change_department" && "Change Department"}
               {bulkAction === "change_manager" && "Change Manager"}
+              {bulkAction === "change_office" && "Change Office / Location"}
               {bulkAction === "assign_kra" && "Assign KRA"}
               {bulkAction === "assign_sop" && "Assign SOP"}
             </DialogTitle>
@@ -780,6 +803,24 @@ export default function PeoplePage() {
                   <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
                   <SelectContent>{people.filter((p) => p.accessLevel !== "EMPLOYEE").map((p) => <SelectItem key={p.id} value={p.id}>{p.firstName} {p.lastName}</SelectItem>)}</SelectContent>
                 </Select>
+              </div>
+            )}
+            {bulkAction === "change_office" && (
+              <div className="space-y-2">
+                <Label>Office / Location</Label>
+                <Select value={bulkPayload.officeId || ""} onValueChange={(v) => setBulkPayload({ ...bulkPayload, officeId: v === "__none__" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="Select office" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Unassign (remove office) —</SelectItem>
+                    {offices.length === 0 && <SelectItem value="none" disabled>No offices — add one in Organization</SelectItem>}
+                    {offices.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.name}{o.city ? ` · ${o.city}` : ""}{o.country ? `, ${o.country}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted">Applies to all selected people. Pick &ldquo;Unassign&rdquo; to clear.</p>
               </div>
             )}
             {bulkAction === "assign_kra" && (

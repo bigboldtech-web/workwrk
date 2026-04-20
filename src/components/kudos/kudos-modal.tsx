@@ -133,7 +133,7 @@ export function KudosModal({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles size={18} className="text-yellow-400" />
+            <Sparkles size={18} className="text-pink-400" />
             Give Kudos
           </DialogTitle>
         </DialogHeader>

@@ -43,11 +43,8 @@ export function PageHeader({
         {kicker && (
           <span className="dash-page-kicker">
             <span
-              className="dash-page-kicker-dot"
-              style={{
-                background: toneHex[kickerTone],
-                boxShadow: `0 0 8px ${toneHex[kickerTone]}`,
-              }}
+              className={`dash-page-kicker-dot dash-page-kicker-dot--${kickerTone}`}
+              style={{ background: toneHex[kickerTone] }}
             />
             {kicker}
           </span>

@@ -772,7 +772,18 @@ export default function SOPsPage() {
       </div>
 
       {/* SOP Grid / List */}
-      <div className={viewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "space-y-2"}>
+      {viewMode === "list" && !loading && filtered.length > 0 && (
+        <div className="hidden md:grid grid-cols-[minmax(0,1fr)_140px_100px_80px_80px_100px] items-center gap-4 px-4 pb-2 text-[10px] font-mono uppercase tracking-wider text-muted">
+          <span>SOP</span>
+          <span>Category</span>
+          <span className="text-right">Compliance</span>
+          <span className="text-right">Steps</span>
+          <span className="text-right">Version</span>
+          <span className="text-right">Published</span>
+        </div>
+      )}
+
+      <div className={viewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "flex flex-col gap-1.5"}>
         {loading
           ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
           : filtered.length === 0 ? (
@@ -785,7 +796,64 @@ export default function SOPsPage() {
                 onAction={() => setShowAddDialog(true)}
               />
             </div>
-          ) : filtered.map((sop) => {
+          ) : viewMode === "list" ? filtered.map((sop) => {
+              const compliance = getComplianceScore(sop);
+              const steps = getStepsCount(sop);
+              const assigned = getAssignedCount(sop);
+              return (
+                <Link
+                  key={sop.id}
+                  href={`/sops/${sop.id}`}
+                  className="grid grid-cols-[1fr] md:grid-cols-[minmax(0,1fr)_140px_100px_80px_80px_100px] items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
+                >
+                  {/* Title + status */}
+                  <div className="min-w-0 flex items-center gap-3">
+                    <FileText size={16} className="text-muted shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="font-medium text-sm truncate">{sop.title}</span>
+                        {getStatusBadge(sop.status)}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-muted">
+                        <span>{assigned > 0 ? `${assigned} assigned` : "Not assigned"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Category */}
+                  <div className="hidden md:flex items-center gap-1 min-w-0">
+                    {sop.category ? (
+                      <Badge variant="outline" className="text-[10px] truncate">{sop.category}</Badge>
+                    ) : (
+                      <span className="text-[11px] text-muted">—</span>
+                    )}
+                  </div>
+
+                  {/* Compliance */}
+                  <div className="hidden md:flex items-center gap-2 justify-end">
+                    {sop.status === "PUBLISHED" ? (
+                      <>
+                        <Progress value={compliance} className="h-1 w-12" indicatorClassName={getComplianceColor(compliance)} />
+                        <span className={`text-xs font-mono tabular-nums ${getComplianceText(compliance)}`}>{compliance}%</span>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-muted">—</span>
+                    )}
+                  </div>
+
+                  {/* Steps */}
+                  <div className="hidden md:block text-right text-xs font-mono tabular-nums text-muted">{steps}</div>
+
+                  {/* Version */}
+                  <div className="hidden md:block text-right">
+                    <Badge variant="outline" className="text-[10px]">v{sop.version}</Badge>
+                  </div>
+
+                  {/* Date */}
+                  <div className="hidden md:block text-right text-[11px] font-mono tabular-nums text-muted">{formatDate(sop.publishedAt || sop.createdAt)}</div>
+                </Link>
+              );
+            }) : filtered.map((sop) => {
               const compliance = getComplianceScore(sop);
               const steps = getStepsCount(sop);
               const assigned = getAssignedCount(sop);
@@ -794,7 +862,7 @@ export default function SOPsPage() {
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-1.5">
-                        <FileText size={14} className="text-[#d4ff2e] shrink-0" />
+                        <FileText size={14} className="text-muted shrink-0" />
                         {getStatusBadge(sop.status)}
                       </div>
                       <Badge variant="outline" className="text-[9px]">v{sop.version}</Badge>
@@ -802,7 +870,7 @@ export default function SOPsPage() {
                     <h3 className="font-semibold text-xs mb-1 truncate">{sop.title}</h3>
                     <div className="flex items-center gap-1 mb-2">
                       {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
-                      {sop.subcategory && <Badge variant="outline" className="text-[9px] text-[#d4ff2e]">{sop.subcategory}</Badge>}
+                      {sop.subcategory && <Badge variant="outline" className="text-[9px]">{sop.subcategory}</Badge>}
                     </div>
                     {sop.status === "PUBLISHED" && (
                       <div className="flex items-center gap-2 mb-2">

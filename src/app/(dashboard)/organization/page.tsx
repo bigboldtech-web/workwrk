@@ -347,7 +347,8 @@ export default function OrganizationPage() {
   // Offices
   const [officesList, setOfficesList] = useState<any[]>([]);
   const [showAddOffice, setShowAddOffice] = useState(false);
-  const [officeForm, setOfficeForm] = useState({ name: "", city: "", country: "", isHeadquarters: false });
+  const [editingOfficeId, setEditingOfficeId] = useState<string | null>(null);
+  const [officeForm, setOfficeForm] = useState({ name: "", address: "", city: "", state: "", country: "", timezone: "", isHeadquarters: false });
 
   useEffect(() => {
     fetchData();
@@ -1022,14 +1023,24 @@ export default function OrganizationPage() {
         {/* Offices Tab */}
         <TabsContent value="offices" className="space-y-4 mt-4">
           <div className="flex justify-end">
+            <Button className="gap-2" onClick={() => {
+              setEditingOfficeId(null);
+              setOfficeForm({ name: "", address: "", city: "", state: "", country: "", timezone: "", isHeadquarters: false });
+              setShowAddOffice(true);
+            }}><Plus size={16} /> Add Office</Button>
             <Dialog open={showAddOffice} onOpenChange={setShowAddOffice}>
-              <Button className="gap-2" onClick={() => setShowAddOffice(true)}><Plus size={16} /> Add Office</Button>
               <DialogContent>
-                <DialogHeader><DialogTitle>Add Office Location</DialogTitle></DialogHeader>
+                <DialogHeader>
+                  <DialogTitle>{editingOfficeId ? "Edit Office Location" : "Add Office Location"}</DialogTitle>
+                </DialogHeader>
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label>Office Name <span className="text-red-400">*</span></Label>
                     <Input placeholder="e.g., Mumbai HQ" value={officeForm.name} onChange={(e) => setOfficeForm({ ...officeForm, name: e.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Street Address</Label>
+                    <Input placeholder="e.g., 221B Baker Street" value={officeForm.address} onChange={(e) => setOfficeForm({ ...officeForm, address: e.target.value })} />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
@@ -1037,8 +1048,18 @@ export default function OrganizationPage() {
                       <Input placeholder="e.g., Mumbai" value={officeForm.city} onChange={(e) => setOfficeForm({ ...officeForm, city: e.target.value })} />
                     </div>
                     <div className="space-y-2">
+                      <Label>State / Province</Label>
+                      <Input placeholder="e.g., Maharashtra" value={officeForm.state} onChange={(e) => setOfficeForm({ ...officeForm, state: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
                       <Label>Country</Label>
                       <Input placeholder="e.g., India" value={officeForm.country} onChange={(e) => setOfficeForm({ ...officeForm, country: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Timezone</Label>
+                      <Input placeholder="e.g., Asia/Kolkata" value={officeForm.timezone} onChange={(e) => setOfficeForm({ ...officeForm, timezone: e.target.value })} />
                     </div>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -1050,17 +1071,26 @@ export default function OrganizationPage() {
                   <Button variant="outline" onClick={() => setShowAddOffice(false)}>Cancel</Button>
                   <Button onClick={async () => {
                     if (!officeForm.name.trim()) return;
-                    const res = await fetch("/api/offices", {
-                      method: "POST", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(officeForm),
-                    });
+                    const res = editingOfficeId
+                      ? await fetch("/api/offices", {
+                          method: "PATCH", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ id: editingOfficeId, ...officeForm }),
+                        })
+                      : await fetch("/api/offices", {
+                          method: "POST", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(officeForm),
+                        });
                     if (res.ok) {
                       setShowAddOffice(false);
-                      setOfficeForm({ name: "", city: "", country: "", isHeadquarters: false });
+                      setEditingOfficeId(null);
+                      setOfficeForm({ name: "", address: "", city: "", state: "", country: "", timezone: "", isHeadquarters: false });
                       fetchData();
-                      toastSuccess("Office added");
+                      toastSuccess(editingOfficeId ? "Office updated" : "Office added");
+                    } else {
+                      const err = await res.json().catch(() => ({}));
+                      toastError(err.error || "Failed to save office");
                     }
-                  }} disabled={!officeForm.name.trim()}>Add Office</Button>
+                  }} disabled={!officeForm.name.trim()}>{editingOfficeId ? "Save Changes" : "Add Office"}</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -1076,14 +1106,50 @@ export default function OrganizationPage() {
                 <Card key={office.id}>
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <Globe size={16} className="text-[#d4ff2e]" />
-                        <h3 className="font-semibold text-sm">{office.name}</h3>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Globe size={16} className="text-[#d4ff2e] flex-shrink-0" />
+                        <h3 className="font-semibold text-sm truncate">{office.name}</h3>
                         {office.isHeadquarters && <Badge variant="secondary" className="text-[10px]">HQ</Badge>}
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
+                          setEditingOfficeId(office.id);
+                          setOfficeForm({
+                            name: office.name || "",
+                            address: office.address || "",
+                            city: office.city || "",
+                            state: office.state || "",
+                            country: office.country || "",
+                            timezone: office.timezone || "",
+                            isHeadquarters: !!office.isHeadquarters,
+                          });
+                          setShowAddOffice(true);
+                        }} title="Edit">
+                          <Edit3 size={13} />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={async () => {
+                          if (!confirm(`Delete office "${office.name}"? Members must first be reassigned.`)) return;
+                          const res = await fetch("/api/offices", {
+                            method: "DELETE", headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ id: office.id }),
+                          });
+                          if (res.ok) {
+                            fetchData();
+                            toastSuccess("Office deleted");
+                          } else {
+                            const err = await res.json().catch(() => ({}));
+                            toastError(err.error || "Cannot delete");
+                          }
+                        }} title="Delete">
+                          <Trash2 size={13} />
+                        </Button>
                       </div>
                     </div>
                     <div className="space-y-1 text-xs text-muted">
-                      {office.city && <p>{office.city}{office.country ? `, ${office.country}` : ""}</p>}
+                      {office.address && <p className="truncate">{office.address}</p>}
+                      {(office.city || office.state || office.country) && (
+                        <p>{[office.city, office.state, office.country].filter(Boolean).join(", ")}</p>
+                      )}
                       {office.timezone && <p>Timezone: {office.timezone}</p>}
                     </div>
                     <div className="mt-3 pt-3 border-t border-border">

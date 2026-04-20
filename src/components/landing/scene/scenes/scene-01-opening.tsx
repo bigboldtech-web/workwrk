@@ -56,9 +56,9 @@ export function SceneOpening() {
             The Business Operating System
           </div>
           <h1 className="op-headline">
-            If you run a business,
-            <br />
-            <span className="hi">you need this.</span>
+            Run your company{" "}
+            <span className="strike">on</span> chaos.{" "}
+            <span className="hi">Or on workwrk.</span>
           </h1>
           <p className="op-sub">
             The operating system for everything your company actually does — people,
@@ -229,10 +229,27 @@ export function SceneOpening() {
           font-weight: 600;
           color: var(--b-fg);
           margin: 0;
-          max-width: 14ch;
+          max-width: 16ch;
         }
         .op-headline .hi {
           color: var(--b-lime);
+        }
+        .op-headline .strike {
+          position: relative;
+          color: var(--b-t3);
+          white-space: nowrap;
+        }
+        .op-headline .strike::after {
+          content: "";
+          position: absolute;
+          left: -6%;
+          right: -6%;
+          top: 58%;
+          height: 0.14em;
+          background: var(--b-pink);
+          transform: rotate(-8deg);
+          border-radius: 2px;
+          box-shadow: 0 0 12px rgba(255, 61, 138, 0.5);
         }
         .op-sub {
           font-size: 18px;

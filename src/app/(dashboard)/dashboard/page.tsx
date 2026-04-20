@@ -30,6 +30,7 @@ import { Trophy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { AISignals } from "@/components/dashboard/ai-signals";
+import { KudosReactions } from "@/components/kudos/kudos-reactions";
 
 interface DashboardStats {
   totalPeople: number;
@@ -85,6 +86,9 @@ interface KudosItem {
   giver: { id: string; firstName: string; lastName: string; avatar: string | null };
   receiver: { id: string; firstName: string; lastName: string; avatar: string | null };
   createdAt: string;
+  reactionCounts: { emoji: string; count: number }[];
+  totalReactions: number;
+  myReactions: string[];
 }
 
 interface DashboardData {
@@ -98,10 +102,9 @@ interface DashboardData {
 }
 
 function getScoreColor(score: number) {
-  if (score >= 90) return "text-[#d4ff2e]";
-  if (score >= 70) return "text-[#4a9eff]";
-  if (score >= 50) return "text-[#ff9933]";
-  return "text-[#ff3d8a]";
+  if (score >= 70) return "text-[color:var(--b-score-good)]";
+  if (score >= 50) return "text-[color:var(--b-score-warn)]";
+  return "text-[color:var(--b-score-bad)]";
 }
 
 function getAlertStyle(type: string) {
@@ -500,7 +503,7 @@ export default function DashboardPage() {
               <CardTitle className="text-base flex items-center gap-2">
                 <Heart size={16} className="text-pink-400" /> Recent Kudos
               </CardTitle>
-              <Badge variant="secondary" className="text-xs">{recentKudos.length} recent</Badge>
+              <Link href="/kudos" className="text-xs text-[#d4ff2e] hover:underline">View all →</Link>
             </div>
           </CardHeader>
           <CardContent>
@@ -514,23 +517,31 @@ export default function DashboardPage() {
                   return `${Math.floor(seconds / 86400)}d ago`;
                 })();
                 return (
-                  <div key={k.id} className="rounded-lg border border-border bg-background/50 p-4">
+                  <div key={k.id} className="rounded-lg border border-border bg-background/50 p-4 flex flex-col">
                     <div className="flex items-start gap-3">
                       <Heart size={14} className="text-pink-400 mt-0.5 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs">
                           <span className="font-medium">{k.giver.firstName} {k.giver.lastName}</span>
-                          <span className="text-muted"> recognized </span>
+                          <span className="text-muted"> → </span>
                           <span className="font-medium">{k.receiver.firstName} {k.receiver.lastName}</span>
                         </p>
-                        <p className="text-sm mt-1.5 text-[#C0C0D0] leading-relaxed">&ldquo;{k.message}&rdquo;</p>
+                        <p className="text-sm mt-1.5 italic text-foreground leading-relaxed">&ldquo;{k.message}&rdquo;</p>
                         <div className="flex items-center gap-2 mt-2">
                           {k.companyValue && (
-                            <Badge variant="secondary" className="text-[10px]">{k.companyValue}</Badge>
+                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[#d4ff2e]">{k.companyValue}</Badge>
                           )}
                           <span className="text-[10px] text-muted">{timeAgo}</span>
                         </div>
                       </div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-border/60">
+                      <KudosReactions
+                        kudosId={k.id}
+                        initialCounts={k.reactionCounts}
+                        initialMine={k.myReactions}
+                        compact
+                      />
                     </div>
                   </div>
                 );

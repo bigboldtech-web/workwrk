@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
 import { getTopPerformers } from "@/services/performanceScoreService";
 
 export async function GET() {
@@ -8,6 +8,7 @@ export async function GET() {
   if (error) return error;
 
   const orgId = getOrgId(session);
+  const currentUserId = getUserId(session);
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
@@ -48,6 +49,7 @@ export async function GET() {
       include: {
         giver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
         receiver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+        reactions: { select: { emoji: true, userId: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 5,
@@ -137,11 +139,24 @@ export async function GET() {
       id: a.id, type: a.type, description: a.description, actor: a.actor,
       createdAt: a.createdAt.toISOString(),
     })),
-    recentKudos: recentKudos.map((k) => ({
-      id: k.id, message: k.message, companyValue: k.companyValue,
-      giver: k.giver, receiver: k.receiver,
-      createdAt: k.createdAt.toISOString(),
-    })),
+    recentKudos: recentKudos.map((k) => {
+      const byEmoji = new Map<string, number>();
+      const mine: string[] = [];
+      for (const r of k.reactions) {
+        byEmoji.set(r.emoji, (byEmoji.get(r.emoji) || 0) + 1);
+        if (r.userId === currentUserId) mine.push(r.emoji);
+      }
+      return {
+        id: k.id, message: k.message, companyValue: k.companyValue,
+        giver: k.giver, receiver: k.receiver,
+        createdAt: k.createdAt.toISOString(),
+        reactionCounts: Array.from(byEmoji.entries())
+          .map(([emoji, count]) => ({ emoji, count }))
+          .sort((a, b) => b.count - a.count),
+        totalReactions: k.reactions.length,
+        myReactions: mine,
+      };
+    }),
   }, {
     headers: {
       // Cache dashboard for 30 seconds in browser to avoid hammering DB on

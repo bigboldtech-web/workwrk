@@ -13,14 +13,20 @@ export async function GET(req: NextRequest) {
   if (error) return error;
 
   const orgId = getOrgId(session);
+  const currentUserId = getUserId(session);
   const url = new URL(req.url);
   const userId = url.searchParams.get("userId");
+  const givenBy = url.searchParams.get("givenBy");
+  const value = url.searchParams.get("value");
+  const sort = url.searchParams.get("sort") || "recent";
   const page = parseInt(url.searchParams.get("page") || "1", 10);
-  const limit = parseInt(url.searchParams.get("limit") || "20", 10);
+  const limit = Math.min(parseInt(url.searchParams.get("limit") || "20", 10), 50);
   const skip = (page - 1) * limit;
 
   const where: Record<string, unknown> = { organizationId: orgId };
   if (userId) where.receiverId = userId;
+  if (givenBy) where.giverId = givenBy;
+  if (value) where.companyValue = value;
 
   const [kudos, total] = await Promise.all([
     prisma.kudos.findMany({
@@ -32,6 +38,9 @@ export async function GET(req: NextRequest) {
         receiver: {
           select: { id: true, firstName: true, lastName: true, avatar: true, role: { select: { title: true } }, department: { select: { name: true } } },
         },
+        reactions: {
+          select: { emoji: true, userId: true },
+        },
       },
       orderBy: { createdAt: "desc" },
       skip,
@@ -40,8 +49,35 @@ export async function GET(req: NextRequest) {
     prisma.kudos.count({ where }),
   ]);
 
+  const shaped = kudos.map((k) => {
+    const byEmoji = new Map<string, number>();
+    const mine: string[] = [];
+    for (const r of k.reactions) {
+      byEmoji.set(r.emoji, (byEmoji.get(r.emoji) || 0) + 1);
+      if (r.userId === currentUserId) mine.push(r.emoji);
+    }
+    const reactionCounts = Array.from(byEmoji.entries())
+      .map(([emoji, count]) => ({ emoji, count }))
+      .sort((a, b) => b.count - a.count);
+    return {
+      id: k.id,
+      message: k.message,
+      companyValue: k.companyValue,
+      giver: k.giver,
+      receiver: k.receiver,
+      createdAt: k.createdAt,
+      reactionCounts,
+      totalReactions: k.reactions.length,
+      myReactions: mine,
+    };
+  });
+
+  if (sort === "reactions") {
+    shaped.sort((a, b) => b.totalReactions - a.totalReactions);
+  }
+
   return jsonSuccess({
-    data: kudos,
+    data: shaped,
     pagination: {
       page,
       limit,

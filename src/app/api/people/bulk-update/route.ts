@@ -50,6 +50,29 @@ export async function POST(req: NextRequest) {
       break;
     }
 
+    case "change_office": {
+      const officeId = payload?.officeId || null;
+      if (officeId) {
+        const office = await prisma.office.findFirst({
+          where: { id: officeId, organizationId: orgId },
+          select: { id: true, name: true },
+        });
+        if (!office) return jsonError("Office not found", 404);
+        await prisma.user.updateMany({
+          where: { id: { in: validIds } },
+          data: { officeId: office.id },
+        });
+        description = `Assigned ${validIds.length} people to office "${office.name}"`;
+      } else {
+        await prisma.user.updateMany({
+          where: { id: { in: validIds } },
+          data: { officeId: null },
+        });
+        description = `Removed office assignment from ${validIds.length} people`;
+      }
+      break;
+    }
+
     case "assign_kra": {
       // Support multi-KRA assignment via kraEntries array
       const entries = payload?.kraEntries || (payload?.kraId ? [{ kraId: payload.kraId, weightage: payload.weightage }] : []);
