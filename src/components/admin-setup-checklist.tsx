@@ -172,7 +172,7 @@ export function AdminSetupChecklist() {
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#d4ff2e",
+              color: "var(--b-accent-text)",
               flexShrink: 0,
             }}
           >
@@ -279,7 +279,7 @@ export function AdminSetupChecklist() {
                 {item.done ? (
                   <CheckCircle2
                     size={16}
-                    style={{ color: "#d4ff2e", flexShrink: 0, marginTop: 2 }}
+                    style={{ color: "var(--b-accent-text)", flexShrink: 0, marginTop: 2 }}
                   />
                 ) : (
                   <Circle size={16} style={{ color: "#707070", flexShrink: 0, marginTop: 2 }} />

@@ -209,7 +209,7 @@ export function OnboardingChecklist() {
                 }}
               >
                 {step.completed ? (
-                  <CheckCircle2 size={16} style={{ color: "#d4ff2e", flexShrink: 0 }} />
+                  <CheckCircle2 size={16} style={{ color: "var(--b-accent-text)", flexShrink: 0 }} />
                 ) : (
                   <Circle size={16} style={{ color: "#707070", flexShrink: 0 }} />
                 )}

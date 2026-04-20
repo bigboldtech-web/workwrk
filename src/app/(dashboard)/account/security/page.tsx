@@ -163,7 +163,7 @@ export default function AccountSecurityPage() {
         <div className="sec-card-head">
           <div className="sec-card-title">
             {status?.mfaEnabled ? (
-              <ShieldCheck size={16} style={{ color: "#d4ff2e" }} />
+              <ShieldCheck size={16} style={{ color: "var(--b-accent-text)" }} />
             ) : (
               <ShieldOff size={16} style={{ color: "#a0a0a0" }} />
             )}

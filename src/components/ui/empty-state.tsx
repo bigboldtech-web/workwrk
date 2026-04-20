@@ -15,9 +15,9 @@ export function EmptyState({ icon: Icon, title, description, actionLabel, onActi
       <div
         className="h-14 w-14 rounded-2xl flex items-center justify-center mb-4"
         style={{
-          background: "rgba(212, 255, 46, 0.08)",
-          border: "1px solid rgba(212, 255, 46, 0.25)",
-          color: "#d4ff2e",
+          background: "var(--b-accent-tint)",
+          border: "1px solid var(--b-accent-border)",
+          color: "var(--b-accent-text)",
         }}
       >
         <Icon size={26} />

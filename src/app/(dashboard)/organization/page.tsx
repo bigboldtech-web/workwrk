@@ -312,7 +312,7 @@ export default function OrganizationPage() {
   const [loading, setLoading] = useState(true);
   const [showAddDeptDialog, setShowAddDeptDialog] = useState(false);
   const [showAddRoleDialog, setShowAddRoleDialog] = useState(false);
-  const [deptForm, setDeptForm] = useState({ name: "", description: "", color: "#d4ff2e" });
+  const [deptForm, setDeptForm] = useState({ name: "", description: "", color: "var(--b-accent-text)" });
   const [roleForm, setRoleForm] = useState({ title: "", description: "", departmentId: "", level: "EMPLOYEE" });
 
   const { success: toastSuccess, error: toastError } = useToast();
@@ -454,7 +454,7 @@ export default function OrganizationPage() {
       });
       if (res.ok) {
         setShowAddDeptDialog(false);
-        setDeptForm({ name: "", description: "", color: "#d4ff2e" });
+        setDeptForm({ name: "", description: "", color: "var(--b-accent-text)" });
         fetchData();
         toastSuccess("Department created");
       }
@@ -498,7 +498,7 @@ export default function OrganizationPage() {
       if (res.ok) {
         setShowEditDeptDialog(false);
         setEditingDept(null);
-        setDeptForm({ name: "", description: "", color: "#d4ff2e" });
+        setDeptForm({ name: "", description: "", color: "var(--b-accent-text)" });
         fetchData();
         toastSuccess("Department updated");
       }

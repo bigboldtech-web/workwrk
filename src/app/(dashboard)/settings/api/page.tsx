@@ -583,12 +583,12 @@ function OneTimeReveal({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-        <AlertTriangle size={16} style={{ color: "#d4ff2e" }} />
+        <AlertTriangle size={16} style={{ color: "var(--b-accent-text)" }} />
         <span
           style={{
             fontSize: 14,
             fontWeight: 600,
-            color: "#d4ff2e",
+            color: "var(--b-accent-text)",
             letterSpacing: "-0.01em",
           }}
         >

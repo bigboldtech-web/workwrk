@@ -74,17 +74,15 @@ interface AnalyticsData {
 }
 
 function getScoreColor(score: number) {
-  if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-[#d4ff2e]";
-  if (score >= 50) return "text-orange-400";
-  return "text-red-400";
+  if (score >= 70) return "text-[color:var(--b-score-good)]";
+  if (score >= 50) return "text-[color:var(--b-score-warn)]";
+  return "text-[color:var(--b-score-bad)]";
 }
 
 function getScoreBg(score: number) {
-  if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-[#d4ff2e]";
-  if (score >= 50) return "bg-orange-500";
-  return "bg-red-500";
+  if (score >= 70) return "bg-[color:var(--b-score-good-bg)]";
+  if (score >= 50) return "bg-[color:var(--b-score-warn-bg)]";
+  return "bg-[color:var(--b-score-bad-bg)]";
 }
 
 function LoadingSkeleton() {
@@ -306,7 +304,11 @@ export default function AnalyticsPage() {
               <Bar dataKey="score" radius={[4, 4, 0, 0]}>
                 {monthlyTrend.map((m, i) => {
                   const s = Math.round(m.avgKPI);
-                  return <Cell key={i} fill={s >= 90 ? "#d4ff2e" : s >= 70 ? "#4a9eff" : s >= 50 ? "#ff9933" : "#ff3d8a"} />;
+                  const band =
+                    s >= 70 ? "var(--b-score-good-bg)" :
+                    s >= 50 ? "var(--b-score-warn-bg)" :
+                    "var(--b-score-bad-bg)";
+                  return <Cell key={i} fill={band} />;
                 })}
               </Bar>
             </BarChart>
@@ -329,7 +331,7 @@ export default function AnalyticsPage() {
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--color-muted)" }} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "var(--color-muted)" }} />
                   <Tooltip contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
-                  <Line type="monotone" dataKey="avgScore" stroke="#d4ff2e" strokeWidth={2} dot={{ fill: "#d4ff2e", r: 4 }} />
+                  <Line type="monotone" dataKey="avgScore" stroke="var(--b-score-good)" strokeWidth={2} dot={{ fill: "var(--b-score-good)", r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
@@ -348,7 +350,10 @@ export default function AnalyticsPage() {
             <CardContent className="space-y-2">
               {topPerformers.map((person, i) => (
                 <div key={person.id} className="flex items-center gap-3 rounded-lg border border-border bg-background/50 p-3">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[rgba(212,255,46,0.12)] text-xs font-bold text-[#d4ff2e]">
+                  <div
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold"
+                    style={{ background: "var(--b-accent-tint)", color: "var(--b-accent-text)" }}
+                  >
                     {i + 1}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -386,7 +391,7 @@ export default function AnalyticsPage() {
                 <tr key={dept.name} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
                   <td className="p-4">
                     <div className="flex items-center gap-2">
-                      <Building2 size={14} className="text-[#d4ff2e]" />
+                      <Building2 size={14} className="text-muted" />
                       <span className="text-sm font-medium">{dept.name}</span>
                     </div>
                   </td>
@@ -414,9 +419,10 @@ export default function AnalyticsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
               {mostRecognized.map((person, i) => (
                 <div key={person.id} className="flex items-center gap-3 rounded-lg border border-border bg-background/50 p-4">
-                  <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
-                    i === 0 ? "bg-yellow-500/20 text-yellow-400" : i === 1 ? "bg-slate-400/20 text-slate-300" : i === 2 ? "bg-orange-700/20 text-orange-400" : "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]"
-                  }`}>
+                  <div
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold"
+                    style={{ background: "var(--b-accent-tint)", color: "var(--b-accent-text)" }}
+                  >
                     {i + 1}
                   </div>
                   <div className="flex-1 min-w-0">

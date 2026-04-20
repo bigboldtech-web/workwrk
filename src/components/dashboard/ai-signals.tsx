@@ -43,7 +43,7 @@ export function AISignals() {
     return (
       <div className="sig-card">
         <div className="sig-head">
-          <Sparkles size={14} style={{ color: "#d4ff2e" }} />
+          <Sparkles size={14} style={{ color: "var(--b-accent-text)" }} />
           <span className="sig-title">Signals · live</span>
         </div>
         <div className="sig-skeleton" />
@@ -55,7 +55,7 @@ export function AISignals() {
     return (
       <div className="sig-card">
         <div className="sig-head">
-          <Sparkles size={14} style={{ color: "#d4ff2e" }} />
+          <Sparkles size={14} style={{ color: "var(--b-accent-text)" }} />
           <span className="sig-title">Signals · live</span>
           <span className="sig-empty-pill">All clear</span>
         </div>
@@ -72,7 +72,7 @@ export function AISignals() {
   return (
     <div className="sig-card">
       <div className="sig-head">
-        <Sparkles size={14} style={{ color: "#d4ff2e" }} />
+        <Sparkles size={14} style={{ color: "var(--b-accent-text)" }} />
         <span className="sig-title">Signals · live</span>
         <span className="sig-count">{signals.length}</span>
       </div>

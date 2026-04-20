@@ -32,6 +32,14 @@
   --b-accent-text: #0a0a0a;
   --b-accent-tint: rgba(212, 255, 46, 0.45);
   --b-accent-border: rgba(168, 204, 36, 0.55);
+
+  /* Score-band semantic colors (readable on both bgs) */
+  --b-score-good: #5a7f14;
+  --b-score-good-bg: #8aaf24;
+  --b-score-warn: #b45309;
+  --b-score-warn-bg: #d97706;
+  --b-score-bad: #be185d;
+  --b-score-bad-bg: #e11d74;
 }
 
 /* Dark mode overrides */
@@ -57,6 +65,14 @@ html.dark .app-shell {
   --b-accent-text: #d4ff2e;
   --b-accent-tint: rgba(212, 255, 46, 0.08);
   --b-accent-border: rgba(212, 255, 46, 0.25);
+
+  /* Score-band semantic colors (dark-mode) */
+  --b-score-good: #d4ff2e;
+  --b-score-good-bg: #d4ff2e;
+  --b-score-warn: #ff9933;
+  --b-score-warn-bg: #ff9933;
+  --b-score-bad: #ff3d8a;
+  --b-score-bad-bg: #ff3d8a;
 }
 
 /* ==== SIDEBAR ==== */
