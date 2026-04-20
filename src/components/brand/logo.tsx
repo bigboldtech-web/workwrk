@@ -16,17 +16,19 @@ import type { CSSProperties } from "react";
  */
 export function LogoMark({
   size = 24,
-  color = "#d4ff2e",
+  color,
   className,
   title,
   style,
 }: {
   size?: number | string;
+  /** Override fill. If omitted, uses the adaptive brand color (lime in dark mode, near-black in light mode). */
   color?: string;
   className?: string;
   title?: string;
   style?: CSSProperties;
 }) {
+  const fill = color ?? "var(--b-logo-color, #d4ff2e)";
   return (
     <svg
       width={size}
@@ -39,9 +41,9 @@ export function LogoMark({
       aria-hidden={title ? undefined : true}
       style={style}
     >
-      <rect x="0" y="0" width="28" height="22" rx="6" fill={color} />
-      <rect x="31" y="0" width="17" height="22" rx="6" fill={color} />
-      <rect x="0" y="25" width="48" height="23" rx="6" fill={color} />
+      <rect x="0" y="0" width="28" height="22" rx="6" fill={fill} />
+      <rect x="31" y="0" width="17" height="22" rx="6" fill={fill} />
+      <rect x="0" y="25" width="48" height="23" rx="6" fill={fill} />
     </svg>
   );
 }
