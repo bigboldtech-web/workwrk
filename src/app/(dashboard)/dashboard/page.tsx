@@ -91,6 +91,14 @@ interface KudosItem {
   myReactions: string[];
 }
 
+interface PendingSurveyItem {
+  id: string;
+  title: string;
+  questions: unknown;
+  audienceType: string;
+  createdAt: string;
+}
+
 interface DashboardData {
   stats: DashboardStats;
   topPerformers: TopPerformer[];
@@ -99,6 +107,7 @@ interface DashboardData {
   alerts: Alert[];
   recentActivity: ActivityItem[];
   recentKudos: KudosItem[];
+  pendingSurveys: PendingSurveyItem[];
 }
 
 function getScoreColor(score: number) {
@@ -230,7 +239,7 @@ export default function DashboardPage() {
     );
   }
 
-  const { stats: apiStats, topPerformers, recentKpiRecords, departmentPerformance, alerts, recentActivity, recentKudos } = data;
+  const { stats: apiStats, topPerformers, recentKpiRecords, departmentPerformance, alerts, recentActivity, recentKudos, pendingSurveys } = data;
 
   const avgKpiScore =
     topPerformers.length > 0
@@ -494,6 +503,41 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Pending Surveys */}
+      {pendingSurveys && pendingSurveys.length > 0 && (
+        <Card className="border-[color:var(--accent-strong)]/30 bg-[color:var(--accent-soft)]/40">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <span aria-hidden className="text-[color:var(--accent-strong)]">📋</span>
+                Surveys waiting for you
+              </CardTitle>
+              <Badge variant="outline" className="text-xs">{pendingSurveys.length} pending</Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {pendingSurveys.map((s) => {
+                const qCount = Array.isArray(s.questions) ? s.questions.length : 0;
+                return (
+                  <Link
+                    key={s.id}
+                    href="/surveys"
+                    className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border bg-background/60 hover:bg-surface-2 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{s.title}</p>
+                      <p className="text-[11px] text-muted">{qCount} question{qCount === 1 ? "" : "s"} · takes ~{Math.max(1, qCount)} min</p>
+                    </div>
+                    <span className="text-xs text-[color:var(--accent-strong)] font-medium flex-shrink-0">Respond →</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Kudos Feed */}
       {recentKudos && recentKudos.length > 0 && (

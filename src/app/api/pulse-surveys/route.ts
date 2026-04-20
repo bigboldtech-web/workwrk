@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { sendEmail } from "@/lib/email";
+import { genericNotificationTemplate } from "@/lib/email-templates";
 
 const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS"]);
 
@@ -115,5 +117,91 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Resolve audience → in-app notifications + emails (non-blocking)
+  notifyAudience(
+    orgId,
+    survey.id,
+    survey.title,
+    resolvedAudienceType,
+    resolvedOfficeIds,
+    resolvedDepartmentIds,
+    resolvedUserIds,
+  ).catch((e) => console.error("[Survey] notifyAudience failed:", e));
+
   return jsonSuccess(survey, 201);
+}
+
+async function notifyAudience(
+  orgId: string,
+  surveyId: string,
+  title: string,
+  audienceType: string,
+  officeIds: string[],
+  departmentIds: string[],
+  userIds: string[],
+) {
+  const where: any = { organizationId: orgId, deletedAt: null };
+  if (audienceType === "OFFICES") where.officeId = { in: officeIds };
+  else if (audienceType === "DEPARTMENTS") where.departmentId = { in: departmentIds };
+  else if (audienceType === "USERS") where.id = { in: userIds };
+  // ALL → no extra filter
+
+  const audience = await prisma.user.findMany({
+    where,
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+    },
+  });
+
+  if (audience.length === 0) return;
+
+  const message = `A new pulse survey "${title}" is waiting for your input.`;
+  await prisma.notification.createMany({
+    data: audience.map((u) => ({
+      title: "New pulse survey",
+      message,
+      type: "SURVEY",
+      link: "/surveys",
+      userId: u.id,
+    })),
+  });
+
+  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+  const actionLink = `${baseUrl}/surveys`;
+
+  // Respect per-user email preferences (dailyDigest opt-in stays digest-only)
+  const userIdList = audience.map((u) => u.id);
+  const prefs = await prisma.emailPreference.findMany({
+    where: { userId: { in: userIdList } },
+    select: { userId: true },
+  });
+  // Users without an EmailPreference row: default to email on (consistent with schema defaults)
+  const prefMap = new Map(prefs.map((p) => [p.userId, true]));
+
+  for (const u of audience) {
+    if (!u.email) continue;
+    if (prefMap.has(u.id) === false) prefMap.set(u.id, true); // default on
+    const { subject, html } = genericNotificationTemplate({
+      heading: "New Pulse Survey",
+      recipientName: u.firstName,
+      subjectText: "You've been included in a new pulse survey. Your responses stay anonymous and help shape the team.",
+      itemTitle: title,
+      itemDetails: "Takes about a minute",
+      actionLabel: "Respond now",
+      actionLink,
+    });
+    sendEmail({
+      to: u.email,
+      subject,
+      html,
+      template: "survey-published",
+      variables: { surveyId, title },
+      organizationId: orgId,
+      userId: u.id,
+      category: "survey",
+    }).catch((err) => console.error(`[Survey] email to ${u.email} failed:`, err));
+  }
 }

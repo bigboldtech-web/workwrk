@@ -15,8 +15,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  ClipboardCheck, Plus, Send, Trash2, Globe, Building2, Users as UsersIcon, Check,
+  ClipboardCheck, Plus, Send, Trash2, Globe, Building2, Users as UsersIcon, Check, MoreHorizontal, Pencil, Archive, RotateCcw,
 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { useRole } from "@/hooks/use-role";
@@ -33,6 +36,8 @@ export default function SurveysPage() {
   const [surveys, setSurveys] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [respondingSurvey, setRespondingSurvey] = useState<any>(null);
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
@@ -78,6 +83,37 @@ export default function SurveysPage() {
     });
   }, [isManager, showCreate]);
 
+  async function refreshSurveys() {
+    const d = await fetch("/api/pulse-surveys").then((r) => r.json());
+    setSurveys(Array.isArray(d) ? d : d?.data || []);
+  }
+
+  function resetForm() {
+    setForm({ title: "", questions: [{ id: "q1", text: "", type: "rating" }], audienceType: "ALL", officeIds: [], departmentIds: [], userIds: [] });
+    setUserSearch("");
+    setEditingId(null);
+  }
+
+  function openCreate() {
+    resetForm();
+    setShowCreate(true);
+  }
+
+  function openEdit(survey: any) {
+    setEditingId(survey.id);
+    setForm({
+      title: survey.title || "",
+      questions: Array.isArray(survey.questions) && survey.questions.length > 0
+        ? survey.questions.map((q: any) => ({ id: q.id || crypto.randomUUID(), text: q.text || "", type: q.type || "rating" }))
+        : [{ id: "q1", text: "", type: "rating" }],
+      audienceType: (survey.audienceType as AudienceType) || "ALL",
+      officeIds: Array.isArray(survey.officeIds) ? survey.officeIds : [],
+      departmentIds: Array.isArray(survey.departmentIds) ? survey.departmentIds : [],
+      userIds: Array.isArray(survey.userIds) ? survey.userIds : [],
+    });
+    setShowCreate(true);
+  }
+
   async function handleCreate() {
     if (!form.title.trim() || form.questions.every((q) => !q.text.trim())) return;
     if (form.audienceType === "OFFICES" && form.officeIds.length === 0) { toastError("Pick at least one office"); return; }
@@ -85,8 +121,10 @@ export default function SurveysPage() {
     if (form.audienceType === "USERS" && form.userIds.length === 0) { toastError("Pick at least one person"); return; }
     setSaving(true);
     try {
-      const res = await fetch("/api/pulse-surveys", {
-        method: "POST",
+      const url = editingId ? `/api/pulse-surveys/${editingId}` : "/api/pulse-surveys";
+      const method = editingId ? "PATCH" : "POST";
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: form.title,
@@ -99,11 +137,42 @@ export default function SurveysPage() {
       });
       if (res.ok) {
         setShowCreate(false);
-        setForm({ title: "", questions: [{ id: "q1", text: "", type: "rating" }], audienceType: "ALL", officeIds: [], departmentIds: [], userIds: [] });
-        setUserSearch("");
-        const d = await fetch("/api/pulse-surveys").then((r) => r.json());
-        setSurveys(Array.isArray(d) ? d : d?.data || []);
-        toastSuccess("Survey published");
+        resetForm();
+        await refreshSurveys();
+        toastSuccess(editingId ? "Survey updated" : "Survey published");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed");
+      }
+    } catch { toastError("Failed"); } finally { setSaving(false); }
+  }
+
+  async function handleSetStatus(surveyId: string, status: "ACTIVE" | "CLOSED") {
+    try {
+      const res = await fetch(`/api/pulse-surveys/${surveyId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        await refreshSurveys();
+        toastSuccess(status === "CLOSED" ? "Survey closed" : "Survey reopened");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed");
+      }
+    } catch { toastError("Failed"); }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/pulse-surveys/${deleteTarget.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setDeleteTarget(null);
+        await refreshSurveys();
+        toastSuccess("Survey deleted");
       } else {
         const err = await res.json().catch(() => ({}));
         toastError(err.error || "Failed");
@@ -147,7 +216,7 @@ export default function SurveysPage() {
         subtitle={`${surveys.length} surveys${pending > 0 ? ` · ${pending} pending` : ""}`}
         actions={
           isManager
-            ? [{ label: "New survey", onClick: () => setShowCreate(true), icon: <Plus size={14} /> }]
+            ? [{ label: "New survey", onClick: openCreate, icon: <Plus size={14} /> }]
             : undefined
         }
       />
@@ -198,6 +267,33 @@ export default function SurveysPage() {
                         <Send size={14} /> Respond
                       </Button>
                     )}
+                    {isManager && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0" aria-label="Survey actions">
+                            <MoreHorizontal size={16} />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem onClick={() => openEdit(survey)} className="gap-2">
+                            <Pencil size={14} /> Edit
+                          </DropdownMenuItem>
+                          {survey.status === "ACTIVE" ? (
+                            <DropdownMenuItem onClick={() => handleSetStatus(survey.id, "CLOSED")} className="gap-2">
+                              <Archive size={14} /> Close survey
+                            </DropdownMenuItem>
+                          ) : survey.status === "CLOSED" ? (
+                            <DropdownMenuItem onClick={() => handleSetStatus(survey.id, "ACTIVE")} className="gap-2">
+                              <RotateCcw size={14} /> Reopen
+                            </DropdownMenuItem>
+                          ) : null}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => setDeleteTarget(survey)} className="gap-2 text-red-400 focus:text-red-400">
+                            <Trash2 size={14} /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -206,10 +302,10 @@ export default function SurveysPage() {
         </div>
       )}
 
-      {/* Create Survey Dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      {/* Create / Edit Survey Dialog */}
+      <Dialog open={showCreate} onOpenChange={(open) => { setShowCreate(open); if (!open) resetForm(); }}>
         <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Create Pulse Survey</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? "Edit Pulse Survey" : "Create Pulse Survey"}</DialogTitle></DialogHeader>
           <div className="space-y-5 py-4">
             <div className="space-y-2">
               <Label>Title <span className="text-red-400">*</span></Label>
@@ -350,7 +446,9 @@ export default function SurveysPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={handleCreate} disabled={saving || !form.title.trim()}>
-              {saving ? "Publishing..." : "Publish Survey"}
+              {saving
+                ? (editingId ? "Saving..." : "Publishing...")
+                : (editingId ? "Save Changes" : "Publish Survey")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -392,6 +490,26 @@ export default function SurveysPage() {
             <Button variant="outline" onClick={() => setRespondingSurvey(null)}>Cancel</Button>
             <Button onClick={handleRespond} disabled={saving}>
               {saving ? "Submitting..." : "Submit Response"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirm */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Delete this survey?</DialogTitle></DialogHeader>
+          <div className="py-2 space-y-2">
+            <p className="text-sm">
+              <span className="font-medium">{deleteTarget?.title}</span> will be permanently removed,
+              along with all {deleteTarget?.totalResponses ?? 0} response{deleteTarget?.totalResponses === 1 ? "" : "s"}.
+              This can&apos;t be undone.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={saving}>
+              {saving ? "Deleting..." : "Delete survey"}
             </Button>
           </DialogFooter>
         </DialogContent>

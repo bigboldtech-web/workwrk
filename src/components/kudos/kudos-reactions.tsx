@@ -123,7 +123,11 @@ export function KudosReactions({
           {totalReactions === 0 && !compact && <span>React</span>}
         </button>
         {pickerOpen && (
-          <div className="absolute bottom-full left-0 mb-2 z-20 rounded-lg border border-border bg-surface p-2 shadow-lg">
+          <div
+            className="absolute bottom-full right-0 mb-2 z-[60] w-[16rem] rounded-lg border border-border bg-background p-2 shadow-xl"
+            role="dialog"
+            aria-label="Pick a reaction"
+          >
             <div className="grid grid-cols-6 gap-1">
               {PICKER_EMOJIS.map((e) => (
                 <button
@@ -132,7 +136,7 @@ export function KudosReactions({
                   onClick={() => react(e)}
                   disabled={busy}
                   className={cn(
-                    "h-8 w-8 rounded-md text-lg leading-none transition-colors hover:bg-surface-2",
+                    "h-9 w-9 flex items-center justify-center rounded-md text-[18px] leading-none transition-colors hover:bg-surface-2",
                     mine.includes(e) && "bg-[rgba(212,255,46,0.12)]",
                   )}
                   aria-label={`React ${e}`}

@@ -12,6 +12,12 @@ export async function GET() {
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
+  // Viewer profile for survey audience checks
+  const viewer = await prisma.user.findUnique({
+    where: { id: currentUserId },
+    select: { id: true, officeId: true, departmentId: true },
+  });
+
   // All queries run in parallel — no sequential bottlenecks
   const [
     totalPeople,
@@ -24,6 +30,7 @@ export async function GET() {
     recentKudos,
     recentKpiRecords,
     compositeTopPerformers,
+    activeSurveys,
   ] = await Promise.all([
     prisma.user.count({ where: { organizationId: orgId, deletedAt: null } }),
     prisma.user.count({ where: { organizationId: orgId, deletedAt: null, createdAt: { gte: thirtyDaysAgo } } }),
@@ -64,7 +71,34 @@ export async function GET() {
       take: 5,
     }),
     getTopPerformers(orgId, 5),
+    prisma.pulseSurvey.findMany({
+      where: { organizationId: orgId, status: "ACTIVE" },
+      include: {
+        responses: { where: { userId: currentUserId }, select: { id: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
   ]);
+
+  // Surface only surveys the viewer is in the audience of AND hasn't responded to
+  const pendingSurveys = activeSurveys
+    .filter((s) => s.responses.length === 0)
+    .filter((s) => {
+      if (s.audienceType === "ALL") return true;
+      if (s.audienceType === "OFFICES") return !!viewer?.officeId && s.officeIds.includes(viewer.officeId);
+      if (s.audienceType === "DEPARTMENTS") return !!viewer?.departmentId && s.departmentIds.includes(viewer.departmentId);
+      if (s.audienceType === "USERS") return s.userIds.includes(currentUserId);
+      return false;
+    })
+    .slice(0, 5)
+    .map((s) => ({
+      id: s.id,
+      title: s.title,
+      questions: s.questions,
+      audienceType: s.audienceType,
+      createdAt: s.createdAt.toISOString(),
+    }));
 
   // SOP compliance from aggregate
   const totalSteps = sopComplianceAgg._sum.stepsTotal || 0;
@@ -157,6 +191,7 @@ export async function GET() {
         myReactions: mine,
       };
     }),
+    pendingSurveys,
   }, {
     headers: {
       // Cache dashboard for 30 seconds in browser to avoid hammering DB on
