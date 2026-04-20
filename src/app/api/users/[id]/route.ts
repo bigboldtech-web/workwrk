@@ -17,6 +17,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     include: {
       department: { select: { id: true, name: true, color: true } },
       role: { select: { id: true, title: true } },
+      office: { select: { id: true, name: true, city: true, country: true, isHeadquarters: true } },
       manager: { select: { id: true, firstName: true, lastName: true, avatar: true } },
       directReports: {
         select: { id: true, firstName: true, lastName: true, avatar: true, role: { select: { title: true } } },

@@ -460,9 +460,14 @@ export default function UserProfilePage() {
     setEditAccessLevel(user.accessLevel || "");
     setEditStatus(user.status || "");
     setEditDob(user.dateOfBirth ? new Date(user.dateOfBirth).toISOString().split("T")[0] : "");
-    setEditOfficeId(user.office?.id || "");
+    setEditOfficeId(user.office?.id || user.officeId || "");
     setEditManagerId(user.manager?.id || user.managerId || "");
     setShowEditDialog(true);
+    // Refetch offices in case the user just added one in another tab
+    fetch("/api/offices")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((offs) => setOffices(Array.isArray(offs) ? offs : offs?.data || []))
+      .catch(() => {});
   };
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -493,7 +498,7 @@ export default function UserProfilePage() {
       if (editAccessLevel) body.accessLevel = editAccessLevel;
       if (editStatus) body.status = editStatus;
       if (editDob) body.dateOfBirth = `${editDob}T12:00:00.000Z`;
-      if (editOfficeId) body.officeId = editOfficeId;
+      body.officeId = editOfficeId || null;
       body.managerId = editManagerId || null;
 
       const res = await fetch(`/api/users/${id}`, {
@@ -682,12 +687,21 @@ export default function UserProfilePage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Office / Location</Label>
-                    <Select value={editOfficeId} onValueChange={setEditOfficeId}>
+                    <Select value={editOfficeId || "__none__"} onValueChange={(v) => setEditOfficeId(v === "__none__" ? "" : v)}>
                       <SelectTrigger><SelectValue placeholder="Select office" /></SelectTrigger>
                       <SelectContent>
-                        {offices.map((o: any) => (
-                          <SelectItem key={o.id} value={o.id}>{o.name}{o.isHeadquarters ? " (HQ)" : ""}</SelectItem>
-                        ))}
+                        <SelectItem value="__none__">— No office —</SelectItem>
+                        {offices.length === 0 ? (
+                          <div className="px-2 py-3 text-xs text-muted">
+                            No offices yet. Add one in <span className="text-[color:var(--accent-strong)]">Organization → Offices</span>.
+                          </div>
+                        ) : (
+                          offices.map((o: any) => (
+                            <SelectItem key={o.id} value={o.id}>
+                              {o.name}{o.city ? ` · ${o.city}` : ""}{o.isHeadquarters ? " (HQ)" : ""}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
