@@ -36,12 +36,12 @@ export async function GET(req: Request) {
       select: { stepsTotal: true, stepsCompleted: true },
     }),
     prisma.kPIRecord.findMany({
-      where: { kpi: { organizationId: orgId } },
+      where: { kpi: { organizationId: orgId }, createdAt: { gte: rangeStart } },
       select: { score: true, period: true, createdAt: true, userId: true },
       orderBy: { createdAt: "desc" },
     }),
     prisma.checkIn.findMany({
-      where: { user: { organizationId: orgId } },
+      where: { user: { organizationId: orgId }, createdAt: { gte: rangeStart } },
       select: { mood: true, createdAt: true },
       orderBy: { createdAt: "desc" },
     }),

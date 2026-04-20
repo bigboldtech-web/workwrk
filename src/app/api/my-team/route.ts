@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
+import { getTeamUserIds } from "@/lib/team";
 
 /**
  * GET /api/my-team
@@ -16,55 +17,37 @@ export async function GET() {
   const userId = getUserId(session);
   const orgId = getOrgId(session);
 
-  // Pull all active users in org with managerId so we can walk the tree in memory
-  const allUsers = await prisma.user.findMany({
-    where: { organizationId: orgId, deletedAt: null },
-    select: {
-      id: true, firstName: true, lastName: true, email: true, avatar: true,
-      accessLevel: true, managerId: true,
-      department: { select: { id: true, name: true } },
-      role: { select: { id: true, title: true } },
-    },
+  // Resolve the team IDs via recursive CTE (DB-side walk), then fetch only
+  // those users' details — avoids pulling the whole org just to filter.
+  const teamIds = await getTeamUserIds(orgId, userId);
+
+  const teamMembers = teamIds.length > 0
+    ? await prisma.user.findMany({
+        where: { id: { in: teamIds } },
+        select: {
+          id: true, firstName: true, lastName: true, email: true, avatar: true,
+          accessLevel: true, managerId: true,
+          department: { select: { id: true, name: true } },
+          role: { select: { id: true, title: true } },
+        },
+      })
+    : [];
+
+  const members = teamMembers.sort((a, b) => {
+    if (a.id === userId) return -1;  // self first
+    if (b.id === userId) return 1;
+    return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
   });
 
-  // Build manager → [directReportIds] map
-  const childrenMap = new Map<string, string[]>();
-  for (const u of allUsers) {
-    if (u.managerId) {
-      if (!childrenMap.has(u.managerId)) childrenMap.set(u.managerId, []);
-      childrenMap.get(u.managerId)!.push(u.id);
-    }
-  }
-
-  // BFS from current user, collecting all descendants
-  const teamIds = new Set<string>([userId]);
-  const queue: string[] = [userId];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    const children = childrenMap.get(id) || [];
-    for (const c of children) {
-      if (!teamIds.has(c)) {
-        teamIds.add(c);
-        queue.push(c);
-      }
-    }
-  }
-
-  const members = allUsers
-    .filter((u) => teamIds.has(u.id))
-    .sort((a, b) => {
-      if (a.id === userId) return -1;  // self first
-      if (b.id === userId) return 1;
-      return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
-    });
-
   const self = members.find((m) => m.id === userId);
-  const directReportIds = childrenMap.get(userId) || [];
+  const directReportIds = members
+    .filter((m) => m.managerId === userId)
+    .map((m) => m.id);
 
   return NextResponse.json({
     self,
     directReportIds,
-    teamIds: Array.from(teamIds),
+    teamIds,
     members,
   }, {
     headers: { "Cache-Control": "private, max-age=30, stale-while-revalidate=60" },

@@ -75,15 +75,15 @@ export async function POST(
     select: { id: true, email: true },
   });
 
-  for (const emp of employeesWithEmail) {
-    const { subject, html } = reviewPendingTemplate({
-      reviewCycleName: cycle.name,
-      dueDate,
-      reviewLink: `${baseUrl}/reviews/${id}`,
-    });
-
-    try {
-      await sendEmail({
+  // Template is identical per-employee; render once and fan out in parallel.
+  const { subject, html } = reviewPendingTemplate({
+    reviewCycleName: cycle.name,
+    dueDate,
+    reviewLink: `${baseUrl}/reviews/${id}`,
+  });
+  await Promise.all(
+    employeesWithEmail.map((emp) =>
+      sendEmail({
         to: emp.email,
         subject,
         html,
@@ -92,11 +92,11 @@ export async function POST(
         organizationId: orgId,
         userId: emp.id,
         category: "review",
-      });
-    } catch (emailErr) {
-      console.error("[ReviewLaunch] Email send failed:", emailErr);
-    }
-  }
+      }).catch((emailErr) => {
+        console.error("[ReviewLaunch] Email send failed:", emailErr);
+      }),
+    ),
+  );
 
   return jsonSuccess({
     message: `${employees.length} reviews generated`,

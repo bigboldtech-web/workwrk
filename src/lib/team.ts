@@ -2,38 +2,27 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * Returns the set of user IDs in `rootUserId`'s team — self + all direct and
- * indirect reports — scoped to `organizationId`. Walks the manager tree in
- * a single user fetch; callers that need this per-request should prefer this
- * helper over open-coding the BFS.
+ * indirect reports — scoped to `organizationId`. Uses a recursive CTE so the
+ * walk happens in the database (indexed on `managerId`) instead of fetching
+ * every org user and walking the tree in Node. Scales to thousands of users.
  */
 export async function getTeamUserIds(
   organizationId: string,
   rootUserId: string,
 ): Promise<string[]> {
-  const allUsers = await prisma.user.findMany({
-    where: { organizationId, deletedAt: null },
-    select: { id: true, managerId: true },
-  });
-
-  const childrenMap = new Map<string, string[]>();
-  for (const u of allUsers) {
-    if (u.managerId) {
-      const list = childrenMap.get(u.managerId);
-      if (list) list.push(u.id);
-      else childrenMap.set(u.managerId, [u.id]);
-    }
-  }
-
-  const teamIds = new Set<string>([rootUserId]);
-  const queue: string[] = [rootUserId];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    for (const c of childrenMap.get(id) || []) {
-      if (!teamIds.has(c)) {
-        teamIds.add(c);
-        queue.push(c);
-      }
-    }
-  }
-  return Array.from(teamIds);
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    WITH RECURSIVE team AS (
+      SELECT id FROM "User"
+      WHERE id = ${rootUserId}
+        AND "organizationId" = ${organizationId}
+        AND "deletedAt" IS NULL
+      UNION
+      SELECT u.id FROM "User" u
+      INNER JOIN team t ON u."managerId" = t.id
+      WHERE u."organizationId" = ${organizationId}
+        AND u."deletedAt" IS NULL
+    )
+    SELECT id FROM team
+  `;
+  return rows.map((r) => r.id);
 }

@@ -60,9 +60,11 @@ export async function dispatchEvent(input: DispatchEventInput): Promise<void> {
   // look it up. A proper production impl would store the plaintext
   // secret encrypted with a KMS key; see `encryptedSecret` TODO below.
 
-  for (const sub of subs) {
-    await deliverOne({ sub, event, payload, organizationId });
-  }
+  // Fan out in parallel — each delivery already isolates its own errors,
+  // and a slow receiver shouldn't block siblings on the same event.
+  await Promise.all(
+    subs.map((sub) => deliverOne({ sub, event, payload, organizationId })),
+  );
 }
 
 async function deliverOne(params: {
@@ -207,76 +209,82 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
     },
   });
 
-  let retried = 0;
-  let delivered = 0;
+  // Run retries in parallel — each delivery targets a different subscription,
+  // so one slow receiver can't hold up the whole queue (previously a single
+  // 10s timeout would block up to 100 subsequent retries → ~17 minutes).
+  const results = await Promise.all(
+    due.map(async (d): Promise<{ retried: 0 | 1; delivered: 0 | 1 }> => {
+      if (d.subscription.status !== "ACTIVE") return { retried: 0, delivered: 0 };
 
-  for (const d of due) {
-    if (d.subscription.status !== "ACTIVE") continue;
-    retried++;
-
-    const timestamp = Math.floor(Date.now() / 1000);
-    const body = JSON.stringify({
-      id: d.id,
-      event: d.event,
-      createdAt: d.createdAt.toISOString(),
-      data: d.payload,
-    });
-    const signedPayload = `${timestamp}.${body}`;
-    const signature = createHmac("sha256", d.subscription.secretHash)
-      .update(signedPayload)
-      .digest("hex");
-
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
-      const res = await fetch(d.subscription.url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "workwrk-webhooks/1.0",
-          "X-Workwrk-Event": d.event,
-          "X-Workwrk-Delivery": d.id,
-          "X-Workwrk-Timestamp": String(timestamp),
-          "X-Workwrk-Signature": `t=${timestamp},v1=${signature}`,
-        },
-        body,
-        signal: controller.signal,
+      const timestamp = Math.floor(Date.now() / 1000);
+      const body = JSON.stringify({
+        id: d.id,
+        event: d.event,
+        createdAt: d.createdAt.toISOString(),
+        data: d.payload,
       });
-      clearTimeout(timeout);
+      const signedPayload = `${timestamp}.${body}`;
+      const signature = createHmac("sha256", d.subscription.secretHash)
+        .update(signedPayload)
+        .digest("hex");
 
-      const responseSnippet = await res
-        .text()
-        .then((t) => t.slice(0, 500))
-        .catch(() => "");
-      if (res.status >= 200 && res.status < 300) {
-        delivered++;
-        await prisma.webhookDelivery.update({
-          where: { id: d.id },
-          data: {
-            status: "DELIVERED",
-            httpStatus: res.status,
-            responseBody: responseSnippet,
-            deliveredAt: new Date(),
-            attemptCount: d.attemptCount + 1,
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
+        const res = await fetch(d.subscription.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "workwrk-webhooks/1.0",
+            "X-Workwrk-Event": d.event,
+            "X-Workwrk-Delivery": d.id,
+            "X-Workwrk-Timestamp": String(timestamp),
+            "X-Workwrk-Signature": `t=${timestamp},v1=${signature}`,
           },
+          body,
+          signal: controller.signal,
         });
-        await prisma.webhookSubscription.update({
-          where: { id: d.subscription.id },
-          data: { lastSuccessAt: new Date(), failureCount: 0 },
-        });
-      } else {
-        await markFailed(d.id, d.subscription.id, res.status, responseSnippet, d.attemptCount + 1);
+        clearTimeout(timeout);
+
+        const responseSnippet = await res
+          .text()
+          .then((t) => t.slice(0, 500))
+          .catch(() => "");
+        if (res.status >= 200 && res.status < 300) {
+          await prisma.webhookDelivery.update({
+            where: { id: d.id },
+            data: {
+              status: "DELIVERED",
+              httpStatus: res.status,
+              responseBody: responseSnippet,
+              deliveredAt: new Date(),
+              attemptCount: d.attemptCount + 1,
+            },
+          });
+          await prisma.webhookSubscription.update({
+            where: { id: d.subscription.id },
+            data: { lastSuccessAt: new Date(), failureCount: 0 },
+          });
+          return { retried: 1, delivered: 1 };
+        } else {
+          await markFailed(d.id, d.subscription.id, res.status, responseSnippet, d.attemptCount + 1);
+          return { retried: 1, delivered: 0 };
+        }
+      } catch (err) {
+        await markFailed(
+          d.id,
+          d.subscription.id,
+          null,
+          err instanceof Error ? err.message.slice(0, 500) : "unknown",
+          d.attemptCount + 1,
+        );
+        return { retried: 1, delivered: 0 };
       }
-    } catch (err) {
-      await markFailed(
-        d.id,
-        d.subscription.id,
-        null,
-        err instanceof Error ? err.message.slice(0, 500) : "unknown",
-        d.attemptCount + 1,
-      );
-    }
-  }
+    }),
+  );
+
+  const retried = results.reduce((n, r) => n + r.retried, 0);
+  const delivered = results.reduce((n, r) => n + r.delivered, 0);
 
   // Final-fail anything that exceeded retry budget.
   await prisma.webhookDelivery.updateMany({

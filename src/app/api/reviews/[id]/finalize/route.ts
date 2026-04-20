@@ -75,14 +75,16 @@ export async function POST(
     select: { id: true, email: true },
   });
 
-  for (const user of subjectUsers) {
-    const { subject, html } = reviewCompletedTemplate({
-      reviewCycleName: cycle.name,
-      reviewLink: `${baseUrl}/reviews/${cycleId}`,
-    });
-
-    try {
-      await sendEmail({
+  // Fan out email queuing in parallel — each sendEmail does its own pref
+  // check + queue insert, and failures for one recipient must not block
+  // the others.
+  const { subject, html } = reviewCompletedTemplate({
+    reviewCycleName: cycle.name,
+    reviewLink: `${baseUrl}/reviews/${cycleId}`,
+  });
+  await Promise.all(
+    subjectUsers.map((user) =>
+      sendEmail({
         to: user.email,
         subject,
         html,
@@ -91,11 +93,11 @@ export async function POST(
         organizationId: orgId,
         userId: user.id,
         category: "review",
-      });
-    } catch (emailErr) {
-      console.error("[ReviewFinalize] Email send failed:", emailErr);
-    }
-  }
+      }).catch((emailErr) => {
+        console.error("[ReviewFinalize] Email send failed:", emailErr);
+      }),
+    ),
+  );
 
   logActivity({
     type: "reviews_finalized",
