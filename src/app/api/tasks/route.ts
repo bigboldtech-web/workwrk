@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
+import { getTeamUserIds } from "@/lib/team";
 
 // GET: List tasks (calendar view)
 // Query params: userId, startDate, endDate, kraId
@@ -31,27 +32,8 @@ export async function GET(req: NextRequest) {
     const ids = userIds.split(",").map((s) => s.trim()).filter(Boolean);
     if (ids.length > 0) where.assigneeId = { in: ids };
   } else if (view === "team" && isManagerLevel) {
-    // Recursive team view — self + all direct/indirect reports
-    const allUsers = await prisma.user.findMany({
-      where: { organizationId: orgId, deletedAt: null },
-      select: { id: true, managerId: true },
-    });
-    const childrenMap = new Map<string, string[]>();
-    for (const u of allUsers) {
-      if (u.managerId) {
-        if (!childrenMap.has(u.managerId)) childrenMap.set(u.managerId, []);
-        childrenMap.get(u.managerId)!.push(u.id);
-      }
-    }
-    const teamIds = new Set<string>([currentUserId]);
-    const queue: string[] = [currentUserId];
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      for (const c of childrenMap.get(id) || []) {
-        if (!teamIds.has(c)) { teamIds.add(c); queue.push(c); }
-      }
-    }
-    where.assigneeId = { in: Array.from(teamIds) };
+    const teamIds = await getTeamUserIds(orgId, currentUserId);
+    where.assigneeId = { in: teamIds };
   } else if (userId) {
     where.assigneeId = userId;
   } else if (!isManagerLevel) {

@@ -67,13 +67,9 @@ export async function GET(req: NextRequest) {
     }
 
     if (newAssessments.length > 0) {
-      for (const a of newAssessments) {
-        await prisma.talentAssessment.upsert({
-          where: { userId_period_organizationId: { userId: a.userId, period: a.period, organizationId: orgId } },
-          create: a,
-          update: {},
-        });
-      }
+      // assessedUserIds already filtered; skipDuplicates guards against
+      // concurrent auto-place runs hitting the unique constraint.
+      await prisma.talentAssessment.createMany({ data: newAssessments, skipDuplicates: true });
       // Re-fetch after auto-placement
       assessments = await prisma.talentAssessment.findMany({ where, orderBy: { createdAt: "desc" } });
     }

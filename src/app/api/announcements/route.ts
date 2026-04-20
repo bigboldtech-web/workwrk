@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
-import { queueEmail, processEmailQueue } from "@/lib/email";
+import { processEmailQueue } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 
 export async function GET() {
@@ -88,7 +88,9 @@ export async function POST(req: NextRequest) {
       const preview = announcement.content.length > 280
         ? announcement.content.slice(0, 280) + "..."
         : announcement.content;
-      for (const u of users) {
+      // Batch-insert email logs (one round-trip instead of N). The "reminder"
+      // category bypasses per-user preferences, so no pref lookup is needed.
+      const emailLogs = users.map((u) => {
         const { subject, html } = genericNotificationTemplate({
           heading: announcement.priority === "URGENT" ? "🚨 Urgent Announcement" : "New Announcement",
           recipientName: u.firstName,
@@ -99,12 +101,18 @@ export async function POST(req: NextRequest) {
           actionLink: `${baseUrl}/announcements`,
           note: preview,
         });
-        await queueEmail({
-          to: u.email, subject, html,
+        return {
+          to: u.email,
+          subject,
           template: "announcement",
+          html,
           variables: { title: announcement.title, priority: announcement.priority },
-          organizationId: orgId, userId: u.id, category: "reminder",
-        });
+          organizationId: orgId,
+          status: "QUEUED" as const,
+        };
+      });
+      if (emailLogs.length > 0) {
+        await prisma.emailLog.createMany({ data: emailLogs });
       }
       processEmailQueue().catch((err) => console.error("[Announcement] Queue processing failed:", err));
     }

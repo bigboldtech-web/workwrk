@@ -773,6 +773,8 @@ model Review {
   @@unique([cycleId, subjectId, reviewerId])
   @@index([subjectId])
   @@index([cycleId])
+  @@index([cycleId, status])
+  @@index([reviewerId])
 }
 
 enum ReviewOutcome {

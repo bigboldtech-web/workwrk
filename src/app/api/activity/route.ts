@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
+import { getTeamUserIds } from "@/lib/team";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -23,27 +24,8 @@ export async function GET(req: NextRequest) {
   if (scope === "my" || !userIsManager) {
     where.actorId = userId;
   } else if (scope === "team") {
-    // Recursive team — self + all direct/indirect reports
-    const allUsers = await prisma.user.findMany({
-      where: { organizationId: orgId, deletedAt: null },
-      select: { id: true, managerId: true },
-    });
-    const childrenMap = new Map<string, string[]>();
-    for (const u of allUsers) {
-      if (u.managerId) {
-        if (!childrenMap.has(u.managerId)) childrenMap.set(u.managerId, []);
-        childrenMap.get(u.managerId)!.push(u.id);
-      }
-    }
-    const teamIds = new Set<string>([userId]);
-    const queue: string[] = [userId];
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      for (const c of childrenMap.get(id) || []) {
-        if (!teamIds.has(c)) { teamIds.add(c); queue.push(c); }
-      }
-    }
-    where.actorId = { in: Array.from(teamIds) };
+    const teamIds = await getTeamUserIds(orgId, userId);
+    where.actorId = { in: teamIds };
   }
   // scope === "all" and caller is manager → no actor filter (org-wide)
 

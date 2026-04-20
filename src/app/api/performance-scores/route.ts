@@ -68,11 +68,15 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Default: all scores for current period
+  // Default: top N scores for current period. Cap at 500 to keep the
+  // response bounded as orgs grow; callers that need pagination should use
+  // the `top=` or `userId=` modes above.
   const period = new Date().toISOString().slice(0, 7);
+  const defaultLimit = Math.min(parseInt(url.searchParams.get("limit") || "100", 10), 500);
   const scores = await prisma.performanceScore.findMany({
     where: { organizationId: orgId, period },
     orderBy: { score: "desc" },
+    take: defaultLimit,
     include: {
       user: {
         select: {

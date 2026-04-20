@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 
 interface ScoreWeights {
   kpi: number;
@@ -244,13 +245,13 @@ export async function calculatePerformanceScore(
       userId,
       period,
       score: compositeScore,
-      breakdown: JSON.parse(JSON.stringify(breakdown)),
+      breakdown: breakdown as unknown as Prisma.InputJsonValue,
       organizationId,
       calculatedAt: new Date(),
     },
     update: {
       score: compositeScore,
-      breakdown: JSON.parse(JSON.stringify(breakdown)),
+      breakdown: breakdown as unknown as Prisma.InputJsonValue,
       calculatedAt: new Date(),
     },
   });

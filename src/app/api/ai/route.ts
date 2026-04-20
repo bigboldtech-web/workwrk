@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
 import Anthropic from "@anthropic-ai/sdk";
-import { getTopPerformers } from "@/services/performanceScoreService";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || "",
@@ -43,8 +42,11 @@ export async function POST(req: NextRequest) {
   const planCheck = await checkPlanLimit(orgId, "ai");
   if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
-  // Gather comprehensive org context
+  // Gather comprehensive org context.
+  // User list is capped at 100 — past that the LLM context wastes tokens on a
+  // head-sized sample anyway. For total headcount we use a separate count query.
   const [
+    totalUserCount,
     users,
     departments,
     recentKPIs,
@@ -53,7 +55,9 @@ export async function POST(req: NextRequest) {
     reviewCycles,
     recentMeetings,
     recentActivity,
+    performanceScores,
   ] = await Promise.all([
+    prisma.user.count({ where: { organizationId: orgId, deletedAt: null } }),
     prisma.user.findMany({
       where: { organizationId: orgId, deletedAt: null },
       select: {
@@ -66,6 +70,7 @@ export async function POST(req: NextRequest) {
         role: { select: { title: true } },
         _count: { select: { directReports: true, kraAssignments: true } },
       },
+      take: 100,
     }),
     prisma.department.findMany({
       where: { organizationId: orgId },
@@ -125,24 +130,21 @@ export async function POST(req: NextRequest) {
       orderBy: { createdAt: "desc" },
       take: 15,
     }),
+    prisma.performanceScore.findMany({
+      where: { organizationId: orgId, period: new Date().toISOString().slice(0, 7) },
+      include: { user: { select: { firstName: true, lastName: true } } },
+      orderBy: { score: "desc" },
+      take: 50,
+    }),
   ]);
-
-  // Get performance scores for AI context
-  const topPerformers = await getTopPerformers(orgId, 10);
-  const performanceScores = await prisma.performanceScore.findMany({
-    where: { organizationId: orgId, period: new Date().toISOString().slice(0, 7) },
-    include: { user: { select: { firstName: true, lastName: true } } },
-    orderBy: { score: "desc" },
-    take: 50,
-  });
 
   // Build context for Claude
   const orgContext = `
 ORGANIZATION DATA:
-- Total employees: ${users.length}
+- Total employees: ${totalUserCount}
 - Departments: ${departments.map(d => `${d.name} (${d._count.members} members, head: ${d.head ? d.head.firstName + ' ' + d.head.lastName : 'vacant'})`).join('; ')}
 
-PEOPLE:
+PEOPLE${totalUserCount > users.length ? ` (showing ${users.length} of ${totalUserCount})` : ""}:
 ${users.map(u => `- ${u.firstName} ${u.lastName}: ${u.role?.title || 'No role'}, ${u.department?.name || 'No dept'}, Status: ${u.status}, Level: ${u.accessLevel}, KRAs: ${u._count.kraAssignments}, Reports: ${u._count.directReports}`).join('\n')}
 
 COMPOSITE PERFORMANCE SCORES (current period):
