@@ -57,8 +57,8 @@ export function SceneOpening() {
           </div>
           <h1 className="op-headline">
             Run your company{" "}
-            <span className="strike">on</span> chaos.{" "}
-            <span className="hi">Or on workwrk.</span>
+            <span className="strike">on chaos</span>{" "}
+            <span className="hi">on workwrk.</span>
           </h1>
           <p className="op-sub">
             The operating system for everything your company actually does — people,
