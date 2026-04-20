@@ -11,6 +11,7 @@ const states = {
 
 let sopTitle = "";
 let sopCategory = "";
+let sopSubcategory = "";
 let sopDescription = "";
 
 function showState(state) {
@@ -32,43 +33,23 @@ function getServerUrl() {
 }
 
 // Check if already recording
-chrome.storage.local.get(["isRecording", "steps", "sopTitle", "sopCategory", "sopDescription"], (result) => {
+chrome.storage.local.get(["isRecording", "steps", "sopTitle", "sopCategory", "sopSubcategory", "sopDescription"], (result) => {
   if (result.isRecording) {
     showState("recording");
     document.getElementById("step-count").textContent = (result.steps || []).length;
     sopTitle = result.sopTitle || "";
     sopCategory = result.sopCategory || "";
+    sopSubcategory = result.sopSubcategory || "";
     sopDescription = result.sopDescription || "";
   }
 });
 
-// Start Recording — title required BEFORE recording
-document.getElementById("start-btn").addEventListener("click", async () => {
-  const title = document.getElementById("sop-title").value.trim();
-  const category = document.getElementById("sop-category").value.trim();
-  const description = document.getElementById("sop-description").value.trim();
-  const errorEl = document.getElementById("start-error");
-
-  if (!title) {
-    errorEl.style.display = "block";
-    return;
-  }
-  errorEl.style.display = "none";
-
-  sopTitle = title;
-  sopCategory = category;
-  sopDescription = description;
-
-  chrome.storage.local.set({
-    isRecording: true, steps: [],
-    sopTitle: title, sopCategory: category, sopDescription: description,
-  });
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab) chrome.tabs.sendMessage(tab.id, { action: "startRecording" });
-
-  showState("recording");
-  document.getElementById("step-count").textContent = "0";
+// "Open WorkwrK" — drop the user straight into the SOPs → New → Record
+// flow. Uses the learned workwrkOrigin when the user has visited the app
+// with the extension installed; falls back to the server URL setting.
+document.getElementById("open-app-btn").addEventListener("click", async () => {
+  const serverUrl = await getServerUrl();
+  chrome.tabs.create({ url: `${serverUrl}/sops` });
 });
 
 // Stop Recording — auto-save immediately (title already set)
@@ -80,10 +61,11 @@ document.getElementById("stop-btn").addEventListener("click", async () => {
   showState("saving");
 
   // Get stored title and steps
-  chrome.storage.local.get(["steps", "sopTitle", "sopCategory", "sopDescription"], async (result) => {
+  chrome.storage.local.get(["steps", "sopTitle", "sopCategory", "sopSubcategory", "sopDescription"], async (result) => {
     const steps = result.steps || [];
     const title = result.sopTitle || sopTitle;
     const category = result.sopCategory || sopCategory;
+    const subcategory = result.sopSubcategory || sopSubcategory;
     const description = result.sopDescription || sopDescription;
     const serverUrl = await getServerUrl();
 
@@ -125,12 +107,13 @@ document.getElementById("stop-btn").addEventListener("click", async () => {
           title,
           description: description || null,
           category: category || null,
+          subcategory: subcategory || null,
           steps: processedSteps,
         }),
       });
 
       if (response.ok) {
-        chrome.storage.local.set({ steps: [], sopTitle: "", sopCategory: "", sopDescription: "" });
+        chrome.storage.local.set({ steps: [], sopTitle: "", sopCategory: "", sopSubcategory: "", sopDescription: "" });
         showState("success");
       } else {
         const data = await response.json().catch(() => ({}));
@@ -186,20 +169,18 @@ async function uploadScreenshotToS3(serverUrl, dataUrl) {
   }
 }
 
-// Retry
+// Retry — after a save failure, show the recording state again so the
+// user can hit Stop & Save a second time. The steps are still in storage.
 document.getElementById("retry-btn")?.addEventListener("click", () => {
-  showState("idle");
-  document.getElementById("sop-title").value = sopTitle;
-  document.getElementById("sop-category").value = sopCategory;
-  document.getElementById("sop-description").value = sopDescription;
+  chrome.storage.local.get(["steps"], (result) => {
+    document.getElementById("step-count").textContent = (result.steps || []).length;
+    showState("recording");
+  });
 });
 
-// Record Another
+// Record Another — back to the idle prompt that points to WorkwrK.
 document.getElementById("new-btn").addEventListener("click", () => {
-  sopTitle = ""; sopCategory = ""; sopDescription = "";
-  document.getElementById("sop-title").value = "";
-  document.getElementById("sop-category").value = "";
-  document.getElementById("sop-description").value = "";
+  sopTitle = ""; sopCategory = ""; sopSubcategory = ""; sopDescription = "";
   showState("idle");
 });
 

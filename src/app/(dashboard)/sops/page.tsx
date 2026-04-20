@@ -421,10 +421,38 @@ export default function SOPsPage() {
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
 
-    // For recorded SOPs, show extension instructions
+    // For recorded SOPs, the extension owns the recording mechanics but
+    // the app owns the metadata — title, category (via the picker), etc.
+    // If the extension is installed, we post the metadata across and tell
+    // it to start recording immediately. Otherwise fall back to the setup
+    // dialog so the user can install it.
     if (sopType === "RECORDED") {
+      const extensionInstalled =
+        document.documentElement.getAttribute("data-workwrk-extension") === "true";
+
+      if (!extensionInstalled) {
+        setShowAddDialog(false);
+        setShowExtensionDialog(true);
+        return;
+      }
+
+      window.postMessage({
+        type: "WORKWRK_START_RECORDING",
+        sop: {
+          title: newTitle.trim(),
+          category: newCategory || null,
+          subcategory: newSubcategory || null,
+          description: newDescription || null,
+        },
+      }, "*");
+
       setShowAddDialog(false);
-      setShowExtensionDialog(true);
+      setNewTitle("");
+      setNewCategory("");
+      setNewSubcategory("");
+      setNewDescription("");
+      setSopType("WRITTEN");
+      toastSuccess("Recording started — perform your workflow, then click the extension to stop & save.");
       return;
     }
 

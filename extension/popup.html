@@ -46,20 +46,14 @@
   </div>
 
   <div class="content">
-    <!-- Idle: Enter title first, then start -->
+    <!-- Idle: direct users back to WorkwrK to set metadata & start -->
     <div id="idle-state" class="status">
       <div class="icon">🎯</div>
-      <div class="text">Name your SOP, then start recording your workflow.</div>
-      <div class="config">
-        <label>SOP Title</label>
-        <input type="text" id="sop-title" placeholder="e.g., How to process a refund" />
-        <label>Category (optional)</label>
-        <input type="text" id="sop-category" placeholder="e.g., Sales, Operations" />
-        <label>Description (optional)</label>
-        <input type="text" id="sop-description" placeholder="What does this SOP cover?" />
+      <div class="text" style="margin-bottom: 12px;">
+        Start a recording from <strong>WorkwrK → SOPs → New → Record</strong>.
+        The extension captures your clicks and screenshots automatically.
       </div>
-      <button class="btn btn-primary" id="start-btn">⏺ Start Recording</button>
-      <div id="start-error" class="error" style="display:none;">Please enter a title for the SOP.</div>
+      <button class="btn btn-primary" id="open-app-btn">Open WorkwrK</button>
     </div>
 
     <!-- Server settings -->

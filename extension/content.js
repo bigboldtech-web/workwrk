@@ -2,21 +2,46 @@ let isRecording = false;
 let highlightEl = null;
 
 // Inject detection flag so the web app knows the extension is installed
-window.postMessage({ type: "WORKWRK_EXTENSION_INSTALLED", version: "1.1.0" }, "*");
+window.postMessage({ type: "WORKWRK_EXTENSION_INSTALLED", version: "1.2.0" }, "*");
 document.documentElement.setAttribute("data-workwrk-extension", "true");
 
-// Auto-learn the server URL. When the user visits a WorkwrK page while the
-// extension is loaded, the app posts back its origin so the popup's "save
-// SOP" request hits the right server — no manual setup needed on staging /
-// self-hosted / custom domain deployments.
+// Messages from the WorkwrK app into the extension.
+//
+//   WORKWRK_APP_ORIGIN     — learn the app's origin so the popup POSTs
+//                            recordings back to the right server.
+//
+//   WORKWRK_START_RECORDING — the app's "Create SOP → Record" flow
+//                            pushes title/category/subcategory/description
+//                            over so the user doesn't re-type them in
+//                            the popup. Stash them, flip isRecording on,
+//                            and show the floating indicator. Existing
+//                            click/nav capture takes it from there.
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const data = event.data;
+
   if (data?.type === "WORKWRK_APP_ORIGIN" && typeof data.origin === "string") {
     try {
       const origin = new URL(data.origin).origin;
       chrome.storage.local.set({ workwrkOrigin: origin });
     } catch {}
+    return;
+  }
+
+  if (data?.type === "WORKWRK_START_RECORDING" && data.sop && typeof data.sop.title === "string") {
+    const sop = data.sop;
+    chrome.storage.local.set({
+      isRecording: true,
+      steps: [],
+      sopTitle: sop.title,
+      sopCategory: sop.category || "",
+      sopSubcategory: sop.subcategory || "",
+      sopDescription: sop.description || "",
+    }, () => {
+      isRecording = true;
+      showRecordingIndicator();
+    });
+    return;
   }
 });
 
