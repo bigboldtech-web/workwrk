@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/warm-neon.mjs && prisma migrate deploy && prisma generate && NODE_OPTIONS=--max-old-space-size=4096 next build",
+    "build": "node scripts/warm-neon.mjs && node scripts/deploy-migrations.mjs && prisma generate && NODE_OPTIONS=--max-old-space-size=4096 next build",
     "db:warm": "node scripts/warm-neon.mjs",
     "db:unstick": "node scripts/unstick-migrate-lock.mjs",
     "start": "next start",
