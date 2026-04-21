@@ -54,6 +54,7 @@ model Organization {
   assets              Asset[]
   candorSessions      CandorSession[]
   taskLabels          TaskLabel[]
+  sopFolders          SOPFolder[]
 
   @@index([slug])
 }
@@ -193,6 +194,7 @@ model User {
   webhooksCreated     WebhookSubscription[] @relation("WebhookCreator")
   taskComments        TaskComment[] @relation("TaskCommentAuthor")
   calendarSubscriptions CalendarSubscription[] @relation("CalendarSubscriptionUser")
+  sopFolderAccess     SOPFolderAccess[] @relation("SOPFolderAccessUser")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -685,6 +687,11 @@ model SOP {
   sopType        SOPType   @default(WRITTEN)
   kraId          String?
   kra            KRA?     @relation(fields: [kraId], references: [id])
+  // Optional folder for access-scoping. NULL = unfoldered / legacy SOP,
+  // visible to everyone in the org. Non-null = only org admins plus
+  // users granted SOPFolderAccess on this folder can see it.
+  folderId       String?
+  folder         SOPFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   content        Json
   version        Int       @default(1)
   status         SOPStatus @default(DRAFT)
@@ -702,6 +709,40 @@ model SOP {
   @@index([organizationId])
   @@index([category])
   @@index([shareToken])
+  @@index([folderId])
+}
+
+/// SOP access-scoping unit. An org admin creates a folder (e.g.
+/// "Marketing"), drops SOPs into it, and assigns which users can
+/// see/contribute via SOPFolderAccess. Admins see every folder
+/// regardless of assignment.
+model SOPFolder {
+  id             String    @id @default(cuid())
+  name           String
+  color          String?
+  description    String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sops           SOP[]
+  access         SOPFolderAccess[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// Join table: which users can see and contribute to a given folder.
+/// Admins aren't in here — they see all folders implicitly.
+model SOPFolderAccess {
+  folderId   String
+  folder     SOPFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User      @relation("SOPFolderAccessUser", fields: [userId], references: [id], onDelete: Cascade)
+  grantedAt  DateTime  @default(now())
+
+  @@id([folderId, userId])
+  @@index([userId])
 }
 
 enum SOPType {
@@ -1609,6 +1650,12 @@ model PulseSurvey {
   officeIds      String[]        @default([])
   departmentIds  String[]        @default([])
   userIds        String[]        @default([])
+  // When true, responses are visible to managers in aggregate only — no
+  // respondent name, no individual attribution. Default true to preserve
+  // existing survey trust assumptions. Managers can opt a survey into
+  // attributed mode at create time when the context calls for it (e.g.
+  // post-review pulse tied to a 1:1 follow-up).
+  anonymous      Boolean         @default(true)
   organizationId String
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses      SurveyResponse[]

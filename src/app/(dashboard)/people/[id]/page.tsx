@@ -497,7 +497,7 @@ export default function UserProfilePage() {
       if (editRoleId) body.roleId = editRoleId;
       if (editAccessLevel) body.accessLevel = editAccessLevel;
       if (editStatus) body.status = editStatus;
-      if (editDob) body.dateOfBirth = `${editDob}T12:00:00.000Z`;
+      body.dateOfBirth = editDob ? `${editDob}T12:00:00.000Z` : null;
       body.officeId = editOfficeId || null;
       body.managerId = editManagerId || null;
 

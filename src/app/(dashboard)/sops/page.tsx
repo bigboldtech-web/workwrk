@@ -24,6 +24,7 @@ import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { FolderManager } from "@/components/sops/folder-manager";
 
 interface SOPCompliance {
   stepsTotal: number;
@@ -251,12 +252,17 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
 
 export default function SOPsPage() {
   const router = useRouter();
-  const { canManageSOPs, isEmployee } = useRole();
+  const { canManageSOPs, isEmployee, accessLevel } = useRole();
+  const isOrgAdmin = accessLevel === "SUPER_ADMIN" || accessLevel === "COMPANY_ADMIN";
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [folderFilter, setFolderFilter] = useState<string>("all");     // "all" | "none" | folderId
+  const [folders, setFolders] = useState<Array<{ id: string; name: string; color: string | null; _count: { sops: number; access: number } }>>([]);
+  const [newFolderId, setNewFolderId] = useState<string>("none");      // for Create SOP dialog
+  const [showFolderManager, setShowFolderManager] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -401,6 +407,7 @@ export default function SOPsPage() {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (categoryFilter !== "all") params.set("category", categoryFilter);
+      if (folderFilter !== "all") params.set("folderId", folderFilter);
       const res = await fetch(`/api/sops?${params}`);
       if (!res.ok) throw new Error("Failed to fetch SOPs");
       const json = await res.json();
@@ -412,7 +419,20 @@ export default function SOPsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, debouncedSearch, categoryFilter]);
+  }, [page, limit, debouncedSearch, categoryFilter, folderFilter]);
+
+  // Fetch folders the caller can see (admins get all; others get their
+  // assigned folders). Drives the filter dropdown + the Create SOP picker.
+  const fetchFolders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sop-folders");
+      if (res.ok) {
+        const data = await res.json();
+        setFolders(Array.isArray(data) ? data : data.data || []);
+      }
+    } catch {}
+  }, []);
+  useEffect(() => { fetchFolders(); }, [fetchFolders]);
 
   useEffect(() => {
     fetchSOPs();
@@ -474,18 +494,23 @@ export default function SOPsPage() {
           description: newDescription,
           category: newCategory,
           subcategory: newSubcategory || undefined,
+          folderId: newFolderId === "none" ? null : newFolderId,
           sopType: dbSopType,
           content: initialContent,
           status: "DRAFT",
         }),
       });
-      if (!res.ok) throw new Error("Failed to create SOP");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to create SOP");
+      }
       const created = await res.json();
       setShowAddDialog(false);
       setNewTitle("");
       setNewCategory("");
       setNewSubcategory("");
       setNewDescription("");
+      setNewFolderId("none");
       setSopType("WRITTEN");
       toastSuccess("SOP created successfully");
       // Navigate to the detail page to start building
@@ -690,6 +715,23 @@ export default function SOPsPage() {
                   )}
                 </div>
               )}
+              {folders.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Folder</Label>
+                  <Select value={newFolderId} onValueChange={setNewFolderId}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No folder (visible to everyone)</SelectItem>
+                      {folders.map((f) => (
+                        <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted">
+                    Pick a folder to scope who sees this SOP. Leave empty and everyone in the org can see it.
+                  </p>
+                </div>
+              )}
               <div className="space-y-2"><Label>Description</Label><Textarea placeholder="What does this SOP cover?" value={newDescription} onChange={(e) => setNewDescription(e.target.value)} /></div>
             </div>
             <DialogFooter>
@@ -797,6 +839,21 @@ export default function SOPsPage() {
             {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={folderFilter} onValueChange={setFolderFilter}>
+          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Folder" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Folders</SelectItem>
+            <SelectItem value="none">Unfoldered</SelectItem>
+            {folders.map((f) => (
+              <SelectItem key={f.id} value={f.id}>{f.name}{f._count ? ` (${f._count.sops})` : ""}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {isOrgAdmin && (
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowFolderManager(true)}>
+            Manage folders
+          </Button>
+        )}
         <div className="flex items-center gap-1 ml-auto">
           <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("grid")} title="Grid view">
             <BarChart3 size={14} className="rotate-90" />
@@ -950,6 +1007,16 @@ export default function SOPsPage() {
           <ExtensionSetupContent onClose={() => setShowExtensionDialog(false)} />
         </DialogContent>
       </Dialog>
+
+      {/* Folder manager — org admins only. Mount unconditionally so the
+          dialog state stays tied to React; the trigger button is gated
+          above. */}
+      {isOrgAdmin && (
+        <FolderManager
+          open={showFolderManager}
+          onOpenChange={(o) => { setShowFolderManager(o); if (!o) fetchFolders(); }}
+        />
+      )}
     </div>
   );
 }

@@ -15,7 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  ClipboardCheck, Plus, Send, Trash2, Globe, Building2, Users as UsersIcon, Check, MoreHorizontal, Pencil, Archive, RotateCcw,
+  ClipboardCheck, Plus, Send, Trash2, Globe, Building2, Users as UsersIcon, Check, MoreHorizontal, Pencil, Archive, RotateCcw, BarChart3, Loader2,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
@@ -38,6 +38,15 @@ export default function SurveysPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
+
+  // Responses viewer state — opens a modal with the aggregated results
+  // of a single survey. Responses stay anonymous (the API never returns
+  // a userId); managers see distribution for rating/NPS questions and
+  // the raw answer list for text questions.
+  const [responsesFor, setResponsesFor] = useState<any | null>(null);
+  const [responsesData, setResponsesData] = useState<any | null>(null);
+  const [loadingResponses, setLoadingResponses] = useState(false);
+  const [responsesFilter, setResponsesFilter] = useState<{ officeId: string; departmentId: string }>({ officeId: "", departmentId: "" });
   const [respondingSurvey, setRespondingSurvey] = useState<any>(null);
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
@@ -48,6 +57,7 @@ export default function SurveysPage() {
     officeIds: string[];
     departmentIds: string[];
     userIds: string[];
+    anonymous: boolean;
   }>({
     title: "",
     questions: [{ id: "q1", text: "", type: "rating" }],
@@ -55,6 +65,7 @@ export default function SurveysPage() {
     officeIds: [],
     departmentIds: [],
     userIds: [],
+    anonymous: true,
   });
   const [offices, setOffices] = useState<Office[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -89,7 +100,7 @@ export default function SurveysPage() {
   }
 
   function resetForm() {
-    setForm({ title: "", questions: [{ id: "q1", text: "", type: "rating" }], audienceType: "ALL", officeIds: [], departmentIds: [], userIds: [] });
+    setForm({ title: "", questions: [{ id: "q1", text: "", type: "rating" }], audienceType: "ALL", officeIds: [], departmentIds: [], userIds: [], anonymous: true });
     setUserSearch("");
     setEditingId(null);
   }
@@ -97,6 +108,56 @@ export default function SurveysPage() {
   function openCreate() {
     resetForm();
     setShowCreate(true);
+  }
+
+  async function openResponses(survey: any) {
+    setResponsesFor(survey);
+    setResponsesData(null);
+    setResponsesFilter({ officeId: "", departmentId: "" });
+    await loadResponses(survey.id, { officeId: "", departmentId: "" });
+  }
+
+  async function loadResponses(surveyId: string, filter: { officeId: string; departmentId: string }) {
+    setLoadingResponses(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter.officeId) params.set("officeId", filter.officeId);
+      if (filter.departmentId) params.set("departmentId", filter.departmentId);
+      const qs = params.toString();
+      const res = await fetch(`/api/pulse-surveys/${surveyId}/responses${qs ? `?${qs}` : ""}`);
+      if (res.ok) {
+        const d = await res.json();
+        setResponsesData(d.data ?? d);
+      } else {
+        toastError("Failed to load responses");
+        setResponsesFor(null);
+      }
+    } catch {
+      toastError("Failed to load responses");
+      setResponsesFor(null);
+    } finally {
+      setLoadingResponses(false);
+    }
+  }
+
+  function updateResponsesFilter(next: { officeId?: string; departmentId?: string }) {
+    if (!responsesFor) return;
+    const merged = {
+      officeId: next.officeId !== undefined ? next.officeId : responsesFilter.officeId,
+      departmentId: next.departmentId !== undefined ? next.departmentId : responsesFilter.departmentId,
+    };
+    setResponsesFilter(merged);
+    loadResponses(responsesFor.id, merged);
+  }
+
+  function exportResponsesCsv() {
+    if (!responsesFor) return;
+    const params = new URLSearchParams();
+    if (responsesFilter.officeId) params.set("officeId", responsesFilter.officeId);
+    if (responsesFilter.departmentId) params.set("departmentId", responsesFilter.departmentId);
+    const qs = params.toString();
+    const url = `/api/pulse-surveys/${responsesFor.id}/responses/export${qs ? `?${qs}` : ""}`;
+    window.location.href = url;
   }
 
   function openEdit(survey: any) {
@@ -110,6 +171,7 @@ export default function SurveysPage() {
       officeIds: Array.isArray(survey.officeIds) ? survey.officeIds : [],
       departmentIds: Array.isArray(survey.departmentIds) ? survey.departmentIds : [],
       userIds: Array.isArray(survey.userIds) ? survey.userIds : [],
+      anonymous: survey.anonymous !== false,
     });
     setShowCreate(true);
   }
@@ -133,6 +195,7 @@ export default function SurveysPage() {
           officeIds: form.officeIds,
           departmentIds: form.departmentIds,
           userIds: form.userIds,
+          anonymous: form.anonymous,
         }),
       });
       if (res.ok) {
@@ -274,7 +337,11 @@ export default function SurveysPage() {
                             <MoreHorizontal size={16} />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => openResponses(survey)} className="gap-2">
+                            <BarChart3 size={14} /> View responses
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => openEdit(survey)} className="gap-2">
                             <Pencil size={14} /> Edit
                           </DropdownMenuItem>
@@ -442,6 +509,26 @@ export default function SurveysPage() {
                 </div>
               )}
             </div>
+
+            {/* Anonymity toggle — on by default. Flip off only when the context
+                calls for attributed feedback (e.g. post-review pulse tied to a
+                1:1 follow-up). The backend enforces the same default. */}
+            <div className="rounded-lg border border-border p-3 flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="anonymous"
+                checked={form.anonymous}
+                onChange={(e) => setForm({ ...form, anonymous: e.target.checked })}
+                className="accent-[#a8cc24] mt-0.5"
+              />
+              <label htmlFor="anonymous" className="flex-1 cursor-pointer">
+                <div className="text-sm font-medium">Anonymous responses</div>
+                <div className="text-[11px] text-muted mt-0.5">
+                  Managers see answers in aggregate only — no names, no attribution.
+                  Turn this off only when the context calls for attributed feedback.
+                </div>
+              </label>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
@@ -514,6 +601,209 @@ export default function SurveysPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Responses viewer — manager-only aggregate of answers */}
+      <Dialog open={!!responsesFor} onOpenChange={(open) => { if (!open) { setResponsesFor(null); setResponsesData(null); } }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{responsesFor?.title || "Responses"}</DialogTitle>
+          </DialogHeader>
+
+          {/* Filter bar + export — usable even while a refetch is in flight */}
+          {responsesFor && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Select
+                value={responsesFilter.officeId || "all"}
+                onValueChange={(v) => updateResponsesFilter({ officeId: v === "all" ? "" : v })}
+              >
+                <SelectTrigger className="h-8 text-xs w-auto min-w-[140px]"><SelectValue placeholder="All offices" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All offices</SelectItem>
+                  {offices.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={responsesFilter.departmentId || "all"}
+                onValueChange={(v) => updateResponsesFilter({ departmentId: v === "all" ? "" : v })}
+              >
+                <SelectTrigger className="h-8 text-xs w-auto min-w-[160px]"><SelectValue placeholder="All departments" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All departments</SelectItem>
+                  {departments.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" className="ml-auto h-8 text-xs gap-1.5" onClick={exportResponsesCsv}>
+                Export CSV
+              </Button>
+            </div>
+          )}
+
+          {loadingResponses && (
+            <div className="flex items-center justify-center py-10 text-sm text-muted gap-2">
+              <Loader2 size={16} className="animate-spin" /> Loading responses…
+            </div>
+          )}
+
+          {!loadingResponses && responsesData && (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center gap-3 flex-wrap text-xs text-muted">
+                <Badge variant="secondary">{responsesData.totalResponses} response{responsesData.totalResponses === 1 ? "" : "s"}</Badge>
+                <Badge variant="outline">{responsesData.survey.status}</Badge>
+                <Badge variant={responsesData.survey.anonymous ? "outline" : "secondary"}>
+                  {responsesData.survey.anonymous ? "Anonymous" : "Attributed"}
+                </Badge>
+                {(responsesFilter.officeId || responsesFilter.departmentId) && (
+                  <span className="text-[10px] text-muted">· filters applied</span>
+                )}
+              </div>
+
+              {(!responsesData.questions || responsesData.questions.length === 0 || responsesData.totalResponses === 0) ? (
+                <div className="text-center py-8 text-sm text-muted">
+                  {(responsesFilter.officeId || responsesFilter.departmentId)
+                    ? "No responses match these filters."
+                    : "No responses yet. Share this survey with your audience."}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {responsesData.questions.map((q: any, i: number) => (
+                    <div key={q.questionId} className="rounded-lg border border-border p-4">
+                      <div className="mb-3">
+                        <div className="text-[10px] text-muted">Question {i + 1}</div>
+                        <div className="text-sm font-medium">{q.text}</div>
+                      </div>
+
+                      {(q.kind === "rating" || q.kind === "nps") && (
+                        <RatingBreakdown q={q} />
+                      )}
+
+                      {q.kind === "text" && (
+                        <TextBreakdown q={q} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setResponsesFor(null); setResponsesData(null); }}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function RatingBreakdown({ q }: { q: any }) {
+  const maxCount = Math.max(1, ...q.distribution.map((d: any) => d.count));
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-muted">Average</span>
+        <span className="font-semibold text-[#d4ff2e]">{q.average != null ? q.average.toFixed(1) : "—"}</span>
+        <span className="text-muted ml-auto">{q.totalAnswered} answered</span>
+      </div>
+      <div className="space-y-1">
+        {q.distribution.map((d: any) => {
+          const pct = q.totalAnswered > 0 ? Math.round((d.count / q.totalAnswered) * 100) : 0;
+          const barPct = (d.count / maxCount) * 100;
+          return (
+            <div key={d.value} className="flex items-center gap-2 text-xs">
+              <span className="w-6 text-muted text-right">{d.value}</span>
+              <div className="flex-1 h-4 bg-surface-2 rounded overflow-hidden">
+                <div className="h-full bg-[rgba(212,255,46,0.55)]" style={{ width: `${barPct}%` }} />
+              </div>
+              <span className="w-16 text-right text-muted">{d.count} · {pct}%</span>
+            </div>
+          );
+        })}
+      </div>
+      {Array.isArray(q.trend) && q.trend.length >= 2 && (
+        <TrendSparkline trend={q.trend} min={q.min} max={q.max} />
+      )}
+    </div>
+  );
+}
+
+// Small inline SVG sparkline of daily average — kept tiny on purpose so the
+// manager can see drift at a glance without the modal turning into a chart
+// dashboard. Needs ≥2 data points to draw meaningful movement.
+function TrendSparkline({ trend, min, max }: { trend: { date: string; average: number; count: number }[]; min: number; max: number }) {
+  const W = 280;
+  const H = 40;
+  const padX = 4;
+  const padY = 4;
+  const range = Math.max(1, max - min);
+  const step = trend.length === 1 ? 0 : (W - padX * 2) / (trend.length - 1);
+  const points = trend.map((t, i) => {
+    const x = padX + i * step;
+    const y = H - padY - ((t.average - min) / range) * (H - padY * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const first = trend[0];
+  const last = trend[trend.length - 1];
+  return (
+    <div className="pt-2 border-t border-border">
+      <div className="flex items-center justify-between text-[10px] text-muted mb-1">
+        <span>Trend (daily average)</span>
+        <span>{first.date} → {last.date}</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-10" preserveAspectRatio="none">
+        <polyline
+          fill="none"
+          stroke="#d4ff2e"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={points}
+        />
+        {trend.map((t, i) => {
+          const x = padX + i * step;
+          const y = H - padY - ((t.average - min) / range) * (H - padY * 2);
+          return <circle key={i} cx={x} cy={y} r={1.5} fill="#d4ff2e"><title>{`${t.date}: ${t.average} (${t.count})`}</title></circle>;
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function TextBreakdown({ q }: { q: any }) {
+  if (q.totalAnswered === 0) {
+    return <div className="text-xs text-muted">No text responses yet.</div>;
+  }
+  // Back-compat: the response endpoint used to return a string[]; it now
+  // returns `{ value, respondent, createdAt }[]`. Handle both shapes so
+  // this page keeps working if the API is ahead or behind during a
+  // partial deploy.
+  const items: { value: string; respondent: { name: string; office?: any; department?: any } | null; createdAt?: string }[] =
+    q.responses.map((r: any) =>
+      typeof r === "string" ? { value: r, respondent: null } : { value: r.value, respondent: r.respondent, createdAt: r.createdAt },
+    );
+  return (
+    <div className="space-y-2 max-h-80 overflow-y-auto">
+      {items.map((r, idx) => (
+        <div key={idx} className="text-xs p-2 rounded-md bg-surface-2">
+          <div className="flex items-center gap-2 text-[10px] text-muted mb-1">
+            <span>{idx + 1}.</span>
+            {r.respondent ? (
+              <span className="text-foreground font-medium">
+                {r.respondent.name}
+                {r.respondent.office?.name && <span className="text-muted ml-1">· {r.respondent.office.name}</span>}
+                {r.respondent.department?.name && <span className="text-muted ml-1">· {r.respondent.department.name}</span>}
+              </span>
+            ) : (
+              <span>Anonymous</span>
+            )}
+            {r.createdAt && <span className="ml-auto">{new Date(r.createdAt).toLocaleDateString()}</span>}
+          </div>
+          <div className="whitespace-pre-wrap">{r.value}</div>
+        </div>
+      ))}
     </div>
   );
 }

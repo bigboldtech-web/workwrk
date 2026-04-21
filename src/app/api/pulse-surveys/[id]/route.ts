@@ -34,6 +34,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.frequency = body.frequency || null;
   }
 
+  if (typeof body.anonymous === "boolean") {
+    data.anonymous = body.anonymous;
+  }
+
   if (typeof body.status === "string") {
     if (!STATUSES.has(body.status)) return jsonError("Invalid status");
     data.status = body.status;

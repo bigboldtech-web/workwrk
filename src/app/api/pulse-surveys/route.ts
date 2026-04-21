@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { title, questions, frequency, audienceType, officeIds, departmentIds, userIds } = body;
+  const { title, questions, frequency, audienceType, officeIds, departmentIds, userIds, anonymous } = body;
 
   if (!title?.trim() || !Array.isArray(questions) || questions.length === 0) {
     return jsonError("Title and questions required");
@@ -113,6 +113,8 @@ export async function POST(req: NextRequest) {
       officeIds: resolvedOfficeIds,
       departmentIds: resolvedDepartmentIds,
       userIds: resolvedUserIds,
+      // Default anonymous unless the caller explicitly opts out.
+      anonymous: anonymous === false ? false : true,
       organizationId: orgId,
     },
   });

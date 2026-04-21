@@ -8,9 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -18,7 +18,7 @@ import {
 import { PageHeader } from "@/components/dashboard/page-header";
 import {
   Lightbulb, Plus, ThumbsUp, MessageSquare, Clock, CheckCircle2, XCircle,
-  Award, Send, ChevronRight,
+  Award, Send, ChevronRight, Trash2,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
@@ -35,13 +35,20 @@ const STATUS_STYLES: Record<string, { color: string; label: string }> = {
   REWARDED: { color: "bg-yellow-500/20 text-yellow-400", label: "Rewarded" },
 };
 
+interface IdeaComment {
+  id: string;
+  content: string;
+  createdAt: string;
+  user: { id: string; firstName: string; lastName: string; avatar?: string | null };
+}
+
 interface Idea {
   id: string;
   title: string;
   description: string;
   category: string | null;
   status: string;
-  submitter: { id: string; firstName: string; lastName: string; department?: { name: string } };
+  submitter: { id: string; firstName: string; lastName: string; avatar?: string | null; department?: { name: string } };
   reviewer?: { id: string; firstName: string; lastName: string } | null;
   reviewNotes?: string | null;
   rewardType?: string | null;
@@ -51,8 +58,12 @@ interface Idea {
   createdAt: string;
 }
 
+function initials(firstName?: string, lastName?: string) {
+  return `${firstName?.[0] || ""}${lastName?.[0] || ""}`.toUpperCase() || "?";
+}
+
 export default function IdeasPage() {
-  const { isManager } = useRole();
+  const { isManager, isAdmin } = useRole();
   const { data: session } = useSession();
   const currentUserId = (session?.user as any)?.id;
   const { success: toastSuccess, error: toastError } = useToast();
@@ -74,10 +85,17 @@ export default function IdeasPage() {
   const [reviewNotes, setReviewNotes] = useState("");
   const [rewardType, setRewardType] = useState("");
   const [rewardValue, setRewardValue] = useState("");
+  const [reviewing, setReviewing] = useState(false);
 
-  // Comment
+  // Delete confirmation
+  const [deleteIdea, setDeleteIdea] = useState<Idea | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Comments
   const [commentIdeaId, setCommentIdeaId] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
+  const [commentsByIdea, setCommentsByIdea] = useState<Record<string, IdeaComment[]>>({});
+  const [loadingComments, setLoadingComments] = useState<string | null>(null);
 
   const fetchIdeas = useCallback(async () => {
     setLoading(true);
@@ -126,6 +144,7 @@ export default function IdeasPage() {
 
   async function handleReview() {
     if (!reviewIdea || !reviewStatus) return;
+    setReviewing(true);
     try {
       const body: any = { status: reviewStatus, reviewNotes };
       if (reviewStatus === "REWARDED") {
@@ -140,24 +159,84 @@ export default function IdeasPage() {
       if (res.ok) {
         setReviewIdea(null);
         setReviewStatus(""); setReviewNotes(""); setRewardType(""); setRewardValue("");
-        fetchIdeas();
+        await fetchIdeas();
         toastSuccess("Idea updated");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to update idea");
       }
-    } catch { toastError("Failed to update idea"); }
+    } catch { toastError("Failed to update idea"); } finally { setReviewing(false); }
+  }
+
+  async function handleDelete() {
+    if (!deleteIdea) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/ideas/${deleteIdea.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setDeleteIdea(null);
+        await fetchIdeas();
+        toastSuccess("Idea deleted");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to delete idea");
+      }
+    } catch { toastError("Failed to delete idea"); } finally { setDeleting(false); }
+  }
+
+  async function loadComments(ideaId: string) {
+    setLoadingComments(ideaId);
+    try {
+      const res = await fetch(`/api/ideas/${ideaId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const idea = data?.data || data;
+        setCommentsByIdea((prev) => ({ ...prev, [ideaId]: idea?.comments || [] }));
+      }
+    } catch {} finally { setLoadingComments(null); }
+  }
+
+  function toggleComments(ideaId: string) {
+    if (commentIdeaId === ideaId) {
+      setCommentIdeaId(null);
+      setCommentText("");
+    } else {
+      setCommentIdeaId(ideaId);
+      setCommentText("");
+      if (!commentsByIdea[ideaId]) loadComments(ideaId);
+    }
   }
 
   async function handleComment(ideaId: string) {
     if (!commentText.trim()) return;
     try {
-      await fetch(`/api/ideas/${ideaId}/comments`, {
+      const res = await fetch(`/api/ideas/${ideaId}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: commentText }),
       });
-      setCommentText("");
-      setCommentIdeaId(null);
-      toastSuccess("Comment added");
-    } catch {}
+      if (res.ok) {
+        const data = await res.json();
+        const newComment: IdeaComment = data?.data || data;
+        setCommentsByIdea((prev) => ({
+          ...prev,
+          [ideaId]: [...(prev[ideaId] || []), newComment],
+        }));
+        setIdeas((prev) => prev.map((i) =>
+          i.id === ideaId ? { ...i, _count: { ...i._count, comments: i._count.comments + 1 } } : i
+        ));
+        setCommentText("");
+        toastSuccess("Comment added");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to add comment");
+      }
+    } catch { toastError("Failed to add comment"); }
+  }
+
+  function canDelete(idea: Idea): boolean {
+    if (isAdmin) return true;
+    return idea.submitter.id === currentUserId && idea.status === "SUBMITTED";
   }
 
   const submitted = ideas.filter((i) => i.status === "SUBMITTED").length;
@@ -246,6 +325,7 @@ export default function IdeasPage() {
                     <button
                       onClick={() => handleVote(idea.id)}
                       className={`flex flex-col items-center gap-0.5 shrink-0 pt-1 ${hasVoted ? "text-[#d4ff2e]" : "text-muted hover:text-[#e2ff6b]"} transition-colors`}
+                      aria-label={hasVoted ? "Remove vote" : "Upvote"}
                     >
                       <ThumbsUp size={18} className={hasVoted ? "fill-[#d4ff2e] text-[#d4ff2e]" : ""} />
                       <span className="text-xs font-bold">{idea._count.votes}</span>
@@ -253,23 +333,42 @@ export default function IdeasPage() {
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                      {/* Author header */}
+                      <div className="flex items-center gap-2 mb-2">
+                        <Avatar className="h-7 w-7">
+                          {idea.submitter.avatar && <AvatarImage src={idea.submitter.avatar} alt="" />}
+                          <AvatarFallback className="text-[10px]">
+                            {initials(idea.submitter.firstName, idea.submitter.lastName)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium truncate">
+                            {idea.submitter.firstName} {idea.submitter.lastName}
+                          </p>
+                          <p className="text-[10px] text-muted-2 truncate">
+                            {idea.submitter.department?.name
+                              ? `${idea.submitter.department.name} · `
+                              : ""}
+                            {new Date(idea.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <h3 className="text-sm font-semibold">{idea.title}</h3>
                         <Badge className={`text-[10px] ${style.color}`}>{style.label}</Badge>
                         {idea.category && <Badge variant="outline" className="text-[10px]">{idea.category}</Badge>}
                       </div>
                       <p className="text-xs text-muted line-clamp-2 mb-2">{idea.description}</p>
-                      <div className="flex items-center gap-4 text-[10px] text-muted-2">
-                        <span>{idea.submitter.firstName} {idea.submitter.lastName}</span>
-                        {idea.submitter.department && <span>{idea.submitter.department.name}</span>}
-                        <span>{new Date(idea.createdAt).toLocaleDateString()}</span>
-                        <button
-                          onClick={() => setCommentIdeaId(commentIdeaId === idea.id ? null : idea.id)}
-                          className="flex items-center gap-1 hover:text-[#e2ff6b] transition-colors"
-                        >
-                          <MessageSquare size={11} /> {idea._count.comments}
-                        </button>
-                      </div>
+
+                      {idea.reviewer && idea.reviewNotes && (
+                        <div className="mt-2 rounded border border-[rgba(255,255,255,0.08)] bg-surface-2 p-2 text-[11px]">
+                          <p className="text-muted-2 mb-0.5">
+                            Review by {idea.reviewer.firstName} {idea.reviewer.lastName}
+                          </p>
+                          <p className="text-muted">{idea.reviewNotes}</p>
+                        </div>
+                      )}
 
                       {/* Reward info */}
                       {idea.rewardValue && (
@@ -278,31 +377,87 @@ export default function IdeasPage() {
                         </div>
                       )}
 
-                      {/* Inline comment */}
+                      <div className="flex items-center gap-4 text-[10px] text-muted-2 mt-2">
+                        <button
+                          onClick={() => toggleComments(idea.id)}
+                          className="flex items-center gap-1 hover:text-[#e2ff6b] transition-colors"
+                        >
+                          <MessageSquare size={11} />
+                          {idea._count.comments} {idea._count.comments === 1 ? "comment" : "comments"}
+                        </button>
+                      </div>
+
+                      {/* Inline comments */}
                       {commentIdeaId === idea.id && (
-                        <div className="flex items-center gap-2 mt-3">
-                          <Input
-                            value={commentText}
-                            onChange={(e) => setCommentText(e.target.value)}
-                            placeholder="Add a comment..."
-                            className="text-xs h-8"
-                            onKeyDown={(e) => e.key === "Enter" && handleComment(idea.id)}
-                          />
-                          <Button size="sm" className="h-8 text-xs" onClick={() => handleComment(idea.id)}>Post</Button>
+                        <div className="mt-3 space-y-2 border-t border-[rgba(255,255,255,0.06)] pt-3">
+                          {loadingComments === idea.id && !commentsByIdea[idea.id] ? (
+                            <p className="text-[11px] text-muted-2">Loading comments...</p>
+                          ) : (commentsByIdea[idea.id] || []).length === 0 ? (
+                            <p className="text-[11px] text-muted-2">No comments yet. Be the first to reply.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {(commentsByIdea[idea.id] || []).map((c) => (
+                                <div key={c.id} className="flex items-start gap-2">
+                                  <Avatar className="h-6 w-6">
+                                    {c.user.avatar && <AvatarImage src={c.user.avatar} alt="" />}
+                                    <AvatarFallback className="text-[9px]">
+                                      {initials(c.user.firstName, c.user.lastName)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-[11px]">
+                                      <span className="font-medium">{c.user.firstName} {c.user.lastName}</span>
+                                      <span className="text-muted-2 ml-2">
+                                        {new Date(c.createdAt).toLocaleDateString()}
+                                      </span>
+                                    </p>
+                                    <p className="text-xs text-muted whitespace-pre-wrap break-words">{c.content}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2 pt-1">
+                            <Input
+                              value={commentText}
+                              onChange={(e) => setCommentText(e.target.value)}
+                              placeholder="Add a comment..."
+                              className="text-xs h-8"
+                              onKeyDown={(e) => e.key === "Enter" && handleComment(idea.id)}
+                            />
+                            <Button size="sm" className="h-8 text-xs" onClick={() => handleComment(idea.id)} disabled={!commentText.trim()}>
+                              Post
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
 
-                    {/* Manager Review */}
-                    {isManager && ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "IMPLEMENTED"].includes(idea.status) && (
-                      <Button variant="outline" size="sm" className="text-xs shrink-0" onClick={() => {
-                        setReviewIdea(idea);
-                        setReviewStatus("");
-                        setReviewNotes(idea.reviewNotes || "");
-                      }}>
-                        Review
-                      </Button>
-                    )}
+                    {/* Actions */}
+                    <div className="flex flex-col gap-2 shrink-0">
+                      {isManager && ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "IMPLEMENTED"].includes(idea.status) && (
+                        <Button variant="outline" size="sm" className="text-xs" onClick={() => {
+                          setReviewIdea(idea);
+                          setReviewStatus("");
+                          setReviewNotes(idea.reviewNotes || "");
+                          setRewardType(idea.rewardType || "");
+                          setRewardValue(idea.rewardValue || "");
+                        }}>
+                          Review
+                        </Button>
+                      )}
+                      {canDelete(idea) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs text-red-400 hover:text-red-300 hover:border-red-500/40"
+                          onClick={() => setDeleteIdea(idea)}
+                          aria-label="Delete idea"
+                        >
+                          <Trash2 size={12} />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -388,8 +543,32 @@ export default function IdeasPage() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setReviewIdea(null)}>Cancel</Button>
-            <Button onClick={handleReview} disabled={!reviewStatus}>Update Status</Button>
+            <Button variant="outline" onClick={() => setReviewIdea(null)} disabled={reviewing}>Cancel</Button>
+            <Button onClick={handleReview} disabled={!reviewStatus || reviewing}>
+              {reviewing ? "Updating..." : "Update Status"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteIdea} onOpenChange={(open) => { if (!open) setDeleteIdea(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete idea?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove &ldquo;{deleteIdea?.title}&rdquo;, including all votes and comments. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteIdea(null)} disabled={deleting}>Cancel</Button>
+            <Button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

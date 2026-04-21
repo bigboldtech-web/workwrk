@@ -38,6 +38,16 @@ export function isManager(session: any): boolean {
   ]);
 }
 
+/** Organization-level admin. Gates org-structure changes like creating
+ *  SOP folders and assigning access to them — the SOP folder system
+ *  uses this to keep "who can see what" under a small trusted group. */
+export function isOrgAdmin(session: any): boolean {
+  return hasRole(session, [
+    "SUPER_ADMIN" as AccessLevel,
+    "COMPANY_ADMIN" as AccessLevel,
+  ]);
+}
+
 export function jsonError(message: string, status: number = 400) {
   return NextResponse.json({ error: message }, { status });
 }
