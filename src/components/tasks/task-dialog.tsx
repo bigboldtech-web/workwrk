@@ -12,6 +12,7 @@ import type { Task, TeamMember } from "./types";
 import { formatISODate } from "./types";
 import { LabelPicker } from "./label-picker";
 import { NotesThread } from "./notes-thread";
+import { useToast } from "@/components/ui/toast";
 
 const CATEGORIES = ["Development", "Meetings", "Admin", "Planning", "Review", "Communication", "Research", "Other"];
 
@@ -75,6 +76,7 @@ export function TaskDialog({
   const [subTasks, setSubTasks] = useState<Task[]>([]);
   const [newSubTaskTitle, setNewSubTaskTitle] = useState("");
   const [saving, setSaving] = useState(false);
+  const { error: toastError } = useToast();
 
   // Populate from `task` when editing, or reset on new task.
   useEffect(() => {
@@ -164,6 +166,11 @@ export function TaskDialog({
         payload.endAt = null;
       }
 
+      const reportFailure = async (res: Response) => {
+        const err = await res.json().catch(() => ({}));
+        toastError(err?.error || `Failed to save task (HTTP ${res.status})`);
+      };
+
       if (editing && task) {
         const res = await fetch("/api/tasks", {
           method: "PATCH",
@@ -171,6 +178,7 @@ export function TaskDialog({
           body: JSON.stringify({ id: task.id, ...payload }),
         });
         if (res.ok) { onSaved(); onOpenChange(false); }
+        else await reportFailure(res);
       } else {
         const dates = getRecurringDates(date, recurring, recurringDays, recurringDuration);
         if (dates.length === 1) {
@@ -180,6 +188,7 @@ export function TaskDialog({
             body: JSON.stringify(payload),
           });
           if (res.ok) { onSaved(); onOpenChange(false); }
+          else await reportFailure(res);
         } else {
           // Batch create — recurring tasks are all-day single-day copies.
           const batch = dates.map((d) => ({
@@ -195,8 +204,11 @@ export function TaskDialog({
             body: JSON.stringify({ tasks: batch }),
           });
           if (res.ok) { onSaved(); onOpenChange(false); }
+          else await reportFailure(res);
         }
       }
+    } catch (err: any) {
+      toastError(err?.message || "Failed to save task");
     } finally { setSaving(false); }
   }
 
