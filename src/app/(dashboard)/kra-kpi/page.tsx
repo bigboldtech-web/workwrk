@@ -26,6 +26,10 @@ import {
   Target, Plus, TrendingUp, TrendingDown, Minus, BarChart3, ChevronRight, ChevronDown, Users,
   Pencil, Trash2, UserPlus, AlertTriangle, Sparkles, Loader2, X,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 
 interface Kra {
   id: string;
@@ -1138,25 +1142,42 @@ export default function KraKpiPage() {
                           </thead>
                           <tbody>
                             {kra.kpis.map((kpi) => (
-                              <tr key={kpi.id} className="border-b border-surface-2 last:border-b-0 hover:bg-surface transition-colors">
-                                <td className="px-4 py-2.5">
-                                  <span className="text-sm">{kpi.name}</span>
-                                  {kpi.description && <p className="text-[10px] text-muted-2 truncate max-w-xs">{kpi.description}</p>}
-                                </td>
-                                <td className="px-4 py-2.5 text-center"><Badge variant="outline" className="text-[9px]">{kpi.type}</Badge></td>
-                                <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.unit || "—"}</td>
-                                <td className="px-4 py-2.5 text-center text-xs font-mono text-[#d4ff2e]">{kpi.targetValue != null ? kpi.targetValue : "—"}</td>
-                                <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.frequency}</td>
-                                <td className="px-4 py-2.5 text-right">
-                                  <div className="flex items-center justify-end gap-1">
-                                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1 text-[#d4ff2e] hover:text-[#e2ff6b]" onClick={() => openRecordForKpi(kpi)} title="Record a value">
-                                      <BarChart3 size={11} /> Record
-                                    </Button>
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEditKpi(kpi)} title="Edit"><Pencil size={12} className="text-muted" /></Button>
-                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setShowDeleteConfirm({ type: "kpi", id: kpi.id })} title="Delete"><Trash2 size={12} className="text-red-400" /></Button>
-                                  </div>
-                                </td>
-                              </tr>
+                              <ContextMenu key={kpi.id}>
+                                <ContextMenuTrigger asChild>
+                                  <tr className="border-b border-surface-2 last:border-b-0 hover:bg-surface transition-colors">
+                                    <td className="px-4 py-2.5">
+                                      <span className="text-sm">{kpi.name}</span>
+                                      {kpi.description && <p className="text-[10px] text-muted-2 truncate max-w-xs">{kpi.description}</p>}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-center"><Badge variant="outline" className="text-[9px]">{kpi.type}</Badge></td>
+                                    <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.unit || "—"}</td>
+                                    <td className="px-4 py-2.5 text-center text-xs font-mono text-[#d4ff2e]">{kpi.targetValue != null ? kpi.targetValue : "—"}</td>
+                                    <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.frequency}</td>
+                                    <td className="px-4 py-2.5 text-right">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1 text-[#d4ff2e] hover:text-[#e2ff6b]" onClick={() => openRecordForKpi(kpi)} title="Record a value">
+                                          <BarChart3 size={11} /> Record
+                                        </Button>
+                                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEditKpi(kpi)} title="Edit"><Pencil size={12} className="text-muted" /></Button>
+                                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setShowDeleteConfirm({ type: "kpi", id: kpi.id })} title="Delete"><Trash2 size={12} className="text-red-400" /></Button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </ContextMenuTrigger>
+                                <ContextMenuContent>
+                                  <ContextMenuLabel>KPI</ContextMenuLabel>
+                                  <ContextMenuItem onSelect={() => openRecordForKpi(kpi)}>
+                                    <BarChart3 size={14} /> Record value
+                                  </ContextMenuItem>
+                                  <ContextMenuItem onSelect={() => openEditKpi(kpi)}>
+                                    <Pencil size={14} /> Edit
+                                  </ContextMenuItem>
+                                  <ContextMenuSeparator />
+                                  <ContextMenuItem destructive onSelect={() => setShowDeleteConfirm({ type: "kpi", id: kpi.id })}>
+                                    <Trash2 size={14} /> Delete
+                                  </ContextMenuItem>
+                                </ContextMenuContent>
+                              </ContextMenu>
                             ))}
                           </tbody>
                         </table>

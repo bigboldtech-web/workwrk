@@ -13,8 +13,12 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Plus, Users, CheckCircle, Rocket, Pencil, Trash2, ChevronRight, Download, Star,
+  Plus, Users, CheckCircle, Rocket, Pencil, Trash2, ChevronRight, Download, Star, Eye,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -296,8 +300,9 @@ export default function ReviewsPage() {
                   const total = cycle.reviews?.length ?? cycle._count?.reviews ?? 0;
                   const completed = cycle.reviews?.filter((r: any) => r.status === "COMPLETED").length ?? 0;
                   return (
+                    <ContextMenu key={cycle.id}>
+                      <ContextMenuTrigger asChild>
                     <tr
-                      key={cycle.id}
                       className="border-b border-border/50 hover:bg-surface-2/50 transition-colors cursor-pointer"
                       onClick={() => router.push(`/reviews/${cycle.id}`)}
                     >
@@ -338,6 +343,29 @@ export default function ReviewsPage() {
                         </div>
                       </td>
                     </tr>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuLabel>Review cycle</ContextMenuLabel>
+                        <ContextMenuItem onSelect={() => router.push(`/reviews/${cycle.id}`)}>
+                          <Eye size={14} /> Open
+                        </ContextMenuItem>
+                        {cycle.status === "DRAFT" && (
+                          <ContextMenuItem onSelect={() => handleLaunch(cycle.id)}>
+                            <Rocket size={14} /> Launch
+                          </ContextMenuItem>
+                        )}
+                        <ContextMenuItem onSelect={() => window.open(`/api/export/reviews/${cycle.id}`, "_blank")}>
+                          <Download size={14} /> Export CSV
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onSelect={() => openEdit(cycle)}>
+                          <Pencil size={14} /> Edit
+                        </ContextMenuItem>
+                        <ContextMenuItem destructive onSelect={() => setShowDeleteConfirm(cycle.id)}>
+                          <Trash2 size={14} /> Delete
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 })
               )}

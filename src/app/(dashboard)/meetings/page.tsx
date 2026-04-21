@@ -15,8 +15,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   MessageSquare, Plus, Calendar, Clock, Users, Video,
-  CheckSquare, ArrowRight, FileText,
+  CheckSquare, ArrowRight, FileText, Eye, ExternalLink, Link2, Copy,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 import Link from "next/link";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
@@ -355,42 +359,62 @@ export default function MeetingsPage() {
               onAction={() => setShowAddDialog(true)}
             />
           ) : upcomingMeetings.map((meeting) => (
-            <Link key={meeting.id} href={`/meetings/${meeting.id}`}>
-              <Card className="hover:border-muted-2 transition-all cursor-pointer">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-4">
-                    <div className="text-center min-w-[60px]">
-                      <p className="text-xs text-muted">{formatDate(meeting.scheduledAt)}</p>
-                      <p className="text-sm font-bold font-mono">{formatTime(meeting.scheduledAt)}</p>
-                    </div>
-                    <div className="h-10 w-px bg-border" />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-medium">{meeting.title}</h3>
-                        <Badge className={`text-[10px] ${getMeetingTypeColor(meeting.type)}`}>
-                          {meeting.type.replace(/_/g, " ")}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted">
-                        <span className="flex items-center gap-1"><Clock size={10} /> {meeting.duration} min</span>
-                        <div className="flex items-center gap-1">
-                          <Users size={10} />
-                          <div className="flex -space-x-1.5">
-                            {meeting.attendees.slice(0, 4).map((a, i) => (
-                              <Avatar key={i} className="h-5 w-5 border border-surface">
-                                <AvatarFallback className="text-[8px]">{getInitials(a.user.firstName, a.user.lastName)}</AvatarFallback>
-                              </Avatar>
-                            ))}
-                            {meeting.attendees.length > 4 && <span className="ml-1">+{meeting.attendees.length - 4}</span>}
+            <ContextMenu key={meeting.id}>
+              <ContextMenuTrigger asChild>
+                <Link href={`/meetings/${meeting.id}`}>
+                  <Card className="hover:border-muted-2 transition-all cursor-pointer">
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-4">
+                        <div className="text-center min-w-[60px]">
+                          <p className="text-xs text-muted">{formatDate(meeting.scheduledAt)}</p>
+                          <p className="text-sm font-bold font-mono">{formatTime(meeting.scheduledAt)}</p>
+                        </div>
+                        <div className="h-10 w-px bg-border" />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-medium">{meeting.title}</h3>
+                            <Badge className={`text-[10px] ${getMeetingTypeColor(meeting.type)}`}>
+                              {meeting.type.replace(/_/g, " ")}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-muted">
+                            <span className="flex items-center gap-1"><Clock size={10} /> {meeting.duration} min</span>
+                            <div className="flex items-center gap-1">
+                              <Users size={10} />
+                              <div className="flex -space-x-1.5">
+                                {meeting.attendees.slice(0, 4).map((a, i) => (
+                                  <Avatar key={i} className="h-5 w-5 border border-surface">
+                                    <AvatarFallback className="text-[8px]">{getInitials(a.user.firstName, a.user.lastName)}</AvatarFallback>
+                                  </Avatar>
+                                ))}
+                                {meeting.attendees.length > 4 && <span className="ml-1">+{meeting.attendees.length - 4}</span>}
+                              </div>
+                            </div>
                           </div>
                         </div>
+                        <Button variant="outline" size="sm" onClick={(e) => e.preventDefault()}>Join</Button>
                       </div>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={(e) => e.preventDefault()}>Join</Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
+                    </CardContent>
+                  </Card>
+                </Link>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuLabel>Meeting</ContextMenuLabel>
+                <ContextMenuItem onSelect={() => window.location.assign(`/meetings/${meeting.id}`)}>
+                  <Eye size={14} /> Open details
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => window.open(`/meetings/${meeting.id}`, "_blank", "noopener,noreferrer")}>
+                  <ExternalLink size={14} /> Open in new tab
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(`${window.location.origin}/meetings/${meeting.id}`).catch(() => {}); }}>
+                  <Link2 size={14} /> Copy link
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(meeting.title).catch(() => {}); }}>
+                  <Copy size={14} /> Copy title
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </TabsContent>
 

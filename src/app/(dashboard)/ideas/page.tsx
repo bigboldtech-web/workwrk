@@ -18,8 +18,13 @@ import {
 import { PageHeader } from "@/components/dashboard/page-header";
 import {
   Lightbulb, Plus, ThumbsUp, MessageSquare, Clock, CheckCircle2, XCircle,
-  Award, Send, ChevronRight, Trash2,
+  Award, Send, ChevronRight, Trash2, MessageCircle, Gavel,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel, ContextMenuSub, ContextMenuSubTrigger,
+  ContextMenuSubContent,
+} from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { useSession } from "next-auth/react";
@@ -317,8 +322,24 @@ export default function IdeasPage() {
           {ideas.map((idea) => {
             const hasVoted = idea.votes.some((v) => v.userId === currentUserId);
             const style = STATUS_STYLES[idea.status] || STATUS_STYLES.SUBMITTED;
+            const openReview = () => {
+              setReviewIdea(idea);
+              setReviewStatus("");
+              setReviewNotes(idea.reviewNotes || "");
+              setRewardType(idea.rewardType || "");
+              setRewardValue(idea.rewardValue || "");
+            };
+            const quickReview = (status: string) => {
+              setReviewIdea(idea);
+              setReviewStatus(status);
+              setReviewNotes(idea.reviewNotes || "");
+              setRewardType(idea.rewardType || "");
+              setRewardValue(idea.rewardValue || "");
+            };
             return (
-              <Card key={idea.id} className="hover:border-muted-2 transition-colors">
+              <ContextMenu key={idea.id}>
+                <ContextMenuTrigger asChild>
+              <Card className="hover:border-muted-2 transition-colors">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-4">
                     {/* Vote */}
@@ -436,13 +457,7 @@ export default function IdeasPage() {
                     {/* Actions */}
                     <div className="flex flex-col gap-2 shrink-0">
                       {isManager && ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "IMPLEMENTED"].includes(idea.status) && (
-                        <Button variant="outline" size="sm" className="text-xs" onClick={() => {
-                          setReviewIdea(idea);
-                          setReviewStatus("");
-                          setReviewNotes(idea.reviewNotes || "");
-                          setRewardType(idea.rewardType || "");
-                          setRewardValue(idea.rewardValue || "");
-                        }}>
+                        <Button variant="outline" size="sm" className="text-xs" onClick={openReview}>
                           Review
                         </Button>
                       )}
@@ -461,6 +476,45 @@ export default function IdeasPage() {
                   </div>
                 </CardContent>
               </Card>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuLabel>Idea</ContextMenuLabel>
+                  <ContextMenuItem onSelect={() => handleVote(idea.id)}>
+                    <ThumbsUp size={14} /> {hasVoted ? "Remove upvote" : "Upvote"}
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => toggleComments(idea.id)}>
+                    <MessageCircle size={14} /> {commentIdeaId === idea.id ? "Hide comments" : "Show comments"}
+                  </ContextMenuItem>
+                  {isManager && ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "IMPLEMENTED"].includes(idea.status) && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger>
+                          <Gavel size={14} /> Set status
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent>
+                          <ContextMenuItem onSelect={() => quickReview("UNDER_REVIEW")}>Under review</ContextMenuItem>
+                          <ContextMenuItem onSelect={() => quickReview("APPROVED")}>Approve</ContextMenuItem>
+                          <ContextMenuItem onSelect={() => quickReview("REJECTED")}>Reject</ContextMenuItem>
+                          <ContextMenuItem onSelect={() => quickReview("IMPLEMENTED")}>Mark implemented</ContextMenuItem>
+                          <ContextMenuItem onSelect={() => quickReview("REWARDED")}>Reward</ContextMenuItem>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      <ContextMenuItem onSelect={openReview}>
+                        <Gavel size={14} /> Review with notes...
+                      </ContextMenuItem>
+                    </>
+                  )}
+                  {canDelete(idea) && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem destructive onSelect={() => setDeleteIdea(idea)}>
+                        <Trash2 size={14} /> Delete idea
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
             );
           })}
         </div>

@@ -13,9 +13,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel, ContextMenuSub, ContextMenuSubTrigger,
+  ContextMenuSubContent, ContextMenuRadioGroup, ContextMenuRadioItem,
+} from "@/components/ui/context-menu";
+import {
   BookOpen, Plus, Search, FileText, Clock, CheckCircle, AlertTriangle,
   Eye, Edit3, Users, BarChart3, ClipboardList, ShieldCheck,
   PenLine, Video, ListChecks, Download, Archive, RotateCcw, Trash2,
+  FolderOpen, FolderInput, Link2, ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -44,6 +50,7 @@ interface SOP {
   publishedAt: string | null;
   compliance: SOPCompliance[];
   createdAt: string;
+  folderId?: string | null;
 }
 
 function getComplianceScore(sop: SOP): number {
@@ -564,9 +571,51 @@ export default function SOPsPage() {
       const res = await fetch(`/api/sops/${sopId}`, { method: "DELETE" });
       if (res.ok) {
         setArchivedSops(archivedSops.filter((s) => s.id !== sopId));
+        setSops((prev) => prev.filter((s) => s.id !== sopId));
         toastSuccess("SOP permanently deleted");
       } else { toastError("Failed to delete"); }
     } catch { toastError("Failed to delete"); }
+  }
+
+  async function handleMoveToFolder(sopId: string, folderId: string | null) {
+    const target = folderId ? folders.find((f) => f.id === folderId)?.name || "folder" : "Unfoldered";
+    try {
+      const res = await fetch(`/api/sops/${sopId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderId }),
+      });
+      if (res.ok) {
+        setSops((prev) => prev.map((s) => (s.id === sopId ? { ...s, folderId } : s)));
+        toastSuccess(`Moved to ${target}`);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to move SOP");
+      }
+    } catch { toastError("Failed to move SOP"); }
+  }
+
+  async function handleArchiveSOP(sopId: string) {
+    try {
+      const res = await fetch(`/api/sops/${sopId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "ARCHIVED" }),
+      });
+      if (res.ok) {
+        setSops((prev) => prev.filter((s) => s.id !== sopId));
+        fetchArchivedSops();
+        toastSuccess("SOP archived");
+      } else { toastError("Failed to archive"); }
+    } catch { toastError("Failed to archive"); }
+  }
+
+  function handleCopyLink(sopId: string) {
+    const url = `${window.location.origin}/sops/${sopId}`;
+    navigator.clipboard.writeText(url).then(
+      () => toastSuccess("Link copied"),
+      () => toastError("Couldn't copy link"),
+    );
   }
 
   const savedCatNames = savedCategories.map((c: any) => c.name);
@@ -894,92 +943,115 @@ export default function SOPsPage() {
               const steps = getStepsCount(sop);
               const assigned = getAssignedCount(sop);
               return (
-                <Link
+                <SOPContextMenu
                   key={sop.id}
-                  href={`/sops/${sop.id}`}
-                  className="grid grid-cols-[1fr] md:grid-cols-[minmax(0,1fr)_140px_100px_80px_80px_100px] items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
+                  sop={sop}
+                  folders={folders}
+                  canManage={canManageSOPs}
+                  isOrgAdmin={isOrgAdmin}
+                  onMove={handleMoveToFolder}
+                  onArchive={handleArchiveSOP}
+                  onDelete={handlePermanentDelete}
+                  onCopyLink={handleCopyLink}
                 >
-                  {/* Title + status */}
-                  <div className="min-w-0 flex items-center gap-3">
-                    <FileText size={16} className="text-muted shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="font-medium text-sm truncate">{sop.title}</span>
-                        {getStatusBadge(sop.status)}
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px] text-muted">
-                        <span>{assigned > 0 ? `${assigned} assigned` : "Not assigned"}</span>
+                  <Link
+                    href={`/sops/${sop.id}`}
+                    className="grid grid-cols-[1fr] md:grid-cols-[minmax(0,1fr)_140px_100px_80px_80px_100px] items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
+                  >
+                    {/* Title + status */}
+                    <div className="min-w-0 flex items-center gap-3">
+                      <FileText size={16} className="text-muted shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="font-medium text-sm truncate">{sop.title}</span>
+                          {getStatusBadge(sop.status)}
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-muted">
+                          <span>{assigned > 0 ? `${assigned} assigned` : "Not assigned"}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Category */}
-                  <div className="hidden md:flex items-center gap-1 min-w-0">
-                    {sop.category ? (
-                      <Badge variant="outline" className="text-[10px] truncate">{sop.category}</Badge>
-                    ) : (
-                      <span className="text-[11px] text-muted">—</span>
-                    )}
-                  </div>
+                    {/* Category */}
+                    <div className="hidden md:flex items-center gap-1 min-w-0">
+                      {sop.category ? (
+                        <Badge variant="outline" className="text-[10px] truncate">{sop.category}</Badge>
+                      ) : (
+                        <span className="text-[11px] text-muted">—</span>
+                      )}
+                    </div>
 
-                  {/* Compliance */}
-                  <div className="hidden md:flex items-center gap-2 justify-end">
-                    {sop.status === "PUBLISHED" ? (
-                      <>
-                        <Progress value={compliance} className="h-1 w-12" indicatorClassName={getComplianceColor(compliance)} />
-                        <span className={`text-xs font-mono tabular-nums ${getComplianceText(compliance)}`}>{compliance}%</span>
-                      </>
-                    ) : (
-                      <span className="text-[11px] text-muted">—</span>
-                    )}
-                  </div>
+                    {/* Compliance */}
+                    <div className="hidden md:flex items-center gap-2 justify-end">
+                      {sop.status === "PUBLISHED" ? (
+                        <>
+                          <Progress value={compliance} className="h-1 w-12" indicatorClassName={getComplianceColor(compliance)} />
+                          <span className={`text-xs font-mono tabular-nums ${getComplianceText(compliance)}`}>{compliance}%</span>
+                        </>
+                      ) : (
+                        <span className="text-[11px] text-muted">—</span>
+                      )}
+                    </div>
 
-                  {/* Steps */}
-                  <div className="hidden md:block text-right text-xs font-mono tabular-nums text-muted">{steps}</div>
+                    {/* Steps */}
+                    <div className="hidden md:block text-right text-xs font-mono tabular-nums text-muted">{steps}</div>
 
-                  {/* Version */}
-                  <div className="hidden md:block text-right">
-                    <Badge variant="outline" className="text-[10px]">v{sop.version}</Badge>
-                  </div>
+                    {/* Version */}
+                    <div className="hidden md:block text-right">
+                      <Badge variant="outline" className="text-[10px]">v{sop.version}</Badge>
+                    </div>
 
-                  {/* Date */}
-                  <div className="hidden md:block text-right text-[11px] font-mono tabular-nums text-muted">{formatDate(sop.publishedAt || sop.createdAt)}</div>
-                </Link>
+                    {/* Date */}
+                    <div className="hidden md:block text-right text-[11px] font-mono tabular-nums text-muted">{formatDate(sop.publishedAt || sop.createdAt)}</div>
+                  </Link>
+                </SOPContextMenu>
               );
             }) : filtered.map((sop) => {
               const compliance = getComplianceScore(sop);
               const steps = getStepsCount(sop);
               const assigned = getAssignedCount(sop);
               return (
-                <Link key={sop.id} href={`/sops/${sop.id}`}><Card className="hover:border-muted-2 transition-all cursor-pointer group">
-                  <CardContent className="p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5">
-                        <FileText size={14} className="text-muted shrink-0" />
-                        {getStatusBadge(sop.status)}
+                <SOPContextMenu
+                  key={sop.id}
+                  sop={sop}
+                  folders={folders}
+                  canManage={canManageSOPs}
+                  isOrgAdmin={isOrgAdmin}
+                  onMove={handleMoveToFolder}
+                  onArchive={handleArchiveSOP}
+                  onDelete={handlePermanentDelete}
+                  onCopyLink={handleCopyLink}
+                >
+                  <Link href={`/sops/${sop.id}`}><Card className="hover:border-muted-2 transition-all cursor-pointer group">
+                    <CardContent className="p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5">
+                          <FileText size={14} className="text-muted shrink-0" />
+                          {getStatusBadge(sop.status)}
+                        </div>
+                        <Badge variant="outline" className="text-[9px]">v{sop.version}</Badge>
                       </div>
-                      <Badge variant="outline" className="text-[9px]">v{sop.version}</Badge>
-                    </div>
-                    <h3 className="font-semibold text-xs mb-1 truncate">{sop.title}</h3>
-                    <div className="flex items-center gap-1 mb-2">
-                      {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
-                      {sop.subcategory && <Badge variant="outline" className="text-[9px]">{sop.subcategory}</Badge>}
-                    </div>
-                    {sop.status === "PUBLISHED" && (
-                      <div className="flex items-center gap-2 mb-2">
-                        <Progress value={compliance} className="h-1 flex-1" indicatorClassName={getComplianceColor(compliance)} />
-                        <span className={`text-[10px] font-mono ${getComplianceText(compliance)}`}>{compliance}%</span>
+                      <h3 className="font-semibold text-xs mb-1 truncate">{sop.title}</h3>
+                      <div className="flex items-center gap-1 mb-2">
+                        {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
+                        {sop.subcategory && <Badge variant="outline" className="text-[9px]">{sop.subcategory}</Badge>}
                       </div>
-                    )}
-                    <div className="flex items-center justify-between text-[9px] text-muted">
-                      <div className="flex items-center gap-2">
-                        <span>{steps} steps</span>
-                        {assigned > 0 && <span>{assigned} assigned</span>}
+                      {sop.status === "PUBLISHED" && (
+                        <div className="flex items-center gap-2 mb-2">
+                          <Progress value={compliance} className="h-1 flex-1" indicatorClassName={getComplianceColor(compliance)} />
+                          <span className={`text-[10px] font-mono ${getComplianceText(compliance)}`}>{compliance}%</span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between text-[9px] text-muted">
+                        <div className="flex items-center gap-2">
+                          <span>{steps} steps</span>
+                          {assigned > 0 && <span>{assigned} assigned</span>}
+                        </div>
+                        <span>{formatDate(sop.publishedAt || sop.createdAt)}</span>
                       </div>
-                      <span>{formatDate(sop.publishedAt || sop.createdAt)}</span>
-                    </div>
-                  </CardContent>
-                </Card></Link>
+                    </CardContent>
+                  </Card></Link>
+                </SOPContextMenu>
               );
             })
         }
@@ -1018,5 +1090,90 @@ export default function SOPsPage() {
         />
       )}
     </div>
+  );
+}
+
+type SOPFolder = { id: string; name: string; color: string | null; _count: { sops: number; access: number } };
+
+function SOPContextMenu({
+  sop,
+  folders,
+  canManage,
+  isOrgAdmin,
+  onMove,
+  onArchive,
+  onDelete,
+  onCopyLink,
+  children,
+}: {
+  sop: SOP;
+  folders: SOPFolder[];
+  canManage: boolean;
+  isOrgAdmin: boolean;
+  onMove: (sopId: string, folderId: string | null) => void;
+  onArchive: (sopId: string) => void;
+  onDelete: (sopId: string) => void;
+  onCopyLink: (sopId: string) => void;
+  children: React.ReactNode;
+}) {
+  const isArchived = sop.status === "ARCHIVED";
+  const href = `/sops/${sop.id}`;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuLabel>SOP</ContextMenuLabel>
+        <ContextMenuItem onSelect={() => window.location.assign(href)}>
+          <Eye size={14} /> Open
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => window.open(href, "_blank", "noopener,noreferrer")}>
+          <ExternalLink size={14} /> Open in new tab
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onCopyLink(sop.id)}>
+          <Link2 size={14} /> Copy link
+        </ContextMenuItem>
+        {canManage && !isArchived && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <FolderInput size={14} /> Move to folder
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                <ContextMenuRadioGroup
+                  value={sop.folderId ?? "__none__"}
+                  onValueChange={(v) => onMove(sop.id, v === "__none__" ? null : v)}
+                >
+                  <ContextMenuRadioItem value="__none__">
+                    <FolderOpen size={13} className="text-muted" /> Unfoldered
+                  </ContextMenuRadioItem>
+                  {folders.length === 0 ? (
+                    <div className="px-2.5 py-2 text-[11px] text-muted">No folders yet</div>
+                  ) : (
+                    folders.map((f) => (
+                      <ContextMenuRadioItem key={f.id} value={f.id}>
+                        <FolderOpen size={13} style={{ color: f.color || undefined }} />
+                        {f.name}
+                      </ContextMenuRadioItem>
+                    ))
+                  )}
+                </ContextMenuRadioGroup>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+            <ContextMenuItem onSelect={() => onArchive(sop.id)}>
+              <Archive size={14} /> Archive
+            </ContextMenuItem>
+          </>
+        )}
+        {isOrgAdmin && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem destructive onSelect={() => onDelete(sop.id)}>
+              <Trash2 size={14} /> Delete permanently
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

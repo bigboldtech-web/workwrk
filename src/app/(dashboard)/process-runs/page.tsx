@@ -24,8 +24,14 @@ import {
   Copy,
   ExternalLink,
   ListChecks,
+  FileText,
+  Eye,
 } from "lucide-react";
 import Link from "next/link";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -230,8 +236,9 @@ export default function ProcessRunsPage() {
               new Date(run.dueDate) < new Date();
 
             return (
+              <ContextMenu key={run.id}>
+                <ContextMenuTrigger asChild>
               <Card
-                key={run.id}
                 className="hover:border-muted-2 transition-all"
               >
                 <CardContent className="p-4">
@@ -315,6 +322,28 @@ export default function ProcessRunsPage() {
                   </div>
                 </CardContent>
               </Card>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuLabel>Process run</ContextMenuLabel>
+                  {run.shareToken && (
+                    <>
+                      <ContextMenuItem onSelect={() => window.open(`/run/${run.shareToken}`, "_blank")}>
+                        <Eye size={14} /> Open run
+                      </ContextMenuItem>
+                      <ContextMenuItem onSelect={() => copyLink(run.shareToken!)}>
+                        <Link2 size={14} /> Copy share link
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                    </>
+                  )}
+                  <ContextMenuItem onSelect={() => window.location.assign(`/sops/${run.sop.id}`)}>
+                    <FileText size={14} /> View source SOP
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(run.title).catch(() => {}); }}>
+                    <Copy size={14} /> Copy title
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             );
           })}
         </div>

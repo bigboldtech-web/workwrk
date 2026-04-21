@@ -19,8 +19,12 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import {
   Package, Plus, Search, Laptop, Monitor, Smartphone, Tablet, Keyboard,
   Mouse, Headphones, Video, Car, CreditCard, Armchair, Pencil, Trash2,
-  UserPlus, UserMinus, X, Filter,
+  UserPlus, UserMinus, X, Filter, Eye,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 
 const ASSET_TYPES = [
   { value: "LAPTOP", label: "Laptop", icon: Laptop },
@@ -314,32 +318,56 @@ export default function AssetsPage() {
             const Icon = getTypeIcon(asset.type);
             const isSelected = selectedAsset?.id === asset.id;
             return (
-              <button
-                key={asset.id}
-                onClick={() => setSelectedAsset(asset)}
-                className={`w-full text-left p-3 rounded-lg border transition-all ${isSelected ? "border-[rgba(212,255,46,0.35)] bg-[#d4ff2e]/5" : "border-border hover:bg-surface-2"}`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="shrink-0 w-8 h-8 rounded-lg bg-surface-2 flex items-center justify-center">
-                    <Icon size={16} className="text-muted" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium truncate">{asset.name}</span>
-                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 shrink-0 ${getStatusColor(asset.status)}`}>
-                        {asset.status.replace("_", " ")}
-                      </Badge>
+              <ContextMenu key={asset.id}>
+                <ContextMenuTrigger asChild>
+                  <button
+                    onClick={() => setSelectedAsset(asset)}
+                    className={`w-full text-left p-3 rounded-lg border transition-all ${isSelected ? "border-[rgba(212,255,46,0.35)] bg-[#d4ff2e]/5" : "border-border hover:bg-surface-2"}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="shrink-0 w-8 h-8 rounded-lg bg-surface-2 flex items-center justify-center">
+                        <Icon size={16} className="text-muted" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">{asset.name}</span>
+                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 shrink-0 ${getStatusColor(asset.status)}`}>
+                            {asset.status.replace("_", " ")}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[11px] text-muted">{ASSET_TYPES.find((t) => t.value === asset.type)?.label}</span>
+                          {asset.brand && <span className="text-[11px] text-muted">· {asset.brand}</span>}
+                          {asset.assignedTo && (
+                            <span className="text-[11px] text-[#d4ff2e]">· {asset.assignedTo.firstName} {asset.assignedTo.lastName}</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[11px] text-muted">{ASSET_TYPES.find((t) => t.value === asset.type)?.label}</span>
-                      {asset.brand && <span className="text-[11px] text-muted">· {asset.brand}</span>}
-                      {asset.assignedTo && (
-                        <span className="text-[11px] text-[#d4ff2e]">· {asset.assignedTo.firstName} {asset.assignedTo.lastName}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </button>
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuLabel>Asset</ContextMenuLabel>
+                  <ContextMenuItem onSelect={() => setSelectedAsset(asset)}>
+                    <Eye size={14} /> View details
+                  </ContextMenuItem>
+                  {isManagerRole && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onSelect={() => openAssign(asset)}>
+                        <UserPlus size={14} /> {asset.assignedTo ? "Reassign" : "Assign"}
+                      </ContextMenuItem>
+                      <ContextMenuItem onSelect={() => openEdit(asset)}>
+                        <Pencil size={14} /> Edit
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem destructive onSelect={() => setShowDeleteConfirm(asset.id)}>
+                        <Trash2 size={14} /> Delete
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
             );
           })}
         </div>

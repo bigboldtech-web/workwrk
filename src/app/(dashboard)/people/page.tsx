@@ -16,11 +16,15 @@ import { KraPicker } from "@/components/ui/kra-picker";
 import {
   Search, Plus, Users, TrendingUp, TrendingDown, Minus,
   MoreHorizontal, Mail, Building2, UserCheck, Download, Upload, Trash2,
-  UserMinus, Target, BookOpen, Globe,
+  UserMinus, Target, BookOpen, Globe, Eye, ExternalLink, Copy, Edit3, ClipboardList,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
@@ -622,8 +626,16 @@ export default function PeoplePage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((person) => {
             const isSelected = selectedIds.has(person.id);
+            const copyEmail = () => {
+              navigator.clipboard.writeText(person.email).then(
+                () => toastSuccess("Email copied"),
+                () => toastError("Couldn't copy email"),
+              );
+            };
             return (
-              <Card key={person.id} className={`hover:border-muted-2 transition-all group cursor-pointer ${isSelected ? "border-[rgba(212,255,46,0.4)] bg-[rgba(212,255,46,0.06)]" : ""}`} onClick={() => router.push(`/people/${person.id}`)}>
+              <ContextMenu key={person.id}>
+                <ContextMenuTrigger asChild>
+              <Card className={`hover:border-muted-2 transition-all group cursor-pointer ${isSelected ? "border-[rgba(212,255,46,0.4)] bg-[rgba(212,255,46,0.06)]" : ""}`} onClick={() => router.push(`/people/${person.id}`)}>
                 <CardContent className="p-5">
                   <div className="flex items-start gap-3">
                     {canManagePeople && <button
@@ -683,6 +695,41 @@ export default function PeoplePage() {
                   )}
                 </CardContent>
               </Card>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuLabel>{person.firstName} {person.lastName}</ContextMenuLabel>
+                  <ContextMenuItem onSelect={() => router.push(`/people/${person.id}`)}>
+                    <Eye size={14} /> View profile
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => window.open(`/people/${person.id}`, "_blank", "noopener,noreferrer")}>
+                    <ExternalLink size={14} /> Open in new tab
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={copyEmail}>
+                    <Copy size={14} /> Copy email
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => window.location.assign(`mailto:${person.email}`)}>
+                    <Mail size={14} /> Send email
+                  </ContextMenuItem>
+                  {canManagePeople && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onSelect={() => router.push(`/kra-kpi`)}>
+                        <Target size={14} /> Assign KRA
+                      </ContextMenuItem>
+                      <ContextMenuItem onSelect={() => router.push(`/reviews`)}>
+                        <ClipboardList size={14} /> Start review
+                      </ContextMenuItem>
+                      <ContextMenuItem onSelect={() => router.push(`/people/${person.id}`)}>
+                        <Edit3 size={14} /> Edit details
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem destructive onSelect={() => setDeleteTarget(person)}>
+                        <UserMinus size={14} /> Remove from organization
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
             );
           })}
           {filtered.length === 0 && !loading && (

@@ -18,6 +18,10 @@ import {
   ClipboardCheck, Plus, Send, Trash2, Globe, Building2, Users as UsersIcon, Check, MoreHorizontal, Pencil, Archive, RotateCcw, BarChart3, Loader2,
 } from "lucide-react";
 import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
+import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/toast";
@@ -306,7 +310,9 @@ export default function SurveysPage() {
               : UsersIcon;
             const AudIcon = audienceIcon;
             return (
-              <Card key={survey.id} className={!survey.hasResponded && survey.status === "ACTIVE" && survey.inAudience ? "border-amber-500/20" : ""}>
+              <ContextMenu key={survey.id}>
+                <ContextMenuTrigger asChild>
+              <Card className={!survey.hasResponded && survey.status === "ACTIVE" && survey.inAudience ? "border-amber-500/20" : ""}>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
                     <ClipboardCheck size={18} className="text-[color:var(--accent-strong)] shrink-0" />
@@ -364,6 +370,41 @@ export default function SurveysPage() {
                   </div>
                 </CardContent>
               </Card>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuLabel>Survey</ContextMenuLabel>
+                  {survey.status === "ACTIVE" && !survey.hasResponded && survey.inAudience && (
+                    <ContextMenuItem onSelect={() => { setRespondingSurvey(survey); setAnswers({}); }}>
+                      <Send size={14} /> Respond
+                    </ContextMenuItem>
+                  )}
+                  {isManager && (
+                    <>
+                      <ContextMenuItem onSelect={() => openResponses(survey)}>
+                        <BarChart3 size={14} /> View responses
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onSelect={() => openEdit(survey)}>
+                        <Pencil size={14} /> Edit
+                      </ContextMenuItem>
+                      {survey.status === "ACTIVE" && (
+                        <ContextMenuItem onSelect={() => handleSetStatus(survey.id, "CLOSED")}>
+                          <Archive size={14} /> Close survey
+                        </ContextMenuItem>
+                      )}
+                      {survey.status === "CLOSED" && (
+                        <ContextMenuItem onSelect={() => handleSetStatus(survey.id, "ACTIVE")}>
+                          <RotateCcw size={14} /> Reopen
+                        </ContextMenuItem>
+                      )}
+                      <ContextMenuSeparator />
+                      <ContextMenuItem destructive onSelect={() => setDeleteTarget(survey)}>
+                        <Trash2 size={14} /> Delete
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
             );
           })}
         </div>

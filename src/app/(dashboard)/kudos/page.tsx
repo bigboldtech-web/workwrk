@@ -5,10 +5,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Heart, Sparkles, ArrowRight, Loader2 } from "lucide-react";
+import { Heart, Sparkles, ArrowRight, Loader2, User, Copy } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { KudosModal } from "@/components/kudos/kudos-modal";
 import { KudosReactions, type ReactionCount } from "@/components/kudos/kudos-reactions";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 interface KudosItem {
@@ -38,6 +43,7 @@ function timeAgo(iso: string) {
 }
 
 export default function KudosFeedPage() {
+  const router = useRouter();
   const [kudos, setKudos] = useState<KudosItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
@@ -174,8 +180,9 @@ export default function KudosFeedPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {kudos.map((k) => (
+            <ContextMenu key={k.id}>
+              <ContextMenuTrigger asChild>
             <div
-              key={k.id}
               className="relative rounded-xl border border-border bg-surface-2/50 p-5 hover:bg-surface-2 transition-colors"
             >
               {k.companyValue && (
@@ -218,6 +225,24 @@ export default function KudosFeedPage() {
                 </div>
               </div>
             </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuLabel>Kudos</ContextMenuLabel>
+                <ContextMenuItem onSelect={() => router.push(`/people/${k.receiver.id}`)}>
+                  <User size={14} /> View {k.receiver.firstName}&apos;s profile
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => router.push(`/people/${k.giver.id}`)}>
+                  <User size={14} /> View {k.giver.firstName}&apos;s profile
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(k.message).catch(() => {}); }}>
+                  <Copy size={14} /> Copy message
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => setModalOpen(true)}>
+                  <Heart size={14} /> Give kudos
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </div>
       )}

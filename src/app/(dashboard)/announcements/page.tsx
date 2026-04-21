@@ -15,8 +15,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Megaphone, Plus, Pin, Trash2, AlertTriangle, PartyPopper, FileText, Calendar,
+  Megaphone, Plus, Pin, PinOff, Trash2, AlertTriangle, PartyPopper, FileText, Calendar, Copy,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -60,6 +64,31 @@ export default function AnnouncementsPage() {
       .catch((err) => console.error("Failed to fetch announcements:", err))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleTogglePin(a: any) {
+    try {
+      const res = await fetch(`/api/announcements/${a.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned: !a.pinned }),
+      });
+      if (res.ok) {
+        setAnnouncements((prev) => prev.map((x) => (x.id === a.id ? { ...x, pinned: !a.pinned } : x)));
+        toastSuccess(a.pinned ? "Unpinned" : "Pinned");
+      } else { toastError("Failed to update"); }
+    } catch { toastError("Failed to update"); }
+  }
+
+  async function handleDeleteAnnouncement(id: string) {
+    if (!confirm("Delete this announcement?")) return;
+    try {
+      const res = await fetch(`/api/announcements/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setAnnouncements((prev) => prev.filter((x) => x.id !== id));
+        toastSuccess("Deleted");
+      } else { toastError("Failed to delete"); }
+    } catch { toastError("Failed to delete"); }
+  }
 
   async function handleCreate() {
     if (!form.title.trim() || !form.content.trim() || !form.expiresAt) return;
@@ -112,26 +141,48 @@ export default function AnnouncementsPage() {
       ) : (
         <div className="space-y-3">
           {announcements.map((a) => (
-            <Card key={a.id}>
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <Megaphone size={16} className="mt-1 text-[#d4ff2e] shrink-0" />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-sm font-semibold">{a.title}</h3>
-                      <Badge variant="outline" className="text-[10px]">{a.type}</Badge>
-                      <Badge variant={a.priority === "URGENT" ? "destructive" : "secondary"} className="text-[10px]">{a.priority}</Badge>
-                      {a.pinned && <Pin size={12} className="text-[#d4ff2e]" />}
+            <ContextMenu key={a.id}>
+              <ContextMenuTrigger asChild>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <Megaphone size={16} className="mt-1 text-[#d4ff2e] shrink-0" />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-sm font-semibold">{a.title}</h3>
+                          <Badge variant="outline" className="text-[10px]">{a.type}</Badge>
+                          <Badge variant={a.priority === "URGENT" ? "destructive" : "secondary"} className="text-[10px]">{a.priority}</Badge>
+                          {a.pinned && <Pin size={12} className="text-[#d4ff2e]" />}
+                        </div>
+                        <p className="text-xs text-muted">{a.content}</p>
+                        <p className="text-[10px] text-muted-2 mt-2">
+                          {new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          {a.expiresAt && ` · Expires ${new Date(a.expiresAt).toLocaleDateString()}`}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted">{a.content}</p>
-                    <p className="text-[10px] text-muted-2 mt-2">
-                      {new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      {a.expiresAt && ` · Expires ${new Date(a.expiresAt).toLocaleDateString()}`}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuLabel>Announcement</ContextMenuLabel>
+                <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(`${a.title}\n\n${a.content}`).catch(() => {}); }}>
+                  <Copy size={14} /> Copy text
+                </ContextMenuItem>
+                {isManager && (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => handleTogglePin(a)}>
+                      {a.pinned ? <><PinOff size={14} /> Unpin</> : <><Pin size={14} /> Pin to top</>}
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem destructive onSelect={() => handleDeleteAnnouncement(a.id)}>
+                      <Trash2 size={14} /> Delete
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </div>
       )}

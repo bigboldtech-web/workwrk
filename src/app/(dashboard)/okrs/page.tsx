@@ -17,8 +17,12 @@ import {
 } from "@/components/ui/select";
 import {
   Target, Plus, ChevronDown, ChevronRight, ArrowRight, Trash2, CheckCircle2,
-  Building2, User, Globe,
+  Building2, User, Globe, TrendingUp, Maximize2,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -231,7 +235,9 @@ export default function OKRsPage() {
                   const isExp = expanded.has(okr.id);
                   const statusStyle = STATUS_COLORS[okr.status] || STATUS_COLORS.ON_TRACK;
                   return (
-                    <Card key={okr.id} className="overflow-hidden">
+                    <ContextMenu key={okr.id}>
+                      <ContextMenuTrigger asChild>
+                    <Card className="overflow-hidden">
                       <div className="p-4 cursor-pointer" onClick={() => toggle(okr.id)}>
                         <div className="flex items-center gap-3">
                           <button className="shrink-0 text-muted">{isExp ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
@@ -291,6 +297,25 @@ export default function OKRsPage() {
                         </div>
                       )}
                     </Card>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuLabel>Objective</ContextMenuLabel>
+                        <ContextMenuItem onSelect={() => toggle(okr.id)}>
+                          <Maximize2 size={14} /> {isExp ? "Collapse" : "Expand"}
+                        </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => { setCheckInOkr(okr); setCheckInValues({}); }}>
+                          <TrendingUp size={14} /> Update progress
+                        </ContextMenuItem>
+                        {isManager && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem destructive onSelect={() => setDeleteOkr(okr)}>
+                              <Trash2 size={14} /> Delete
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 })}
               </div>

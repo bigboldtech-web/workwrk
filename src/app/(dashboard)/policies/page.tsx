@@ -12,8 +12,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Shield, Plus, CheckCircle2, X, Save, Trash2, Pencil,
+  Shield, Plus, CheckCircle2, X, Save, Trash2, Pencil, Eye, Copy,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { useSession } from "next-auth/react";
@@ -154,18 +158,47 @@ export default function PoliciesPage() {
         ) : (
           <div className="divide-y divide-border">
             {policies.map((p) => (
-              <button key={p.id} onClick={() => { setSelectedPolicy(p); setCreating(false); }}
-                className={`w-full text-left p-3 hover:bg-surface-2 transition-colors ${selectedPolicy?.id === p.id ? "bg-[rgba(212,255,46,0.06)] border-l-2 border-l-[#d4ff2e]" : ""}`}>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <Shield size={11} className="text-[#d4ff2e] shrink-0" />
-                  <span className="text-xs font-semibold truncate flex-1">{p.title}</span>
-                  {p.requiresAck && !p.acknowledged && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />}
-                </div>
-                <div className="flex items-center gap-1.5 ml-5">
-                  {p.category && <Badge variant="outline" className="text-[8px]">{p.category}</Badge>}
-                  {p.acknowledged && <Badge variant="success" className="text-[8px]">Done</Badge>}
-                </div>
-              </button>
+              <ContextMenu key={p.id}>
+                <ContextMenuTrigger asChild>
+                  <button onClick={() => { setSelectedPolicy(p); setCreating(false); }}
+                    className={`w-full text-left p-3 hover:bg-surface-2 transition-colors ${selectedPolicy?.id === p.id ? "bg-[rgba(212,255,46,0.06)] border-l-2 border-l-[#d4ff2e]" : ""}`}>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <Shield size={11} className="text-[#d4ff2e] shrink-0" />
+                      <span className="text-xs font-semibold truncate flex-1">{p.title}</span>
+                      {p.requiresAck && !p.acknowledged && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />}
+                    </div>
+                    <div className="flex items-center gap-1.5 ml-5">
+                      {p.category && <Badge variant="outline" className="text-[8px]">{p.category}</Badge>}
+                      {p.acknowledged && <Badge variant="success" className="text-[8px]">Done</Badge>}
+                    </div>
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuLabel>Policy</ContextMenuLabel>
+                  <ContextMenuItem onSelect={() => { setSelectedPolicy(p); setCreating(false); }}>
+                    <Eye size={14} /> View
+                  </ContextMenuItem>
+                  {p.requiresAck && !p.acknowledged && (
+                    <ContextMenuItem onSelect={() => handleAcknowledge(p.id)}>
+                      <CheckCircle2 size={14} /> Acknowledge
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(p.title).catch(() => {}); }}>
+                    <Copy size={14} /> Copy title
+                  </ContextMenuItem>
+                  {isManager && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onSelect={() => { setSelectedPolicy(p); startEditing(p); }}>
+                        <Pencil size={14} /> Edit
+                      </ContextMenuItem>
+                      <ContextMenuItem destructive onSelect={() => handleDelete(p.id)}>
+                        <Trash2 size={14} /> Delete
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
             ))}
           </div>
         )}

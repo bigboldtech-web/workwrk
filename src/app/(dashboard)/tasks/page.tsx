@@ -13,7 +13,12 @@ import {
   Plus, ChevronLeft, ChevronRight, Calendar, List, Clock,
   CheckCircle2, Circle, Play, Users, AlertCircle, Filter,
   CalendarDays, CalendarRange, GanttChart, Activity,
+  Edit3, Trash2,
 } from "lucide-react";
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+  ContextMenuSeparator, ContextMenuLabel,
+} from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 
@@ -556,33 +561,74 @@ export default function TasksPage() {
                   </div>
                   <div className="space-y-2">
                     {dayTasks.map((task) => (
-                      <Card key={task.id} className="hover:border-muted-2 transition-colors cursor-pointer" onClick={() => openEditTask(task)}>
-                        <CardContent className="p-3 flex items-center gap-3">
-                          <button onClick={(e) => { e.stopPropagation(); toggleStatus(task.id, task.status); }} className="shrink-0">
-                            {task.status === "COMPLETED" ? <CheckCircle2 size={18} className="text-[#d4ff2e]" />
-                              : task.status === "IN_PROGRESS" ? <Play size={18} className="text-amber-400" />
-                              : <Circle size={18} className="text-muted" />}
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-medium ${task.status === "COMPLETED" ? "line-through text-muted" : ""}`}>{task.title}</p>
-                            {task.description && <p className="text-xs text-muted truncate">{task.description}</p>}
-                            {(task.labels || []).length > 0 && (
-                              <div className="flex items-center gap-1 mt-1">
-                                {task.labels!.map((lb) => (
-                                  <span key={lb.labelId} className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px]" style={{ backgroundColor: `${lb.label.color}22`, color: lb.label.color }}>
-                                    {lb.label.name}
-                                  </span>
-                                ))}
+                      <ContextMenu key={task.id}>
+                        <ContextMenuTrigger asChild>
+                          <Card className="hover:border-muted-2 transition-colors cursor-pointer" onClick={() => openEditTask(task)}>
+                            <CardContent className="p-3 flex items-center gap-3">
+                              <button onClick={(e) => { e.stopPropagation(); toggleStatus(task.id, task.status); }} className="shrink-0">
+                                {task.status === "COMPLETED" ? <CheckCircle2 size={18} className="text-[#d4ff2e]" />
+                                  : task.status === "IN_PROGRESS" ? <Play size={18} className="text-amber-400" />
+                                  : <Circle size={18} className="text-muted" />}
+                              </button>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium ${task.status === "COMPLETED" ? "line-through text-muted" : ""}`}>{task.title}</p>
+                                {task.description && <p className="text-xs text-muted truncate">{task.description}</p>}
+                                {(task.labels || []).length > 0 && (
+                                  <div className="flex items-center gap-1 mt-1">
+                                    {task.labels!.map((lb) => (
+                                      <span key={lb.labelId} className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px]" style={{ backgroundColor: `${lb.label.color}22`, color: lb.label.color }}>
+                                        {lb.label.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {task.category && <Badge variant="outline" className="text-[9px]">{task.category}</Badge>}
-                            {task.hoursSpent != null && <span className="text-xs text-muted font-mono">{task.hoursSpent}h</span>}
-                            {teamView && task.assignee && <span className="text-[10px] text-muted">{task.assignee.firstName}</span>}
-                          </div>
-                        </CardContent>
-                      </Card>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {task.category && <Badge variant="outline" className="text-[9px]">{task.category}</Badge>}
+                                {task.hoursSpent != null && <span className="text-xs text-muted font-mono">{task.hoursSpent}h</span>}
+                                {teamView && task.assignee && <span className="text-[10px] text-muted">{task.assignee.firstName}</span>}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent>
+                          <ContextMenuLabel>Task</ContextMenuLabel>
+                          <ContextMenuItem onSelect={() => openEditTask(task)}>
+                            <Edit3 size={14} /> Open / edit
+                          </ContextMenuItem>
+                          {task.status !== "COMPLETED" && (
+                            <ContextMenuItem onSelect={async () => {
+                              await fetch("/api/tasks", {
+                                method: "PATCH", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ id: task.id, status: "COMPLETED" }),
+                              });
+                              fetchTasks();
+                            }}>
+                              <CheckCircle2 size={14} /> Mark complete
+                            </ContextMenuItem>
+                          )}
+                          {task.status !== "IN_PROGRESS" && (
+                            <ContextMenuItem onSelect={async () => {
+                              await fetch("/api/tasks", {
+                                method: "PATCH", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ id: task.id, status: "IN_PROGRESS" }),
+                              });
+                              fetchTasks();
+                            }}>
+                              <Play size={14} /> Mark in progress
+                            </ContextMenuItem>
+                          )}
+                          {task.status !== "PLANNED" && (
+                            <ContextMenuItem onSelect={() => toggleStatus(task.id, task.status)}>
+                              <Circle size={14} /> Mark planned
+                            </ContextMenuItem>
+                          )}
+                          <ContextMenuSeparator />
+                          <ContextMenuItem destructive onSelect={() => confirmDelete(task)}>
+                            <Trash2 size={14} /> Delete
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
                     ))}
                   </div>
                 </div>
