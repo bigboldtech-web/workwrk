@@ -8,6 +8,7 @@
     "db:warm": "node scripts/warm-neon.mjs",
     "db:unstick": "node scripts/unstick-migrate-lock.mjs",
     "db:fix-task-calendar": "node scripts/apply-task-calendar-migration.mjs",
+    "db:audit-migrations": "node scripts/audit-baselined-migrations.mjs",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
