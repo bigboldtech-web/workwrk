@@ -587,6 +587,7 @@ export default function SOPsPage() {
       });
       if (res.ok) {
         setSops((prev) => prev.map((s) => (s.id === sopId ? { ...s, folderId } : s)));
+        fetchFolders();
         toastSuccess(`Moved to ${target}`);
       } else {
         const err = await res.json().catch(() => ({}));
