@@ -7,6 +7,7 @@
     "build": "node scripts/warm-neon.mjs && node scripts/deploy-migrations.mjs && prisma generate && NODE_OPTIONS=--max-old-space-size=4096 next build",
     "db:warm": "node scripts/warm-neon.mjs",
     "db:unstick": "node scripts/unstick-migrate-lock.mjs",
+    "db:fix-task-calendar": "node scripts/apply-task-calendar-migration.mjs",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
