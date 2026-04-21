@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Plus, Trash2, Loader2, Users as UsersIcon, FolderOpen, ChevronLeft, Check } from "lucide-react";
+import { Plus, Trash2, Loader2, Users as UsersIcon, FolderOpen, ChevronLeft, Check, Pencil, X } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 
 interface Folder {
@@ -49,6 +49,11 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
   const [accessDirty, setAccessDirty] = useState(false);
   const [savingAccess, setSavingAccess] = useState(false);
 
+  // Inline rename state
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
+
   async function loadFolders() {
     setLoading(true);
     try {
@@ -84,14 +89,50 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
   }
 
   async function deleteFolder(f: Folder) {
-    if (!confirm(`Delete "${f.name}"? SOPs inside it will become unfoldered (visible to everyone).`)) return;
+    if ((f._count?.sops ?? 0) > 0) {
+      toastError(`Move the ${f._count?.sops} SOP${f._count?.sops === 1 ? "" : "s"} out of "${f.name}" before deleting.`);
+      return;
+    }
+    if (!confirm(`Delete empty folder "${f.name}"?`)) return;
     const res = await fetch(`/api/sop-folders/${f.id}`, { method: "DELETE" });
     if (res.ok) {
       toastSuccess("Folder deleted");
       loadFolders();
     } else {
-      toastError("Failed to delete folder");
+      const body = await res.json().catch(() => ({}));
+      toastError(body?.error || "Failed to delete folder");
     }
+  }
+
+  function beginRename(f: Folder) {
+    setRenameId(f.id);
+    setRenameValue(f.name);
+  }
+
+  function cancelRename() {
+    setRenameId(null);
+    setRenameValue("");
+  }
+
+  async function saveRename() {
+    const name = renameValue.trim();
+    if (!name || !renameId) return;
+    setRenaming(true);
+    try {
+      const res = await fetch(`/api/sop-folders/${renameId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        toastSuccess("Folder renamed");
+        cancelRename();
+        loadFolders();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toastError(body?.error || "Failed to rename folder");
+      }
+    } finally { setRenaming(false); }
   }
 
   async function openAccess(f: Folder) {
@@ -202,24 +243,67 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
               </div>
             ) : (
               <div className="space-y-1.5">
-                {folders.map((f) => (
-                  <div key={f.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:border-muted-2 transition-colors">
-                    <FolderOpen size={16} className="text-[#d4ff2e] shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{f.name}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <Badge variant="outline" className="text-[10px] h-4">{f._count?.sops ?? 0} SOP{f._count?.sops === 1 ? "" : "s"}</Badge>
-                        <Badge variant="outline" className="text-[10px] h-4">{f._count?.access ?? 0} user{f._count?.access === 1 ? "" : "s"}</Badge>
+                {folders.map((f) => {
+                  const isRenaming = renameId === f.id;
+                  const hasSops = (f._count?.sops ?? 0) > 0;
+                  return (
+                    <div key={f.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:border-muted-2 transition-colors">
+                      <FolderOpen size={16} className="text-[#d4ff2e] shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        {isRenaming ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); saveRename(); }
+                                if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
+                              }}
+                              autoFocus
+                              className="h-7 text-sm"
+                              disabled={renaming}
+                            />
+                            <Button size="sm" variant="outline" className="h-7 px-2" onClick={saveRename} disabled={renaming || !renameValue.trim()} aria-label="Save rename">
+                              {renaming ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={cancelRename} disabled={renaming} aria-label="Cancel rename">
+                              <X size={12} />
+                            </Button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="text-sm font-medium truncate">{f.name}</div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <Badge variant="outline" className="text-[10px] h-4">{f._count?.sops ?? 0} SOP{f._count?.sops === 1 ? "" : "s"}</Badge>
+                              <Badge variant="outline" className="text-[10px] h-4">{f._count?.access ?? 0} user{f._count?.access === 1 ? "" : "s"}</Badge>
+                            </div>
+                          </>
+                        )}
                       </div>
+                      {!isRenaming && (
+                        <>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => beginRename(f)} aria-label="Rename folder">
+                            <Pencil size={13} className="text-muted" />
+                          </Button>
+                          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openAccess(f)}>
+                            <UsersIcon size={12} /> Access
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-8 w-8 ${hasSops ? "text-muted-2 cursor-not-allowed" : "text-red-400 hover:text-red-300"}`}
+                            onClick={() => deleteFolder(f)}
+                            disabled={hasSops}
+                            title={hasSops ? `Cannot delete — move the ${f._count?.sops} SOP${f._count?.sops === 1 ? "" : "s"} out first` : "Delete folder"}
+                            aria-label="Delete folder"
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </>
+                      )}
                     </div>
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openAccess(f)}>
-                      <UsersIcon size={12} /> Access
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-300" onClick={() => deleteFolder(f)} aria-label="Delete folder">
-                      <Trash2 size={14} />
-                    </Button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

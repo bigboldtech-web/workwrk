@@ -78,14 +78,22 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   const existing = await prisma.sOPFolder.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, _count: { select: { sops: true } } },
+    select: { id: true, name: true, _count: { select: { sops: true } } },
   });
   if (!existing) return jsonError("Folder not found", 404);
 
-  // SOPs in the folder have `folder.onDelete: SetNull`, so deleting the
-  // folder un-scopes its SOPs rather than destroying them. Access rows
-  // cascade via schema.
+  // Refuse to delete a folder that still has SOPs in it. Admin must move
+  // those SOPs out first — prevents accidental un-scoping of content
+  // that was meant to stay access-controlled.
+  if (existing._count.sops > 0) {
+    return jsonError(
+      `"${existing.name}" still has ${existing._count.sops} SOP${existing._count.sops === 1 ? "" : "s"} in it. Move them out before deleting.`,
+      409,
+    );
+  }
+
+  // Access rows cascade via schema.
   await prisma.sOPFolder.delete({ where: { id } });
 
-  return jsonSuccess({ deleted: true, unfolderedSops: existing._count.sops });
+  return jsonSuccess({ deleted: true });
 }
