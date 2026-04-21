@@ -23,6 +23,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { useRole } from "@/hooks/use-role";
 import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KudosReactions } from "@/components/kudos/kudos-reactions";
 
@@ -419,6 +420,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
 export default function UserProfilePage() {
   const { id } = useParams();
   const router = useRouter();
+  const { isAdmin } = useRole();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { success: toastSuccess, error: toastError } = useToast();
@@ -495,7 +497,12 @@ export default function UserProfilePage() {
       const body: any = {};
       if (editDepartmentId) body.departmentId = editDepartmentId;
       if (editRoleId) body.roleId = editRoleId;
-      if (editAccessLevel) body.accessLevel = editAccessLevel;
+      // Only include accessLevel when it actually changed AND the caller
+      // is allowed to change it. The API rejects any accessLevel field
+      // from non-admins, even when the value is unchanged.
+      if (isAdmin && editAccessLevel && editAccessLevel !== user?.accessLevel) {
+        body.accessLevel = editAccessLevel;
+      }
       if (editStatus) body.status = editStatus;
       body.dateOfBirth = editDob ? `${editDob}T12:00:00.000Z` : null;
       body.officeId = editOfficeId || null;
@@ -506,14 +513,17 @@ export default function UserProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error("Failed to update");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to update");
+      }
       // Refetch user
       const updated = await fetch(`/api/users/${id}`).then((r) => r.json());
       setUser(updated);
       setShowEditDialog(false);
       toastSuccess("Profile updated successfully");
-    } catch (err) {
-      toastError("Failed to update profile");
+    } catch (err: any) {
+      toastError(err?.message || "Failed to update profile");
     } finally {
       setSaving(false);
     }
@@ -634,8 +644,8 @@ export default function UserProfilePage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Access Level</Label>
-                    <Select value={editAccessLevel} onValueChange={setEditAccessLevel}>
+                    <Label>Access Level {!isAdmin && <span className="text-[10px] text-muted-2">(admin only)</span>}</Label>
+                    <Select value={editAccessLevel} onValueChange={setEditAccessLevel} disabled={!isAdmin}>
                       <SelectTrigger><SelectValue placeholder="Select level" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="EMPLOYEE">Employee</SelectItem>
