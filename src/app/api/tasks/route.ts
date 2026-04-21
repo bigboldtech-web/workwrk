@@ -120,33 +120,46 @@ export async function POST(req: NextRequest) {
     if (parent.parentTaskId) return jsonError("Sub-tasks cannot have their own sub-tasks", 400);
   }
 
-  const task = await prisma.task.create({
-    data: {
-      title: title.trim(),
-      description: description?.trim() || null,
-      date: new Date(date),
-      startAt: startAt ? new Date(startAt) : null,
-      endAt: endAt ? new Date(endAt) : null,
-      allDay: allDay === false ? false : true,
-      estimateHours: estimateHours != null ? Number(estimateHours) : null,
-      hoursSpent: hoursSpent != null ? Number(hoursSpent) : null,
-      category: category || null,
-      assigneeId: assigneeId || currentUserId,
-      kraId: kraId || null,
-      parentTaskId: parentTaskId || null,
-      organizationId: orgId,
-      labels: Array.isArray(labelIds) && labelIds.length > 0
-        ? { create: labelIds.map((labelId: string) => ({ labelId })) }
-        : undefined,
-    },
-    include: {
-      assignee: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-      kra: { select: { id: true, name: true } },
-      labels: { include: { label: true } },
-      _count: { select: { subTasks: true, comments: true } },
-    },
-  });
+  let task;
+  try {
+    task = await prisma.task.create({
+      data: {
+        title: title.trim(),
+        description: description?.trim() || null,
+        date: new Date(date),
+        startAt: startAt ? new Date(startAt) : null,
+        endAt: endAt ? new Date(endAt) : null,
+        allDay: allDay === false ? false : true,
+        estimateHours: estimateHours != null ? Number(estimateHours) : null,
+        hoursSpent: hoursSpent != null ? Number(hoursSpent) : null,
+        category: category || null,
+        assigneeId: assigneeId || currentUserId,
+        kraId: kraId || null,
+        parentTaskId: parentTaskId || null,
+        organizationId: orgId,
+        labels: Array.isArray(labelIds) && labelIds.length > 0
+          ? { create: labelIds.map((labelId: string) => ({ labelId })) }
+          : undefined,
+      },
+      include: {
+        assignee: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+        kra: { select: { id: true, name: true } },
+        labels: { include: { label: true } },
+        _count: { select: { subTasks: true, comments: true } },
+      },
+    });
+  } catch (err: any) {
+    console.error("[Task POST] prisma.task.create failed:", err);
+    const code = err?.code;
+    if (code === "P2003") return jsonError(`Invalid reference: ${err.meta?.field_name || "foreign key"}`, 400);
+    if (code === "P2025") return jsonError("Referenced record not found", 400);
+    return jsonError(err?.message || "Failed to create task", 500);
+  }
 
+  // Side-effects below must not fail the create — the task row is already
+  // persisted. Wrap anything network-adjacent so a downstream outage
+  // (notification row, email provider, Google push) can't surface as a
+  // 500 to the caller.
   logActivity({
     type: "task_created",
     actorId: currentUserId,
@@ -157,7 +170,7 @@ export async function POST(req: NextRequest) {
   });
 
   // Notify assignee if task was delegated to someone else
-  if (task.assigneeId !== currentUserId) {
+  if (task.assigneeId !== currentUserId) try {
     const dateStr = new Date(task.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     await prisma.notification.create({
       data: {
@@ -195,7 +208,7 @@ export async function POST(req: NextRequest) {
         });
       }
     } catch (err) { console.error("[Task] Email failed:", err); }
-  }
+  } catch (err) { console.error("[Task] Notify block failed:", err); }
 
   // Push to Google if the assignee has an OUT/BOTH subscription. Fire-and-forget
   // so the response isn't blocked on external I/O.
