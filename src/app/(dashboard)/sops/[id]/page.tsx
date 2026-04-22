@@ -29,6 +29,8 @@ import {
   Plus,
   X,
   GripVertical,
+  ChevronUp,
+  ChevronDown,
   FileText,
   Users,
   Clock,
@@ -278,6 +280,11 @@ export default function SOPDetailPage() {
   const [checklistSections, setChecklistSections] = useState<ChecklistSection[]>([]);
   const [processFlow, setProcessFlow] = useState<ProcessFlow>({ type: "process_flow", steps: [] });
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
+  // DnD bookkeeping: which step is currently being dragged (by id), and
+  // which step is being hovered as a drop target. We only track target
+  // for visual feedback — the drop index is derived from the target id.
+  const [draggingStepId, setDraggingStepId] = useState<string | null>(null);
+  const [dragOverStepId, setDragOverStepId] = useState<string | null>(null);
   const [showPublishDialog, setShowPublishDialog] = useState(false);
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
@@ -585,6 +592,17 @@ export default function SOPDetailPage() {
 
   const updateStep = (stepId: string, field: keyof SOPStep, value: string) => {
     setSteps(steps.map((s) => (s.id === stepId ? { ...s, [field]: value } : s)));
+  };
+
+  // Move a step to a new index. Used by both drag-and-drop (drop target)
+  // and the up/down buttons (+1 / -1 neighbor swap).
+  const moveStep = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex >= steps.length || toIndex >= steps.length) return;
+    const next = steps.slice();
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, item);
+    setSteps(next);
   };
 
   if (loading) {
@@ -1174,12 +1192,53 @@ export default function SOPDetailPage() {
                       )}
                     </div>
                   ) : (
-                    steps.map((step, index) => (
+                    steps.map((step, index) => {
+                      const isDragging = draggingStepId === step.id;
+                      const isDropTarget = dragOverStepId === step.id && draggingStepId && draggingStepId !== step.id;
+                      return (
                       <div
                         key={step.id}
-                        className="flex items-start gap-3 p-3 rounded-lg border border-border bg-surface-3 group"
+                        draggable={editing && editingStepId !== step.id}
+                        onDragStart={(e) => {
+                          setDraggingStepId(step.id);
+                          e.dataTransfer.effectAllowed = "move";
+                          // Some browsers need data to be set for a drag to begin.
+                          e.dataTransfer.setData("text/plain", step.id);
+                        }}
+                        onDragOver={(e) => {
+                          if (!draggingStepId || draggingStepId === step.id) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          if (dragOverStepId !== step.id) setDragOverStepId(step.id);
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverStepId === step.id) setDragOverStepId(null);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const fromId = draggingStepId || e.dataTransfer.getData("text/plain");
+                          if (!fromId || fromId === step.id) return;
+                          const from = steps.findIndex((s) => s.id === fromId);
+                          if (from === -1) return;
+                          moveStep(from, index);
+                          setDraggingStepId(null);
+                          setDragOverStepId(null);
+                        }}
+                        onDragEnd={() => {
+                          setDraggingStepId(null);
+                          setDragOverStepId(null);
+                        }}
+                        className={`flex items-start gap-3 p-3 rounded-lg border bg-surface-3 group transition-all ${
+                          isDragging ? "opacity-40" : ""
+                        } ${
+                          isDropTarget ? "border-[#d4ff2e] ring-1 ring-[rgba(212,255,46,0.35)]" : "border-border"
+                        }`}
                       >
-                        <div className="pt-0.5 text-muted opacity-30">
+                        <div
+                          className={`pt-0.5 text-muted transition-opacity ${editing ? "opacity-60 hover:opacity-100 cursor-grab active:cursor-grabbing" : "opacity-30"}`}
+                          aria-label="Drag to reorder"
+                          title={editing ? "Drag to reorder" : undefined}
+                        >
                           <GripVertical size={16} />
                         </div>
                         <div className="flex items-center justify-center w-6 h-6 rounded-full bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] text-xs font-bold shrink-0 mt-0.5">
@@ -1235,17 +1294,43 @@ export default function SOPDetailPage() {
                           )}
                         </div>
                         {editing && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-red-400 hover:text-red-300"
-                            onClick={() => removeStep(step.id)}
-                          >
-                            <X size={14} />
-                          </Button>
+                          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted hover:text-foreground disabled:opacity-30"
+                              onClick={() => moveStep(index, index - 1)}
+                              disabled={index === 0}
+                              aria-label="Move step up"
+                              title="Move up"
+                            >
+                              <ChevronUp size={14} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted hover:text-foreground disabled:opacity-30"
+                              onClick={() => moveStep(index, index + 1)}
+                              disabled={index === steps.length - 1}
+                              aria-label="Move step down"
+                              title="Move down"
+                            >
+                              <ChevronDown size={14} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-red-400 hover:text-red-300 ml-1"
+                              onClick={() => removeStep(step.id)}
+                              aria-label="Remove step"
+                            >
+                              <X size={14} />
+                            </Button>
+                          </div>
                         )}
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </CardContent>
               </Card>
