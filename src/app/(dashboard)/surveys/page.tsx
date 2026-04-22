@@ -76,6 +76,8 @@ export default function SurveysPage() {
     departmentIds: string[];
     userIds: string[];
     anonymous: boolean;
+    closesAt: string; // YYYY-MM-DD (empty = no deadline)
+    frequency: "" | "WEEKLY" | "BIWEEKLY" | "MONTHLY" | "QUARTERLY";
   }>({
     title: "",
     questions: [{ id: "q1", text: "", type: "rating" }],
@@ -84,6 +86,8 @@ export default function SurveysPage() {
     departmentIds: [],
     userIds: [],
     anonymous: true,
+    closesAt: "",
+    frequency: "",
   });
   const [offices, setOffices] = useState<Office[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -118,7 +122,7 @@ export default function SurveysPage() {
   }
 
   function resetForm() {
-    setForm({ title: "", questions: [{ id: "q1", text: "", type: "rating" }], audienceType: "ALL", officeIds: [], departmentIds: [], userIds: [], anonymous: true });
+    setForm({ title: "", questions: [{ id: "q1", text: "", type: "rating" }], audienceType: "ALL", officeIds: [], departmentIds: [], userIds: [], anonymous: true, closesAt: "", frequency: "" });
     setUserSearch("");
     setEditingId(null);
   }
@@ -195,6 +199,8 @@ export default function SurveysPage() {
       departmentIds: Array.isArray(survey.departmentIds) ? survey.departmentIds : [],
       userIds: Array.isArray(survey.userIds) ? survey.userIds : [],
       anonymous: survey.anonymous !== false,
+      closesAt: survey.closesAt ? new Date(survey.closesAt).toISOString().slice(0, 10) : "",
+      frequency: (["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"].includes(survey.frequency) ? survey.frequency : "") as any,
     });
     setShowCreate(true);
   }
@@ -217,6 +223,17 @@ export default function SurveysPage() {
     const badChoice = questions.find((q) => needsOptions(q.type as QuestionType) && (q.options?.length ?? 0) < 2);
     if (badChoice) { toastError(`"${badChoice.text}" needs at least 2 options`); return; }
 
+    // Recurring surveys must have a deadline — the cron rotates on close.
+    if (form.frequency && !form.closesAt) {
+      toastError("Recurring surveys need a close date so we know when to rotate");
+      return;
+    }
+
+    // Normalize closesAt to end-of-day UTC so "today" means "before
+    // tomorrow", not "before midnight UTC" (which could be later today
+    // or already past depending on timezone).
+    const closesAtIso = form.closesAt ? new Date(`${form.closesAt}T23:59:59.999Z`).toISOString() : null;
+
     setSaving(true);
     try {
       const url = editingId ? `/api/pulse-surveys/${editingId}` : "/api/pulse-surveys";
@@ -232,6 +249,8 @@ export default function SurveysPage() {
           departmentIds: form.departmentIds,
           userIds: form.userIds,
           anonymous: form.anonymous,
+          closesAt: closesAtIso,
+          frequency: form.frequency || null,
         }),
       });
       if (res.ok) {
@@ -355,6 +374,12 @@ export default function SurveysPage() {
                         <Badge variant="outline" className="text-[10px] gap-1">
                           <AudIcon size={10} /> {audienceLabel}
                         </Badge>
+                        {survey.frequency && (
+                          <Badge variant="outline" className="text-[10px]">
+                            Repeats {String(survey.frequency).toLowerCase()}
+                          </Badge>
+                        )}
+                        {survey.status === "ACTIVE" && survey.closesAt && <ClosesInBadge closesAt={survey.closesAt} />}
                         {survey.hasResponded && <Badge variant="outline" className="text-[10px] text-green-400">Responded</Badge>}
                       </div>
                       <div className="flex items-center gap-3 text-xs text-muted">
@@ -647,6 +672,38 @@ export default function SurveysPage() {
                       })}
                   </div>
                 </div>
+              )}
+            </div>
+
+            {/* Deadline + recurrence. closesAt drives auto-close; frequency
+                opts into the rotate cron spawning a fresh cycle on close. */}
+            <div className="rounded-lg border border-border p-3 space-y-3">
+              <div>
+                <Label className="text-sm">Close date</Label>
+                <p className="text-[11px] text-muted mt-0.5">Survey auto-closes on this date. Reminders go out ~24h before.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  type="date"
+                  value={form.closesAt}
+                  onChange={(e) => setForm({ ...form, closesAt: e.target.value })}
+                  min={new Date().toISOString().slice(0, 10)}
+                />
+                <Select value={form.frequency || "none"} onValueChange={(v) => setForm({ ...form, frequency: v === "none" ? "" : (v as any) })}>
+                  <SelectTrigger><SelectValue placeholder="Repeats" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">One-off (no repeat)</SelectItem>
+                    <SelectItem value="WEEKLY">Weekly</SelectItem>
+                    <SelectItem value="BIWEEKLY">Every 2 weeks</SelectItem>
+                    <SelectItem value="MONTHLY">Monthly</SelectItem>
+                    <SelectItem value="QUARTERLY">Quarterly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.frequency && (
+                <p className="text-[11px] text-muted-2">
+                  A new cycle will be created automatically each time this survey closes, using the same questions and audience.
+                </p>
               )}
             </div>
 
@@ -977,6 +1034,16 @@ function TrendSparkline({ trend, min, max }: { trend: { date: string; average: n
       </svg>
     </div>
   );
+}
+
+function ClosesInBadge({ closesAt }: { closesAt: string | Date }) {
+  const d = typeof closesAt === "string" ? new Date(closesAt) : closesAt;
+  const hoursLeft = (d.getTime() - Date.now()) / (60 * 60 * 1000);
+  if (!isFinite(hoursLeft)) return null;
+  if (hoursLeft <= 0) return <Badge variant="outline" className="text-[10px] text-red-400">Closing now</Badge>;
+  if (hoursLeft < 24) return <Badge variant="outline" className="text-[10px] text-amber-400">Closes in {Math.max(1, Math.round(hoursLeft))}h</Badge>;
+  const days = Math.round(hoursLeft / 24);
+  return <Badge variant="outline" className="text-[10px] text-muted">Closes in {days}d</Badge>;
 }
 
 function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: "good" | "ok" | "bad" }) {

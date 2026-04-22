@@ -74,10 +74,27 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { title, questions, frequency, audienceType, officeIds, departmentIds, userIds, anonymous } = body;
+  const { title, questions, frequency, audienceType, officeIds, departmentIds, userIds, anonymous, closesAt } = body;
 
   if (!title?.trim() || !Array.isArray(questions) || questions.length === 0) {
     return jsonError("Title and questions required");
+  }
+
+  // Normalize closesAt — reject malformed strings and past dates. Past
+  // dates would trigger immediate close on the next cron tick, which
+  // is almost always a user mistake.
+  let resolvedClosesAt: Date | null = null;
+  if (closesAt) {
+    const d = new Date(closesAt);
+    if (isNaN(d.getTime())) return jsonError("Invalid close date");
+    if (d.getTime() <= Date.now()) return jsonError("Close date must be in the future");
+    resolvedClosesAt = d;
+  }
+
+  const VALID_FREQUENCIES = new Set(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"]);
+  const resolvedFrequency = typeof frequency === "string" && VALID_FREQUENCIES.has(frequency) ? frequency : null;
+  if (resolvedFrequency && !resolvedClosesAt) {
+    return jsonError("Recurring surveys need a close date so we know when to rotate");
   }
 
   const resolvedAudienceType = typeof audienceType === "string" && AUDIENCE_TYPES.has(audienceType) ? audienceType : "ALL";
@@ -107,7 +124,7 @@ export async function POST(req: NextRequest) {
     data: {
       title: title.trim(),
       questions: questions as any,
-      frequency: frequency || null,
+      frequency: resolvedFrequency,
       status: "ACTIVE",
       audienceType: resolvedAudienceType,
       officeIds: resolvedOfficeIds,
@@ -115,6 +132,7 @@ export async function POST(req: NextRequest) {
       userIds: resolvedUserIds,
       // Default anonymous unless the caller explicitly opts out.
       anonymous: anonymous === false ? false : true,
+      closesAt: resolvedClosesAt,
       organizationId: orgId,
     },
   });

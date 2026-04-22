@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@
 
 const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS"]);
 const STATUSES = new Set(["DRAFT", "ACTIVE", "CLOSED"]);
+const VALID_FREQUENCIES = new Set(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"]);
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -31,11 +32,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (typeof body.frequency === "string" || body.frequency === null) {
-    data.frequency = body.frequency || null;
+    const next = typeof body.frequency === "string" && VALID_FREQUENCIES.has(body.frequency) ? body.frequency : null;
+    data.frequency = next;
   }
 
   if (typeof body.anonymous === "boolean") {
     data.anonymous = body.anonymous;
+  }
+
+  if (body.closesAt !== undefined) {
+    if (body.closesAt === null || body.closesAt === "") {
+      data.closesAt = null;
+      // Clearing the close date also clears any reminder-sent bookmark
+      // so the next run with a new close date gets its own reminder.
+      data.reminderSentAt = null;
+    } else {
+      const d = new Date(body.closesAt);
+      if (isNaN(d.getTime())) return jsonError("Invalid close date");
+      if (d.getTime() <= Date.now()) return jsonError("Close date must be in the future");
+      data.closesAt = d;
+      data.reminderSentAt = null;
+    }
   }
 
   if (typeof body.status === "string") {

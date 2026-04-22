@@ -1661,9 +1661,24 @@ model PulseSurvey {
   responses      SurveyResponse[]
   createdAt      DateTime        @default(now())
   closedAt       DateTime?
+  // Hard deadline for collecting responses. When set, the rotate cron
+  // auto-closes the survey at this time and — if `frequency` is set —
+  // spawns the next cycle. A reminder email to anyone in the audience
+  // who hasn't responded goes out ~24h before.
+  closesAt       DateTime?
+  reminderSentAt DateTime?
+  // When a survey was spawned by the rotate cron as the next cycle of
+  // a recurring template, `parentSurveyId` points back to the most
+  // recent prior cycle. Null for one-off surveys and for the first
+  // cycle of any recurrence.
+  parentSurveyId String?
+  parent         PulseSurvey?    @relation("PulseSurveyRecurrence", fields: [parentSurveyId], references: [id], onDelete: SetNull)
+  children       PulseSurvey[]   @relation("PulseSurveyRecurrence")
 
   @@index([organizationId])
   @@index([status])
+  @@index([status, closesAt])
+  @@index([parentSurveyId])
 }
 
 model SurveyResponse {
