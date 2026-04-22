@@ -24,7 +24,16 @@ interface Question {
 
 interface Answer {
   questionId: string;
-  value: string | number;
+  value: string | number | string[];
+}
+
+// Flatten an answer value into a single CSV cell. Arrays (multi_choice
+// selections) render as semicolon-joined so spreadsheet users can still
+// split or count them.
+function flattenValue(v: Answer["value"] | undefined | null): string {
+  if (v === undefined || v === null) return "";
+  if (Array.isArray(v)) return v.map(String).join("; ");
+  return String(v);
 }
 
 function csvEscape(val: unknown): string {
@@ -102,7 +111,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const answers = Array.isArray(r.answers) ? (r.answers as any as Answer[]) : [];
     for (const q of questions) {
       const match = answers.find((a) => a.questionId === q.id);
-      row.push(match && match.value !== undefined && match.value !== null ? match.value : "");
+      row.push(flattenValue(match?.value));
     }
     lines.push(row.map(csvEscape).join(","));
   }

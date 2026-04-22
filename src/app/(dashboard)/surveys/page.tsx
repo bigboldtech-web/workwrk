@@ -28,8 +28,22 @@ import { useToast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { useRole } from "@/hooks/use-role";
 
-interface SurveyQuestion { id: string; text: string; type: "rating" | "nps" | "text" }
+type QuestionType = "rating" | "nps" | "text" | "single_choice" | "multi_choice" | "yes_no";
+interface SurveyQuestion { id: string; text: string; type: QuestionType; options?: string[] }
 type AudienceType = "ALL" | "OFFICES" | "DEPARTMENTS" | "USERS";
+
+const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  rating: "Rating (1–5)",
+  nps: "NPS (0–10)",
+  yes_no: "Yes / No",
+  single_choice: "Poll (single choice)",
+  multi_choice: "Poll (multi choice)",
+  text: "Text",
+};
+
+function needsOptions(t: QuestionType): boolean {
+  return t === "single_choice" || t === "multi_choice";
+}
 
 interface Office { id: string; name: string; city?: string | null; country?: string | null }
 interface Department { id: string; name: string }
@@ -56,7 +70,7 @@ export default function SurveysPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<{
     title: string;
-    questions: { id: string; text: string; type: "rating" | "nps" | "text" }[];
+    questions: SurveyQuestion[];
     audienceType: AudienceType;
     officeIds: string[];
     departmentIds: string[];
@@ -169,8 +183,13 @@ export default function SurveysPage() {
     setForm({
       title: survey.title || "",
       questions: Array.isArray(survey.questions) && survey.questions.length > 0
-        ? survey.questions.map((q: any) => ({ id: q.id || crypto.randomUUID(), text: q.text || "", type: q.type || "rating" }))
-        : [{ id: "q1", text: "", type: "rating" }],
+        ? survey.questions.map((q: any) => ({
+            id: q.id || crypto.randomUUID(),
+            text: q.text || "",
+            type: (q.type || "rating") as QuestionType,
+            options: Array.isArray(q.options) ? q.options : undefined,
+          }))
+        : [{ id: "q1", text: "", type: "rating" as QuestionType }],
       audienceType: (survey.audienceType as AudienceType) || "ALL",
       officeIds: Array.isArray(survey.officeIds) ? survey.officeIds : [],
       departmentIds: Array.isArray(survey.departmentIds) ? survey.departmentIds : [],
@@ -185,6 +204,19 @@ export default function SurveysPage() {
     if (form.audienceType === "OFFICES" && form.officeIds.length === 0) { toastError("Pick at least one office"); return; }
     if (form.audienceType === "DEPARTMENTS" && form.departmentIds.length === 0) { toastError("Pick at least one department"); return; }
     if (form.audienceType === "USERS" && form.userIds.length === 0) { toastError("Pick at least one person"); return; }
+
+    // Prep questions: trim options, drop empties, ensure choice questions
+    // have at least two non-empty options.
+    const questions = form.questions
+      .filter((q) => q.text.trim())
+      .map((q) => {
+        if (!needsOptions(q.type)) return { id: q.id, text: q.text.trim(), type: q.type };
+        const cleaned = (q.options ?? []).map((o) => o.trim()).filter(Boolean);
+        return { id: q.id, text: q.text.trim(), type: q.type, options: cleaned };
+      });
+    const badChoice = questions.find((q) => needsOptions(q.type as QuestionType) && (q.options?.length ?? 0) < 2);
+    if (badChoice) { toastError(`"${badChoice.text}" needs at least 2 options`); return; }
+
     setSaving(true);
     try {
       const url = editingId ? `/api/pulse-surveys/${editingId}` : "/api/pulse-surveys";
@@ -194,7 +226,7 @@ export default function SurveysPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: form.title,
-          questions: form.questions.filter((q) => q.text.trim()),
+          questions,
           audienceType: form.audienceType,
           officeIds: form.officeIds,
           departmentIds: form.departmentIds,
@@ -427,24 +459,91 @@ export default function SurveysPage() {
                   <Plus size={12} /> Add question
                 </Button>
               </div>
-              {form.questions.map((q, i) => (
-                <div key={q.id} className="flex items-center gap-2">
-                  <Input value={q.text} onChange={(e) => { const qs = [...form.questions]; qs[i] = { ...qs[i], text: e.target.value }; setForm({ ...form, questions: qs }); }} placeholder={`Question ${i + 1}`} className="flex-1 text-sm" />
-                  <Select value={q.type} onValueChange={(v) => { const qs = [...form.questions]; qs[i] = { ...qs[i], type: v as any }; setForm({ ...form, questions: qs }); }}>
-                    <SelectTrigger className="w-24 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="rating">Rating (1-5)</SelectItem>
-                      <SelectItem value="nps">NPS (0-10)</SelectItem>
-                      <SelectItem value="text">Text</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {form.questions.length > 1 && (
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => setForm({ ...form, questions: form.questions.filter((_, j) => j !== i) })}>
-                      <Trash2 size={12} />
-                    </Button>
-                  )}
-                </div>
-              ))}
+              {form.questions.map((q, i) => {
+                const hasOptions = needsOptions(q.type);
+                const options = q.options ?? [""];
+                const updateQuestion = (patch: Partial<SurveyQuestion>) => {
+                  const qs = [...form.questions];
+                  qs[i] = { ...qs[i], ...patch };
+                  setForm({ ...form, questions: qs });
+                };
+                return (
+                  <div key={q.id} className="rounded-lg border border-border p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={q.text}
+                        onChange={(e) => updateQuestion({ text: e.target.value })}
+                        placeholder={`Question ${i + 1}`}
+                        className="flex-1 text-sm"
+                      />
+                      <Select
+                        value={q.type}
+                        onValueChange={(v) => {
+                          const t = v as QuestionType;
+                          // Seed options when switching INTO a choice type.
+                          // Clear them when leaving so we don't send stale data.
+                          updateQuestion({
+                            type: t,
+                            options: needsOptions(t) ? (q.options && q.options.length > 0 ? q.options : ["", ""]) : undefined,
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="w-[170px] text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(QUESTION_TYPE_LABELS) as QuestionType[]).map((t) => (
+                            <SelectItem key={t} value={t}>{QUESTION_TYPE_LABELS[t]}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {form.questions.length > 1 && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 shrink-0" onClick={() => setForm({ ...form, questions: form.questions.filter((_, j) => j !== i) })}>
+                          <Trash2 size={12} />
+                        </Button>
+                      )}
+                    </div>
+
+                    {hasOptions && (
+                      <div className="space-y-1.5 pl-1">
+                        <Label className="text-[10px] text-muted">Options</Label>
+                        {options.map((opt, optIdx) => (
+                          <div key={optIdx} className="flex items-center gap-2">
+                            <span className="text-[10px] text-muted-2 w-4 text-right">{optIdx + 1}.</span>
+                            <Input
+                              value={opt}
+                              onChange={(e) => {
+                                const next = [...options];
+                                next[optIdx] = e.target.value;
+                                updateQuestion({ options: next });
+                              }}
+                              placeholder={`Option ${optIdx + 1}`}
+                              className="h-8 text-xs"
+                            />
+                            {options.length > 2 && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted hover:text-red-400"
+                                onClick={() => updateQuestion({ options: options.filter((_, j) => j !== optIdx) })}
+                                aria-label="Remove option"
+                              >
+                                <Trash2 size={11} />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1 ml-6"
+                          onClick={() => updateQuestion({ options: [...options, ""] })}
+                        >
+                          <Plus size={10} /> Add option
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <div className="space-y-3 pt-2 border-t border-border">
@@ -608,6 +707,58 @@ export default function SurveysPage() {
                       </button>
                     ))}
                   </div>
+                ) : q.type === "yes_no" ? (
+                  <div className="flex gap-2">
+                    {["Yes", "No"].map((opt) => (
+                      <button
+                        key={opt}
+                        onClick={() => setAnswers({ ...answers, [q.id]: opt })}
+                        className={`flex-1 h-10 rounded-lg border text-sm font-medium transition-colors ${answers[q.id] === opt ? "bg-[#d4ff2e] text-[#0a0a0a] border-[#d4ff2e]" : "border-border hover:border-[#d4ff2e]"}`}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                ) : q.type === "single_choice" ? (
+                  <div className="space-y-1.5">
+                    {(q.options || []).map((opt) => {
+                      const selected = answers[q.id] === opt;
+                      return (
+                        <button
+                          key={opt}
+                          onClick={() => setAnswers({ ...answers, [q.id]: opt })}
+                          className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left text-sm transition-colors ${selected ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)]" : "border-border hover:bg-surface-2"}`}
+                        >
+                          <span className={`h-4 w-4 rounded-full border flex items-center justify-center shrink-0 ${selected ? "border-[#d4ff2e]" : "border-border"}`}>
+                            {selected && <span className="h-2 w-2 rounded-full bg-[#d4ff2e]" />}
+                          </span>
+                          <span className="flex-1">{opt}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : q.type === "multi_choice" ? (
+                  <div className="space-y-1.5">
+                    {(q.options || []).map((opt) => {
+                      const current = Array.isArray(answers[q.id]) ? (answers[q.id] as string[]) : [];
+                      const selected = current.includes(opt);
+                      return (
+                        <button
+                          key={opt}
+                          onClick={() => {
+                            const next = selected ? current.filter((x) => x !== opt) : [...current, opt];
+                            setAnswers({ ...answers, [q.id]: next });
+                          }}
+                          className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left text-sm transition-colors ${selected ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)]" : "border-border hover:bg-surface-2"}`}
+                        >
+                          <span className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${selected ? "border-[#d4ff2e] bg-[#d4ff2e]" : "border-border"}`}>
+                            {selected && <Check size={10} className="text-[#0a0a0a]" />}
+                          </span>
+                          <span className="flex-1">{opt}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <Textarea value={answers[q.id] || ""} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })} placeholder="Your response..." rows={2} />
                 )}
@@ -702,6 +853,25 @@ export default function SurveysPage() {
                 )}
               </div>
 
+              {responsesData.totalResponses > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <SummaryStat label="Responses" value={String(responsesData.totalResponses)} />
+                  {responsesData.summary?.npsScore != null && (
+                    <SummaryStat
+                      label="NPS score"
+                      value={String(responsesData.summary.npsScore)}
+                      tone={responsesData.summary.npsScore >= 30 ? "good" : responsesData.summary.npsScore >= 0 ? "ok" : "bad"}
+                    />
+                  )}
+                  {responsesData.summary?.firstResponseAt && (
+                    <SummaryStat label="First response" value={new Date(responsesData.summary.firstResponseAt).toLocaleDateString()} />
+                  )}
+                  {responsesData.summary?.lastResponseAt && (
+                    <SummaryStat label="Latest response" value={new Date(responsesData.summary.lastResponseAt).toLocaleDateString()} />
+                  )}
+                </div>
+              )}
+
               {(!responsesData.questions || responsesData.questions.length === 0 || responsesData.totalResponses === 0) ? (
                 <div className="text-center py-8 text-sm text-muted">
                   {(responsesFilter.officeId || responsesFilter.departmentId)
@@ -713,17 +883,13 @@ export default function SurveysPage() {
                   {responsesData.questions.map((q: any, i: number) => (
                     <div key={q.questionId} className="rounded-lg border border-border p-4">
                       <div className="mb-3">
-                        <div className="text-[10px] text-muted">Question {i + 1}</div>
+                        <div className="text-[10px] text-muted">Question {i + 1} · {QUESTION_TYPE_LABELS[q.kind as QuestionType] || q.kind}</div>
                         <div className="text-sm font-medium">{q.text}</div>
                       </div>
 
-                      {(q.kind === "rating" || q.kind === "nps") && (
-                        <RatingBreakdown q={q} />
-                      )}
-
-                      {q.kind === "text" && (
-                        <TextBreakdown q={q} />
-                      )}
+                      {(q.kind === "rating" || q.kind === "nps") && <RatingBreakdown q={q} />}
+                      {(q.kind === "single_choice" || q.kind === "multi_choice" || q.kind === "yes_no") && <ChoiceBreakdown q={q} />}
+                      {q.kind === "text" && <TextBreakdown q={q} />}
                     </div>
                   ))}
                 </div>
@@ -809,6 +975,53 @@ function TrendSparkline({ trend, min, max }: { trend: { date: string; average: n
           return <circle key={i} cx={x} cy={y} r={1.5} fill="#d4ff2e"><title>{`${t.date}: ${t.average} (${t.count})`}</title></circle>;
         })}
       </svg>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: "good" | "ok" | "bad" }) {
+  const toneClass =
+    tone === "good" ? "text-[#d4ff2e]" :
+    tone === "bad" ? "text-red-400" :
+    tone === "ok" ? "text-amber-400" :
+    "text-foreground";
+  return (
+    <div className="rounded-lg border border-border bg-surface-2/40 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted-2">{label}</div>
+      <div className={`text-xl font-semibold font-mono mt-0.5 ${toneClass}`}>{value}</div>
+    </div>
+  );
+}
+
+function ChoiceBreakdown({ q }: { q: any }) {
+  if (!q.options || q.options.length === 0) {
+    return <div className="text-xs text-muted">No options configured.</div>;
+  }
+  const totalPicks = q.options.reduce((s: number, o: any) => s + o.count, 0);
+  const maxCount = Math.max(1, ...q.options.map((o: any) => o.count));
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-xs text-muted">
+        <span>{q.totalAnswered} answered</span>
+        {q.kind === "multi_choice" && totalPicks > q.totalAnswered && (
+          <span className="text-[10px]">{totalPicks} total selections</span>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {q.options.map((o: any) => {
+          const pct = q.totalAnswered > 0 ? Math.round((o.count / q.totalAnswered) * 100) : 0;
+          const barPct = (o.count / maxCount) * 100;
+          return (
+            <div key={o.value} className="flex items-center gap-2 text-xs">
+              <span className="w-32 truncate text-foreground" title={o.value}>{o.value}</span>
+              <div className="flex-1 h-4 bg-surface-2 rounded overflow-hidden">
+                <div className="h-full bg-[rgba(212,255,46,0.55)]" style={{ width: `${barPct}%` }} />
+              </div>
+              <span className="w-20 text-right text-muted">{o.count} · {pct}%</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
