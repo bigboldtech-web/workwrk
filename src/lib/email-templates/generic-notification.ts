@@ -16,10 +16,10 @@ export function genericNotificationTemplate(vars: GenericNotificationVars): { su
     <h1>${vars.heading}</h1>
     ${vars.recipientName ? `<p>Hi ${vars.recipientName},</p>` : ""}
     <p>${vars.subjectText}</p>
-    <div style="margin:16px 0;padding:14px;border:1px solid #2A2A3A;border-radius:10px;background:#0f0f17;">
-      <p style="color:#E8E8F0;font-size:15px;font-weight:500;margin:0;">${vars.itemTitle}</p>
-      ${vars.itemDetails ? `<p style="color:#8888A0;font-size:12px;margin:4px 0 0 0;">${vars.itemDetails}</p>` : ""}
-      ${vars.note ? `<p style="color:#8888A0;font-size:13px;margin:10px 0 0 0;line-height:1.6;">${vars.note}</p>` : ""}
+    <div style="margin:16px 0;padding:14px;border:1px solid #1f1f1f;border-radius:10px;background:#141414;">
+      <p style="color:#fafafa;font-size:15px;font-weight:500;margin:0;">${vars.itemTitle}</p>
+      ${vars.itemDetails ? `<p style="color:#a0a0a0;font-size:12px;margin:4px 0 0 0;">${vars.itemDetails}</p>` : ""}
+      ${vars.note ? `<p style="color:#a0a0a0;font-size:13px;margin:10px 0 0 0;line-height:1.6;">${vars.note}</p>` : ""}
     </div>
     <p style="text-align:center;">
       <a href="${vars.actionLink}" class="btn">${vars.actionLabel}</a>
