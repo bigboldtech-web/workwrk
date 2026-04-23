@@ -126,6 +126,19 @@ function getStatusBadge(status: string) {
   }
 }
 
+// DB `sopType` only knows WRITTEN / RECORDED / CHECKLIST — the UI splits
+// WRITTEN further into "Write" (rich-text body) and "Step-by-step"
+// (ordered steps with no html), keyed off `content.type`. This helper
+// collapses both axes into a single human label so every surface that
+// needs to say "what kind of SOP is this?" stays in sync.
+function getSopKindLabel(sop: SOP): string {
+  if (sop.sopType === "CHECKLIST") return "Checklist";
+  if (sop.sopType === "RECORDED") return "Recording";
+  if ((sop.content as { type?: string } | null)?.type === "richtext") return "Write";
+  if ((sop.content as { type?: string } | null)?.type === "recorded") return "Recording";
+  return "Step-by-step";
+}
+
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "---";
   return new Date(dateStr).toLocaleDateString("en-US", {
@@ -227,27 +240,20 @@ function StepDescriptionView({ html }: { html?: string }) {
   return <p className="text-xs text-muted mt-0.5 whitespace-pre-wrap">{html}</p>;
 }
 
-function RichTextSopEditor({ content, editable, onSave }: { content: string; editable: boolean; onSave: (html: string) => void }) {
-  const [html, setHtml] = useState(content);
-  const [dirty, setDirty] = useState(false);
-
+// Thin pass-through around the generic RichEditor — the parent holds
+// the HTML state so the main "Save" button picks it up. An inline save
+// button used to live here; it lied about what was persisted because the
+// top-of-page Save would clobber the staged content with the pre-edit
+// version. Now there is one save path, not two.
+function RichTextSopEditor({ content, editable, onChange }: { content: string; editable: boolean; onChange: (html: string) => void }) {
   return (
-    <div>
-      <RichEditor
-        content={html}
-        onChange={(newHtml) => { setHtml(newHtml); setDirty(true); }}
-        editable={editable}
-        placeholder="Write your SOP content here... Use headings, lists, bold text, links, and images."
-        minHeight="400px"
-      />
-      {editable && dirty && (
-        <div className="flex justify-end p-3 border-t border-border">
-          <Button size="sm" onClick={() => { onSave(html); setDirty(false); }} className="gap-1.5">
-            <Save size={14} /> Save Content
-          </Button>
-        </div>
-      )}
-    </div>
+    <RichEditor
+      content={content}
+      onChange={onChange}
+      editable={editable}
+      placeholder="Write your SOP content here. Press / for commands — headings, lists, callouts, tables, and more."
+      minHeight="400px"
+    />
   );
 }
 
@@ -374,6 +380,11 @@ export default function SOPDetailPage() {
   const [steps, setSteps] = useState<SOPStep[]>([]);
   const [checklistSections, setChecklistSections] = useState<ChecklistSection[]>([]);
   const [processFlow, setProcessFlow] = useState<ProcessFlow>({ type: "process_flow", steps: [] });
+  // Rich-text body for WRITTEN "write" SOPs. Lifted into the parent so
+  // the main Save button includes it — previously the editor kept its
+  // own draft in local state and the top-bar Save would overwrite it
+  // with the pre-edit version, silently eating the user's changes.
+  const [richtextHtml, setRichtextHtml] = useState("");
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   // DnD bookkeeping: which step is currently being dragged (by id), and
   // which step is being hovered as a drop target. We only track target
@@ -488,6 +499,8 @@ export default function SOPDetailPage() {
       setDescription(data.description || "");
       if (data.sopType === "CHECKLIST") {
         setChecklistSections((data.content?.sections || []) as ChecklistSection[]);
+      } else if (data.content?.type === "richtext") {
+        setRichtextHtml((data.content as { html?: string })?.html || "");
       } else if (data.content?.type === "process_flow") {
         setProcessFlow({
           type: "process_flow",
@@ -513,9 +526,8 @@ export default function SOPDetailPage() {
     if (sop?.sopType === "CHECKLIST") {
       return { sections: checklistSections };
     }
-    // For richtext SOPs, preserve existing content (it's saved via its own Save button)
     if (sop?.content && (sop.content as any).type === "richtext") {
-      return sop.content;
+      return { type: "richtext", html: richtextHtml };
     }
     if (sop?.content && (sop.content as any).type === "process_flow") {
       return { type: "process_flow", flow: processFlow };
@@ -766,6 +778,9 @@ export default function SOPDetailPage() {
               )}
               <div className="flex items-center gap-2 mt-1">
                 {getStatusBadge(sop.status)}
+                <Badge variant="secondary" className="text-[10px]">
+                  {getSopKindLabel(sop)}
+                </Badge>
                 <Badge variant="outline" className="text-[10px]">
                   v{sop.version}
                 </Badge>
@@ -786,6 +801,8 @@ export default function SOPDetailPage() {
                   setDescription(sop.description || "");
                   if (sop.sopType === "CHECKLIST") {
                     setChecklistSections((sop.content?.sections || []) as ChecklistSection[]);
+                  } else if (sop.content?.type === "richtext") {
+                    setRichtextHtml((sop.content as { html?: string })?.html || "");
                   } else {
                     setSteps((sop.content?.type === "recorded" ? [] : sop.content?.steps || []) as SOPStep[]);
                   }
@@ -1075,21 +1092,16 @@ export default function SOPDetailPage() {
                 </CardContent>
               </Card>
 
-              {/* Rich Text Editor for "Write" type SOPs */}
+              {/* Rich Text Editor for "Write" type SOPs — parent owns the
+                  html so the top-bar Save persists it along with title /
+                  description / type-specific content in one request. */}
               {sop.content && (sop.content as any).type === "richtext" && (
                 <Card>
                   <CardContent className="p-0">
                     <RichTextSopEditor
-                      content={(sop.content as any).html || ""}
+                      content={richtextHtml}
                       editable={editing}
-                      onSave={async (html) => {
-                        await fetch(`/api/sops/${id}`, {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ content: { type: "richtext", html } }),
-                        });
-                        fetchSOP();
-                      }}
+                      onChange={setRichtextHtml}
                     />
                   </CardContent>
                 </Card>
@@ -1681,6 +1693,16 @@ export default function SOPDetailPage() {
                     Status
                   </Label>
                   <div className="mt-0.5">{getStatusBadge(sop.status)}</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <FileText size={14} className="text-muted shrink-0" />
+                <div>
+                  <Label className="text-[10px] text-muted uppercase tracking-wider">
+                    Type
+                  </Label>
+                  <p className="text-sm">{getSopKindLabel(sop)}</p>
                 </div>
               </div>
 
