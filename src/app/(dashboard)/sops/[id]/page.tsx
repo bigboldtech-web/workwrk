@@ -76,7 +76,14 @@ interface SOPCompliance {
 interface SOPStep {
   id: string;
   title: string;
+  /**
+   * Rich HTML. Legacy steps with plain text still work — TipTap treats
+   * raw strings as paragraphs, and the read-only renderer below falls
+   * back to `whitespace-pre-wrap` for anything that doesn't contain tags.
+   */
   description?: string;
+  /** Optional inline image for the step (URL or data URI). */
+  image?: string;
 }
 
 interface RecordedStep {
@@ -130,6 +137,94 @@ function formatDate(dateStr: string | null): string {
 
 function generateStepId(): string {
   return `step_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Per-step image picker. Reuses the file->data-URI pattern the rich
+// editor uses, so we don't need an upload endpoint before images can be
+// attached. If the user later wants to host images externally, they can
+// paste a URL instead of uploading.
+function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: string) => void }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = reader.result as string;
+      if (src) onChange(src);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleUrl() {
+    const url = prompt("Paste image URL (leave blank to remove):", image || "");
+    if (url === null) return;
+    onChange(url.trim());
+  }
+
+  if (image) {
+    return (
+      <div className="relative inline-block">
+        <img src={image} alt="" className="max-h-40 rounded-md border border-border" />
+        <div className="absolute top-1 right-1 flex gap-1">
+          <button
+            type="button"
+            onClick={handleUrl}
+            className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-white hover:bg-black/80"
+          >
+            Replace
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-white hover:bg-black/80"
+            aria-label="Remove image"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="text-[11px] px-2 py-1 rounded border border-dashed border-border text-muted hover:text-[#e2ff6b] hover:border-[#d4ff2e]"
+      >
+        + Upload image
+      </button>
+      <button
+        type="button"
+        onClick={handleUrl}
+        className="text-[11px] px-2 py-1 rounded text-muted hover:text-[#e2ff6b]"
+      >
+        or paste URL
+      </button>
+    </div>
+  );
+}
+
+// Read-only step description renderer. Old steps stored plain text in
+// `description`; new steps store rich HTML. We sniff for tags so both
+// shapes render correctly without converting legacy data.
+function StepDescriptionView({ html }: { html?: string }) {
+  if (!html) return null;
+  const looksLikeHtml = /<[a-z][^>]*>/i.test(html);
+  if (looksLikeHtml) {
+    return (
+      <div
+        className="prose prose-sm dark:prose-invert max-w-none text-xs text-muted mt-0.5 [&_p]:my-1"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  }
+  return <p className="text-xs text-muted mt-0.5 whitespace-pre-wrap">{html}</p>;
 }
 
 function RichTextSopEditor({ content, editable, onSave }: { content: string; editable: boolean; onSave: (html: string) => void }) {
@@ -1256,17 +1351,20 @@ export default function SOPDetailPage() {
                                 className="bg-transparent border-border h-8 text-sm"
                                 autoFocus
                                 onKeyDown={(e) => {
-                                  if (e.key === "Enter") setEditingStepId(null);
+                                  if (e.key === "Enter" && e.metaKey) setEditingStepId(null);
                                 }}
                               />
-                              <Textarea
-                                value={step.description || ""}
-                                onChange={(e) =>
-                                  updateStep(step.id, "description", e.target.value)
-                                }
-                                placeholder="Step description (optional)..."
-                                rows={2}
-                                className="bg-transparent border-border text-sm"
+                              <RichEditor
+                                content={step.description || ""}
+                                onChange={(html) => updateStep(step.id, "description", html)}
+                                placeholder="Add details, links, lists, or formatting… Press / for commands."
+                                editable
+                                compact
+                                minHeight="80px"
+                              />
+                              <StepImageEditor
+                                image={step.image}
+                                onChange={(img) => updateStep(step.id, "image", img)}
                               />
                               <Button
                                 variant="ghost"
@@ -1287,8 +1385,14 @@ export default function SOPDetailPage() {
                                   <span className="text-muted italic">Untitled step</span>
                                 )}
                               </p>
-                              {step.description && (
-                                <p className="text-xs text-muted mt-0.5">{step.description}</p>
+                              <StepDescriptionView html={step.description} />
+                              {step.image && (
+                                <img
+                                  src={step.image}
+                                  alt=""
+                                  loading="lazy"
+                                  className="mt-2 rounded-md border border-border max-h-48"
+                                />
                               )}
                             </div>
                           )}

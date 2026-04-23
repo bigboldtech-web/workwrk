@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
       sop: {
         select: {
           id: true, title: true, category: true, status: true,
-          content: true, version: true,
+          content: true, version: true, sopType: true,
         },
       },
       user: {
@@ -69,10 +69,16 @@ export async function POST(req: NextRequest) {
   });
   if (!sop) return jsonError("SOP not found", 404);
 
-  // Calculate total steps from SOP content
+  // Reference SOPs (WRITTEN / RECORDED) are guides, not trackable work —
+  // leave stepsTotal at 0 so they never show a completion percentage or
+  // graduate into a "Completed" bucket. Only CHECKLIST SOPs accumulate
+  // step progress, because those are the ones users actually run.
   const content = sop.content as any;
-  const steps = content?.steps || content?.sections || [];
-  const stepsTotal = steps.length;
+  let stepsTotal = 0;
+  if (sop.sopType === "CHECKLIST") {
+    const sections = (content?.sections as any[]) || [];
+    stepsTotal = sections.reduce((sum, s) => sum + (s?.steps?.length || 0), 0);
+  }
 
   // Resolve user IDs — either from userIds array or from departmentId
   let resolvedUserIds: string[] = userIds || [];

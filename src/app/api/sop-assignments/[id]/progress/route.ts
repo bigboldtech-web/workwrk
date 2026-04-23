@@ -16,11 +16,19 @@ export async function PATCH(
 
   const assignment = await prisma.sOPAssignment.findFirst({
     where: { id, userId, sop: { organizationId: getOrgId(session) } },
-    include: { sop: { select: { content: true } } },
+    include: { sop: { select: { content: true, sopType: true } } },
   });
 
   if (!assignment) return jsonError("Assignment not found", 404);
   if (assignment.status === "COMPLETED") return jsonError("Already completed");
+
+  // Reference SOPs (WRITTEN / RECORDED) have no completion state — the
+  // UI no longer calls this route for them, but guard the backend too so
+  // stale clients or external callers can't push a rich-text guide into
+  // a fake-completed state.
+  if (assignment.sop.sopType !== "CHECKLIST") {
+    return jsonError("Progress is only tracked for checklist SOPs", 400);
+  }
 
   const body = await req.json();
   const { stepIndex, completed, quizScore } = body;
