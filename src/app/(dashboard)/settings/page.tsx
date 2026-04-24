@@ -14,7 +14,9 @@ import {
 import {
   Building2, Users, Shield, Bell, CreditCard, Check, Loader2, Send, Trash2,
   UserX, RotateCcw, Download, AlertTriangle, Sliders, ToggleLeft, Key, Lock,
+  BookOpen,
 } from "lucide-react";
+import { SopCategoryManager } from "@/components/settings/sop-category-manager";
 import { PERMISSION_MODULES, ACCESS_LEVELS, DEFAULT_PERMISSIONS, PROTECTED_ADMIN_ROLES, type PermissionMatrix, type PermissionModule, type AccessLevel } from "@/lib/permissions";
 import { invalidatePermissionCache } from "@/hooks/use-permission";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -1009,6 +1011,7 @@ export default function SettingsPage() {
           <TabsTrigger value="security" className="gap-2"><Shield size={14} /> Security</TabsTrigger>
           <TabsTrigger value="sso" className="gap-2"><Key size={14} /> SSO</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2"><Bell size={14} /> Notifications</TabsTrigger>
+          <TabsTrigger value="sops" className="gap-2"><BookOpen size={14} /> SOPs</TabsTrigger>
           <TabsTrigger value="removed" className="gap-2" onClick={() => { if (removedPeople.length === 0) fetchRemovedPeople(); }}><UserX size={14} /> Removed People</TabsTrigger>
           <TabsTrigger value="billing" className="gap-2"><CreditCard size={14} /> Billing</TabsTrigger>
           <TabsTrigger value="data" className="gap-2"><Sliders size={14} /> Data</TabsTrigger>
@@ -1616,6 +1619,11 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* SOPs — category/subcategory registry */}
+        <TabsContent value="sops" className="space-y-4 mt-4">
+          <SopCategoryManager />
         </TabsContent>
 
         {/* Privacy — user-level DSR controls (GDPR Art. 15/17, CCPA) */}

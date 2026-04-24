@@ -2,20 +2,55 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 
-// GET: List all categories with subcategories
+// GET: List all categories with subcategories + per-name SOP counts.
+//
+// SOPs reference category/subcategory by *name* (strings), not FK IDs,
+// so we aggregate with a groupBy over (category, subcategory) and fold
+// the numbers onto each row by name match. Cheap: one extra query, and
+// lets the category-manager UI show the admin how many SOPs each
+// category/subcategory touches before they rename or delete it.
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const orgId = getOrgId(session);
 
-  const categories = await prisma.sOPCategory.findMany({
-    where: { organizationId: orgId },
-    include: { subcategories: { orderBy: { name: "asc" } } },
-    orderBy: { name: "asc" },
+  const [categories, sopCounts] = await Promise.all([
+    prisma.sOPCategory.findMany({
+      where: { organizationId: orgId },
+      include: { subcategories: { orderBy: { name: "asc" } } },
+      orderBy: { name: "asc" },
+    }),
+    prisma.sOP.groupBy({
+      by: ["category", "subcategory"],
+      where: { organizationId: orgId },
+      _count: { _all: true },
+    }),
+  ]);
+
+  // { "Marketing": { total: 12, sub: { "Email": 4, "Social": 3, _unassigned: 5 } } }
+  const byName: Record<string, { total: number; sub: Record<string, number> }> = {};
+  for (const row of sopCounts) {
+    const cat = row.category || "_uncategorized";
+    const sub = row.subcategory || "_unassigned";
+    if (!byName[cat]) byName[cat] = { total: 0, sub: {} };
+    byName[cat].total += row._count._all;
+    byName[cat].sub[sub] = (byName[cat].sub[sub] || 0) + row._count._all;
+  }
+
+  const enriched = categories.map((c) => {
+    const bucket = byName[c.name];
+    return {
+      ...c,
+      sopCount: bucket?.total || 0,
+      subcategories: c.subcategories.map((s) => ({
+        ...s,
+        sopCount: bucket?.sub[s.name] || 0,
+      })),
+    };
   });
 
-  return jsonSuccess(categories, 200, LOOKUP_CACHE_HEADERS);
+  return jsonSuccess(enriched, 200, LOOKUP_CACHE_HEADERS);
 }
 
 // POST: Create category or subcategory

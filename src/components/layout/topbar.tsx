@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck } from "lucide-react";
+import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import {
   DropdownMenu,
@@ -18,6 +18,7 @@ import { getInitials } from "@/lib/utils";
 import { useTranslations } from "next-intl";
 import { LanguageSwitcher } from "./language-switcher";
 import { CurrencySwitcher } from "./currency-switcher";
+import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
 
 interface SearchResult {
   type: "person" | "task" | "sop" | "department" | "meeting";
@@ -87,16 +88,68 @@ export function Topbar() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // Desktop alerts — permission state + notify(). See use-desktop-notifications.
+  const desktop = useDesktopNotifications();
+  // Track the most recent notification id we've already seen so we only
+  // ping for genuinely new ones across polling cycles. Ref, not state —
+  // updating it shouldn't trigger re-renders, and the first poll seeds
+  // it silently so we don't ding on page load.
+  const lastSeenIdRef = useRef<string | null>(null);
+  const firstPollRef = useRef(true);
+
+  // Shared fetch-and-diff. Runs once on mount + every 45s + on tab focus.
+  const loadNotifications = useCallback(async () => {
+    try {
+      const res = await fetch("/api/notifications");
+      if (!res.ok) return;
+      const data = await res.json();
+      const notifs: Notification[] = data.notifications || (Array.isArray(data) ? data : []);
+      setNotifications(notifs.slice(0, 10));
+      setUnreadCount(data.unreadCount ?? notifs.filter((n: Notification) => !n.read).length);
+
+      if (notifs.length === 0) return;
+      const latestId = notifs[0].id;
+
+      if (firstPollRef.current) {
+        // Seed on first load so a refresh doesn't re-alert on stale unread items.
+        lastSeenIdRef.current = latestId;
+        firstPollRef.current = false;
+        return;
+      }
+
+      // Fire desktop alert for every notification that's newer than the
+      // last one we saw. Stops at the first known id so we don't replay
+      // the whole history after a long idle.
+      if (latestId !== lastSeenIdRef.current) {
+        const fresh: Notification[] = [];
+        for (const n of notifs) {
+          if (n.id === lastSeenIdRef.current) break;
+          if (!n.read) fresh.push(n);
+        }
+        fresh.reverse(); // oldest-first so tags don't collapse the newest one
+        for (const n of fresh) {
+          desktop.notify({
+            title: n.title,
+            body: n.message,
+            tag: `notif-${n.id}`,
+            url: n.link || undefined,
+          });
+        }
+        lastSeenIdRef.current = latestId;
+      }
+    } catch { /* offline / transient — retry next tick */ }
+  }, [desktop]);
+
   useEffect(() => {
-    fetch("/api/notifications")
-      .then((res) => res.json())
-      .then((data) => {
-        const notifs = data.notifications || (Array.isArray(data) ? data : []);
-        setNotifications(notifs.slice(0, 10));
-        setUnreadCount(data.unreadCount ?? notifs.filter((n: Notification) => !n.read).length);
-      })
-      .catch(() => {});
-  }, []);
+    loadNotifications();
+    const interval = setInterval(loadNotifications, 45_000);
+    const onFocus = () => loadNotifications();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loadNotifications]);
 
   const handleNotificationClick = useCallback(
     (notif: Notification) => {
@@ -266,6 +319,7 @@ export function Topbar() {
                 </button>
               )}
             </DropdownMenuLabel>
+            <DesktopAlertsRow desktop={desktop} />
             <DropdownMenuSeparator />
             {notifications.length === 0 ? (
               <div className="px-3 py-6 text-center text-sm" style={{ color: "#a0a0a0" }}>
@@ -352,6 +406,67 @@ export function Topbar() {
         </DropdownMenu>
       </div>
     </header>
+  );
+}
+
+// Small row inside the bell dropdown so users can enable / disable the
+// browser-level ding. Shown above the separator so it's always visible
+// even when the notifications list is empty.
+function DesktopAlertsRow({
+  desktop,
+}: {
+  desktop: ReturnType<typeof useDesktopNotifications>;
+}) {
+  const { permission, pref, enabled, requestPermission, disable, enable } = desktop;
+
+  // Don't render if the browser has no Notification API at all (e.g.
+  // some embedded webviews) — it would just confuse the user.
+  if (permission === "unsupported") return null;
+
+  let label = "Enable desktop alerts";
+  let subtitle = "Get a ping when something new arrives";
+  let icon = <Bell size={14} className="text-muted" />;
+  let action: () => void = () => { requestPermission(); };
+  let actionLabel = "Enable";
+  let muted = false;
+
+  if (permission === "denied") {
+    label = "Desktop alerts blocked";
+    subtitle = "Enable in your browser's site settings";
+    icon = <BellOff size={14} className="text-muted" />;
+    actionLabel = "";
+    muted = true;
+  } else if (enabled) {
+    label = "Desktop alerts on";
+    subtitle = "Ping + popup for new notifications";
+    icon = <BellRing size={14} className="text-[#d4ff2e]" />;
+    actionLabel = "Turn off";
+    action = disable;
+  } else if (permission === "granted" && pref === "off") {
+    label = "Desktop alerts paused";
+    subtitle = "Turn back on to hear new notifications";
+    icon = <BellOff size={14} className="text-muted" />;
+    actionLabel = "Turn on";
+    action = enable;
+  }
+
+  return (
+    <div className={`px-3 py-2 text-xs flex items-center gap-2 ${muted ? "opacity-70" : ""}`}>
+      {icon}
+      <div className="flex-1 min-w-0">
+        <p className="font-medium truncate">{label}</p>
+        <p className="text-[10px] text-muted truncate">{subtitle}</p>
+      </div>
+      {actionLabel && (
+        <button
+          type="button"
+          onClick={action}
+          className="text-[10px] px-2 py-1 rounded border border-border hover:border-[#d4ff2e] hover:text-[#d4ff2e] transition-colors"
+        >
+          {actionLabel}
+        </button>
+      )}
+    </div>
   );
 }
 

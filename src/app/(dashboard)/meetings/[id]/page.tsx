@@ -82,10 +82,21 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
   const [supported, setSupported] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [interimText, setInterimText] = useState("");
+  // "reconnecting" means a network blip was reported; cleared the moment
+  // a fresh recognition session actually starts (onstart) or a result
+  // comes in. Previously there was no onstart handler, so this label got
+  // stuck on screen forever whenever the first retry didn't immediately
+  // produce speech.
+  const [reconnecting, setReconnecting] = useState(false);
+
   const recognitionRef = useRef<any>(null);
   const isRecordingRef = useRef(false);
+  const consecutiveFailuresRef = useRef(0);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
+
+  const MAX_CONSECUTIVE_FAILURES = 5;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -94,13 +105,35 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
       setSupported(false);
       return;
     }
+    recognitionRef.current = null; // lazy-created in toggleRecording
+    return () => {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+    };
+  }, []);
 
+  // Build a fresh SpeechRecognition each time we (re)start. A recognition
+  // that hit a "network" error can get into a zombie state where .start()
+  // silently no-ops — reusing it is exactly why the UI got stuck on
+  // "Reconnecting…". Creating a new one per session dodges that entirely.
+  function buildRecognition() {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return null;
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
+    recognition.onstart = () => {
+      // Fresh session is live — any reconnect banner is no longer true.
+      consecutiveFailuresRef.current = 0;
+      setReconnecting(false);
+      setErrorMsg("");
+    };
+
     recognition.onresult = (event: any) => {
+      // Any result (even interim) means we're truly connected again.
+      if (reconnecting) setReconnecting(false);
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
@@ -118,62 +151,86 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
 
     recognition.onerror = (e: any) => {
       if (e.error === "no-speech" || e.error === "aborted") return;
-      if (e.error === "not-allowed") {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         setErrorMsg("Microphone access denied. Please allow microphone in your browser settings.");
         isRecordingRef.current = false;
         setIsRecording(false);
+        setReconnecting(false);
         return;
       }
-      // Network errors are transient — auto-retry instead of stopping
       if (e.error === "network") {
-        if (isRecordingRef.current) {
-          setInterimText("Reconnecting...");
-          // onend will auto-restart since isRecordingRef is still true
-        }
+        // onend will run next and handle the retry with backoff.
+        if (isRecordingRef.current) setReconnecting(true);
         return;
       }
+      // Unknown error — still let onend decide whether to retry.
       console.error("[VoiceRecord] Error:", e.error);
-      isRecordingRef.current = false;
-      setIsRecording(false);
     };
 
     recognition.onend = () => {
-      if (isRecordingRef.current) {
-        // Small delay before restart to handle transient network errors
-        setTimeout(() => {
-          if (isRecordingRef.current) {
-            try { recognition.start(); } catch {}
-          }
-        }, 300);
-      } else {
-        setIsRecording(false);
+      if (!isRecordingRef.current) {
+        setReconnecting(false);
         setInterimText("");
+        setIsRecording(false);
+        return;
       }
+      // Still recording per user intent → attempt a retry with backoff.
+      consecutiveFailuresRef.current += 1;
+      if (consecutiveFailuresRef.current > MAX_CONSECUTIVE_FAILURES) {
+        setErrorMsg("Speech recognition keeps failing. Check your internet connection and try again — or type notes directly.");
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        setReconnecting(false);
+        return;
+      }
+      setReconnecting(true);
+      const delay = Math.min(300 * Math.pow(2, consecutiveFailuresRef.current - 1), 4000);
+      restartTimerRef.current = setTimeout(() => {
+        if (!isRecordingRef.current) return;
+        try {
+          const fresh = buildRecognition();
+          if (!fresh) return;
+          recognitionRef.current = fresh;
+          fresh.start();
+        } catch {
+          // Another retry will be scheduled by the next onend.
+        }
+      }, delay);
     };
 
-    recognitionRef.current = recognition;
-  }, []);
+    return recognition;
+  }
 
   function toggleRecording() {
     setErrorMsg("");
-    if (!recognitionRef.current) {
+    if (!supported) {
       setErrorMsg("Voice recording is only supported in Chrome. Please use Chrome or paste your transcript manually.");
       return;
     }
     if (isRecording) {
       isRecordingRef.current = false;
-      recognitionRef.current.stop();
+      if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+      try { recognitionRef.current?.stop(); } catch { /* ignore */ }
       setIsRecording(false);
       setInterimText("");
-    } else {
-      isRecordingRef.current = true;
-      try {
-        recognitionRef.current.start();
-        setIsRecording(true);
-      } catch (err: any) {
-        setErrorMsg("Failed to start recording. Please check microphone permissions.");
-        isRecordingRef.current = false;
-      }
+      setReconnecting(false);
+      return;
+    }
+    isRecordingRef.current = true;
+    consecutiveFailuresRef.current = 0;
+    const fresh = buildRecognition();
+    if (!fresh) {
+      setErrorMsg("Voice recording is only supported in Chrome.");
+      isRecordingRef.current = false;
+      return;
+    }
+    recognitionRef.current = fresh;
+    try {
+      fresh.start();
+      setIsRecording(true);
+    } catch {
+      setErrorMsg("Failed to start recording. Please check microphone permissions.");
+      isRecordingRef.current = false;
     }
   }
 
@@ -203,12 +260,15 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
           <><Mic size={14} /> Voice Record</>
         )}
       </Button>
-      {isRecording && interimText && (
+      {isRecording && reconnecting && (
+        <span className="text-[11px] text-orange-400 animate-pulse">Reconnecting…</span>
+      )}
+      {isRecording && !reconnecting && interimText && (
         <span className="text-[11px] text-muted italic truncate max-w-[200px]">
           {interimText}...
         </span>
       )}
-      {isRecording && !interimText && (
+      {isRecording && !reconnecting && !interimText && (
         <span className="text-[11px] text-muted animate-pulse">Listening...</span>
       )}
       {errorMsg && (

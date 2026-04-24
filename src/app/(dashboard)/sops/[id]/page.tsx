@@ -53,6 +53,11 @@ import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-build
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { RichEditor } from "@/components/ui/rich-editor";
 import { useRole } from "@/hooks/use-role";
+import {
+  useAutosave,
+  readAutosaveBackup,
+  clearAutosaveBackup,
+} from "@/hooks/use-autosave";
 
 interface ComplianceUser {
   id: string;
@@ -150,6 +155,58 @@ function formatDate(dateStr: string | null): string {
 
 function generateStepId(): string {
   return `step_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Small header pill reflecting the autosave state. Renders nothing when
+// idle — the user only needs to know something is happening once they've
+// actually changed something.
+function AutosaveIndicator({
+  status,
+  lastSavedAt,
+}: {
+  status: "idle" | "dirty" | "saving" | "saved" | "error";
+  lastSavedAt: Date | null;
+}) {
+  const [, tick] = useState(0);
+  // Re-render every 15s while showing "Saved Xs ago" so the label stays fresh.
+  useEffect(() => {
+    if (status !== "saved") return;
+    const id = setInterval(() => tick((v) => v + 1), 15_000);
+    return () => clearInterval(id);
+  }, [status]);
+
+  if (status === "idle") return null;
+
+  const common = "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border";
+  if (status === "saving") {
+    return <span className={`${common} border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]`}>
+      <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#d4ff2e] animate-pulse" />
+      Saving…
+    </span>;
+  }
+  if (status === "dirty") {
+    return <span className={`${common} border-orange-500/30 bg-orange-500/10 text-orange-400`}>
+      Unsaved changes
+    </span>;
+  }
+  if (status === "error") {
+    return <span className={`${common} border-red-500/30 bg-red-500/10 text-red-400`}>
+      Save failed — retrying
+    </span>;
+  }
+  // saved
+  return <span className={`${common} border-green-500/30 bg-green-500/10 text-green-400`}>
+    <CheckCircle size={10} /> Saved {lastSavedAt ? formatSavedAgo(lastSavedAt) : "just now"}
+  </span>;
+}
+
+function formatSavedAgo(at: Date): string {
+  const s = Math.max(1, Math.floor((Date.now() - at.getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
 }
 
 // Per-step image picker. Reuses the file->data-URI pattern the rich
@@ -522,6 +579,49 @@ export default function SOPDetailPage() {
     fetchOrgUsers();
   }, [fetchSOP, fetchAssignments, fetchOrgUsers]);
 
+  // Offer to restore an unsaved local backup if one exists and is newer
+  // than the server's `updatedAt`. Backups older than a week are treated
+  // as stale and cleaned up silently — stale drafts do more harm than
+  // good.
+  const MAX_BACKUP_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  interface SopAutosaveSnapshot { title: string; description: string; content: unknown }
+  const [restorePrompt, setRestorePrompt] = useState<{ key: string; at: number; data: SopAutosaveSnapshot } | null>(null);
+
+  useEffect(() => {
+    if (!sop) return;
+    const key = `sop-autosave:${sop.id}`;
+    const backup = readAutosaveBackup<SopAutosaveSnapshot>(key);
+    if (!backup) return;
+    const age = Date.now() - backup.at;
+    const serverTime = new Date(sop.updatedAt).getTime();
+    if (age > MAX_BACKUP_AGE_MS || backup.at <= serverTime) {
+      clearAutosaveBackup(key);
+      return;
+    }
+    setRestorePrompt({ key, at: backup.at, data: backup.data });
+    // Run only when the SOP id or its server updatedAt changes — we
+    // don't want this firing on every autosave tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sop?.id, sop?.updatedAt]);
+
+  const applyRestoredSnapshot = (snap: SopAutosaveSnapshot) => {
+    setTitle(snap.title || "");
+    setDescription(snap.description || "");
+    const c = (snap.content || {}) as any;
+    if (sop?.sopType === "CHECKLIST") {
+      setChecklistSections((c.sections || []) as ChecklistSection[]);
+    } else if (c.type === "richtext") {
+      setRichtextHtml(c.html || "");
+    } else if (c.type === "process_flow") {
+      setProcessFlow({
+        type: "process_flow",
+        steps: Array.isArray(c.flow?.steps) ? c.flow.steps : [],
+      });
+    } else if (Array.isArray(c.steps)) {
+      setSteps(c.steps as SOPStep[]);
+    }
+  };
+
   const getContentPayload = () => {
     if (sop?.sopType === "CHECKLIST") {
       return { sections: checklistSections };
@@ -534,6 +634,41 @@ export default function SOPDetailPage() {
     }
     return { steps };
   };
+
+  // Autosave snapshot — the shape that gets watched for changes and
+  // written to localStorage as a crash-recovery backup. Kept flat so
+  // JSON.stringify comparison is cheap and deterministic.
+  const autosaveSnapshot = {
+    title,
+    description,
+    content: getContentPayload(),
+  };
+
+  // Only autosave DRAFT SOPs. Published SOPs shouldn't drift live because
+  // someone typed — those need explicit Save (and ideally Publish → new
+  // version).
+  const autosaveEnabled = editing && !!sop && sop.status === "DRAFT";
+  const autosaveKey = sop ? `sop-autosave:${sop.id}` : undefined;
+
+  const autosave = useAutosave({
+    snapshot: autosaveSnapshot,
+    enabled: autosaveEnabled,
+    localKey: autosaveKey,
+    delay: 1500,
+    save: async (snap) => {
+      const res = await fetch(`/api/sops/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snap),
+      });
+      if (!res.ok) throw new Error("Autosave failed");
+      const updated = await res.json();
+      // Keep local sop in sync so updatedAt / content are current. We
+      // avoid touching the edit-buffer state here — the user may still
+      // be typing, and overwriting it would clobber in-flight keystrokes.
+      setSop((prev) => (prev ? { ...prev, ...updated, content: prev.content } : prev));
+    },
+  });
 
   const handleSave = async () => {
     if (!sop) return;
@@ -552,6 +687,9 @@ export default function SOPDetailPage() {
       const updated = await res.json();
       setSop(updated);
       setEditing(false);
+      // Explicit save succeeded — drop the local crash backup so the next
+      // page load doesn't offer to restore stale content.
+      if (autosaveKey) clearAutosaveBackup(autosaveKey);
       toastSuccess("Saved successfully");
     } catch (err) {
       console.error("Error saving SOP:", err);
@@ -749,6 +887,46 @@ export default function SOPDetailPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
+      {/* Unsaved-backup restore banner */}
+      {restorePrompt && (
+        <Card className="border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.04)]">
+          <CardContent className="p-4 flex items-center gap-3">
+            <AlertCircle size={18} className="text-[#d4ff2e] shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Unsaved changes found</p>
+              <p className="text-xs text-muted">
+                Local backup from {formatSavedAgo(new Date(restorePrompt.at))} that wasn&apos;t
+                synced to the server. Restore it to keep editing, or discard to use the saved version.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (restorePrompt) clearAutosaveBackup(restorePrompt.key);
+                setRestorePrompt(null);
+              }}
+            >
+              Discard
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!restorePrompt) return;
+                applyRestoredSnapshot(restorePrompt.data);
+                // Drop into edit mode so autosave picks up from here.
+                setEditing(true);
+                setRestorePrompt(null);
+                toastSuccess("Restored unsaved changes — autosaving now");
+              }}
+              className="gap-1.5"
+            >
+              Restore
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -776,7 +954,7 @@ export default function SOPDetailPage() {
                   {sop.title}
                 </h1>
               )}
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {getStatusBadge(sop.status)}
                 <Badge variant="secondary" className="text-[10px]">
                   {getSopKindLabel(sop)}
@@ -784,6 +962,9 @@ export default function SOPDetailPage() {
                 <Badge variant="outline" className="text-[10px]">
                   v{sop.version}
                 </Badge>
+                {editing && sop.status === "DRAFT" && (
+                  <AutosaveIndicator status={autosave.status} lastSavedAt={autosave.lastSavedAt} />
+                )}
               </div>
             </div>
           </div>
@@ -807,6 +988,9 @@ export default function SOPDetailPage() {
                     setSteps((sop.content?.type === "recorded" ? [] : sop.content?.steps || []) as SOPStep[]);
                   }
                   setEditingStepId(null);
+                  // User explicitly cancelled — drop any autosaved draft
+                  // so it doesn't re-surface as a restore prompt later.
+                  if (autosaveKey) clearAutosaveBackup(autosaveKey);
                 }}
               >
                 Cancel

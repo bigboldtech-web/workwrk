@@ -40,6 +40,7 @@ import {
   Package,
   MessageSquareHeart,
   Heart,
+  Palette,
 } from "lucide-react";
 
 type NavItem = {
@@ -55,6 +56,7 @@ type NavItem = {
 const navigation: NavItem[] = [
   { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone },
+  { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette },
   { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true },
   { name: "Organization", key: "organization", href: "/organization", icon: Building2 },
   { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi" },
