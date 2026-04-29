@@ -67,14 +67,23 @@ export async function PATCH(
   }
 
   const body = await req.json();
-  const { title, description, category, content, status, version, folderId } = body;
+  const { title, description, category, subcategory, content, status, version, folderId, tags } = body;
 
   const data: Record<string, unknown> = {};
   if (title !== undefined) data.title = title;
   if (description !== undefined) data.description = description;
   if (category !== undefined) data.category = category;
+  if (subcategory !== undefined) data.subcategory = subcategory;
   if (content !== undefined) data.content = content;
   if (version !== undefined) data.version = version;
+  if (tags !== undefined) {
+    data.tags = Array.isArray(tags)
+      ? Array.from(new Set(
+          tags.map((t: unknown) => (typeof t === "string" ? t.trim() : ""))
+              .filter((t: string) => t.length > 0 && t.length <= 40),
+        ))
+      : [];
+  }
 
   // Moving between folders requires write access on the target too.
   // Moving TO the unfoldered bucket (null) is allowed for anyone with

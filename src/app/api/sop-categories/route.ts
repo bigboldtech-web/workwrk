@@ -50,7 +50,26 @@ export async function GET() {
     };
   });
 
-  return jsonSuccess(enriched, 200, LOOKUP_CACHE_HEADERS);
+  // Surface category strings observed on SOPs that don't have a matching
+  // SOPCategory row yet (legacy / never-saved). Without this the filter
+  // dropdown drops them whenever they fall off the current page.
+  const savedNames = new Set(categories.map((c) => c.name));
+  const ghostCategories = Object.entries(byName)
+    .filter(([name]) => name !== "_uncategorized" && !savedNames.has(name))
+    .map(([name, bucket]) => ({
+      id: null,
+      name,
+      organizationId: orgId,
+      sopCount: bucket.total,
+      subcategories: Object.entries(bucket.sub)
+        .filter(([sub]) => sub !== "_unassigned")
+        .map(([sub, count]) => ({ id: null, name: sub, categoryId: null, sopCount: count })),
+      unsaved: true,
+    }));
+
+  const all = [...enriched, ...ghostCategories].sort((a, b) => a.name.localeCompare(b.name));
+
+  return jsonSuccess(all, 200, LOOKUP_CACHE_HEADERS);
 }
 
 // POST: Create category or subcategory

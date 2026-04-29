@@ -21,8 +21,10 @@ import {
   BookOpen, Plus, Search, FileText, Clock, CheckCircle, AlertTriangle,
   Eye, Edit3, Users, BarChart3, ClipboardList, ShieldCheck,
   PenLine, Video, ListChecks, Download, Archive, RotateCcw, Trash2,
-  FolderOpen, FolderInput, Link2, ExternalLink,
+  FolderOpen, FolderInput, Link2, ExternalLink, Tag, Settings2, X,
 } from "lucide-react";
+import { FolderTree, type FolderNode } from "@/components/sops/folder-tree";
+import { TagChips, type TagOption } from "@/components/sops/tag-chips";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PaginationControls } from "@/components/ui/pagination-controls";
@@ -51,6 +53,8 @@ interface SOP {
   compliance: SOPCompliance[];
   createdAt: string;
   folderId?: string | null;
+  folder?: { id: string; name: string; color: string | null; parentId: string | null } | null;
+  tags?: string[];
 }
 
 function getComplianceScore(sop: SOP): number {
@@ -96,6 +100,27 @@ function getStatusBadge(status: string) {
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "";
   return new Date(dateStr).toISOString().split("T")[0];
+}
+
+/**
+ * Build a "Root / Child / Leaf" path for a folder by walking up
+ * `parentId`. Cheap O(depth) lookup against the flat folders list
+ * the page already has in memory.
+ */
+function folderBreadcrumb(folderId: string | null | undefined, folders: FolderNode[]): { name: string; color: string | null } | null {
+  if (!folderId) return null;
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const parts: FolderNode[] = [];
+  let cursor: FolderNode | undefined = byId.get(folderId);
+  while (cursor) {
+    parts.unshift(cursor);
+    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+  }
+  if (parts.length === 0) return null;
+  return {
+    name: parts.map((p) => p.name).join(" / "),
+    color: parts[parts.length - 1].color,
+  };
 }
 
 function SkeletonCard() {
@@ -265,10 +290,13 @@ export default function SOPsPage() {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
   const [folderFilter, setFolderFilter] = useState<string>("all");     // "all" | "none" | folderId
-  const [folders, setFolders] = useState<Array<{ id: string; name: string; color: string | null; _count: { sops: number; access: number } }>>([]);
+  const [folders, setFolders] = useState<FolderNode[]>([]);
+  const [allTags, setAllTags] = useState<TagOption[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [newFolderId, setNewFolderId] = useState<string>("none");      // for Create SOP dialog
+  const [newSopTags, setNewSopTags] = useState<string[]>([]);
+  const [newSopTagInput, setNewSopTagInput] = useState("");
   const [showFolderManager, setShowFolderManager] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -290,7 +318,7 @@ export default function SOPsPage() {
   const [archivedSops, setArchivedSops] = useState<SOP[]>([]);
   const [loadingArchive, setLoadingArchive] = useState(false);
 
-  // Categories from DB
+  // Categories from DB (with sopCount, includes unsaved/legacy names)
   const [savedCategories, setSavedCategories] = useState<any[]>([]);
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [showAddSubcategory, setShowAddSubcategory] = useState(false);
@@ -299,13 +327,18 @@ export default function SOPsPage() {
 
   const { success: toastSuccess, error: toastError } = useToast();
 
-  // Fetch saved categories
-  useEffect(() => {
-    fetch("/api/sop-categories")
-      .then((r) => r.ok ? r.json() : { data: [] })
-      .then((d) => setSavedCategories(Array.isArray(d) ? d : d?.data || []))
-      .catch(() => {});
+  // Fetch categories with live SOP counts. Called on mount and re-called
+  // whenever the SOP list changes so the filter dropdown stays in sync
+  // after create / move / archive.
+  const fetchCategories = useCallback(async () => {
+    try {
+      const r = await fetch("/api/sop-categories");
+      if (!r.ok) return;
+      const d = await r.json();
+      setSavedCategories(Array.isArray(d) ? d : d?.data || []);
+    } catch {}
   }, []);
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
 
   const selectedCategoryObj = savedCategories.find((c: any) => c.name === newCategory);
   const subcategories = selectedCategoryObj?.subcategories || [];
@@ -406,15 +439,15 @@ export default function SOPsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, categoryFilter]);
+  }, [debouncedSearch, folderFilter, selectedTags]);
 
   const fetchSOPs = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (debouncedSearch) params.set("search", debouncedSearch);
-      if (categoryFilter !== "all") params.set("category", categoryFilter);
       if (folderFilter !== "all") params.set("folderId", folderFilter);
+      if (selectedTags.length > 0) params.set("tags", selectedTags.join(","));
       const res = await fetch(`/api/sops?${params}`);
       if (!res.ok) throw new Error("Failed to fetch SOPs");
       const json = await res.json();
@@ -426,10 +459,14 @@ export default function SOPsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, debouncedSearch, categoryFilter, folderFilter]);
+  }, [page, limit, debouncedSearch, folderFilter, selectedTags]);
+
+  // Keep category counts fresh after SOPs change (move/archive/create).
+  useEffect(() => { if (!loading) fetchCategories(); }, [sops, loading, fetchCategories]);
 
   // Fetch folders the caller can see (admins get all; others get their
-  // assigned folders). Drives the filter dropdown + the Create SOP picker.
+  // assigned folders + descendants). Returns the full tree as a flat
+  // list with parentId, plus rolled-up sopCountDeep on each node.
   const fetchFolders = useCallback(async () => {
     try {
       const res = await fetch("/api/sop-folders");
@@ -440,6 +477,19 @@ export default function SOPsPage() {
     } catch {}
   }, []);
   useEffect(() => { fetchFolders(); }, [fetchFolders]);
+
+  // Fetch tags in use across the org so we can render the chip filter
+  // and the autocomplete in the Create dialog.
+  const fetchTags = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sop-tags");
+      if (res.ok) {
+        const data = await res.json();
+        setAllTags(Array.isArray(data) ? data : data.data || []);
+      }
+    } catch {}
+  }, []);
+  useEffect(() => { fetchTags(); }, [fetchTags]);
 
   useEffect(() => {
     fetchSOPs();
@@ -502,6 +552,7 @@ export default function SOPsPage() {
           category: newCategory,
           subcategory: newSubcategory || undefined,
           folderId: newFolderId === "none" ? null : newFolderId,
+          tags: newSopTags,
           sopType: dbSopType,
           content: initialContent,
           status: "DRAFT",
@@ -518,8 +569,11 @@ export default function SOPsPage() {
       setNewSubcategory("");
       setNewDescription("");
       setNewFolderId("none");
+      setNewSopTags([]);
+      setNewSopTagInput("");
       setSopType("WRITTEN");
       toastSuccess("SOP created successfully");
+      fetchTags();
       // Navigate to the detail page to start building
       router.push(`/sops/${created.id}`);
     } catch (err) {
@@ -596,6 +650,67 @@ export default function SOPsPage() {
     } catch { toastError("Failed to move SOP"); }
   }
 
+  // Folder admin actions used by the sidebar tree's right-click menu.
+  async function handleCreateFolder(parentId: string | null) {
+    const name = window.prompt(parentId ? "New sub-folder name:" : "New folder name:");
+    if (!name?.trim()) return;
+    try {
+      const res = await fetch("/api/sop-folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), parentId }),
+      });
+      if (res.ok) {
+        toastSuccess("Folder created");
+        fetchFolders();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to create folder");
+      }
+    } catch { toastError("Failed to create folder"); }
+  }
+  async function handleRenameFolder(folder: FolderNode) {
+    const next = window.prompt("Rename folder", folder.name)?.trim();
+    if (!next || next === folder.name) return;
+    try {
+      const res = await fetch(`/api/sop-folders/${folder.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: next }),
+      });
+      if (res.ok) {
+        toastSuccess("Folder renamed");
+        fetchFolders();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to rename folder");
+      }
+    } catch { toastError("Failed to rename folder"); }
+  }
+  async function handleDeleteFolder(folder: FolderNode) {
+    if (folder._count.sops > 0) {
+      toastError(`"${folder.name}" still has ${folder._count.sops} SOP${folder._count.sops === 1 ? "" : "s"}. Move them out before deleting.`);
+      return;
+    }
+    if (!window.confirm(`Delete folder "${folder.name}"?`)) return;
+    try {
+      const res = await fetch(`/api/sop-folders/${folder.id}`, { method: "DELETE" });
+      if (res.ok) {
+        toastSuccess("Folder deleted");
+        if (folderFilter === folder.id) setFolderFilter("all");
+        fetchFolders();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to delete folder");
+      }
+    } catch { toastError("Failed to delete folder"); }
+  }
+  // Open the existing folder-manager dialog for access changes.
+  // Cheap reuse of the existing UI (admin can pick the folder inside).
+  function handleManageAccess() {
+    setShowFolderManager(true);
+  }
+
   async function handleArchiveSOP(sopId: string) {
     try {
       const res = await fetch(`/api/sops/${sopId}`, {
@@ -619,9 +734,9 @@ export default function SOPsPage() {
     );
   }
 
-  const savedCatNames = savedCategories.map((c: any) => c.name);
-  const existingCategories = [...new Set(sops.map((s) => s.category).filter(Boolean))];
-  const categories = [...new Set([...savedCatNames, ...existingCategories])].sort();
+  // For the Create-SOP dialog's legacy category Select: every known
+  // category name (saved + ghost). Phased out once data migration runs.
+  const categories = savedCategories.map((c: { name: string }) => c.name).sort();
 
   const filtered = sops; // Server-side filtering now
 
@@ -664,7 +779,22 @@ export default function SOPsPage() {
               <Archive size={16} /> Archive{archivedSops.length > 0 ? ` (${archivedSops.length})` : ""}
             </Button>
           )}
-          {canManageSOPs && <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+          {canManageSOPs && <Dialog
+            open={showAddDialog}
+            onOpenChange={(open) => {
+              setShowAddDialog(open);
+              if (open) {
+                // Seed the folder picker from the current sidebar selection
+                // so creating an SOP while a folder is filtered drops it
+                // straight into that folder.
+                if (folderFilter && folderFilter !== "all" && folderFilter !== "none") {
+                  setNewFolderId(folderFilter);
+                } else if (folderFilter === "none") {
+                  setNewFolderId("none");
+                }
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button className="gap-2"><Plus size={16} /> New SOP</Button>
             </DialogTrigger>
@@ -772,9 +902,20 @@ export default function SOPsPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">No folder (visible to everyone)</SelectItem>
-                      {folders.map((f) => (
-                        <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                      ))}
+                      {folders.map((f) => {
+                        const bc = folderBreadcrumb(f.id, folders);
+                        return (
+                          <SelectItem key={f.id} value={f.id}>
+                            <span className="inline-flex items-center gap-2">
+                              <span
+                                className="h-2 w-2 rounded-full shrink-0"
+                                style={{ backgroundColor: f.color || "#d4ff2e" }}
+                              />
+                              {bc?.name || f.name}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                   <p className="text-[10px] text-muted">
@@ -782,6 +923,69 @@ export default function SOPsPage() {
                   </p>
                 </div>
               )}
+
+              {/* Tags — free-form chips. Suggestions come from existing
+                  tags in the org; pressing Enter or comma adds a new one. */}
+              <div className="space-y-2">
+                <Label>Tags <span className="text-muted text-[10px]">(optional)</span></Label>
+                <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface-2 p-2 min-h-[40px]">
+                  {newSopTags.map((t) => (
+                    <span key={t} className="inline-flex items-center gap-1 rounded-full bg-[rgba(212,255,46,0.10)] text-[#d4ff2e] px-2 py-0.5 text-[11px]">
+                      #{t}
+                      <button
+                        type="button"
+                        onClick={() => setNewSopTags((prev) => prev.filter((x) => x !== t))}
+                        className="opacity-70 hover:opacity-100"
+                        aria-label={`Remove ${t}`}
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                  <Input
+                    value={newSopTagInput}
+                    onChange={(e) => setNewSopTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === ",") {
+                        e.preventDefault();
+                        const v = newSopTagInput.trim().replace(/^#/, "");
+                        if (v && !newSopTags.includes(v)) {
+                          setNewSopTags((prev) => [...prev, v]);
+                        }
+                        setNewSopTagInput("");
+                      } else if (e.key === "Backspace" && !newSopTagInput && newSopTags.length > 0) {
+                        setNewSopTags((prev) => prev.slice(0, -1));
+                      }
+                    }}
+                    placeholder={newSopTags.length === 0 ? "Add tags (Enter to confirm)" : ""}
+                    className="border-0 bg-transparent flex-1 min-w-[120px] h-6 px-1 focus-visible:ring-0 focus-visible:border-0"
+                  />
+                </div>
+                {allTags.length > 0 && newSopTagInput && (
+                  <div className="flex flex-wrap gap-1">
+                    {allTags
+                      .filter((t) =>
+                        t.name.toLowerCase().includes(newSopTagInput.toLowerCase()) &&
+                        !newSopTags.includes(t.name),
+                      )
+                      .slice(0, 8)
+                      .map((t) => (
+                        <button
+                          key={t.name}
+                          type="button"
+                          onClick={() => {
+                            setNewSopTags((prev) => [...prev, t.name]);
+                            setNewSopTagInput("");
+                          }}
+                          className="rounded-full border border-border px-2 py-0.5 text-[10px] text-muted hover:text-foreground hover:border-muted-2"
+                        >
+                          #{t.name}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-2"><Label>Description</Label><Textarea placeholder="What does this SOP cover?" value={newDescription} onChange={(e) => setNewDescription(e.target.value)} /></div>
             </div>
             <DialogFooter>
@@ -876,35 +1080,24 @@ export default function SOPsPage() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
+      {/* Top filter row — search, tag chips, view toggle. Folder filter
+          is now driven by the sidebar tree below, not a dropdown. */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input placeholder="Search SOPs..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-[160px]"><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={folderFilter} onValueChange={setFolderFilter}>
-          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Folder" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Folders</SelectItem>
-            <SelectItem value="none">Unfoldered</SelectItem>
-            {folders.map((f) => (
-              <SelectItem key={f.id} value={f.id}>{f.name}{f._count ? ` (${f._count.sops})` : ""}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {isOrgAdmin && (
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowFolderManager(true)}>
-            Manage folders
-          </Button>
-        )}
-        <div className="flex items-center gap-1 ml-auto">
+
+        <div className="flex-1 min-w-0">
+          <TagChips
+            tags={allTags}
+            selected={selectedTags}
+            onToggle={(t) => setSelectedTags((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])}
+            onClearAll={() => setSelectedTags([])}
+          />
+        </div>
+
+        <div className="flex items-center gap-1">
           <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("grid")} title="Grid view">
             <BarChart3 size={14} className="rotate-90" />
           </Button>
@@ -914,11 +1107,45 @@ export default function SOPsPage() {
         </div>
       </div>
 
+      {/* Two-pane layout: folder tree sidebar (left) + SOP grid (right).
+          The tree handles folder filtering; folderFilter still drives
+          the API query. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-4">
+        <aside className="rounded-lg border border-border bg-surface p-2 self-start sticky top-2">
+          <div className="px-1.5 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-muted flex items-center justify-between">
+            <span>Folders</span>
+            {isOrgAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowFolderManager(true)}
+                className="text-muted hover:text-foreground"
+                title="Manage folder access"
+              >
+                <Settings2 size={12} />
+              </button>
+            )}
+          </div>
+          <FolderTree
+            folders={folders}
+            totalSops={total}
+            selected={folderFilter as any}
+            onSelect={(v) => setFolderFilter(v)}
+            onDropSop={(folderId, sopId) => handleMoveToFolder(sopId, folderId)}
+            onCreateChild={isOrgAdmin ? handleCreateFolder : undefined}
+            onRename={isOrgAdmin ? handleRenameFolder : undefined}
+            onManageAccess={isOrgAdmin ? () => handleManageAccess() : undefined}
+            onDelete={isOrgAdmin ? handleDeleteFolder : undefined}
+            canManage={isOrgAdmin}
+          />
+        </aside>
+
+        <div className="min-w-0">
+
       {/* SOP Grid / List */}
       {viewMode === "list" && !loading && filtered.length > 0 && (
-        <div className="hidden md:grid grid-cols-[minmax(0,1fr)_140px_100px_80px_80px_100px] items-center gap-4 px-4 pb-2 text-[10px] font-mono uppercase tracking-wider text-muted">
+        <div className="hidden md:grid grid-cols-[minmax(0,1fr)_180px_100px_80px_80px_100px] items-center gap-4 px-4 pb-2 text-[10px] font-mono uppercase tracking-wider text-muted">
           <span>SOP</span>
-          <span>Category</span>
+          <span>Folder · tags</span>
           <span className="text-right">Compliance</span>
           <span className="text-right">Steps</span>
           <span className="text-right">Version</span>
@@ -926,7 +1153,7 @@ export default function SOPsPage() {
         </div>
       )}
 
-      <div className={viewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "flex flex-col gap-1.5"}>
+      <div className={viewMode === "grid" ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3" : "flex flex-col gap-1.5"}>
         {loading
           ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
           : filtered.length === 0 ? (
@@ -957,7 +1184,13 @@ export default function SOPsPage() {
                 >
                   <Link
                     href={`/sops/${sop.id}`}
-                    className="grid grid-cols-[1fr] md:grid-cols-[minmax(0,1fr)_140px_100px_80px_80px_100px] items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
+                    draggable={canManageSOPs}
+                    onDragStart={(e) => {
+                      if (!canManageSOPs) return;
+                      e.dataTransfer.setData("application/x-sop-id", sop.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    className="grid grid-cols-[1fr] md:grid-cols-[minmax(0,1fr)_180px_100px_80px_80px_100px] items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
                   >
                     {/* Title + status */}
                     <div className="min-w-0 flex items-center gap-3">
@@ -973,12 +1206,35 @@ export default function SOPsPage() {
                       </div>
                     </div>
 
-                    {/* Category */}
-                    <div className="hidden md:flex items-center gap-1 min-w-0">
-                      {sop.category ? (
-                        <Badge variant="outline" className="text-[10px] truncate">{sop.category}</Badge>
-                      ) : (
-                        <span className="text-[11px] text-muted">—</span>
+                    {/* Folder breadcrumb + tags */}
+                    <div className="hidden md:flex items-center gap-1 min-w-0 flex-wrap">
+                      {(() => {
+                        const bc = folderBreadcrumb(sop.folderId, folders);
+                        if (bc) return (
+                          <Badge variant="outline" className="text-[10px] truncate gap-1">
+                            <span
+                              className="h-1.5 w-1.5 rounded-full shrink-0"
+                              style={{ backgroundColor: bc.color || "#d4ff2e" }}
+                            />
+                            {bc.name}
+                          </Badge>
+                        );
+                        // Fallback for SOPs not yet migrated into a folder.
+                        if (sop.category) return (
+                          <Badge variant="outline" className="text-[10px] truncate gap-1">
+                            <Tag size={9} className="text-muted shrink-0" />
+                            {sop.category}{sop.subcategory ? ` / ${sop.subcategory}` : ""}
+                          </Badge>
+                        );
+                        return <span className="text-[11px] text-muted">Unfoldered</span>;
+                      })()}
+                      {sop.tags?.slice(0, 2).map((t) => (
+                        <Badge key={t} variant="outline" className="text-[10px] truncate">
+                          #{t}
+                        </Badge>
+                      ))}
+                      {sop.tags && sop.tags.length > 2 && (
+                        <span className="text-[10px] text-muted">+{sop.tags.length - 2}</span>
                       )}
                     </div>
 
@@ -1023,7 +1279,15 @@ export default function SOPsPage() {
                   onDelete={handlePermanentDelete}
                   onCopyLink={handleCopyLink}
                 >
-                  <Link href={`/sops/${sop.id}`}><Card className="hover:border-muted-2 transition-all cursor-pointer group">
+                  <Link
+                    href={`/sops/${sop.id}`}
+                    draggable={canManageSOPs}
+                    onDragStart={(e) => {
+                      if (!canManageSOPs) return;
+                      e.dataTransfer.setData("application/x-sop-id", sop.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                  ><Card className="hover:border-muted-2 transition-all cursor-pointer group">
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-1.5">
@@ -1033,9 +1297,32 @@ export default function SOPsPage() {
                         <Badge variant="outline" className="text-[9px]">v{sop.version}</Badge>
                       </div>
                       <h3 className="font-semibold text-xs mb-1 truncate">{sop.title}</h3>
-                      <div className="flex items-center gap-1 mb-2">
-                        {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
-                        {sop.subcategory && <Badge variant="outline" className="text-[9px]">{sop.subcategory}</Badge>}
+                      <div className="flex items-center gap-1 mb-2 flex-wrap">
+                        {(() => {
+                          const bc = folderBreadcrumb(sop.folderId, folders);
+                          if (bc) return (
+                            <Badge variant="outline" className="text-[9px] gap-1">
+                              <span
+                                className="h-1.5 w-1.5 rounded-full shrink-0"
+                                style={{ backgroundColor: bc.color || "#d4ff2e" }}
+                              />
+                              {bc.name}
+                            </Badge>
+                          );
+                          if (sop.category) return (
+                            <Badge variant="outline" className="text-[9px] gap-1">
+                              <Tag size={8} className="text-muted shrink-0" />
+                              {sop.category}{sop.subcategory ? ` / ${sop.subcategory}` : ""}
+                            </Badge>
+                          );
+                          return null;
+                        })()}
+                        {sop.tags?.slice(0, 3).map((t) => (
+                          <Badge key={t} variant="outline" className="text-[9px]">#{t}</Badge>
+                        ))}
+                        {sop.tags && sop.tags.length > 3 && (
+                          <span className="text-[9px] text-muted">+{sop.tags.length - 3}</span>
+                        )}
                       </div>
                       {sop.status === "PUBLISHED" && (
                         <div className="flex items-center gap-2 mb-2">
@@ -1069,6 +1356,9 @@ export default function SOPsPage() {
           onLimitChange={(l) => { setLimit(l); setPage(1); }}
         />
       )}
+
+        </div>
+      </div>
 
       </>
       )}

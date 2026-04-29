@@ -4,7 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManage
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { logActivity } from "@/lib/activity";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
-import { sopVisibilityWhere, canWriteToFolder } from "@/lib/sop-access";
+import { sopVisibilityWhere, canWriteToFolder, descendantFolderIds } from "@/lib/sop-access";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -14,7 +14,14 @@ export async function GET(req: NextRequest) {
   const category = searchParams.get("category");
   const status = searchParams.get("status");
   const kraId = searchParams.get("kraId");
-  const folderId = searchParams.get("folderId"); // "none" = unfoldered, "<id>" = specific folder, null = all-visible
+  // folderId semantics:
+  //   null / unset       → no folder narrowing (all visible)
+  //   "none"             → unfoldered SOPs only
+  //   "<id>"             → that folder + every descendant (inclusive)
+  const folderId = searchParams.get("folderId");
+  // tags: comma-separated list. Match SOPs that have ALL the listed tags
+  // (intersection — fits user expectation of progressively narrowing).
+  const tagsParam = searchParams.get("tags");
   const pagination = parsePaginationParams(req);
 
   const where: any = { organizationId: getOrgId(session) };
@@ -37,14 +44,21 @@ export async function GET(req: NextRequest) {
     ];
   }
 
+  if (tagsParam) {
+    const tags = tagsParam.split(",").map((t) => t.trim()).filter(Boolean);
+    if (tags.length > 0) where.tags = { hasEvery: tags };
+  }
+
   // Folder scoping — admins see everything; others see unfoldered + their
-  // granted folders. An explicit `folderId` param narrows further.
+  // granted folders (and descendants). An explicit `folderId` param
+  // narrows further: picking "HR" rolls in "HR / Onboarding" too.
   const visibility = await sopVisibilityWhere(session);
   if (Object.keys(visibility).length > 0) Object.assign(where, visibility);
   if (folderId === "none") {
     where.folderId = null;
   } else if (folderId) {
-    where.folderId = folderId;
+    const ids = await descendantFolderIds(folderId);
+    where.folderId = ids.length > 0 ? { in: ids } : folderId;
   }
 
   const [sops, total] = await Promise.all([
@@ -53,11 +67,11 @@ export async function GET(req: NextRequest) {
       select: {
         id: true, title: true, description: true, category: true, subcategory: true,
         sopType: true, version: true, status: true, shareToken: true,
-        folderId: true,
+        folderId: true, tags: true,
         createdAt: true, updatedAt: true, publishedAt: true,
         _count: { select: { compliance: true } },
         kra: { select: { id: true, name: true } },
-        folder: { select: { id: true, name: true, color: true } },
+        folder: { select: { id: true, name: true, color: true, parentId: true } },
       },
       orderBy: { updatedAt: "desc" },
       ...skipTake(pagination),
@@ -79,7 +93,7 @@ export async function POST(req: NextRequest) {
   if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
   const body = await req.json();
-  const { title, description, category, subcategory, content, kraId, sopType, folderId } = body;
+  const { title, description, category, subcategory, content, kraId, sopType, folderId, tags } = body;
 
   if (!title) return jsonError("SOP title is required");
 
@@ -96,6 +110,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Tags: trim, dedupe, drop empties, cap length to keep things sane.
+  const cleanTags = Array.isArray(tags)
+    ? Array.from(new Set(
+        tags.map((t: unknown) => (typeof t === "string" ? t.trim() : ""))
+            .filter((t: string) => t.length > 0 && t.length <= 40),
+      ))
+    : [];
+
   const sop = await prisma.sOP.create({
     data: {
       title,
@@ -105,6 +127,7 @@ export async function POST(req: NextRequest) {
       sopType: sopType || "WRITTEN",
       content: content || { steps: [] },
       folderId: resolvedFolderId,
+      tags: cleanTags,
       organizationId: getOrgId(session),
       ...(kraId ? { kraId } : {}),
     },

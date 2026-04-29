@@ -682,16 +682,24 @@ model SOP {
   id             String    @id @default(cuid())
   title          String
   description    String?
+  // Legacy taxonomy — kept for backwards compatibility and safe rollback
+  // after the unification migration. New code should read folder + tags.
+  // Values are mirrored on write so old reads keep working until we drop
+  // the columns in a later migration.
   category       String?
   subcategory    String?
   sopType        SOPType   @default(WRITTEN)
   kraId          String?
   kra            KRA?     @relation(fields: [kraId], references: [id])
-  // Optional folder for access-scoping. NULL = unfoldered / legacy SOP,
-  // visible to everyone in the org. Non-null = only org admins plus
-  // users granted SOPFolderAccess on this folder can see it.
+  // Folder is now the single primary taxonomy. NULL = unfoldered (visible
+  // to everyone in the org). Non-null = visibility scoped by the folder's
+  // access list, inherited from ancestors when not set explicitly.
   folderId       String?
   folder         SOPFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  // Cross-cutting tags. Free-form, multi-value, no access control —
+  // useful for things that don't map to folder structure (e.g.
+  // "Compliance", "Q2-2026", "Onboarding").
+  tags           String[]  @default([])
   content        Json
   version        Int       @default(1)
   status         SOPStatus @default(DRAFT)
@@ -710,17 +718,25 @@ model SOP {
   @@index([category])
   @@index([shareToken])
   @@index([folderId])
+  @@index([tags], type: Gin)
 }
 
-/// SOP access-scoping unit. An org admin creates a folder (e.g.
-/// "Marketing"), drops SOPs into it, and assigns which users can
-/// see/contribute via SOPFolderAccess. Admins see every folder
-/// regardless of assignment.
+/// SOP access-scoping unit and primary taxonomy. Folders form a tree
+/// (parentId points to the parent). An org admin creates a folder
+/// (e.g. "Marketing"), optionally nests sub-folders ("Marketing /
+/// Email Campaigns"), drops SOPs into it, and assigns which users
+/// can see/contribute via SOPFolderAccess. If a folder has no
+/// explicit access list, it inherits the parent's. Admins see every
+/// folder regardless of assignment.
 model SOPFolder {
   id             String    @id @default(cuid())
   name           String
   color          String?
+  icon           String?
   description    String?
+  parentId       String?
+  parent         SOPFolder?  @relation("SOPFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       SOPFolder[] @relation("SOPFolderTree")
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sops           SOP[]
@@ -728,8 +744,13 @@ model SOPFolder {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  @@unique([organizationId, name])
+  // Sibling folders (same parent + same org) must have unique names.
+  // Postgres treats NULLs as distinct in unique constraints, so the
+  // top-level case is also enforced via a partial unique index added
+  // in the migration SQL.
+  @@unique([organizationId, parentId, name])
   @@index([organizationId])
+  @@index([parentId])
 }
 
 /// Join table: which users can see and contribute to a given folder.
