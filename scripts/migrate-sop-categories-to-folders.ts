@@ -28,9 +28,15 @@
  *   --org=<id>   Limit to a single organization (useful for pilot).
  *   --verbose    Per-SOP log line.
  */
+import * as dotenv from "dotenv";
+dotenv.config();
 import { PrismaClient } from "../src/generated/prisma";
+import { PrismaNeon } from "@prisma/adapter-neon";
 
-const prisma = new PrismaClient();
+const connStr = process.env.DATABASE_URL;
+if (!connStr) throw new Error("DATABASE_URL is not set");
+const adapter = new PrismaNeon({ connectionString: connStr });
+const prisma = new PrismaClient({ adapter });
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
@@ -129,6 +135,14 @@ async function migrateOrg(orgId: string, counts: Counts): Promise<void> {
     },
   });
 
+  // Map folder ids → name so we can decide whether a manually-placed
+  // SOP is in the "right" top-level folder for its category.
+  const folderRows = await prisma.sOPFolder.findMany({
+    where: { organizationId: orgId },
+    select: { id: true, name: true, parentId: true },
+  });
+  const folderById = new Map(folderRows.map((f) => [f.id, f]));
+
   // Cache folder ids per (parent, name) so we don't hit the DB once per SOP.
   const rootCache = new Map<string, string>();
   const childCache = new Map<string, string>();
@@ -144,15 +158,15 @@ async function migrateOrg(orgId: string, counts: Counts): Promise<void> {
       continue;
     }
 
-    if (sop.folderId) {
-      counts.alreadyFoldered++;
-      if (verbose) console.log(`  · ${sop.title} — already foldered, leaving`);
-      continue;
-    }
-
+    // Resolve where this SOP *should* live based on (category, subcategory).
     let rootId = rootCache.get(category);
     if (!rootId) {
-      rootId = await findOrCreateRoot(orgId, category, counts);
+      // If a folder with this exact name already exists at the top level,
+      // re-use it. Otherwise create one.
+      const existingRoot = folderRows.find((f) => f.parentId === null && f.name === category);
+      rootId = existingRoot
+        ? existingRoot.id
+        : await findOrCreateRoot(orgId, category, counts);
       rootCache.set(category, rootId);
     }
 
@@ -161,15 +175,50 @@ async function migrateOrg(orgId: string, counts: Counts): Promise<void> {
       const key = `${rootId}>${subcategory}`;
       let childId = childCache.get(key);
       if (!childId) {
-        childId = await findOrCreateChild(orgId, rootId, subcategory, counts);
+        const existingChild = folderRows.find(
+          (f) => f.parentId === rootId && f.name === subcategory,
+        );
+        childId = existingChild
+          ? existingChild.id
+          : await findOrCreateChild(orgId, rootId, subcategory, counts);
         childCache.set(key, childId);
       }
       targetId = childId;
     }
 
+    // Decide whether to move this SOP.
+    let shouldUpdate = false;
+    let reason = "";
+
+    if (!sop.folderId) {
+      // Currently unfoldered — move into the resolved target.
+      shouldUpdate = true;
+      reason = "unfoldered → linking";
+    } else if (sop.folderId === targetId) {
+      // Already exactly where it should be.
+      counts.alreadyFoldered++;
+      if (verbose) console.log(`  · ${sop.title} — already at ${category}${subcategory ? ` / ${subcategory}` : ""}, leaving`);
+      continue;
+    } else {
+      // It's somewhere else. Only move it if the manual placement is
+      // along the same chain — i.e. it sits in the top-level folder
+      // for its category but missing the subcategory layer. Anything
+      // else looks like a deliberate manual override; leave it.
+      const currentFolder = folderById.get(sop.folderId);
+      if (currentFolder && currentFolder.name === category && currentFolder.parentId === null && subcategory) {
+        // SOP is in the right root, just needs to drop into the subcategory.
+        shouldUpdate = true;
+        reason = "deepening into subcategory";
+      } else {
+        counts.alreadyFoldered++;
+        if (verbose) console.log(`  · ${sop.title} — manually placed elsewhere (folder=${currentFolder?.name ?? sop.folderId}), leaving`);
+        continue;
+      }
+    }
+
     if (verbose) {
       const path = subcategory ? `${category} / ${subcategory}` : category;
-      console.log(`  · ${sop.title} → ${path}`);
+      console.log(`  · ${sop.title} → ${path}  [${reason}]`);
     }
 
     if (!dryRun && !targetId.startsWith("dry-run-")) {
