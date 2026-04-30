@@ -22,6 +22,7 @@ import {
   ContextMenuSeparator, ContextMenuLabel,
 } from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/dashboard/page-header";
 
@@ -48,6 +49,7 @@ export default function AnnouncementsPage() {
   const [form, setForm] = useState({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
   const [saving, setSaving] = useState(false);
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
   const t = useTranslations("announcements");
   const tCommon = useTranslations("common");
 
@@ -80,7 +82,12 @@ export default function AnnouncementsPage() {
   }
 
   async function handleDeleteAnnouncement(id: string) {
-    if (!confirm("Delete this announcement?")) return;
+    if (!(await confirm({
+      title: "Delete this announcement?",
+      description: "It will be removed from everyone's feed. This cannot be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    }))) return;
     try {
       const res = await fetch(`/api/announcements/${id}`, { method: "DELETE" });
       if (res.ok) {

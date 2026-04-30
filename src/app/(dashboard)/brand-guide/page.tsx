@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { RichEditor } from "@/components/ui/rich-editor";
 import { useAutosave } from "@/hooks/use-autosave";
 import { useToast } from "@/components/ui/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 // --- Types kept in sync with /api/brand-guide/route.ts ---
 
@@ -310,6 +311,7 @@ function LogoSection({
   onChange: (partial: Partial<BrandGuide>) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const prompt = usePrompt();
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -323,10 +325,17 @@ function LogoSection({
     reader.readAsDataURL(file);
   }
 
-  function pasteUrl() {
-    const url = prompt("Paste logo URL (leave blank to remove):", logoUrl || "");
+  async function pasteUrl() {
+    const url = await prompt({
+      title: "Paste logo URL",
+      description: "Leave blank to remove the logo.",
+      defaultValue: logoUrl || "",
+      placeholder: "https://…",
+      submitLabel: logoUrl ? "Save" : "Add logo",
+      required: false,
+    });
     if (url === null) return;
-    onChange({ logoUrl: url.trim() });
+    onChange({ logoUrl: url });
   }
 
   return (

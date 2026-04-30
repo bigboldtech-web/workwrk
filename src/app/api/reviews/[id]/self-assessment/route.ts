@@ -61,12 +61,44 @@ export async function GET(
     },
   });
 
+  // OKRs owned by the user during this cycle's window. We pull every
+  // owned OKR plus the check-ins inside the cycle dates so the
+  // self-assessment auto-populates with what they actually shipped —
+  // they barely have to type anything to fill in the "what went well"
+  // section.
+  const cycleStart = review.cycle?.startDate;
+  const cycleEnd = review.cycle?.endDate;
+  const myOkrs = await prisma.oKR.findMany({
+    where: { organizationId: orgId, ownerId: userId },
+    include: {
+      keyResults: {
+        select: {
+          id: true, title: true, unit: true,
+          startValue: true, currentValue: true, targetValue: true, progress: true,
+          checkIns: {
+            where: cycleStart && cycleEnd
+              ? { createdAt: { gte: cycleStart, lte: cycleEnd } }
+              : undefined,
+            orderBy: { createdAt: "asc" },
+            select: { id: true, value: true, note: true, createdAt: true },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const okrAvgProgress = myOkrs.length === 0
+    ? null
+    : Math.round(myOkrs.reduce((s, o) => s + (o.progress || 0), 0) / myOkrs.length);
+
   return jsonSuccess({
     review,
     metrics: {
       kpiRecords,
       avgKpiScore,
       avgSopScore,
+      okrs: myOkrs,
+      okrAvgProgress,
     },
     kraAssignments,
   });

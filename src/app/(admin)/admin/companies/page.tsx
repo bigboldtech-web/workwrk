@@ -214,9 +214,14 @@ export default function AdminCompaniesPage() {
                       {new Date(c.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
                     <td className="p-4 text-center">
-                      <Button variant="ghost" size="sm" onClick={() => openDetail(c)}>
-                        <Eye size={14} />
-                      </Button>
+                      <div className="flex items-center gap-1 justify-center">
+                        <Button variant="ghost" size="sm" onClick={() => openDetail(c)} title="Quick edit">
+                          <Eye size={14} />
+                        </Button>
+                        <Button asChild variant="outline" size="sm" title="Open detail / manage Enterprise add-ons">
+                          <a href={`/admin/companies/${c.id}`}>Manage</a>
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

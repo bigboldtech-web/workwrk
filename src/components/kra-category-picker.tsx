@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Plus, Pencil, Trash2, Check, X } from "lucide-react";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { useToast } from "@/components/ui/toast";
 
 interface Category {
   id: string;
@@ -30,6 +32,8 @@ export function KraCategoryPicker({
   const [editName, setEditName] = useState("");
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const confirm = useConfirm();
+  const { error: toastError } = useToast();
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -61,13 +65,18 @@ export function KraCategoryPicker({
         setAdding(false);
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.error || "Failed to add category");
+        toastError(err.error || "Failed to add category");
       }
     } finally { setBusy(false); }
   }
 
   async function deleteCategory(id: string, name: string) {
-    if (!confirm(`Delete category "${name}"? KRAs using this category will keep the name as a free-text label.`)) return;
+    if (!(await confirm({
+      title: `Delete category "${name}"?`,
+      description: "KRAs using this category will keep the name as a free-text label.",
+      confirmLabel: "Delete category",
+      destructive: true,
+    }))) return;
     setBusy(true);
     try {
       const res = await fetch("/api/kra-categories", {
@@ -98,7 +107,7 @@ export function KraCategoryPicker({
         setEditingId(null);
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.error || "Failed to update");
+        toastError(err.error || "Failed to update");
       }
     } finally { setBusy(false); }
   }

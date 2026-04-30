@@ -55,6 +55,7 @@ model Organization {
   candorSessions      CandorSession[]
   taskLabels          TaskLabel[]
   sopFolders          SOPFolder[]
+  secrets             OrgSecret[]
 
   @@index([slug])
 }
@@ -719,6 +720,40 @@ model SOP {
   @@index([shareToken])
   @@index([folderId])
   @@index([tags], type: Gin)
+}
+
+/// Per-organization secrets (BYOK — bring your own key).
+///
+/// Holds encrypted credentials owned by the customer. Today we only
+/// use this for Anthropic API keys (provider="anthropic"), but the
+/// shape is provider-keyed so adding OpenAI / Bedrock later is a
+/// new row, not a migration.
+///
+/// Encryption: the `encryptedKey` blob is AES-256-GCM ciphertext
+/// produced by src/lib/secrets-crypto.ts using the
+/// `SECRETS_ENCRYPTION_KEY` env var as the master key. Plain keys
+/// never hit Prisma.
+model OrgSecret {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider       String       // "anthropic" today; future: "openai", "bedrock"
+  // The decoded structure stored as { ciphertext, iv, tag, version }.
+  encryptedKey   Json
+  // Last 4 chars of the plaintext key, for the Settings UI to show
+  // which key is currently in use ("…sk-Bw8q") without decrypting.
+  keyHint        String?
+  // What the customer typed for "Test connection" — only set after a
+  // successful test. Drives the green checkmark.
+  lastUsedAt     DateTime?
+  // Optional model preference. Ignored if null.
+  preferredModel String?
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
 }
 
 /// SOP access-scoping unit and primary taxonomy. Folders form a tree
@@ -1587,6 +1622,10 @@ model OKR {
   startDate      DateTime?
   endDate        DateTime?
   quarter        String?      // "Q2 2026"
+  // Check-in rhythm. Drives the reminder cron + the "stale" badge on
+  // the personal hero. Defaults to weekly because that's what most
+  // teams settle on.
+  checkInCadence String       @default("WEEKLY")     // WEEKLY, BIWEEKLY, MONTHLY
   ownerId        String?
   departmentId   String?
   parentId       String?
@@ -1613,6 +1652,10 @@ model KeyResult {
   targetValue Float
   currentValue Float      @default(0)
   progress    Int         @default(0)  // 0-100 auto-calculated
+  // When we last fired a "you haven't checked in lately" reminder for
+  // this KR. Used to avoid spamming the owner — see scripts/api
+  // /api/cron/okr-reminders.
+  lastReminderAt DateTime?
   okrId       String
   okr         OKR         @relation(fields: [okrId], references: [id], onDelete: Cascade)
   checkIns    KRCheckIn[]

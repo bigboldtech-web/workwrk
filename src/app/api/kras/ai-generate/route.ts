@@ -1,17 +1,14 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
-});
+import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const orgId = getOrgId(session);
+  const ai = await getAnthropicForOrg(orgId);
   const { jobTitle, jobDescription } = await req.json();
 
   if (!jobTitle?.trim()) {
@@ -67,7 +64,7 @@ export async function POST(req: NextRequest) {
     ? `Use these existing categories where appropriate: ${existingCategories.join(", ")}. You may create new categories only if none of the existing ones fit.`
     : "Create appropriate categories for each KRA (e.g., Performance, Quality, Growth, Leadership, Communication).";
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
     return jsonSuccess({
       kras: [
         {
@@ -85,8 +82,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+    const message = await ai.client.messages.create({
+      model: modelFor(ai, "claude-haiku-4-5-20251001"),
       max_tokens: 3000,
       system: `You are an HR and performance management expert. Generate Key Result Areas (KRAs) and Key Performance Indicators (KPIs) for job roles.
 

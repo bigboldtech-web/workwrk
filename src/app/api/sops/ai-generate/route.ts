@@ -1,14 +1,12 @@
 import { NextRequest } from "next/server";
-import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
-});
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 
 export async function POST(req: NextRequest) {
-  const { error } = await getSessionOrFail();
+  const { error, session } = await getSessionOrFail();
   if (error) return error;
+  const orgId = getOrgId(session);
+  const ai = await getAnthropicForOrg(orgId);
 
   const { title, context } = await req.json();
 
@@ -16,7 +14,7 @@ export async function POST(req: NextRequest) {
     return jsonError("Provide a title or context for the process");
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
     // Return a template-based fallback with inputs and content blocks
     return jsonSuccess({
       title: title || "New Process",
@@ -67,8 +65,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+    const message = await ai.client.messages.create({
+      model: modelFor(ai, "claude-haiku-4-5-20251001"),
       max_tokens: 2000,
       system: `You are a process design expert. Create structured, actionable checklists for business processes.
 

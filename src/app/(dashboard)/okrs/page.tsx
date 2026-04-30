@@ -23,9 +23,12 @@ import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
   ContextMenuSeparator, ContextMenuLabel,
 } from "@/components/ui/context-menu";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { MyOkrsHero } from "@/components/okrs/my-okrs-hero";
+import { CascadeTree } from "@/components/okrs/cascade-tree";
 
 const STATUS_COLORS: Record<string, string> = {
   ON_TRACK: "bg-green-500/20 text-green-400",
@@ -211,6 +214,21 @@ export default function OKRsPage() {
         </div>
       </div>
 
+      <Tabs defaultValue="mine" className="w-full">
+        <TabsList>
+          <TabsTrigger value="mine" className="gap-2"><User size={13} /> My OKRs</TabsTrigger>
+          <TabsTrigger value="all" className="gap-2"><Target size={13} /> All objectives</TabsTrigger>
+          <TabsTrigger value="cascade" className="gap-2"><Maximize2 size={13} /> Cascade</TabsTrigger>
+        </TabsList>
+
+        {/* "My OKRs" — the engagement hero. Personal goals first, with
+            inline check-ins, sparklines, and stale-check-in nudges. */}
+        <TabsContent value="mine" className="mt-4">
+          <MyOkrsHero />
+        </TabsContent>
+
+        {/* "All objectives" — the existing organisational view. */}
+        <TabsContent value="all" className="mt-4 space-y-4">
       {loading ? (
         <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-20 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>
       ) : okrs.length === 0 ? (
@@ -323,6 +341,14 @@ export default function OKRsPage() {
           ))}
         </div>
       )}
+        </TabsContent>
+
+        {/* Cascade — top-down tree view: company → team → individual.
+            Helps managers see how every individual goal rolls up. */}
+        <TabsContent value="cascade" className="mt-4">
+          <CascadeTree quarter={quarter} />
+        </TabsContent>
+      </Tabs>
 
       {/* Create OKR Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { Loader2, Plug, Unplug, RefreshCcw, CheckCircle2, Link2, Copy, RotateCw } from "lucide-react";
 
 interface GoogleCalendar {
@@ -27,6 +28,7 @@ interface SyncedSub {
 export default function CalendarSettingsPage() {
   const search = useSearchParams();
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
 
   const [status, setStatus] = useState<{
     connected: boolean;
@@ -105,12 +107,22 @@ export default function CalendarSettingsPage() {
   }
 
   async function rotateIcs() {
-    if (!confirm("Rotate the feed URL? The old URL stops working immediately.")) return;
+    if (!(await confirm({
+      title: "Rotate the feed URL?",
+      description: "The old URL stops working immediately. Anyone subscribed to it will need the new URL.",
+      confirmLabel: "Rotate URL",
+      destructive: true,
+    }))) return;
     await generateIcs();
   }
 
   async function revokeIcs() {
-    if (!confirm("Revoke the feed? Any calendar subscribed to this URL will stop receiving updates.")) return;
+    if (!(await confirm({
+      title: "Revoke the feed?",
+      description: "Any calendar subscribed to this URL will stop receiving updates. You can issue a new URL later if needed.",
+      confirmLabel: "Revoke",
+      destructive: true,
+    }))) return;
     const res = await fetch("/api/calendar/ics/token", { method: "DELETE" });
     if (res.ok) {
       setIcsFeed({ token: null });
@@ -127,7 +139,12 @@ export default function CalendarSettingsPage() {
   }
 
   async function disconnect() {
-    if (!confirm("Disconnect Google Calendar? All synced events will be removed from Workwrk.")) return;
+    if (!(await confirm({
+      title: "Disconnect Google Calendar?",
+      description: "All synced events will be removed from WorkwrK. Your Google calendar isn't touched.",
+      confirmLabel: "Disconnect",
+      destructive: true,
+    }))) return;
     const res = await fetch("/api/integrations/google-calendar", { method: "DELETE" });
     if (res.ok) {
       toastSuccess("Google Calendar disconnected");

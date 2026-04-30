@@ -8,6 +8,9 @@ import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-he
  * - Team OKRs where user's department matches
  * - Individual OKRs where user is the owner
  *
+ * Each Key Result gets the last 8 check-ins so the client can render
+ * a sparkline + "stale check-in" nudge without an extra round trip.
+ *
  * Query param: quarter (optional, default = current quarter)
  */
 export async function GET(req: Request) {
@@ -44,7 +47,18 @@ export async function GET(req: Request) {
   const okrs = await prisma.oKR.findMany({
     where,
     include: {
-      keyResults: { select: { id: true, title: true, startValue: true, currentValue: true, targetValue: true, unit: true } },
+      keyResults: {
+        select: {
+          id: true, title: true, startValue: true, currentValue: true,
+          targetValue: true, unit: true, progress: true,
+          // Last 8 check-ins, oldest → newest, for sparkline rendering.
+          checkIns: {
+            orderBy: { createdAt: "desc" },
+            take: 8,
+            select: { id: true, value: true, note: true, createdAt: true },
+          },
+        },
+      },
     },
     orderBy: [{ level: "asc" }, { createdAt: "desc" }],
   });
@@ -63,9 +77,27 @@ export async function GET(req: Request) {
   const ownerMap = new Map(owners.map((u) => [u.id, u]));
   const deptMap = new Map(depts.map((d) => [d.id, d]));
 
-  // Compute progress per OKR
+  const STALE_AFTER_DAYS = 7;
+  const now = Date.now();
+
+  // Compute progress per OKR + per-KR staleness
   const enriched = okrs.map((o) => {
-    const krs = o.keyResults;
+    const krs = o.keyResults.map((kr) => {
+      // Reverse so oldest → newest for nicer sparkline path math.
+      const history = [...kr.checkIns].reverse();
+      const lastAt = kr.checkIns[0]?.createdAt ?? null;
+      const daysSinceCheckIn = lastAt
+        ? Math.floor((now - new Date(lastAt).getTime()) / 86_400_000)
+        : null;
+      return {
+        ...kr,
+        checkIns: history,
+        lastCheckInAt: lastAt,
+        daysSinceCheckIn,
+        isStale: daysSinceCheckIn === null || daysSinceCheckIn > STALE_AFTER_DAYS,
+      };
+    });
+
     let progress = 0;
     if (krs.length > 0) {
       const total = krs.reduce((sum, kr) => {
@@ -77,11 +109,15 @@ export async function GET(req: Request) {
       }, 0);
       progress = Math.round(total / krs.length);
     }
+
     return {
       ...o,
+      keyResults: krs,
       progress,
       owner: o.ownerId ? ownerMap.get(o.ownerId) || null : null,
       department: o.departmentId ? deptMap.get(o.departmentId) || null : null,
+      // Whether *I* own this OKR (drives "your goal" framing in the UI).
+      isOwnedByMe: o.ownerId === userId,
     };
   });
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Check, Plus, Trash2, AlertTriangle, Key, Webhook } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type ApiKeyRow = {
   id: string;
@@ -32,6 +33,7 @@ type WebhookRow = {
 };
 
 export default function ApiSettingsPage() {
+  const confirm = useConfirm();
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
   const [subs, setSubs] = useState<WebhookRow[]>([]);
   const [validEvents, setValidEvents] = useState<string[]>([]);
@@ -95,7 +97,12 @@ export default function ApiSettingsPage() {
   }
 
   async function revokeKey(id: string) {
-    if (!confirm("Revoke this key? Clients using it will start getting 401 responses immediately.")) return;
+    if (!(await confirm({
+      title: "Revoke this API key?",
+      description: "Clients using it will start getting 401 responses immediately. This cannot be undone.",
+      confirmLabel: "Revoke key",
+      destructive: true,
+    }))) return;
     await fetch(`/api/keys?id=${id}`, { method: "DELETE" });
     refresh();
   }
@@ -126,7 +133,12 @@ export default function ApiSettingsPage() {
   }
 
   async function deleteWebhook(id: string) {
-    if (!confirm("Delete this webhook? Delivery history will be removed too.")) return;
+    if (!(await confirm({
+      title: "Delete this webhook?",
+      description: "Delivery history will be removed too. The remote endpoint won't get any further events.",
+      confirmLabel: "Delete webhook",
+      destructive: true,
+    }))) return;
     await fetch(`/api/webhooks?id=${id}`, { method: "DELETE" });
     refresh();
   }

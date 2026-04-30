@@ -2,11 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
-});
+import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 
 // GET: Load conversation history for persistent context
 export async function GET(req: NextRequest) {
@@ -191,11 +187,12 @@ ${recentActivity.length > 0 ? recentActivity.map(a => `- [${a.createdAt.toISOStr
   let response = "";
 
   try {
-    if (!process.env.ANTHROPIC_API_KEY) {
+    const ai = await getAnthropicForOrg(orgId);
+    if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
       response = generateFallbackResponse(query, users, departments, recentKPIs, sops);
     } else {
-      const message = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
+      const message = await ai.client.messages.create({
+        model: modelFor(ai, "claude-sonnet-4-20250514"),
         max_tokens: 1500,
         system: `You are the AI assistant for WorkwrK, a Business Operating System. You help managers and leaders understand their organization's performance, identify issues, and make data-driven decisions.
 

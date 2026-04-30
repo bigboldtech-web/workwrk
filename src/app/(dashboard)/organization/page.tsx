@@ -18,6 +18,7 @@ import {
   Heart, Target, Eye, Globe, Calendar, Sparkles, Save, X,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -316,6 +317,7 @@ export default function OrganizationPage() {
   const [roleForm, setRoleForm] = useState({ title: "", description: "", departmentId: "", level: "EMPLOYEE" });
 
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
 
   // Company profile
   interface CompanyProfile {
@@ -1128,7 +1130,12 @@ export default function OrganizationPage() {
                           <Edit3 size={13} />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400" onClick={async () => {
-                          if (!confirm(`Delete office "${office.name}"? Members must first be reassigned.`)) return;
+                          if (!(await confirm({
+                            title: `Delete office "${office.name}"?`,
+                            description: "Members must first be reassigned. This action cannot be undone.",
+                            confirmLabel: "Delete office",
+                            destructive: true,
+                          }))) return;
                           const res = await fetch("/api/offices", {
                             method: "DELETE", headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ id: office.id }),

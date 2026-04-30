@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { ShieldCheck, ShieldOff, Copy, Check, AlertTriangle, KeyRound, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { useToast } from "@/components/ui/toast";
 
 type Status = { mfaEnabled: boolean; emailVerified: boolean };
 
 type EnrollData = { secret: string; qr: string; otpauth: string };
 
 export default function AccountSecurityPage() {
+  const { success: toastSuccess } = useToast();
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -302,7 +304,7 @@ export default function AccountSecurityPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({}),
               }).catch(() => {});
-              alert("We sent a fresh verification link to your email.");
+              toastSuccess("We sent a fresh verification link to your email.");
             }}
           >
             Resend verification email

@@ -19,6 +19,7 @@ import {
   ContextMenuSeparator, ContextMenuLabel,
 } from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { useRole } from "@/hooks/use-role";
 import { useSession } from "next-auth/react";
 
@@ -33,6 +34,7 @@ export default function PoliciesPage() {
   const [selectedPolicy, setSelectedPolicy] = useState<any>(null);
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
 
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -121,7 +123,12 @@ export default function PoliciesPage() {
   }
 
   async function handleDelete(policyId: string) {
-    if (!confirm("Are you sure you want to delete this policy? This cannot be undone.")) return;
+    if (!(await confirm({
+      title: "Delete this policy?",
+      description: "The policy and any acknowledgement records on it will be removed. This cannot be undone.",
+      confirmLabel: "Delete policy",
+      destructive: true,
+    }))) return;
     try {
       const res = await fetch(`/api/policies/${policyId}`, { method: "DELETE" });
       if (res.ok) {

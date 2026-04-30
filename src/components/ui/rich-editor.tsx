@@ -20,6 +20,7 @@ import {
   Table as TableIcon, Highlighter, AlignLeft, AlignCenter, AlignRight,
   Plus, Info, X,
 } from "lucide-react";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 interface RichEditorProps {
   content: string;
@@ -43,6 +44,7 @@ export function RichEditor({
   compact = false,
 }: RichEditorProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const prompt = usePrompt();
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
 
@@ -160,9 +162,16 @@ export function RichEditor({
 
   if (!editor) return <div className="h-32 bg-surface-2 rounded animate-pulse" />;
 
-  function addLink() {
+  async function addLink() {
     const prev = editor?.getAttributes("link").href || "";
-    const url = prompt("Enter URL:", prev);
+    const url = await prompt({
+      title: prev ? "Edit link" : "Add link",
+      description: "Leave blank to remove the link.",
+      defaultValue: prev,
+      placeholder: "https://…",
+      submitLabel: "Save",
+      required: false,
+    });
     if (url === null) return;
     if (url === "") {
       editor?.chain().focus().unsetLink().run();
@@ -171,8 +180,12 @@ export function RichEditor({
     editor?.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
   }
 
-  function insertImageFromUrl() {
-    const url = prompt("Paste image URL:");
+  async function insertImageFromUrl() {
+    const url = await prompt({
+      title: "Paste image URL",
+      placeholder: "https://…",
+      submitLabel: "Insert image",
+    });
     if (url) editor?.chain().focus().setImage({ src: url }).run();
   }
 

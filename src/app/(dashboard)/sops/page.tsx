@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -18,8 +18,8 @@ import {
   ContextMenuSubContent, ContextMenuRadioGroup, ContextMenuRadioItem,
 } from "@/components/ui/context-menu";
 import {
-  BookOpen, Plus, Search, FileText, Clock, CheckCircle, AlertTriangle,
-  Eye, Edit3, Users, BarChart3, ClipboardList, ShieldCheck,
+  BookOpen, Plus, Search, FileText, CheckCircle, AlertTriangle,
+  Eye, BarChart3, ClipboardList, ShieldCheck,
   PenLine, Video, ListChecks, Download, Archive, RotateCcw, Trash2,
   FolderOpen, FolderInput, Link2, ExternalLink, Tag, Settings2, X,
 } from "lucide-react";
@@ -29,6 +29,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -326,6 +327,8 @@ export default function SOPsPage() {
   const [newSubcatName, setNewSubcatName] = useState("");
 
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
+  const prompt = usePrompt();
 
   // Fetch categories with live SOP counts. Called on mount and re-called
   // whenever the SOP list changes so the filter dropdown stays in sync
@@ -620,7 +623,12 @@ export default function SOPsPage() {
   }
 
   async function handlePermanentDelete(sopId: string) {
-    if (!confirm("Permanently delete this SOP? This cannot be undone.")) return;
+    if (!(await confirm({
+      title: "Permanently delete this SOP?",
+      description: "The SOP, its content, and all its compliance records will be removed. This cannot be undone.",
+      confirmLabel: "Delete forever",
+      destructive: true,
+    }))) return;
     try {
       const res = await fetch(`/api/sops/${sopId}`, { method: "DELETE" });
       if (res.ok) {
@@ -652,13 +660,21 @@ export default function SOPsPage() {
 
   // Folder admin actions used by the sidebar tree's right-click menu.
   async function handleCreateFolder(parentId: string | null) {
-    const name = window.prompt(parentId ? "New sub-folder name:" : "New folder name:");
-    if (!name?.trim()) return;
+    const parentName = parentId ? folders.find((f) => f.id === parentId)?.name : null;
+    const name = await prompt({
+      title: parentId ? `New sub-folder in "${parentName}"` : "New folder",
+      description: parentId
+        ? "Sub-folders inherit access from their parent unless you grant access explicitly."
+        : "Top-level folder. Visible to everyone in the org until you set an access list.",
+      placeholder: parentId ? "e.g. Hiring" : "e.g. HR",
+      submitLabel: "Create",
+    });
+    if (!name) return;
     try {
       const res = await fetch("/api/sop-folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), parentId }),
+        body: JSON.stringify({ name, parentId }),
       });
       if (res.ok) {
         toastSuccess("Folder created");
@@ -670,7 +686,12 @@ export default function SOPsPage() {
     } catch { toastError("Failed to create folder"); }
   }
   async function handleRenameFolder(folder: FolderNode) {
-    const next = window.prompt("Rename folder", folder.name)?.trim();
+    const next = await prompt({
+      title: "Rename folder",
+      description: `Currently named "${folder.name}".`,
+      defaultValue: folder.name,
+      submitLabel: "Save",
+    });
     if (!next || next === folder.name) return;
     try {
       const res = await fetch(`/api/sop-folders/${folder.id}`, {
@@ -692,7 +713,12 @@ export default function SOPsPage() {
       toastError(`"${folder.name}" still has ${folder._count.sops} SOP${folder._count.sops === 1 ? "" : "s"}. Move them out before deleting.`);
       return;
     }
-    if (!window.confirm(`Delete folder "${folder.name}"?`)) return;
+    if (!(await confirm({
+      title: `Delete "${folder.name}"?`,
+      description: "The folder will be removed. SOPs are not deleted — anything inside it will need to be moved first.",
+      confirmLabel: "Delete folder",
+      destructive: true,
+    }))) return;
     try {
       const res = await fetch(`/api/sop-folders/${folder.id}`, { method: "DELETE" });
       if (res.ok) {
@@ -1143,7 +1169,7 @@ export default function SOPsPage() {
 
       {/* SOP Grid / List */}
       {viewMode === "list" && !loading && filtered.length > 0 && (
-        <div className="hidden md:grid grid-cols-[minmax(0,1fr)_180px_100px_80px_80px_100px] items-center gap-4 px-4 pb-2 text-[10px] font-mono uppercase tracking-wider text-muted">
+        <div className="hidden md:grid grid-cols-[minmax(220px,2.4fr)_minmax(140px,1.2fr)_90px_64px_64px_100px] items-center gap-3 px-4 pb-2 text-[10px] font-mono uppercase tracking-wider text-muted">
           <span>SOP</span>
           <span>Folder · tags</span>
           <span className="text-right">Compliance</span>
@@ -1160,10 +1186,26 @@ export default function SOPsPage() {
             <div className="col-span-full">
               <EmptyState
                 icon={BookOpen}
-                title="No SOPs documented"
-                description="Document your first standard operating procedure to start building your knowledge base."
-                actionLabel="Create SOP"
-                onAction={() => setShowAddDialog(true)}
+                title={
+                  folderFilter !== "all" || selectedTags.length > 0 || debouncedSearch
+                    ? "No SOPs match these filters"
+                    : "No SOPs yet"
+                }
+                description={
+                  folderFilter !== "all" || selectedTags.length > 0 || debouncedSearch
+                    ? "Try clearing the search box, tag chips, or folder selection to widen the view."
+                    : "Document your first standard operating procedure — pick a folder on the left to scope access, add tags so people can find it, and start writing."
+                }
+                actionLabel={
+                  folderFilter !== "all" || selectedTags.length > 0 || debouncedSearch
+                    ? "Clear filters"
+                    : (canManageSOPs ? "Create your first SOP" : undefined)
+                }
+                onAction={
+                  folderFilter !== "all" || selectedTags.length > 0 || debouncedSearch
+                    ? () => { setFolderFilter("all"); setSelectedTags([]); setSearchQuery(""); }
+                    : (canManageSOPs ? () => setShowAddDialog(true) : undefined)
+                }
               />
             </div>
           ) : viewMode === "list" ? filtered.map((sop) => {
@@ -1190,18 +1232,18 @@ export default function SOPsPage() {
                       e.dataTransfer.setData("application/x-sop-id", sop.id);
                       e.dataTransfer.effectAllowed = "move";
                     }}
-                    className="grid grid-cols-[1fr] md:grid-cols-[minmax(0,1fr)_180px_100px_80px_80px_100px] items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
+                    className="grid grid-cols-[1fr] md:grid-cols-[minmax(220px,2.4fr)_minmax(140px,1.2fr)_90px_64px_64px_100px] items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
                   >
-                    {/* Title + status */}
+                    {/* Title + status. Title gets full width; status sits
+                        under it as a small badge so it never squeezes
+                        the title down to two characters. */}
                     <div className="min-w-0 flex items-center gap-3">
                       <FileText size={16} className="text-muted shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-medium text-sm truncate">{sop.title}</span>
+                        <span className="block font-medium text-sm truncate">{sop.title}</span>
+                        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted">
                           {getStatusBadge(sop.status)}
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-muted">
-                          <span>{assigned > 0 ? `${assigned} assigned` : "Not assigned"}</span>
+                          <span className="truncate">{assigned > 0 ? `${assigned} assigned` : "Not assigned"}</span>
                         </div>
                       </div>
                     </div>

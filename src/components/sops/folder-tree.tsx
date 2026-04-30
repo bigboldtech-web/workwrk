@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronRight, FolderOpen, Folder as FolderIcon, Inbox, Layers, Plus, MoreHorizontal, Pencil, Users as UsersIcon, Trash2 } from "lucide-react";
+import { ChevronRight, Inbox, Layers, Plus, Pencil, Users as UsersIcon, Trash2 } from "lucide-react";
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 } from "@/components/ui/context-menu";

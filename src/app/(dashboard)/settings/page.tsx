@@ -14,9 +14,11 @@ import {
 import {
   Building2, Users, Shield, Bell, CreditCard, Check, Loader2, Send, Trash2,
   UserX, RotateCcw, Download, AlertTriangle, Sliders, ToggleLeft, Key, Lock,
-  BookOpen,
+  BookOpen, Sparkles,
 } from "lucide-react";
-import { SopCategoryManager } from "@/components/settings/sop-category-manager";
+import { SopFoldersTagsManager } from "@/components/settings/sop-folders-tags-manager";
+import { BrandingManager } from "@/components/settings/branding-manager";
+import { ByokManager } from "@/components/settings/byok-manager";
 import { PERMISSION_MODULES, ACCESS_LEVELS, DEFAULT_PERMISSIONS, PROTECTED_ADMIN_ROLES, type PermissionMatrix, type PermissionModule, type AccessLevel } from "@/lib/permissions";
 import { invalidatePermissionCache } from "@/hooks/use-permission";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -288,6 +290,7 @@ function TeamMembersList() {
   const { data: session } = useSession();
   const callerLevel = ((session?.user as any)?.accessLevel || "") as string;
   const isAdmin = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(callerLevel);
+  const { error: toastError } = useToast();
 
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -321,7 +324,7 @@ function TeamMembersList() {
         setTimeout(() => setSavedId(null), 2000);
       } else {
         const err = await res.json();
-        alert(err.error || "Failed to update access level");
+        toastError(err.error || "Failed to update access level");
       }
     } finally { setUpdating(null); }
   };
@@ -345,7 +348,7 @@ function TeamMembersList() {
         setTimeout(() => setSavedId(null), 2000);
       } else {
         const err = await res.json();
-        alert(err.error || "Failed to update reporting manager");
+        toastError(err.error || "Failed to update reporting manager");
       }
     } finally { setUpdating(null); }
   };
@@ -1012,6 +1015,8 @@ export default function SettingsPage() {
           <TabsTrigger value="sso" className="gap-2"><Key size={14} /> SSO</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2"><Bell size={14} /> Notifications</TabsTrigger>
           <TabsTrigger value="sops" className="gap-2"><BookOpen size={14} /> SOPs</TabsTrigger>
+          <TabsTrigger value="branding" className="gap-2"><Sparkles size={14} /> Branding</TabsTrigger>
+          <TabsTrigger value="ai" className="gap-2"><Sparkles size={14} /> AI</TabsTrigger>
           <TabsTrigger value="removed" className="gap-2" onClick={() => { if (removedPeople.length === 0) fetchRemovedPeople(); }}><UserX size={14} /> Removed People</TabsTrigger>
           <TabsTrigger value="billing" className="gap-2"><CreditCard size={14} /> Billing</TabsTrigger>
           <TabsTrigger value="data" className="gap-2"><Sliders size={14} /> Data</TabsTrigger>
@@ -1621,9 +1626,25 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        {/* SOPs — category/subcategory registry */}
+        {/* SOPs — folder tree + tag registry. Replaces the legacy
+            category/subcategory registry; the underlying SOPCategory
+            tables are still around for rollback safety but no longer
+            surfaced in the UI. */}
         <TabsContent value="sops" className="space-y-4 mt-4">
-          <SopCategoryManager />
+          <SopFoldersTagsManager />
+        </TabsContent>
+
+        {/* Branding — Enterprise white-label add-on. The component
+            shows an upsell card if the customer's org doesn't have
+            features.whiteLabel enabled. */}
+        <TabsContent value="branding" className="space-y-4 mt-4">
+          <BrandingManager />
+        </TabsContent>
+
+        {/* AI & Integrations — BYOK Enterprise add-on. Same upsell
+            pattern: component handles the gate itself. */}
+        <TabsContent value="ai" className="space-y-4 mt-4">
+          <ByokManager />
         </TabsContent>
 
         {/* Privacy — user-level DSR controls (GDPR Art. 15/17, CCPA) */}

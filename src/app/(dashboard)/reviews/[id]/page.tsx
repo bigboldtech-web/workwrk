@@ -17,8 +17,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft, Star, Users, CheckCircle, Clock, BarChart3, Send, AlertTriangle,
-  UserPlus, TrendingUp, Shield,
+  UserPlus, TrendingUp, Shield, Cloud, CloudOff,
 } from "lucide-react";
+import { useAutosave } from "@/hooks/use-autosave";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
@@ -211,6 +212,37 @@ export default function ReviewCycleDetailPage() {
     } catch {} finally { setSavingSelf(false); }
   };
 
+  // Autosave hook for the self-assessment. Saves the draft (submit=false)
+  // every ~1.5s after the user pauses typing. The "Save Draft" button
+  // becomes mostly cosmetic, but we keep it so the user can do an
+  // explicit save if they want one.
+  const myReviewForAutosave = selfData?.review;
+  const canSelfAssessAutosave =
+    myReviewForAutosave && (myReviewForAutosave.status === "PENDING" || myReviewForAutosave.status === "SELF_ASSESSMENT");
+  const selfSnapshot = { kraRatings, reflection };
+  const autosaveSelf = useAutosave({
+    snapshot: selfSnapshot,
+    enabled: !!canSelfAssessAutosave,
+    delay: 1500,
+    localKey: cycleId ? `review-self:${cycleId}` : undefined,
+    save: async () => {
+      const selfRatings = {
+        kraRatings: Object.entries(kraRatings).map(([kraId, data]) => ({
+          kraId,
+          kraName: selfData?.kraAssignments?.find((a: any) => a.kra.id === kraId)?.kra.name || "",
+          rating: data.rating,
+          achievements: data.achievements,
+        })),
+        reflection,
+      };
+      await fetch(`/api/reviews/${cycleId}/self-assessment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selfRatings, submit: false }),
+      });
+    },
+  });
+
   const handleManagerReview = async (reviewId: string, submit: boolean) => {
     setSavingMgr(true);
     try {
@@ -237,6 +269,35 @@ export default function ReviewCycleDetailPage() {
       }
     } catch {} finally { setSavingMgr(false); }
   };
+
+  // Autosave for the manager review while a reviewee is selected.
+  // Saves every ~1.5s of pause; final submission still goes through
+  // the explicit Submit button.
+  const autosaveMgr = useAutosave({
+    snapshot: { mgrKraRatings, behavioral, mgrComments, mgrOutcome },
+    enabled: !!selectedReview,
+    delay: 1500,
+    localKey: selectedReview ? `mgr-review:${selectedReview.id}` : undefined,
+    save: async () => {
+      if (!selectedReview) return;
+      const managerAssessment = {
+        kraRatings: Object.entries(mgrKraRatings).map(([kraId, data]) => ({
+          kraId,
+          kraName: "",
+          rating: data.rating,
+          comments: data.comments,
+        })),
+        behavioral,
+        overallComments: mgrComments,
+        recommendation: mgrOutcome,
+      };
+      await fetch(`/api/reviews/${cycleId}/manager-review`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewId: selectedReview.id, managerAssessment, managerComments: mgrComments, submit: false }),
+      });
+    },
+  });
 
   const handlePeerSubmit = async (feedbackId: string) => {
     setSavingPeer(true);
@@ -395,6 +456,22 @@ export default function ReviewCycleDetailPage() {
                 {myReview.status !== "PENDING" && myReview.status !== "SELF_ASSESSMENT" && (
                   <span className="text-xs text-green-400">Self-assessment submitted</span>
                 )}
+                {/* Autosave indicator. Visible while the draft is editable. */}
+                {canSelfAssessAutosave && (
+                  <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-muted">
+                    {autosaveSelf.status === "saving" ? (
+                      <><Cloud size={11} className="animate-pulse" /> Saving…</>
+                    ) : autosaveSelf.status === "saved" ? (
+                      <><Cloud size={11} className="text-green-400" /> Saved {autosaveSelf.lastSavedAt ? `at ${autosaveSelf.lastSavedAt.toLocaleTimeString()}` : ""}</>
+                    ) : autosaveSelf.status === "error" ? (
+                      <><CloudOff size={11} className="text-red-400" /> Save failed — retrying</>
+                    ) : autosaveSelf.status === "dirty" ? (
+                      <><Cloud size={11} /> Unsaved changes</>
+                    ) : (
+                      <><Cloud size={11} /> Autosave on</>
+                    )}
+                  </span>
+                )}
               </div>
 
               {/* Auto-populated Metrics (READ ONLY) */}
@@ -414,9 +491,54 @@ export default function ReviewCycleDetailPage() {
                       </p>
                       <p className="text-[10px] text-muted">SOP Compliance</p>
                     </div>
+                    <div className="rounded-lg border border-border bg-surface p-3 text-center">
+                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.okrAvgProgress != null ? getScoreColor(selfData.metrics.okrAvgProgress) : "text-muted"}`}>
+                        {selfData.metrics.okrAvgProgress != null ? `${selfData.metrics.okrAvgProgress}%` : "N/A"}
+                      </p>
+                      <p className="text-[10px] text-muted">OKR Progress</p>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
+
+              {/* OKRs you owned this period — pre-populated from your
+                  check-ins so you barely have to re-write what you
+                  shipped. */}
+              {selfData.metrics.okrs?.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2"><CardTitle className="text-sm">Your OKRs this period</CardTitle></CardHeader>
+                  <CardContent className="space-y-3">
+                    {selfData.metrics.okrs.map((okr: any) => (
+                      <div key={okr.id} className="rounded-lg border border-border bg-surface p-3">
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{okr.title}</p>
+                            <p className="text-[10px] text-muted">{okr.level} · {okr.quarter || "—"}</p>
+                          </div>
+                          <span className={`text-xs font-mono tabular-nums shrink-0 ${getScoreColor(okr.progress)}`}>
+                            {okr.progress}%
+                          </span>
+                        </div>
+                        {okr.keyResults?.map((kr: any) => (
+                          <div key={kr.id} className="mt-1.5 text-[11px] flex items-center gap-2">
+                            <span className="text-muted truncate flex-1">{kr.title}</span>
+                            <span className="font-mono tabular-nums">
+                              {kr.currentValue}/{kr.targetValue}{kr.unit ? ` ${kr.unit}` : ""}
+                            </span>
+                            <span className="font-mono tabular-nums text-muted w-12 text-right">
+                              {kr.checkIns?.length ?? 0} check-in{(kr.checkIns?.length ?? 0) === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-muted leading-relaxed pt-1">
+                      These came from your own check-ins during this review period. Use them as
+                      proof points in the reflection below.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* KRA Self-Ratings */}
               {selfData.kraAssignments?.length > 0 && (
@@ -689,7 +811,20 @@ export default function ReviewCycleDetailPage() {
                 </CardContent>
               </Card>
 
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-2 items-center">
+                <span className="mr-auto inline-flex items-center gap-1.5 text-[11px] text-muted">
+                  {autosaveMgr.status === "saving" ? (
+                    <><Cloud size={11} className="animate-pulse" /> Saving draft…</>
+                  ) : autosaveMgr.status === "saved" ? (
+                    <><Cloud size={11} className="text-green-400" /> Draft saved {autosaveMgr.lastSavedAt ? `at ${autosaveMgr.lastSavedAt.toLocaleTimeString()}` : ""}</>
+                  ) : autosaveMgr.status === "error" ? (
+                    <><CloudOff size={11} className="text-red-400" /> Save failed</>
+                  ) : autosaveMgr.status === "dirty" ? (
+                    <><Cloud size={11} /> Unsaved changes</>
+                  ) : (
+                    <><Cloud size={11} /> Autosave on</>
+                  )}
+                </span>
                 <Button variant="outline" onClick={() => handleManagerReview(selectedReview.id, false)} disabled={savingMgr}>
                   {savingMgr ? "Saving..." : "Save Draft"}
                 </Button>

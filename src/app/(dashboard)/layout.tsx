@@ -3,6 +3,7 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { ToastProvider } from "@/components/ui/toast";
+import { DialogProvider } from "@/components/ui/dialog-provider";
 import { KudosFab } from "@/components/kudos/kudos-fab";
 import { ScreenProtection } from "@/components/security/screen-protection";
 import { TourProvider } from "@/components/tour-provider";
@@ -59,27 +60,29 @@ export default function DashboardLayout({
 
   return (
     <ToastProvider>
-      <TourProvider>
-        <div className="app-shell" style={{ display: "flex", minHeight: "100vh" }}>
-          <Sidebar />
-          <div
-            className="app-shell-main"
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              paddingLeft: "var(--sidebar-width, 232px)",
-              transition: "padding-left 0.3s cubic-bezier(0.2, 0.9, 0.3, 1)",
-              minWidth: 0,
-            }}
-          >
-            <Topbar />
-            <main className="app-content">{children}</main>
+      <DialogProvider>
+        <TourProvider>
+          <div className="app-shell" style={{ display: "flex", minHeight: "100vh" }}>
+            <Sidebar />
+            <div
+              className="app-shell-main"
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                paddingLeft: "var(--sidebar-width, 232px)",
+                transition: "padding-left 0.3s cubic-bezier(0.2, 0.9, 0.3, 1)",
+                minWidth: 0,
+              }}
+            >
+              <Topbar />
+              <main className="app-content">{children}</main>
+            </div>
+            <KudosFab />
+            <ScreenProtection />
           </div>
-          <KudosFab />
-          <ScreenProtection />
-        </div>
-      </TourProvider>
+        </TourProvider>
+      </DialogProvider>
     </ToastProvider>
   );
 }

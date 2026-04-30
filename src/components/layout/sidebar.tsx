@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import { Menu, Sun, Moon } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo";
+import { useBranding } from "@/hooks/use-branding";
 import {
   LayoutDashboard,
   Users,
@@ -113,6 +114,14 @@ export function Sidebar() {
   const [themeMounted, setThemeMounted] = useState(false);
   const tNav = useTranslations("nav");
   const { theme, resolvedTheme, setTheme } = useTheme();
+  const branding = useBranding();
+  // Branding is honoured only when white-label is on. We still want
+  // to use the org's name (not a custom display name) for the topbar
+  // tooltip even on lower plans, but the wordmark stays "workwrk"
+  // unless they're paying for the rebrand.
+  const showCustomBrand = !!branding?.whiteLabelEnabled;
+  const wordmark = (showCustomBrand && (branding?.displayName || branding?.name)) || "workwrk";
+  const logoUrl = showCustomBrand ? branding?.logo : null;
 
   useEffect(() => {
     setThemeMounted(true);
@@ -236,16 +245,27 @@ export function Sidebar() {
       className={cn("app-sidebar", collapsed && "is-collapsed", mobileOpen && "is-mobile-open")}
       aria-label="Dashboard navigation"
     >
-      {/* Brand */}
+      {/* Brand — falls through to WorkwrK defaults when white-label
+          isn't enabled for this org. */}
       <div className="app-sidebar-brand">
         {!collapsed ? (
-          <Link href="/dashboard" className="app-sidebar-brand-full" aria-label="workwrk home">
-            <LogoMark size={22} />
-            <span className="app-sidebar-wordmark">workwrk</span>
+          <Link href="/dashboard" className="app-sidebar-brand-full" aria-label={`${wordmark} home`}>
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt="" width={22} height={22} className="rounded-md object-contain" />
+            ) : (
+              <LogoMark size={22} />
+            )}
+            <span className="app-sidebar-wordmark truncate">{wordmark}</span>
           </Link>
         ) : (
-          <Link href="/dashboard" className="app-sidebar-brand-mini" aria-label="workwrk home">
-            <LogoMark size={26} />
+          <Link href="/dashboard" className="app-sidebar-brand-mini" aria-label={`${wordmark} home`}>
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt="" width={26} height={26} className="rounded-md object-contain" />
+            ) : (
+              <LogoMark size={26} />
+            )}
           </Link>
         )}
         <button

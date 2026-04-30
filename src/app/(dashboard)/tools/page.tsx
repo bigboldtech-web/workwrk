@@ -16,6 +16,7 @@ import {
   Wrench, Plus, Share2, Eye, EyeOff, ExternalLink, Copy, Trash2, Users, X,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { useRole } from "@/hooks/use-role";
 
 const CATEGORIES = ["Communication", "Design", "Development", "Finance", "HR", "Marketing", "Sales", "Project Management", "Analytics", "Storage", "Other"];
@@ -44,6 +45,7 @@ export default function ToolsPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [shareUserIds, setShareUserIds] = useState<string[]>([]);
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
 
   const [form, setForm] = useState({
     name: "", description: "", url: "", icon: "", category: "",
@@ -108,7 +110,12 @@ export default function ToolsPage() {
   }
 
   async function handleDelete(toolId: string) {
-    if (!confirm("Delete this tool?")) return;
+    if (!(await confirm({
+      title: "Delete this tool?",
+      description: "The tool entry and any stored credentials will be removed.",
+      confirmLabel: "Delete",
+      destructive: true,
+    }))) return;
     await fetch(`/api/tools/${toolId}`, { method: "DELETE" });
     setTools(tools.filter((t) => t.id !== toolId));
     if (selectedTool?.id === toolId) setSelectedTool(null);

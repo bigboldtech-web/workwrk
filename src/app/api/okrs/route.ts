@@ -44,13 +44,18 @@ export async function POST(req: NextRequest) {
   // Employees can create INDIVIDUAL OKRs for themselves; managers can create any
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { title, description, level, quarter, startDate, endDate, ownerId, departmentId, parentId, keyResults } = body;
+  const { title, description, level, quarter, startDate, endDate, ownerId, departmentId, parentId, keyResults, checkInCadence } = body;
 
   if (!isManager(session) && level !== "INDIVIDUAL") {
     return jsonError("Only managers can create Company/Team OKRs", 403);
   }
 
   if (!title?.trim()) return jsonError("Title required");
+
+  const cadence =
+    checkInCadence && ["WEEKLY", "BIWEEKLY", "MONTHLY"].includes(checkInCadence)
+      ? checkInCadence
+      : "WEEKLY";
 
   const okr = await prisma.oKR.create({
     data: {
@@ -63,6 +68,7 @@ export async function POST(req: NextRequest) {
       ownerId: ownerId || null,
       departmentId: departmentId || null,
       parentId: parentId || null,
+      checkInCadence: cadence,
       organizationId: orgId,
     },
   });

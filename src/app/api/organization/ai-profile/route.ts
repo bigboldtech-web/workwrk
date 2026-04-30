@@ -1,11 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
-});
+import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -13,6 +9,7 @@ export async function POST(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
+  const ai = await getAnthropicForOrg(orgId);
   const body = await req.json();
   const { companyName, website, industry, currentAbout, currentMission, currentVision, currentValues } = body;
 
@@ -24,7 +21,7 @@ export async function POST(req: NextRequest) {
 
   const deptNames = departments.map((d) => d.name).join(", ");
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
     return jsonSuccess({
       about: currentAbout || `${companyName || "Our company"} is a growing organization in the ${industry || "technology"} space.`,
       mission: currentMission || "To deliver exceptional value to our customers through innovation and excellence.",
@@ -46,8 +43,8 @@ export async function POST(req: NextRequest) {
     if (currentVision) context += `Current Vision: ${currentVision}\n`;
     if (currentValues?.length > 0) context += `Current Values: ${currentValues.join(", ")}\n`;
 
-    const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+    const message = await ai.client.messages.create({
+      model: modelFor(ai, "claude-haiku-4-5-20251001"),
       max_tokens: 1500,
       system: `You are a business strategy expert. Generate a professional company profile based on the information provided.
 

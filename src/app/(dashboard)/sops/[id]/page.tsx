@@ -49,6 +49,7 @@ import {
   GitBranch,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-builder";
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { RichEditor } from "@/components/ui/rich-editor";
@@ -214,6 +215,7 @@ function formatSavedAgo(at: Date): string {
 // attached. If the user later wants to host images externally, they can
 // paste a URL instead of uploading.
 function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: string) => void }) {
+  const prompt = usePrompt();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -228,10 +230,17 @@ function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: 
     reader.readAsDataURL(file);
   }
 
-  function handleUrl() {
-    const url = prompt("Paste image URL (leave blank to remove):", image || "");
+  async function handleUrl() {
+    const url = await prompt({
+      title: "Paste image URL",
+      description: "Leave blank to remove the current image.",
+      defaultValue: image || "",
+      placeholder: "https://…",
+      submitLabel: image ? "Save" : "Add image",
+      required: false,
+    });
     if (url === null) return;
-    onChange(url.trim());
+    onChange(url);
   }
 
   if (image) {
@@ -315,6 +324,7 @@ function RichTextSopEditor({ content, editable, onChange }: { content: string; e
 }
 
 function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: string; currentVersion: number; onRollback: () => void }) {
+  const confirm = useConfirm();
   const [versions, setVersions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [rolling, setRolling] = useState(false);
@@ -329,7 +339,12 @@ function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: strin
   }, [sopId]);
 
   async function handleRollback(versionId: string, ver: number) {
-    if (!confirm(`Rollback to v${ver}? Current content will be saved as a new version.`)) return;
+    if (!(await confirm({
+      title: `Rollback to v${ver}?`,
+      description: "Your current content will be saved as a new version, then v" + ver + " will be restored as the active draft.",
+      confirmLabel: "Rollback",
+      destructive: false,
+    }))) return;
     setRolling(true);
     try {
       const res = await fetch(`/api/sops/${sopId}/versions`, {
@@ -429,6 +444,7 @@ export default function SOPDetailPage() {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState("content");
 
   // Editable fields
@@ -536,7 +552,12 @@ export default function SOPDetailPage() {
   };
 
   const handleRemoveAssignment = async (assignmentId: string) => {
-    if (!confirm("Remove this assignment?")) return;
+    if (!(await confirm({
+      title: "Remove this assignment?",
+      description: "The assignee will no longer see this SOP in their assigned list. Their compliance history is kept.",
+      confirmLabel: "Remove",
+      destructive: true,
+    }))) return;
     try {
       await fetch(`/api/sop-assignments/${assignmentId}`, { method: "DELETE" });
       toastSuccess("Assignment removed");

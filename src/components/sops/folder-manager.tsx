@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Plus, Trash2, Loader2, Users as UsersIcon, FolderOpen, ChevronLeft, Check, Pencil, X } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface Folder {
   id: string;
@@ -38,6 +39,7 @@ interface AccessUser {
  */
 export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
   const [folders, setFolders] = useState<Folder[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [creatingName, setCreatingName] = useState("");
@@ -93,7 +95,12 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
       toastError(`Move the ${f._count?.sops} SOP${f._count?.sops === 1 ? "" : "s"} out of "${f.name}" before deleting.`);
       return;
     }
-    if (!confirm(`Delete empty folder "${f.name}"?`)) return;
+    if (!(await confirm({
+      title: `Delete folder "${f.name}"?`,
+      description: "Empty folders only. The folder will be removed and any access grants on it cleared.",
+      confirmLabel: "Delete folder",
+      destructive: true,
+    }))) return;
     const res = await fetch(`/api/sop-folders/${f.id}`, { method: "DELETE" });
     if (res.ok) {
       toastSuccess("Folder deleted");
