@@ -104,8 +104,37 @@ export async function PATCH(
   }
 
   if (status !== undefined) {
-    data.status = status;
     if (status === "PUBLISHED") {
+      // Refuse to publish a row that's empty. Earlier we shipped a
+      // bug where the publish flow would happily overwrite a real
+      // SOP's title + content with whatever was in the form (even
+      // when blank), nuking the live row. The version snapshot a
+      // few lines below would still preserve the previous v as a
+      // backup, but at the cost of an empty PUBLISHED row sitting
+      // in the customer's list. Easier to refuse the publish.
+      const proposedTitle = (data.title as string | undefined) ?? existing.title;
+      const proposedContent = (data.content as { html?: string; steps?: unknown[]; sections?: unknown[] } | undefined) ?? (existing.content as any);
+
+      if (!proposedTitle || (typeof proposedTitle === "string" && proposedTitle.trim() === "")) {
+        return jsonError("SOP title is required before publishing");
+      }
+
+      const c = proposedContent ?? {};
+      const htmlEmpty = typeof c.html === "string" && c.html.replace(/<[^>]+>/g, "").trim() === "";
+      const stepsEmpty = Array.isArray(c.steps) && c.steps.length === 0;
+      const sectionsEmpty = Array.isArray(c.sections) && c.sections.length === 0;
+      const onlyHtml = "html" in c && !("steps" in c) && !("sections" in c);
+      const onlySteps = "steps" in c && !("html" in c) && !("sections" in c);
+      const onlySections = "sections" in c && !("html" in c) && !("steps" in c);
+      const isEmpty =
+        (onlyHtml && htmlEmpty) ||
+        (onlySteps && stepsEmpty) ||
+        (onlySections && sectionsEmpty);
+      if (isEmpty) {
+        return jsonError("Add some content before publishing");
+      }
+
+      data.status = status;
       data.publishedAt = new Date();
       // Save version snapshot before updating
       await prisma.sOPVersion.create({
@@ -118,6 +147,8 @@ export async function PATCH(
           publishedBy: getUserId(session),
         },
       });
+    } else {
+      data.status = status;
     }
   }
 
