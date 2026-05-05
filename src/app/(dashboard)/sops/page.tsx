@@ -782,21 +782,27 @@ export default function SOPsPage() {
   const categories = savedCategories.map((c: { name: string }) => c.name).sort();
 
   // Tree shape for the sidebar. Counts come from the API response so
-  // they always agree with the ARCHIVED-excluded list rule. The
-  // sentinel "__uncategorized__" row is excluded from the tree and
-  // surfaced separately as the "Uncategorized" pill count.
+  // they always agree with the ARCHIVED-excluded list rule. We hide:
+  //   · the "__uncategorized__" sentinel (surfaced as its own pill)
+  //   · saved categories with zero SOPs that *also* have no
+  //     populated subcategories — those are "defined but unused" and
+  //     would just be visual noise in the sidebar. Admins can still
+  //     see/edit them in Settings → SOPs.
+  // Subcategories with zero SOPs are also hidden inside their parent.
   const categoryNodes: CategoryNode[] = savedCategories
     .filter((c: any) => c.id !== "__uncategorized__")
-    .map((c: any) => ({
-      id: c.id,
-      name: c.name,
-      sopCount: c.sopCount ?? 0,
-      subcategories: (c.subcategories ?? []).map((s: any) => ({
-        id: s.id,
-        name: s.name,
-        sopCount: s.sopCount ?? 0,
-      })),
-    }));
+    .map((c: any) => {
+      const subs = (c.subcategories ?? [])
+        .filter((s: any) => (s.sopCount ?? 0) > 0)
+        .map((s: any) => ({ id: s.id, name: s.name, sopCount: s.sopCount ?? 0 }));
+      return {
+        id: c.id,
+        name: c.name,
+        sopCount: c.sopCount ?? 0,
+        subcategories: subs,
+      };
+    })
+    .filter((c) => (c.sopCount ?? 0) > 0 || c.subcategories.length > 0);
   const uncategorizedCount =
     savedCategories.find((c: any) => c.id === "__uncategorized__")?.sopCount ?? 0;
   // Total active (non-archived) SOPs across the whole org. Drives
@@ -1283,36 +1289,17 @@ export default function SOPsPage() {
             />
           </div>
 
-          {/* Secondary: folders (access scope). Only shown if any
-              folders exist or the user is an admin who might create them. */}
-          {(folders.length > 0 || isOrgAdmin) && (
-            <div className="rounded-lg border border-border bg-surface p-2">
-              <div className="px-1.5 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-muted flex items-center justify-between">
-                <span>Folders (access)</span>
-                {isOrgAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setShowFolderManager(true)}
-                    className="text-muted hover:text-foreground"
-                    title="Manage folder access"
-                  >
-                    <Settings2 size={12} />
-                  </button>
-                )}
-              </div>
-              <FolderTree
-                folders={folders}
-                totalSops={totalActiveSops}
-                selected={folderFilter as any}
-                onSelect={(v) => setFolderFilter(v)}
-                onDropSop={(folderId, sopId) => handleMoveToFolder(sopId, folderId)}
-                onCreateChild={isOrgAdmin ? handleCreateFolder : undefined}
-                onRename={isOrgAdmin ? handleRenameFolder : undefined}
-                onManageAccess={isOrgAdmin ? () => handleManageAccess() : undefined}
-                onDelete={isOrgAdmin ? handleDeleteFolder : undefined}
-                canManage={isOrgAdmin}
-              />
-            </div>
+          {/* Folders aren't shown in the sidebar — they're an
+              access-control thing, not a navigation thing. Admins
+              get a small link to the access manager instead. */}
+          {isOrgAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowFolderManager(true)}
+              className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted hover:text-foreground transition-colors"
+            >
+              <Settings2 size={12} /> Manage access (folders)
+            </button>
           )}
         </aside>
 
