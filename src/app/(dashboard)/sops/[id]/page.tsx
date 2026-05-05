@@ -107,6 +107,7 @@ interface SOP {
   title: string;
   description: string | null;
   category: string | null;
+  subcategory: string | null;
   sopType: "WRITTEN" | "RECORDED" | "CHECKLIST";
   content: { type?: string; steps?: SOPStep[] | RecordedStep[]; sections?: ChecklistSection[]; flow?: ProcessFlow };
   version: number;
@@ -410,6 +411,42 @@ export default function SOPDetailPage() {
 
   const { canManageSOPs } = useRole();
   const [sop, setSop] = useState<SOP | null>(null);
+  // Org-wide list of saved categories (with their subcategories) so the
+  // detail page's editor mirrors the create dialog. Refreshed only when
+  // the user opens a Select; cheap on the server.
+  const [savedCategories, setSavedCategories] = useState<Array<{ id: string; name: string; subcategories: { id: string; name: string }[] }>>([]);
+  const [savingCategory, setSavingCategory] = useState(false);
+  useEffect(() => {
+    fetch("/api/sop-categories")
+      .then((r) => r.ok ? r.json() : { data: [] })
+      .then((d) => setSavedCategories(Array.isArray(d) ? d : d?.data || []))
+      .catch(() => {});
+  }, []);
+
+  // Persist a category / subcategory change. Optimistic UI: we set the
+  // local state first so the picker reflects the choice instantly, then
+  // round-trip to the server to actually save. If the request fails we
+  // roll back.
+  async function patchCategory(partial: { category?: string | null; subcategory?: string | null }) {
+    if (!sop) return;
+    const previous = { category: sop.category, subcategory: sop.subcategory };
+    setSop({ ...sop, ...partial } as SOP);
+    setSavingCategory(true);
+    try {
+      const res = await fetch(`/api/sops/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(partial),
+      });
+      if (!res.ok) {
+        setSop({ ...sop, ...previous } as SOP);
+      }
+    } catch {
+      setSop({ ...sop, ...previous } as SOP);
+    } finally {
+      setSavingCategory(false);
+    }
+  }
 
   // Debounced server persistence for recorded-SOP step mutations
   // (reorder / edit description / add / delete). Reorders and edits
@@ -1878,16 +1915,54 @@ export default function SOPDetailPage() {
               <CardTitle className="text-sm">Details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Tag size={14} className="text-muted shrink-0" />
-                <div>
+              <div className="flex items-start gap-3">
+                <Tag size={14} className="text-muted shrink-0 mt-1" />
+                <div className="min-w-0 flex-1">
                   <Label className="text-[10px] text-muted uppercase tracking-wider">
-                    Category
+                    Category {savingCategory && <span className="text-muted-2 normal-case ml-1">· saving…</span>}
                   </Label>
-                  <p className="text-sm">
-                    {sop.category || "Uncategorized"}
-                    {(sop as any).subcategory && <span className="text-muted"> / {(sop as any).subcategory}</span>}
-                  </p>
+                  {canManageSOPs ? (
+                    <div className="space-y-1.5 mt-1">
+                      <Select
+                        value={sop.category ?? "__none__"}
+                        onValueChange={(v) => patchCategory({
+                          category: v === "__none__" ? null : v,
+                          // Reset subcategory when the parent category changes,
+                          // since subcategory names live under a parent.
+                          subcategory: v === sop.category ? sop.subcategory : null,
+                        })}
+                        disabled={savingCategory}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No category" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">No category</SelectItem>
+                          {savedCategories.map((c) => (
+                            <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {sop.category && (
+                        <Select
+                          value={sop.subcategory ?? "__none__"}
+                          onValueChange={(v) => patchCategory({ subcategory: v === "__none__" ? null : v })}
+                          disabled={savingCategory}
+                        >
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No subcategory" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">No subcategory</SelectItem>
+                            {(savedCategories.find((c) => c.name === sop.category)?.subcategories ?? []).map((s) => (
+                              <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm">
+                      {sop.category || "Uncategorized"}
+                      {sop.subcategory && <span className="text-muted"> / {sop.subcategory}</span>}
+                    </p>
+                  )}
                 </div>
               </div>
 

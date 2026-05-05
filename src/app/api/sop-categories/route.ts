@@ -15,6 +15,9 @@ export async function GET() {
 
   const orgId = getOrgId(session);
 
+  // Counts here must match the main /api/sops list, which excludes
+  // ARCHIVED. If we counted archived too, sidebar totals would
+  // disagree with what the user sees and feel buggy.
   const [categories, sopCounts] = await Promise.all([
     prisma.sOPCategory.findMany({
       where: { organizationId: orgId },
@@ -23,7 +26,7 @@ export async function GET() {
     }),
     prisma.sOP.groupBy({
       by: ["category", "subcategory"],
-      where: { organizationId: orgId },
+      where: { organizationId: orgId, status: { not: "ARCHIVED" } },
       _count: { _all: true },
     }),
   ]);
@@ -68,6 +71,22 @@ export async function GET() {
     }));
 
   const all = [...enriched, ...ghostCategories].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Surface the "uncategorized" bucket as a sentinel row (id starts
+  // with "__"). Consumers that just want the saved + ghost categories
+  // can filter on that prefix; the SOPs page reads it for the
+  // "Uncategorized" sidebar pill.
+  const uncategorizedTotal = byName["_uncategorized"]?.total ?? 0;
+  if (uncategorizedTotal > 0) {
+    all.push({
+      id: "__uncategorized__",
+      name: "Uncategorized",
+      organizationId: orgId,
+      sopCount: uncategorizedTotal,
+      subcategories: [],
+      unsaved: false,
+    } as any);
+  }
 
   return jsonSuccess(all, 200, LOOKUP_CACHE_HEADERS);
 }
@@ -114,6 +133,57 @@ export async function POST(req: NextRequest) {
   });
 
   return jsonSuccess(category, 201);
+}
+
+// PATCH: Rename a category or subcategory. When the name changes,
+// every SOP that referenced the old name (by string) is re-pointed.
+//
+// Body: { id, type?: "category"|"subcategory", name }
+export async function PATCH(req: NextRequest) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+  if (!isManager(session)) return jsonError("Forbidden", 403);
+
+  const orgId = getOrgId(session);
+  const { id, type, name } = await req.json();
+
+  if (!id) return jsonError("ID is required");
+  const next = typeof name === "string" ? name.trim() : "";
+  if (!next) return jsonError("Name is required");
+
+  if (type === "subcategory") {
+    const sub = await prisma.sOPSubcategory.findFirst({
+      where: { id, category: { organizationId: orgId } },
+      select: { id: true, name: true, category: { select: { name: true } } },
+    });
+    if (!sub) return jsonError("Subcategory not found", 404);
+    if (sub.name === next) return jsonSuccess({ updated: 0 });
+
+    await prisma.$transaction([
+      prisma.sOPSubcategory.update({ where: { id }, data: { name: next } }),
+      prisma.sOP.updateMany({
+        where: { organizationId: orgId, category: sub.category.name, subcategory: sub.name },
+        data: { subcategory: next },
+      }),
+    ]);
+    return jsonSuccess({ ok: true });
+  }
+
+  const cat = await prisma.sOPCategory.findFirst({
+    where: { id, organizationId: orgId },
+    select: { id: true, name: true },
+  });
+  if (!cat) return jsonError("Category not found", 404);
+  if (cat.name === next) return jsonSuccess({ updated: 0 });
+
+  await prisma.$transaction([
+    prisma.sOPCategory.update({ where: { id }, data: { name: next } }),
+    prisma.sOP.updateMany({
+      where: { organizationId: orgId, category: cat.name },
+      data: { category: next },
+    }),
+  ]);
+  return jsonSuccess({ ok: true });
 }
 
 // DELETE: Delete category or subcategory

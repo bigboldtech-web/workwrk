@@ -11,7 +11,16 @@ export async function GET(req: NextRequest) {
   if (error) return error;
 
   const { searchParams } = new URL(req.url);
+  // category semantics:
+  //   null / unset       → no narrowing
+  //   "__none__"         → category IS NULL (uncategorized)
+  //   "<name>"           → category = <name>
+  // subcategory semantics:
+  //   null / unset       → no narrowing
+  //   "__none__"         → subcategory IS NULL (only sensible alongside a category)
+  //   "<name>"           → subcategory = <name>
   const category = searchParams.get("category");
+  const subcategory = searchParams.get("subcategory");
   const status = searchParams.get("status");
   const kraId = searchParams.get("kraId");
   // folderId semantics:
@@ -25,7 +34,10 @@ export async function GET(req: NextRequest) {
   const pagination = parsePaginationParams(req);
 
   const where: any = { organizationId: getOrgId(session) };
-  if (category) where.category = category;
+  if (category === "__none__") where.category = null;
+  else if (category) where.category = category;
+  if (subcategory === "__none__") where.subcategory = null;
+  else if (subcategory) where.subcategory = subcategory;
   if (status) {
     where.status = status;
   } else {

@@ -16,6 +16,7 @@ import {
   UserX, RotateCcw, Download, AlertTriangle, Sliders, ToggleLeft, Key, Lock,
   BookOpen, Sparkles,
 } from "lucide-react";
+import { SopCategoryManager } from "@/components/settings/sop-category-manager";
 import { SopFoldersTagsManager } from "@/components/settings/sop-folders-tags-manager";
 import { BrandingManager } from "@/components/settings/branding-manager";
 import { ByokManager } from "@/components/settings/byok-manager";
@@ -1626,11 +1627,11 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        {/* SOPs — folder tree + tag registry. Replaces the legacy
-            category/subcategory registry; the underlying SOPCategory
-            tables are still around for rollback safety but no longer
-            surfaced in the UI. */}
+        {/* SOPs — categories + subcategories are the primary
+            organisational taxonomy. Folders + tags get a secondary
+            management card below. */}
         <TabsContent value="sops" className="space-y-4 mt-4">
+          <SopCategoryManager />
           <SopFoldersTagsManager />
         </TabsContent>
 
