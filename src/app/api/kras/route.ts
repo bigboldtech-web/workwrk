@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
+import { getTeamUserIds } from "@/lib/team";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -9,10 +10,38 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const category = searchParams.get("category");
+  // scope:
+  //   "all"  — every KRA in the org (admins / execs / HR)
+  //   "team" — KRAs assigned to anyone in my recursive team
+  //   "own"  — KRAs assigned to me
+  // Default: admins+execs → "all", managers/team-leads → "team",
+  // everyone else → "own". Non-admins can never escape their scope.
+  const requestedScope = searchParams.get("scope");
   const pagination = parsePaginationParams(req);
 
-  const where: any = { organizationId: getOrgId(session) };
+  const orgId = getOrgId(session);
+  const callerId = getUserId(session);
+  const callerLevel = (session.user as any).accessLevel as string;
+  const orgWideRoles = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
+  const isOrgWide = orgWideRoles.has(callerLevel);
+  const isManagerLevel = isManager(session);
+
+  const where: any = { organizationId: orgId };
   if (category) where.category = category;
+
+  const effectiveScope = isOrgWide
+    ? (requestedScope || "all")
+    : isManagerLevel
+      ? "team"
+      : "own";
+
+  if (effectiveScope !== "all") {
+    const userIds =
+      effectiveScope === "team"
+        ? await getTeamUserIds(orgId, callerId)
+        : [callerId];
+    where.assignments = { some: { userId: { in: userIds }, status: "ACTIVE" } };
+  }
   if (pagination.search) {
     where.OR = [
       { name: { contains: pagination.search, mode: "insensitive" } },

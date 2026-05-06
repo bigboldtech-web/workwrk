@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck } from "lucide-react";
+import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import {
   DropdownMenu,
@@ -177,6 +177,24 @@ export function Topbar() {
     setUnreadCount(0);
   }, []);
 
+  // Delete a single notification optimistically. Used by the small X
+  // button on each row — lets users sweep already-seen items one by
+  // one without leaving the dropdown.
+  const handleDismissNotification = useCallback((id: string) => {
+    setNotifications((prev) => {
+      const target = prev.find((n) => n.id === id);
+      if (target && !target.read) {
+        setUnreadCount((u) => Math.max(0, u - 1));
+      }
+      return prev.filter((n) => n.id !== id);
+    });
+    fetch("/api/notifications", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
     if (searchQuery.length < 2) {
@@ -332,6 +350,15 @@ export function Topbar() {
                     key={notif.id}
                     className={`flex flex-col items-start gap-1 py-2 cursor-pointer ${!notif.read ? "bg-[rgba(212,255,46,0.06)]" : ""}`}
                     onClick={() => handleNotificationClick(notif)}
+                    // Don't auto-close the dropdown when the user
+                    // clicks the X (the click target is a child
+                    // button which calls e.stopPropagation, but the
+                    // DropdownMenuItem's default onSelect would still
+                    // close — keep it open for fast multi-dismiss).
+                    onSelect={(e) => {
+                      const target = e.target as HTMLElement | null;
+                      if (target?.closest?.("[data-dismiss-notif]")) e.preventDefault();
+                    }}
                   >
                     <div className="flex items-center gap-2 w-full">
                       {!notif.read && (
@@ -341,26 +368,29 @@ export function Topbar() {
                         />
                       )}
                       <span
-                        className={`text-sm truncate ${!notif.read ? "font-semibold text-foreground" : "font-medium text-muted"}`}
+                        className={`text-sm truncate flex-1 ${!notif.read ? "font-semibold text-foreground" : "font-medium text-muted"}`}
                       >
                         {notif.title}
                       </span>
-                      <span className="text-[10px] ml-auto flex-shrink-0 text-muted-2">
+                      <span className="text-[10px] flex-shrink-0 text-muted-2">
                         {timeAgo(notif.createdAt)}
                       </span>
+                      <button
+                        type="button"
+                        data-dismiss-notif
+                        className="ml-1 flex-shrink-0 rounded p-0.5 text-muted-2 hover:text-foreground hover:bg-surface-2 transition-colors"
+                        aria-label="Dismiss notification"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDismissNotification(notif.id);
+                        }}
+                      >
+                        <X size={11} />
+                      </button>
                     </div>
                     <span className="text-xs line-clamp-1 text-muted">{notif.message}</span>
                   </DropdownMenuItem>
                 ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild className="justify-center">
-                  <Link
-                    href="/activity"
-                    className="text-xs text-center w-full text-[color:var(--accent-strong)]"
-                  >
-                    View all notifications →
-                  </Link>
-                </DropdownMenuItem>
               </>
             )}
           </DropdownMenuContent>

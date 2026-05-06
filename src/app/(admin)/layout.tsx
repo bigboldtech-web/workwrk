@@ -6,12 +6,13 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Building2, BarChart3, Shield, ArrowLeft, RefreshCw } from "lucide-react";
+import { LayoutDashboard, Building2, BarChart3, Shield, ArrowLeft, RefreshCw, Sparkles } from "lucide-react";
 import { ToastProvider } from "@/components/ui/toast";
 
 const adminNav = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { name: "Companies", href: "/admin/companies", icon: Building2 },
+  { name: "AppSumo Codes", href: "/admin/appsumo", icon: Sparkles },
   { name: "Analytics", href: "/admin/analytics", icon: BarChart3 },
 ];
 

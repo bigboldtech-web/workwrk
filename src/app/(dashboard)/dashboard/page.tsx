@@ -323,8 +323,11 @@ export default function DashboardPage() {
       {/* Manager Team Dashboard — managers see their direct reports first */}
       {isManager && <ManagerTeamDashboard />}
 
-      {/* Stats Grid — org-wide stats for managers/executives */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Stats Grid — org-wide stats. Hidden from employees: those
+          numbers (total people, avg performance, SOP compliance) are
+          a manager / exec concern. Employees stay focused on their
+          own widgets above. */}
+      {isManager && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.title} className="hover:border-muted-2 transition-colors">
             <CardContent className="p-5">
@@ -351,10 +354,13 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         ))}
-      </div>
+      </div>}
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-4">
+      {/* Main Content Grid — Top Performers / Department Performance /
+          Alerts / Recent Activity / KPI Records / Kudos / Pending Surveys.
+          All org-wide views, gated to managers and above. Employees
+          already saw their personal versions of these widgets above. */}
+      {isManager && <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-4">
         {/* Top Performers */}
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
@@ -502,7 +508,7 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
-      </div>
+      </div>}
 
       {/* Pending Surveys */}
       {pendingSurveys && pendingSurveys.length > 0 && (

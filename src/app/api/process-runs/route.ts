@@ -1,22 +1,50 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
+import { getTeamUserIds } from "@/lib/team";
 import crypto from "crypto";
 
 // GET: List process runs
+//
+// Scope policy (mirrors /api/kras + /api/users):
+//   "all"  — every run in the org (admins / execs / HR)
+//   "team" — runs assigned to anyone in my recursive team
+//   "own"  — runs assigned to me
+// Default: org-wide for admins+execs, "team" for managers, "own"
+// otherwise. Non-org-wide callers cannot escape their scope.
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const orgId = getOrgId(session);
+  const callerId = getUserId(session);
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const sopId = url.searchParams.get("sopId");
+  const requestedScope = url.searchParams.get("scope");
+
+  const callerLevel = (session.user as any).accessLevel as string;
+  const orgWideRoles = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
+  const isOrgWide = orgWideRoles.has(callerLevel);
+  const isManagerLevel = isManager(session);
+  const effectiveScope = isOrgWide
+    ? (requestedScope || "all")
+    : isManagerLevel
+      ? "team"
+      : "own";
 
   const where: Record<string, unknown> = { organizationId: orgId };
   if (status) where.status = status;
   if (sopId) where.sopId = sopId;
+
+  if (effectiveScope !== "all") {
+    const userIds =
+      effectiveScope === "team"
+        ? await getTeamUserIds(orgId, callerId)
+        : [callerId];
+    where.assigneeId = { in: userIds };
+  }
 
   const runs = await prisma.processRun.findMany({
     where,

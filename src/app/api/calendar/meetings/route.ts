@@ -41,7 +41,10 @@ export async function GET(req: NextRequest) {
     attendeeFilter = userIdsParam.split(",").map((s) => s.trim()).filter(Boolean);
   } else if (view === "team" && managerLevel) {
     attendeeFilter = await getTeamUserIds(orgId, currentUserId);
-  } else if (!managerLevel) {
+  } else {
+    // Default to the caller's own meetings — same fix applied to
+    // /api/tasks. Managers used to get every meeting in the org by
+    // default; you have to opt in to a team view explicitly.
     attendeeFilter = [currentUserId];
   }
 

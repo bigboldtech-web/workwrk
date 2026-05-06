@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ACCESS_LEVELS } from "@/lib/access-levels";
 import { KraPicker } from "@/components/ui/kra-picker";
 import {
   Search, Plus, Users, TrendingUp, TrendingDown, Minus,
@@ -58,6 +59,9 @@ interface Role {
   id: string;
   name?: string;
   title?: string;
+  /** AccessLevel as configured on the Role row. Used to default
+   *  Access Level in the invite dialog so the two stay aligned. */
+  level?: string;
 }
 
 function getScoreColor(score: number) {
@@ -500,7 +504,22 @@ export default function PeoplePage() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
-                      <Select value={formRoleId} onValueChange={setFormRoleId}>
+                      <Select
+                        value={formRoleId}
+                        onValueChange={(v) => {
+                          setFormRoleId(v);
+                          // Default Access Level from the role's
+                          // configured level. The user can still override
+                          // — but if they don't touch it, the new
+                          // teammate's accessLevel will match what the
+                          // org defined for that role. No more "Marketing
+                          // Manager role marked as EMPLOYEE" drift.
+                          const picked = roles.find((r: any) => r.id === v);
+                          if (picked?.level && !formAccessLevel) {
+                            setFormAccessLevel(picked.level);
+                          }
+                        }}
+                      >
                         <SelectTrigger className="flex-1"><SelectValue placeholder="Select role" /></SelectTrigger>
                         <SelectContent>{roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.title || r.name}</SelectItem>)}</SelectContent>
                       </Select>
@@ -515,15 +534,23 @@ export default function PeoplePage() {
                   <Select value={formAccessLevel} onValueChange={setFormAccessLevel}>
                     <SelectTrigger><SelectValue placeholder="Select level" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="EMPLOYEE">Employee</SelectItem>
-                      <SelectItem value="TEAM_LEAD">Team Lead</SelectItem>
-                      <SelectItem value="MANAGER">Manager</SelectItem>
-                      <SelectItem value="DIRECTOR">Director</SelectItem>
-                      <SelectItem value="VP">VP</SelectItem>
-                      <SelectItem value="HR">HR</SelectItem>
-                      <SelectItem value="AGENT">Agent</SelectItem>
+                      {/* Same option set as the Roles form. Single
+                          source of truth in lib/access-levels. */}
+                      {ACCESS_LEVELS.map((l) => (
+                        <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
+                  {formRoleId && (() => {
+                    const picked = roles.find((r: any) => r.id === formRoleId);
+                    if (!picked?.level || !formAccessLevel || picked.level === formAccessLevel) return null;
+                    return (
+                      <p className="text-[11px] text-amber-400">
+                        Role&rsquo;s configured level is <strong>{picked.level.replace(/_/g, " ")}</strong>. You picked
+                        <strong> {formAccessLevel.replace(/_/g, " ")}</strong> — keep both in sync if this isn&rsquo;t intentional.
+                      </p>
+                    );
+                  })()}
                 </div>
                 <div className="space-y-2">
                   <Label>Office / Location</Label>

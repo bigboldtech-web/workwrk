@@ -416,6 +416,9 @@ export default function SOPDetailPage() {
   // the user opens a Select; cheap on the server.
   const [savedCategories, setSavedCategories] = useState<Array<{ id: string; name: string; subcategories: { id: string; name: string }[] }>>([]);
   const [savingCategory, setSavingCategory] = useState(false);
+  // Category/subcategory are read-only by default. The pencil button
+  // flips this to true so the dropdowns appear; saving auto-exits.
+  const [editingCategory, setEditingCategory] = useState(false);
   useEffect(() => {
     fetch("/api/sop-categories")
       .then((r) => r.ok ? r.json() : { data: [] })
@@ -1918,10 +1921,32 @@ export default function SOPDetailPage() {
               <div className="flex items-start gap-3">
                 <Tag size={14} className="text-muted shrink-0 mt-1" />
                 <div className="min-w-0 flex-1">
-                  <Label className="text-[10px] text-muted uppercase tracking-wider">
-                    Category {savingCategory && <span className="text-muted-2 normal-case ml-1">· saving…</span>}
-                  </Label>
-                  {canManageSOPs ? (
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[10px] text-muted uppercase tracking-wider">
+                      Category {savingCategory && <span className="text-muted-2 normal-case ml-1">· saving…</span>}
+                    </Label>
+                    {canManageSOPs && (
+                      editingCategory ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditingCategory(false)}
+                          className="text-[10px] text-muted hover:text-foreground inline-flex items-center gap-1"
+                        >
+                          <CheckCircle size={11} /> Done
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setEditingCategory(true)}
+                          className="text-[10px] text-muted hover:text-foreground inline-flex items-center gap-1"
+                          aria-label="Edit category"
+                        >
+                          <Edit3 size={11} /> Edit
+                        </button>
+                      )
+                    )}
+                  </div>
+                  {canManageSOPs && editingCategory ? (
                     <div className="space-y-1.5 mt-1">
                       <Select
                         value={sop.category ?? "__none__"}
@@ -1958,8 +1983,8 @@ export default function SOPDetailPage() {
                       )}
                     </div>
                   ) : (
-                    <p className="text-sm">
-                      {sop.category || "Uncategorized"}
+                    <p className="text-sm mt-0.5">
+                      {sop.category || <span className="text-muted">Uncategorized</span>}
                       {sop.subcategory && <span className="text-muted"> / {sop.subcategory}</span>}
                     </p>
                   )}

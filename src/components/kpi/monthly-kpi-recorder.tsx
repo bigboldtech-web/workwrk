@@ -22,6 +22,8 @@ import {
   getLastPeriod,
   formatPeriodLabel,
   calculateScore,
+  adjustedTarget,
+  type KpiFrequency,
 } from "@/lib/kpi-utils";
 
 interface KpiEntry {
@@ -29,7 +31,11 @@ interface KpiEntry {
   name: string;
   unit: string | null;
   type: string;
+  /** Target as defined on the KPI (per its `frequency`). */
   targetValue: number | null;
+  /** Cadence the KPI was set up for. We use it to convert the
+   *  stored target into a monthly target for the recorder. */
+  frequency?: KpiFrequency;
   lowerIsBetter?: boolean;
   existingRecord: {
     id: string;
@@ -282,37 +288,82 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                 {kra.kpis.map((kpi) => {
                   const fd = formData[kpi.kpiId] || { actualValue: "", managerNotes: "" };
                   const actual = fd.actualValue ? Number(fd.actualValue) : null;
-                  const score = calculateScore(actual, kpi.targetValue, kpi.lowerIsBetter);
+                  // The recorder always works in MONTHLY periods, so
+                  // adjust the displayed + scoring target if the KPI
+                  // was set up at a different cadence (weekly target
+                  // 40 → monthly target ≈ 174).
+                  const { value: adjTarget, hint: targetHint } = adjustedTarget(
+                    kpi.targetValue,
+                    (kpi.frequency ?? "MONTHLY") as KpiFrequency,
+                    "MONTHLY",
+                  );
+                  const score = calculateScore(actual, adjTarget, kpi.lowerIsBetter);
                   const isNoteOpen = showNotes.has(kpi.kpiId);
                   const hasExisting = kpi.existingRecord?.actualValue != null;
 
+                  // Cadence chip + helper copy. The recorder always
+                  // works in monthly periods, so a quarterly KPI is
+                  // tracked here as "1/3 of a quarter" — the score
+                  // uses the prorated monthly target, and the row
+                  // says so plainly to avoid the "is this monthly
+                  // or quarterly?" confusion.
+                  const definedFreq = (kpi.frequency ?? "MONTHLY") as KpiFrequency;
+                  const isMonthly = definedFreq === "MONTHLY";
+                  const cadenceLabel = definedFreq.charAt(0) + definedFreq.slice(1).toLowerCase();
+                  const cadenceChipColor =
+                    definedFreq === "MONTHLY" ? "bg-surface-2 text-muted" :
+                    definedFreq === "WEEKLY" ? "bg-cyan-500/10 text-cyan-400" :
+                    definedFreq === "DAILY" ? "bg-blue-500/10 text-blue-400" :
+                    definedFreq === "QUARTERLY" ? "bg-purple-500/10 text-purple-400" :
+                    "bg-amber-500/10 text-amber-400"; // ANNUALLY
                   return (
                     <div key={kpi.kpiId} className="border-b border-surface-2 last:border-b-0 px-4 py-3">
                       <div className="flex items-center gap-4">
                         {/* KPI Name */}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-sm">{kpi.name}</p>
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wide ${cadenceChipColor}`}
+                              title={isMonthly ? "Monthly KPI" : `Defined ${cadenceLabel.toLowerCase()} — recording the monthly slice`}
+                            >
+                              {cadenceLabel}
+                            </span>
                             {hasExisting && (
                               <CheckCircle2 size={12} className="text-green-400 shrink-0" />
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             {kpi.unit && (
                               <span className="text-[10px] text-muted-2">Unit: {kpi.unit}</span>
                             )}
                             {kpi.lowerIsBetter && (
                               <span className="text-[10px] text-amber-400">Lower is better</span>
                             )}
+                            {!isMonthly && (
+                              <span className="text-[10px] text-muted-2">
+                                {definedFreq === "QUARTERLY" || definedFreq === "ANNUALLY"
+                                  ? `Tracked ${cadenceLabel.toLowerCase()} — enter this month's contribution`
+                                  : `Tracked ${cadenceLabel.toLowerCase()} — enter the month's rolled-up actual`}
+                              </span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Target */}
-                        <div className="text-center min-w-[80px]">
-                          <p className="text-[10px] text-muted-2 uppercase">Target</p>
+                        {/* Target — auto-converted to a monthly figure if
+                            the KPI is defined at a different cadence so the
+                            number you enter under Actual compares apples
+                            to apples. */}
+                        <div className="text-center min-w-[100px]" title={targetHint ?? undefined}>
+                          <p className="text-[10px] text-muted-2 uppercase">Target / month</p>
                           <p className="text-sm font-mono font-bold">
-                            {kpi.targetValue != null ? kpi.targetValue : "—"}
+                            {adjTarget != null ? adjTarget : "—"}
                           </p>
+                          {targetHint && (
+                            <p className="text-[9px] text-muted-2 leading-tight">
+                              from {kpi.targetValue} {kpi.frequency?.toLowerCase()}
+                            </p>
+                          )}
                         </div>
 
                         {/* Actual Value Input */}

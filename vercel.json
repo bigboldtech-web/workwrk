@@ -20,6 +20,14 @@
     {
       "path": "/api/cron/calendar-sync",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/surveys-rotate",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/okr-reminders",
+      "schedule": "0 9 * * 1-5"
     }
   ],
   "functions": {
@@ -52,6 +60,12 @@
     },
     "src/app/api/cron/calendar-sync/route.ts": {
       "maxDuration": 120
+    },
+    "src/app/api/cron/okr-reminders/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/surveys-rotate/route.ts": {
+      "maxDuration": 60
     }
   }
 }

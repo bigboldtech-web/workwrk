@@ -13,6 +13,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { useRole } from "@/hooks/use-role";
 
 const ACTIVITY_ICONS: Record<string, any> = {
   task_created: CheckSquare,
@@ -76,10 +77,14 @@ function groupByDate(activities: any[]) {
 }
 
 export default function ActivityPage() {
+  const { isManager } = useRole();
   const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [scope, setScope] = useState("team");
+  // Default tab — non-managers land on "my activity" since "team
+  // activity" wouldn't show them anything they have permission to
+  // see anyway. Managers + see team by default (their job).
+  const [scope, setScope] = useState(isManager ? "team" : "my");
   const [typeFilter, setTypeFilter] = useState("");
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
@@ -159,7 +164,7 @@ export default function ActivityPage() {
         <div className="flex items-center justify-between">
           <TabsList>
             <TabsTrigger value="my">My Activity</TabsTrigger>
-            <TabsTrigger value="team">Team Activity</TabsTrigger>
+            {isManager && <TabsTrigger value="team">Team Activity</TabsTrigger>}
           </TabsList>
           <Badge variant="secondary" className="text-xs">{pagination.total} events</Badge>
         </div>

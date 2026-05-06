@@ -71,6 +71,43 @@ enum Plan {
 // Billing + subscriptions
 // ==========================================
 
+/// AppSumo lifetime-deal codes.
+///
+/// AppSumo customers don't pay through Stripe — they redeem a code on
+/// the AppSumo marketplace and receive a string they paste into our
+/// /redeem page. Each code maps to a plan tier (Tier 1 = 5 seats,
+/// Tier 2 = 25 seats, Tier 3 = unlimited, by convention) and is
+/// single-use.
+///
+/// Codes are bulk-imported by WorkwrK staff via the admin panel
+/// (CSV from AppSumo merchant dashboard). On redemption we set the
+/// org's Subscription plan to ENTERPRISE / SCALE etc., set
+/// `stripeCustomerId = null` (no Stripe), and stamp `redeemedById`
+/// so refunds can be traced.
+model AppsumoCode {
+  id             String      @id @default(cuid())
+  /// The redemption string the customer pastes in. Unique per code.
+  code           String      @unique
+  /// Plan tier this code grants. We map AppSumo "Tier 1/2/3" to our
+  /// internal Plan enum values via the redemption handler.
+  tier           Int         /// 1, 2, 3 — matches AppSumo Tier numbering
+  plan           Plan        /// Plan to apply on redemption (e.g. SCALE)
+  seats          Int         /// User cap (null-equivalent for unlimited tiers; we use a large int)
+  /// Once redeemed, the code is locked. Refunds flip `refunded=true`
+  /// without deleting the row so the AppSumo merchant dashboard
+  /// reconciliation stays auditable.
+  redeemedById   String?
+  redeemedByOrg  String?
+  redeemedAt     DateTime?
+  refundedAt     DateTime?
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([redeemedByOrg])
+  @@index([redeemedAt])
+}
+
 model Subscription {
   id                 String             @id @default(cuid())
   organizationId     String             @unique

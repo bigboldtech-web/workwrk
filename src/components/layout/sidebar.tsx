@@ -77,9 +77,9 @@ const navigation: NavItem[] = [
   { name: "Policies", key: "policies", href: "/policies", icon: Shield },
   { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true },
   { name: "Activity", key: "activity", href: "/activity", icon: Activity },
-  { name: "Tools", key: "tools", href: "/tools", icon: Wrench },
+  { name: "Tools", key: "tools", href: "/tools", icon: Wrench, managerOnly: true },
   { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true },
-  { name: "AI Assistant", key: "aiAssistant", href: "/ai", icon: Bot, moduleKey: "ai" },
+  { name: "AI Assistant", key: "aiAssistant", href: "/ai", icon: Bot, moduleKey: "ai", managerOnly: true },
 ];
 
 const bottomNav = [

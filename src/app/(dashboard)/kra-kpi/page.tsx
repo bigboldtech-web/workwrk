@@ -24,7 +24,7 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Target, Plus, TrendingUp, TrendingDown, Minus, BarChart3, ChevronRight, ChevronDown, Users,
-  Pencil, Trash2, UserPlus, AlertTriangle, Sparkles, Loader2, X,
+  Pencil, Trash2, UserPlus, AlertTriangle, Sparkles, Loader2, X, Search,
 } from "lucide-react";
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
@@ -171,6 +171,10 @@ export default function KraKpiPage() {
 
   // Data state
   const [kras, setKras] = useState<Kra[]>([]);
+  // Free-text search across KRA name, description, category, and any
+  // contained KPI name. Lets users find an item without scrolling
+  // through the full list when they have dozens.
+  const [kraSearch, setKraSearch] = useState("");
   const [kpis, setKpis] = useState<Kpi[]>([]);
   const [kpiRecords, setKpiRecords] = useState<KpiRecord[]>([]);
   const [assignments, setAssignments] = useState<KraAssignment[]>([]);
@@ -1081,20 +1085,68 @@ export default function KraKpiPage() {
 
         {/* KRAs Tab */}
         <TabsContent value="kras" className="mt-4 space-y-3">
-          {loadingKras ? (
-            <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-12 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>
-          ) : kras.length === 0 ? (
-            <Card><CardContent className="p-0">
-              <EmptyState
-                icon={Target}
-                title="No KRAs defined"
-                description="Define what success looks like for your team by creating Key Result Areas."
-                actionLabel="Create KRA"
-                onAction={() => setShowAddKraDialog(true)}
+          {/* Search row — matches against KRA name, description,
+              category, and any contained KPI name. Cheap client-side
+              filter; the list is small enough that round-tripping
+              isn't worth it. */}
+          {kras.length > 0 && (
+            <div className="relative max-w-md">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <Input
+                placeholder="Search KRAs and KPIs…"
+                className="pl-10"
+                value={kraSearch}
+                onChange={(e) => setKraSearch(e.target.value)}
               />
-            </CardContent></Card>
-          ) : (
-            kras.map((kra) => {
+              {kraSearch && (
+                <button
+                  type="button"
+                  onClick={() => setKraSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {(() => {
+            const q = kraSearch.trim().toLowerCase();
+            const filteredKras = q
+              ? kras.filter((k) => {
+                  if (k.name?.toLowerCase().includes(q)) return true;
+                  if (k.description?.toLowerCase().includes(q)) return true;
+                  if (k.category?.toLowerCase().includes(q)) return true;
+                  if ((k.kpis ?? []).some((kpi: any) => kpi.name?.toLowerCase().includes(q))) return true;
+                  return false;
+                })
+              : kras;
+
+            if (loadingKras) {
+              return <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-12 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>;
+            }
+            if (kras.length === 0) {
+              return (
+                <Card><CardContent className="p-0">
+                  <EmptyState
+                    icon={Target}
+                    title="No KRAs defined"
+                    description="Define what success looks like for your team by creating Key Result Areas."
+                    actionLabel="Create KRA"
+                    onAction={() => setShowAddKraDialog(true)}
+                  />
+                </CardContent></Card>
+              );
+            }
+            if (filteredKras.length === 0) {
+              return (
+                <Card><CardContent className="p-6 text-center text-sm text-muted">
+                  No KRAs or KPIs match &ldquo;{kraSearch}&rdquo;.
+                </CardContent></Card>
+              );
+            }
+            return filteredKras.map((kra) => {
               const isExpanded = expandedKraIds.has(kra.id);
               return (
                 <Card key={kra.id} className="overflow-hidden">
@@ -1192,8 +1244,8 @@ export default function KraKpiPage() {
                   )}
                 </Card>
               );
-            })
-          )}
+            });
+          })()}
         </TabsContent>
 
         {/* Assignments Tab */}

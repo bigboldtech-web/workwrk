@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ACCESS_LEVELS, labelForAccessLevel } from "@/lib/access-levels";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Building2, Plus, Users, ChevronRight, Briefcase, Edit3, Trash2,
@@ -569,7 +570,9 @@ export default function OrganizationPage() {
     }
   }
 
-  const levels = ["EMPLOYEE", "TEAM_LEAD", "MANAGER", "DIRECTOR", "VP", "C_LEVEL", "HR", "AGENT"];
+  // Single source of truth lives in lib/access-levels — used here +
+  // in the People page invite dialog so they can never drift again.
+  const levels = ACCESS_LEVELS.map((l) => l.value);
 
   if (loading) {
     return (
@@ -958,7 +961,7 @@ export default function OrganizationPage() {
                   <div className="space-y-2">
                     <Label>Level</Label>
                     <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
-                      {levels.map((l) => <option key={l} value={l}>{l.replace(/_/g, " ")}</option>)}
+                      {levels.map((l) => <option key={l} value={l}>{labelForAccessLevel(l)}</option>)}
                     </select>
                   </div>
                 </div>
@@ -1001,7 +1004,7 @@ export default function OrganizationPage() {
                         </div>
                       </td>
                       <td className="p-4"><Badge variant="outline" className="text-xs">{role.department?.name || "—"}</Badge></td>
-                      <td className="p-4"><Badge variant="secondary" className="text-xs">{(role.level || "EMPLOYEE").replace(/_/g, " ")}</Badge></td>
+                      <td className="p-4"><Badge variant="secondary" className="text-xs">{labelForAccessLevel(role.level || "EMPLOYEE")}</Badge></td>
                       <td className="p-4 text-right text-sm text-muted">{role._count?.users ?? role.users?.length ?? 0}</td>
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -1222,7 +1225,7 @@ export default function OrganizationPage() {
             <div className="space-y-2">
               <Label>Level</Label>
               <select className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]" value={roleForm.level} onChange={(e) => setRoleForm({ ...roleForm, level: e.target.value })}>
-                {levels.map((l) => <option key={l} value={l}>{l.replace(/_/g, " ")}</option>)}
+                {levels.map((l) => <option key={l} value={l}>{labelForAccessLevel(l)}</option>)}
               </select>
             </div>
           </div>

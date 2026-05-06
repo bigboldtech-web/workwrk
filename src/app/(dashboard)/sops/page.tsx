@@ -822,19 +822,16 @@ export default function SOPsPage() {
   }
 
   const publishedSops = sops.filter(s => s.status === "PUBLISHED");
-  const avgCompliance = publishedSops.length > 0
-    ? Math.round(publishedSops.reduce((acc, s) => acc + getComplianceScore(s), 0) / publishedSops.length)
-    : 0;
 
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader
         kicker="SOPs · written · recorded · flows"
         title="SOPs"
-        subtitle="Standard operating procedures — versioned, assignable, and nightly-audited."
+        subtitle="Standard operating procedures — versioned and assignable. Compliance is tracked per-run, not here."
         stats={[
-          { label: "Published", value: total },
-          { label: "Avg compliance", value: `${avgCompliance}%` },
+          { label: "Total", value: totalActiveSops },
+          { label: "Published", value: publishedSops.length },
         ]}
       />
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1132,9 +1129,9 @@ export default function SOPsPage() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Card><CardContent className="p-3 text-center">
-            <p className="text-lg font-bold">{sops.length}</p>
+            <p className="text-lg font-bold">{total}</p>
             <p className="text-[10px] text-muted">Total SOPs</p>
           </CardContent></Card>
           <Card><CardContent className="p-3 text-center">
@@ -1142,24 +1139,88 @@ export default function SOPsPage() {
             <p className="text-[10px] text-muted">Published</p>
           </CardContent></Card>
           <Card><CardContent className="p-3 text-center">
-            <p className={`text-lg font-bold ${getComplianceText(avgCompliance)}`}>{avgCompliance}%</p>
-            <p className="text-[10px] text-muted">Avg Compliance</p>
-          </CardContent></Card>
-          <Card><CardContent className="p-3 text-center">
-            <p className="text-lg font-bold text-red-400">{publishedSops.filter(s => getComplianceScore(s) < 70).length}</p>
-            <p className="text-[10px] text-muted">Below Target</p>
+            <p className="text-lg font-bold text-muted">{sops.filter(s => s.status === "DRAFT").length}</p>
+            <p className="text-[10px] text-muted">Drafts</p>
           </CardContent></Card>
         </div>
       )}
 
-      {/* Top filter row — search and view toggle on top, tag chips
-          (search aid only) on a small secondary row underneath. */}
+      {/* Top filter row — search + category filter + view toggle.
+          The category dropdown replaces the left-sidebar tree;
+          subcategories are surfaced as indented items inside it. */}
       <div className="space-y-2">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[200px] max-w-md">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
             <Input placeholder="Search SOPs..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
           </div>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-[240px]">
+              <Tag size={13} className="text-muted shrink-0" />
+              <SelectValue placeholder="All categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                All SOPs <span className="text-muted ml-1.5">{totalActiveSops}</span>
+              </SelectItem>
+              {uncategorizedCount > 0 && (
+                <SelectItem value="uncategorized">
+                  Uncategorized <span className="text-muted ml-1.5">{uncategorizedCount}</span>
+                </SelectItem>
+              )}
+              {categoryNodes.length > 0 && <div className="my-1 border-t border-border" />}
+              {categoryNodes.map((cat) => (
+                <div key={cat.id ?? cat.name}>
+                  <SelectItem value={cat.name}>
+                    <span className="font-medium">{cat.name}</span>
+                    <span className="text-muted ml-1.5">{cat.sopCount ?? 0}</span>
+                  </SelectItem>
+                  {cat.subcategories.map((sub) => (
+                    <SelectItem key={`${cat.name}::${sub.name}`} value={`${cat.name}::${sub.name}`}>
+                      <span className="text-muted">↳</span>{" "}
+                      <span>{sub.name}</span>
+                      <span className="text-muted ml-1.5">{sub.sopCount ?? 0}</span>
+                    </SelectItem>
+                  ))}
+                </div>
+              ))}
+              {canManageSOPs && (
+                <>
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      const name = await prompt({ title: "New category", placeholder: "e.g. HR", submitLabel: "Create" });
+                      if (!name) return;
+                      const r = await fetch("/api/sop-categories", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ name }),
+                      });
+                      if (r.ok) { toastSuccess("Category created"); fetchCategories(); }
+                      else { const er = await r.json().catch(() => ({})); toastError(er.error || "Failed"); }
+                    }}
+                    className="w-full text-left px-3 py-2 text-[11.5px] text-muted hover:text-foreground hover:bg-surface-2 rounded-md inline-flex items-center gap-1.5"
+                  >
+                    <Plus size={11} /> New category
+                  </button>
+                </>
+              )}
+            </SelectContent>
+          </Select>
+
+          {isOrgAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setShowFolderManager(true)}
+              title="Folders are an access-scope mechanism. Most users won't need to touch them."
+            >
+              <Settings2 size={13} /> Access
+            </Button>
+          )}
+
           <div className="flex items-center gap-1 ml-auto">
             <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("grid")} title="Grid view">
               <BarChart3 size={14} className="rotate-90" />
@@ -1182,135 +1243,14 @@ export default function SOPsPage() {
         )}
       </div>
 
-      {/* Two-pane layout: categories tree (primary) + SOP grid.
-          Folders are kept for access scoping but demoted to a small
-          secondary section underneath. */}
-      <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-4">
-        <aside className="space-y-3 self-start sticky top-2">
-          {/* Primary nav: categories + subcategories. */}
-          <div className="rounded-lg border border-border bg-surface p-2">
-            <div className="px-1.5 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-muted flex items-center justify-between">
-              <span>Categories</span>
-            </div>
-            <CategoryTree
-              categories={categoryNodes}
-              totalSops={totalActiveSops}
-              uncategorizedCount={uncategorizedCount}
-              selected={categoryFilter}
-              onSelect={(v) => setCategoryFilter(v)}
-              onDropSop={async (cat, sub, sopId) => {
-                await fetch(`/api/sops/${sopId}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ category: cat, subcategory: sub }),
-                });
-                fetchSOPs();
-                fetchCategories();
-              }}
-              onCreateCategory={canManageSOPs ? async () => {
-                const name = await prompt({ title: "New category", placeholder: "e.g. HR", submitLabel: "Create" });
-                if (!name) return;
-                const r = await fetch("/api/sop-categories", {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ name }),
-                });
-                if (r.ok) { toastSuccess("Category created"); fetchCategories(); }
-                else { const e = await r.json().catch(() => ({})); toastError(e.error || "Failed"); }
-              } : undefined}
-              onAddSubcategory={canManageSOPs ? async (cat) => {
-                const name = await prompt({ title: `New subcategory in "${cat.name}"`, placeholder: "e.g. Hiring", submitLabel: "Create" });
-                if (!name) return;
-                const r = await fetch("/api/sop-categories", {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ name, categoryId: cat.id }),
-                });
-                if (r.ok) { toastSuccess("Subcategory created"); fetchCategories(); }
-                else { const e = await r.json().catch(() => ({})); toastError(e.error || "Failed"); }
-              } : undefined}
-              onRenameCategory={canManageSOPs ? async (cat) => {
-                const next = await prompt({ title: "Rename category", defaultValue: cat.name, submitLabel: "Save" });
-                if (!next || next === cat.name) return;
-                const r = await fetch("/api/sop-categories", {
-                  method: "PATCH", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ id: cat.id, name: next }),
-                });
-                if (r.ok) {
-                  toastSuccess("Category renamed");
-                  if (categoryFilter === cat.name) setCategoryFilter(next);
-                  fetchCategories(); fetchSOPs();
-                } else { const e = await r.json().catch(() => ({})); toastError(e.error || "Failed"); }
-              } : undefined}
-              onDeleteCategory={canManageSOPs ? async (cat) => {
-                if (!(await confirm({
-                  title: `Delete category "${cat.name}"?`,
-                  description: `${cat.sopCount ?? 0} SOP${cat.sopCount === 1 ? "" : "s"} reference this category. They'll keep the name as a free-text label after delete.`,
-                  confirmLabel: "Delete category", destructive: true,
-                }))) return;
-                const r = await fetch("/api/sop-categories", {
-                  method: "DELETE", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ id: cat.id, type: "category" }),
-                });
-                if (r.ok) {
-                  toastSuccess("Category deleted");
-                  if (categoryFilter === cat.name || categoryFilter.startsWith(cat.name + "::")) setCategoryFilter("all");
-                  fetchCategories();
-                } else { const e = await r.json().catch(() => ({})); toastError(e.error || "Failed"); }
-              } : undefined}
-              onRenameSubcategory={canManageSOPs ? async (cat, subId, subName) => {
-                const next = await prompt({ title: "Rename subcategory", defaultValue: subName, submitLabel: "Save" });
-                if (!next || next === subName) return;
-                const r = await fetch("/api/sop-categories", {
-                  method: "PATCH", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ id: subId, type: "subcategory", name: next }),
-                });
-                if (r.ok) {
-                  toastSuccess("Subcategory renamed");
-                  if (categoryFilter === `${cat.name}::${subName}`) setCategoryFilter(`${cat.name}::${next}`);
-                  fetchCategories(); fetchSOPs();
-                } else { const e = await r.json().catch(() => ({})); toastError(e.error || "Failed"); }
-              } : undefined}
-              onDeleteSubcategory={canManageSOPs ? async (cat, subId, subName) => {
-                if (!(await confirm({
-                  title: `Delete subcategory "${subName}"?`,
-                  description: `Subcategory will be removed from this category. SOPs that referenced it will simply lose the subcategory label.`,
-                  confirmLabel: "Delete subcategory", destructive: true,
-                }))) return;
-                const r = await fetch("/api/sop-categories", {
-                  method: "DELETE", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ id: subId, type: "subcategory" }),
-                });
-                if (r.ok) {
-                  toastSuccess("Subcategory deleted");
-                  if (categoryFilter === `${cat.name}::${subName}`) setCategoryFilter(cat.name);
-                  fetchCategories();
-                } else { const e = await r.json().catch(() => ({})); toastError(e.error || "Failed"); }
-              } : undefined}
-              canManage={canManageSOPs}
-            />
-          </div>
-
-          {/* Folders aren't shown in the sidebar — they're an
-              access-control thing, not a navigation thing. Admins
-              get a small link to the access manager instead. */}
-          {isOrgAdmin && (
-            <button
-              type="button"
-              onClick={() => setShowFolderManager(true)}
-              className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted hover:text-foreground transition-colors"
-            >
-              <Settings2 size={12} /> Manage access (folders)
-            </button>
-          )}
-        </aside>
-
-        <div className="min-w-0">
-
-      {/* SOP Grid / List */}
+      {/* SOP Grid / List. Compliance % isn't shown here — that's a
+          per-assignment / per-process-run concern. The hub list
+          stays focused on what each SOP *is*, not how it's being
+          executed. */}
       {viewMode === "list" && !loading && filtered.length > 0 && (
-        <div className="hidden md:grid grid-cols-[minmax(220px,2.4fr)_minmax(140px,1.2fr)_90px_64px_64px_100px] items-center gap-3 px-4 pb-2 text-[10px] font-mono uppercase tracking-wider text-muted">
+        <div className="hidden md:grid grid-cols-[minmax(220px,2.4fr)_minmax(140px,1.2fr)_64px_64px_100px] items-center gap-3 px-4 pb-2 text-[10px] font-mono uppercase tracking-wider text-muted">
           <span>SOP</span>
           <span>Category · tags</span>
-          <span className="text-right">Compliance</span>
           <span className="text-right">Steps</span>
           <span className="text-right">Version</span>
           <span className="text-right">Published</span>
@@ -1347,7 +1287,6 @@ export default function SOPsPage() {
               />
             </div>
           ) : viewMode === "list" ? filtered.map((sop) => {
-              const compliance = getComplianceScore(sop);
               const steps = getStepsCount(sop);
               const assigned = getAssignedCount(sop);
               return (
@@ -1370,7 +1309,7 @@ export default function SOPsPage() {
                       e.dataTransfer.setData("application/x-sop-id", sop.id);
                       e.dataTransfer.effectAllowed = "move";
                     }}
-                    className="grid grid-cols-[1fr] md:grid-cols-[minmax(220px,2.4fr)_minmax(140px,1.2fr)_90px_64px_64px_100px] items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
+                    className="grid grid-cols-[1fr] md:grid-cols-[minmax(220px,2.4fr)_minmax(140px,1.2fr)_64px_64px_100px] items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
                   >
                     {/* Title + status. Title gets full width; status sits
                         under it as a small badge so it never squeezes
@@ -1406,18 +1345,6 @@ export default function SOPsPage() {
                       )}
                     </div>
 
-                    {/* Compliance */}
-                    <div className="hidden md:flex items-center gap-2 justify-end">
-                      {sop.status === "PUBLISHED" ? (
-                        <>
-                          <Progress value={compliance} className="h-1 w-12" indicatorClassName={getComplianceColor(compliance)} />
-                          <span className={`text-xs font-mono tabular-nums ${getComplianceText(compliance)}`}>{compliance}%</span>
-                        </>
-                      ) : (
-                        <span className="text-[11px] text-muted">—</span>
-                      )}
-                    </div>
-
                     {/* Steps */}
                     <div className="hidden md:block text-right text-xs font-mono tabular-nums text-muted">{steps}</div>
 
@@ -1432,7 +1359,6 @@ export default function SOPsPage() {
                 </SOPContextMenu>
               );
             }) : filtered.map((sop) => {
-              const compliance = getComplianceScore(sop);
               const steps = getStepsCount(sop);
               const assigned = getAssignedCount(sop);
               return (
@@ -1479,12 +1405,6 @@ export default function SOPsPage() {
                           <span className="text-[9px] text-muted">+{sop.tags.length - 3}</span>
                         )}
                       </div>
-                      {sop.status === "PUBLISHED" && (
-                        <div className="flex items-center gap-2 mb-2">
-                          <Progress value={compliance} className="h-1 flex-1" indicatorClassName={getComplianceColor(compliance)} />
-                          <span className={`text-[10px] font-mono ${getComplianceText(compliance)}`}>{compliance}%</span>
-                        </div>
-                      )}
                       <div className="flex items-center justify-between text-[9px] text-muted">
                         <div className="flex items-center gap-2">
                           <span>{steps} steps</span>
@@ -1511,9 +1431,6 @@ export default function SOPsPage() {
           onLimitChange={(l) => { setLimit(l); setPage(1); }}
         />
       )}
-
-        </div>
-      </div>
 
       </>
       )}

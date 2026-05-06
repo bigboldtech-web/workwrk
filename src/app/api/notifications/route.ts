@@ -69,3 +69,44 @@ export async function PATCH(req: NextRequest) {
 
   return jsonError("Invalid request");
 }
+
+/**
+ * DELETE — remove notifications. Always scoped to the current user
+ * (you can never delete someone else's row).
+ *
+ * Body shapes:
+ *   { id: "<id>" }    delete a single notification
+ *   { ids: ["..."] }  delete a batch
+ *   { allRead: true } sweep every notification the user has marked
+ *                    read — useful for "clear inbox" actions
+ */
+export async function DELETE(req: NextRequest) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+
+  const userId = getUserId(session);
+  const body = await req.json().catch(() => ({}));
+
+  if (typeof body?.id === "string" && body.id) {
+    const r = await prisma.notification.deleteMany({
+      where: { id: body.id, userId },
+    });
+    return jsonSuccess({ deleted: r.count });
+  }
+
+  if (Array.isArray(body?.ids) && body.ids.length > 0) {
+    const r = await prisma.notification.deleteMany({
+      where: { id: { in: body.ids as string[] }, userId },
+    });
+    return jsonSuccess({ deleted: r.count });
+  }
+
+  if (body?.allRead === true) {
+    const r = await prisma.notification.deleteMany({
+      where: { userId, read: true },
+    });
+    return jsonSuccess({ deleted: r.count });
+  }
+
+  return jsonError("Provide id, ids, or allRead");
+}

@@ -1,22 +1,45 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { getTeamUserIds } from "@/lib/team";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const orgId = getOrgId(session);
+  const callerId = getUserId(session);
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
   const type = searchParams.get("type");
   const assignedToId = searchParams.get("assignedToId");
   const search = searchParams.get("search");
+  // scope: "all" / "team" / "own". Defaults to "own" for non-managers
+  // so an employee browsing /assets only sees what's assigned to them.
+  const requestedScope = searchParams.get("scope");
+
+  const callerLevel = (session.user as any).accessLevel as string;
+  const orgWideRoles = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
+  const isOrgWide = orgWideRoles.has(callerLevel);
+  const isManagerLevel = isManager(session);
+  const effectiveScope = isOrgWide
+    ? (requestedScope || "all")
+    : isManagerLevel
+      ? "team"
+      : "own";
 
   const where: any = { organizationId: orgId };
   if (status) where.status = status;
   if (type) where.type = type;
   if (assignedToId) where.assignedToId = assignedToId;
+
+  if (effectiveScope !== "all" && !assignedToId) {
+    const userIds =
+      effectiveScope === "team"
+        ? await getTeamUserIds(orgId, callerId)
+        : [callerId];
+    where.assignedToId = { in: userIds };
+  }
   if (search) {
     where.OR = [
       { name: { contains: search, mode: "insensitive" } },

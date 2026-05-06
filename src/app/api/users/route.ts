@@ -5,6 +5,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManage
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { logActivity } from "@/lib/activity";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
+import { getTeamUserIds } from "@/lib/team";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -14,14 +15,32 @@ export async function GET(req: NextRequest) {
   const departmentId = searchParams.get("departmentId");
   const status = searchParams.get("status");
   const accessLevel = searchParams.get("accessLevel");
+  // scope:
+  //   "team" — only the caller's reports + themselves
+  //   "all"  — every active user in the org (admins only)
+  // Default: admins get "all", everyone else gets "team".
+  const requestedScope = searchParams.get("scope");
   const pagination = parsePaginationParams(req);
 
+  const orgId = getOrgId(session);
+  const callerId = getUserId(session);
+  const callerLevel = (session.user as any).accessLevel as string;
+  const isAdmin = callerLevel === "COMPANY_ADMIN" || callerLevel === "SUPER_ADMIN";
+
   const includeDeleted = searchParams.get("includeDeleted") === "true";
-  const where: any = { organizationId: getOrgId(session) };
+  const where: any = { organizationId: orgId };
   if (!includeDeleted) where.deletedAt = null;
   if (departmentId) where.departmentId = departmentId;
   if (status) where.status = status;
   if (accessLevel) where.accessLevel = accessLevel;
+
+  // Enforce scope. Non-admins can never escape team scope, regardless
+  // of what they pass. Stops a line manager from seeing org-wide data.
+  const effectiveScope = isAdmin ? (requestedScope || "all") : "team";
+  if (effectiveScope === "team") {
+    const teamIds = await getTeamUserIds(orgId, callerId);
+    where.id = teamIds.length > 0 ? { in: teamIds } : callerId;
+  }
   if (pagination.search) {
     where.OR = [
       { firstName: { contains: pagination.search, mode: "insensitive" } },

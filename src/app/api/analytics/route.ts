@@ -1,10 +1,17 @@
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { getTopPerformers } from "@/services/performanceScoreService";
 
+// Analytics is gated at the API level — managers and above only.
+// Sidebar already has managerOnly=true on the entry, but defence in
+// depth so a direct fetch from a logged-in employee can't pull the
+// org-wide rollups.
 export async function GET(req: Request) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
+  if (!isManager(session)) {
+    return jsonError("Analytics requires manager-level access", 403);
+  }
 
   try {
   const orgId = getOrgId(session);

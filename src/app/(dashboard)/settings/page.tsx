@@ -1007,22 +1007,28 @@ export default function SettingsPage() {
       />
 
       <Tabs defaultValue="general">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="general" className="gap-2"><Building2 size={14} /> General</TabsTrigger>
-          <TabsTrigger value="modules" className="gap-2"><ToggleLeft size={14} /> Modules</TabsTrigger>
-          <TabsTrigger value="access" className="gap-2"><Lock size={14} /> Access Control</TabsTrigger>
-          <TabsTrigger value="team" className="gap-2"><Users size={14} /> Team</TabsTrigger>
-          <TabsTrigger value="security" className="gap-2"><Shield size={14} /> Security</TabsTrigger>
-          <TabsTrigger value="sso" className="gap-2"><Key size={14} /> SSO</TabsTrigger>
-          <TabsTrigger value="notifications" className="gap-2"><Bell size={14} /> Notifications</TabsTrigger>
-          <TabsTrigger value="sops" className="gap-2"><BookOpen size={14} /> SOPs</TabsTrigger>
-          <TabsTrigger value="branding" className="gap-2"><Sparkles size={14} /> Branding</TabsTrigger>
-          <TabsTrigger value="ai" className="gap-2"><Sparkles size={14} /> AI</TabsTrigger>
-          <TabsTrigger value="removed" className="gap-2" onClick={() => { if (removedPeople.length === 0) fetchRemovedPeople(); }}><UserX size={14} /> Removed People</TabsTrigger>
-          <TabsTrigger value="billing" className="gap-2"><CreditCard size={14} /> Billing</TabsTrigger>
-          <TabsTrigger value="data" className="gap-2"><Sliders size={14} /> Data</TabsTrigger>
-          <TabsTrigger value="privacy" className="gap-2"><Shield size={14} /> Privacy</TabsTrigger>
-        </TabsList>
+        {/* Horizontal scroll instead of wrap — there are 14 tabs and
+            wrap breaks the rounded pill into a stacked mess. The
+            scrollbar is hidden so it just feels like a swipeable
+            strip. */}
+        <div className="overflow-x-auto -mx-1 px-1 scrollbar-thin">
+          <TabsList className="w-max min-w-full">
+            <TabsTrigger value="general" className="gap-2"><Building2 size={14} /> General</TabsTrigger>
+            <TabsTrigger value="modules" className="gap-2"><ToggleLeft size={14} /> Modules</TabsTrigger>
+            <TabsTrigger value="access" className="gap-2"><Lock size={14} /> Access</TabsTrigger>
+            <TabsTrigger value="team" className="gap-2"><Users size={14} /> Team</TabsTrigger>
+            <TabsTrigger value="security" className="gap-2"><Shield size={14} /> Security</TabsTrigger>
+            <TabsTrigger value="sso" className="gap-2"><Key size={14} /> SSO</TabsTrigger>
+            <TabsTrigger value="notifications" className="gap-2"><Bell size={14} /> Notifications</TabsTrigger>
+            <TabsTrigger value="sops" className="gap-2"><BookOpen size={14} /> SOPs</TabsTrigger>
+            <TabsTrigger value="branding" className="gap-2"><Sparkles size={14} /> Branding</TabsTrigger>
+            <TabsTrigger value="ai" className="gap-2"><Sparkles size={14} /> AI</TabsTrigger>
+            <TabsTrigger value="removed" className="gap-2" onClick={() => { if (removedPeople.length === 0) fetchRemovedPeople(); }}><UserX size={14} /> Removed</TabsTrigger>
+            <TabsTrigger value="billing" className="gap-2"><CreditCard size={14} /> Billing</TabsTrigger>
+            <TabsTrigger value="data" className="gap-2"><Sliders size={14} /> Data</TabsTrigger>
+            <TabsTrigger value="privacy" className="gap-2"><Shield size={14} /> Privacy</TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* General */}
         <TabsContent value="general" className="space-y-6 mt-4">

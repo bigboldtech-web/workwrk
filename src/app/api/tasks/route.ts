@@ -38,7 +38,12 @@ export async function GET(req: NextRequest) {
     where.assigneeId = { in: teamIds };
   } else if (userId) {
     where.assigneeId = userId;
-  } else if (!isManagerLevel) {
+  } else {
+    // Default: scope to the requesting user. This used to be
+    // skipped for managers, which meant "open /tasks without any
+    // filter" returned every task in the org. People legitimately
+    // expect their default view to be *their own* work — managers
+    // can opt in to a team view via `view=team`.
     where.assigneeId = currentUserId;
   }
 

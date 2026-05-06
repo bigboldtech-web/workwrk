@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getTeamUserIds } from "@/lib/team";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -8,12 +9,24 @@ export async function GET(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
+  const callerId = getUserId(session);
   const url = new URL(req.url);
   const period = url.searchParams.get("period") || "";
   const autoPlace = url.searchParams.get("auto") === "true";
 
+  // Scope: org-wide for admins/execs/HR, team-only for line
+  // managers. The talent grid is sensitive — line managers should
+  // not see other managers' people.
+  const callerLevel = (session.user as any).accessLevel as string;
+  const orgWideRoles = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
+  const isOrgWide = orgWideRoles.has(callerLevel);
+
   const where: any = { organizationId: orgId };
   if (period) where.period = period;
+  if (!isOrgWide) {
+    const teamIds = await getTeamUserIds(orgId, callerId);
+    where.userId = { in: teamIds };
+  }
 
   let assessments = await prisma.talentAssessment.findMany({
     where,
@@ -23,8 +36,16 @@ export async function GET(req: NextRequest) {
   // Auto-place: generate assessments from performance scores for users not yet assessed
   if (autoPlace && period) {
     const assessedUserIds = new Set(assessments.map((a) => a.userId));
+    const userScopeIds = isOrgWide
+      ? null
+      : await getTeamUserIds(orgId, callerId);
     const allUsers = await prisma.user.findMany({
-      where: { organizationId: orgId, deletedAt: null, accessLevel: { not: "SUPER_ADMIN" } },
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        accessLevel: { not: "SUPER_ADMIN" },
+        ...(userScopeIds ? { id: { in: userScopeIds } } : {}),
+      },
       select: { id: true },
     });
 
