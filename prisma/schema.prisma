@@ -58,6 +58,9 @@ model Organization {
   secrets             OrgSecret[]
   tags                Tag[]
   tagAssignments      TagAssignment[]
+  expenses            Expense[]
+  compensationCycles    CompensationCycle[]
+  compensationDecisions CompensationDecision[]
 
   @@index([slug])
 }
@@ -235,6 +238,10 @@ model User {
   taskComments        TaskComment[] @relation("TaskCommentAuthor")
   calendarSubscriptions CalendarSubscription[] @relation("CalendarSubscriptionUser")
   sopFolderAccess     SOPFolderAccess[] @relation("SOPFolderAccessUser")
+  expensesReported    Expense[] @relation("ExpenseReporter")
+  expensesApproved    Expense[] @relation("ExpenseApprover")
+  compDecisionsAsSubject  CompensationDecision[] @relation("CompDecisionSubject")
+  compDecisionsProposed   CompensationDecision[] @relation("CompDecisionProposer")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -2197,4 +2204,166 @@ enum TagEntityType {
   ASSET
   EXPENSE
   MEETING
+}
+
+// ==========================================
+// EXPENSES (Phase 2)
+// ==========================================
+// Employee expense submission + approval flow. Single-currency per
+// org for v1 (reporting in `currency`). Multi-currency, FX rates,
+// auto-routing, and OCR all sit behind this — schema doesn't preclude
+// them. Cost-center / project attribution rides the polymorphic
+// TagAssignment system rather than direct FKs, so adding a new
+// dimension (e.g. Fund) doesn't require a schema change here.
+//
+// Decimal(12,2) for `amount`: 10 digits of dollars + 2 cents. Float
+// is wrong for money — at Fortune-500 volume the rounding bites.
+
+model Expense {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  reporterId     String
+  reporter       User          @relation("ExpenseReporter", fields: [reporterId], references: [id])
+
+  description    String        // short headline visible in lists
+  notes          String?       // longer context, only on detail
+  category       ExpenseCategory
+
+  amount         Decimal       @db.Decimal(12, 2)
+  currency       String        @default("USD") // ISO 4217
+
+  expenseDate    DateTime
+  receiptUrl     String?       // S3 URL after upload
+
+  status         ExpenseStatus @default(DRAFT)
+  submittedAt    DateTime?
+
+  approverId     String?
+  approver       User?         @relation("ExpenseApprover", fields: [approverId], references: [id])
+  decisionAt     DateTime?
+  decisionNote   String?       // why approved / rejected
+
+  reimbursedAt   DateTime?     // future: link to a Payment row when payroll lands
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, expenseDate])
+  @@index([reporterId, status])
+  @@index([approverId, status])
+}
+
+enum ExpenseCategory {
+  TRAVEL
+  MEALS
+  LODGING
+  TRANSPORT
+  SUPPLIES
+  SUBSCRIPTION
+  EQUIPMENT
+  CLIENT_ENTERTAINMENT
+  TRAINING
+  OTHER
+}
+
+enum ExpenseStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  REIMBURSED
+}
+
+// ==========================================
+// COMPENSATION CYCLES (Phase 2)
+// ==========================================
+// Annual / biannual comp review. Managers propose merit + bonus per
+// direct report; HR finalizes. Salary bands and PDF letter generation
+// land in v2. Equity grants are a separate v3 surface.
+//
+// Comp data is the single most sensitive record in the org —
+// authorization on every read goes through CompensationDecision's
+// (subjectId, proposedById, decidedById) triangle: subject sees their
+// own row, proposer (manager) sees rows for their reports, HR sees
+// everything.
+
+model CompensationCycle {
+  id                String         @id @default(cuid())
+  organizationId    String
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name              String
+  description       String?
+  status            CompCycleStatus @default(DRAFT)
+  startDate         DateTime
+  endDate           DateTime
+
+  // Optional org-wide budget guidance for managers — e.g. "stay under
+  // 5% across the team." Stored as percent, signed Decimal(5,2).
+  budgetPct         Decimal?       @db.Decimal(5, 2)
+  reportingCurrency String         @default("USD")
+
+  closedAt          DateTime?
+  decisions         CompensationDecision[]
+
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, startDate])
+}
+
+model CompensationDecision {
+  id              String              @id @default(cuid())
+  organizationId  String
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  cycleId         String
+  cycle           CompensationCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  subjectId       String
+  subject         User                @relation("CompDecisionSubject", fields: [subjectId], references: [id])
+  proposedById    String?
+  proposedBy      User?               @relation("CompDecisionProposer", fields: [proposedById], references: [id])
+
+  currentSalary   Decimal?            @db.Decimal(12, 2)
+  proposedSalary  Decimal?            @db.Decimal(12, 2)
+  currency        String              @default("USD")
+  // Signed so we can encode pay cuts (rare but legal). Two decimals
+  // avoids float surprises — 5.50% vs 5.499999%.
+  changePct       Decimal?            @db.Decimal(6, 2)
+  bonusAmount     Decimal?            @db.Decimal(12, 2)
+  reasoning       String?
+
+  status          CompDecisionStatus  @default(DRAFT)
+  decisionNote    String?
+  // Audit fields without relations — HR ops can swap who finalized
+  // without rewiring rows. The id should resolve via User lookup.
+  decidedById     String?
+  decidedAt       DateTime?
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@unique([cycleId, subjectId])
+  @@index([organizationId, status])
+  @@index([cycleId, status])
+  @@index([subjectId])
+  @@index([proposedById])
+}
+
+enum CompCycleStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+enum CompDecisionStatus {
+  DRAFT
+  PROPOSED
+  APPROVED
+  REJECTED
 }

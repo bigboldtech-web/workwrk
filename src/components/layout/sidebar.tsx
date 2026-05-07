@@ -45,6 +45,8 @@ import {
   Palette,
   Folder,
   Inbox,
+  Receipt,
+  DollarSign,
 } from "lucide-react";
 
 type NavItem = {
@@ -66,6 +68,8 @@ const navigation: NavItem[] = [
   { name: "Organization", key: "organization", href: "/organization", icon: Building2 },
   { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi" },
   { name: "Work Calendar", key: "calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks" },
+  { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt },
+  { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true },
   { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops" },
   { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true },
   { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews" },

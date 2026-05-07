@@ -9,7 +9,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair } from "lucide-react";
+import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign } from "lucide-react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -44,11 +44,15 @@ export default async function InboxPage() {
   if (!session?.user) redirect("/login");
   const userId = (session.user as { id: string }).id;
   const orgId = (session.user as { organizationId: string }).organizationId;
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+  const isOrgAdmin = accessLevel === "SUPER_ADMIN" || accessLevel === "COMPANY_ADMIN";
 
   const horizonEnd = new Date(Date.now() + TASK_HORIZON_DAYS * DAY_MS);
 
-  // Four queries in parallel. Each is bounded by the user/org pair.
-  const [sopAssignments, tasks, reviews, myOkrs] = await Promise.all([
+  // Six queries in parallel. Each is bounded by the user/org pair.
+  // Comp decisions are HR-only (filtered server-side); we fetch
+  // unconditionally and the empty result hides the section for non-HR.
+  const [sopAssignments, tasks, reviews, myOkrs, expensesToApprove, compToApprove] = await Promise.all([
     prisma.sOPAssignment.findMany({
       where: {
         userId,
@@ -128,6 +132,48 @@ export default async function InboxPage() {
         },
       },
     }),
+    // Expenses where I'm the named approver (or the open queue if I'm
+    // a manager). Bounded; managers in big orgs may have lots of these
+    // so we cap and link to the full Approval queue tab if exceeded.
+    prisma.expense.findMany({
+      where: {
+        organizationId: orgId,
+        status: "SUBMITTED",
+        approverId: userId,
+      },
+      orderBy: { submittedAt: "asc" },
+      take: 25,
+      select: {
+        id: true,
+        description: true,
+        amount: true,
+        currency: true,
+        submittedAt: true,
+        reporter: { select: { firstName: true, lastName: true } },
+      },
+    }),
+    // Comp decisions awaiting an HR call. Only org admins / HR see
+    // these — for everyone else the role check returns 0 rows.
+    isOrgAdmin
+      ? prisma.compensationDecision.findMany({
+          where: {
+            organizationId: orgId,
+            status: "PROPOSED",
+            cycle: { status: { not: "CLOSED" } },
+          },
+          orderBy: { updatedAt: "asc" },
+          take: 25,
+          select: {
+            id: true,
+            cycleId: true,
+            currentSalary: true,
+            proposedSalary: true,
+            currency: true,
+            subject: { select: { firstName: true, lastName: true } },
+            cycle: { select: { name: true } },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   // Compute "stale" OKRs: latest check-in across all KRs is older than
@@ -147,7 +193,13 @@ export default async function InboxPage() {
     })
     .filter((x): x is { id: string; title: string; progress: number; lastDays: number | null } => x !== null);
 
-  const total = sopAssignments.length + tasks.length + reviews.length + staleOkrs.length;
+  const total =
+    sopAssignments.length +
+    tasks.length +
+    reviews.length +
+    staleOkrs.length +
+    expensesToApprove.length +
+    compToApprove.length;
   const overdueCount =
     sopAssignments.filter((a) => isOverdue(a.dueDate)).length +
     tasks.filter((t) => isOverdue(t.endAt ?? t.date)).length;
@@ -254,6 +306,96 @@ export default async function InboxPage() {
                       <span className={`text-xs flex-shrink-0 ml-3 ${overdue ? "text-red-400" : "text-muted"}`}>
                         {fmtRelative(due)}
                       </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {compToApprove.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <DollarSign size={16} /> Comp decisions waiting on you
+              <span className="text-xs text-muted font-normal">({compToApprove.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {compToApprove.map((c) => {
+                const cur = c.currentSalary === null ? null : Number(c.currentSalary);
+                const prop = c.proposedSalary === null ? null : Number(c.proposedSalary);
+                const pct = cur && prop && cur > 0 ? ((prop - cur) / cur) * 100 : null;
+                return (
+                  <li key={c.id}>
+                    <Link
+                      href={`/compensation/${c.cycleId}`}
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="text-sm font-medium truncate">
+                          {c.subject.firstName} {c.subject.lastName}
+                        </span>
+                        <span className="text-xs text-muted truncate">{c.cycle.name}</span>
+                      </div>
+                      <span className="text-xs font-mono flex-shrink-0 ml-3">
+                        {pct === null ? "—" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {expensesToApprove.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Receipt size={16} /> Expenses waiting on you
+              <span className="text-xs text-muted font-normal">({expensesToApprove.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {expensesToApprove.map((e) => {
+                const amount = Number(e.amount);
+                const submittedAgo = e.submittedAt
+                  ? Math.floor((Date.now() - e.submittedAt.getTime()) / DAY_MS)
+                  : null;
+                let amountLabel: string;
+                try {
+                  amountLabel = new Intl.NumberFormat(undefined, { style: "currency", currency: e.currency }).format(amount);
+                } catch {
+                  amountLabel = `${e.currency} ${amount.toFixed(2)}`;
+                }
+                return (
+                  <li key={e.id}>
+                    <Link
+                      href={`/expenses/${e.id}`}
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="text-sm font-medium truncate">{e.description}</span>
+                        <span className="text-xs text-muted truncate">
+                          {e.reporter ? `${e.reporter.firstName} ${e.reporter.lastName}` : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                        <span className="text-xs font-mono">{amountLabel}</span>
+                        <span className="text-xs text-muted">
+                          {submittedAgo === null
+                            ? ""
+                            : submittedAgo === 0
+                            ? "today"
+                            : `${submittedAgo}d ago`}
+                        </span>
+                      </div>
                     </Link>
                   </li>
                 );
