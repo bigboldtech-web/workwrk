@@ -33,6 +33,7 @@ import {
   Wrench,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   LogOut,
   Link2,
   Activity,
@@ -42,6 +43,7 @@ import {
   MessageSquareHeart,
   Heart,
   Palette,
+  Folder,
 } from "lucide-react";
 
 type NavItem = {
@@ -150,6 +152,40 @@ export function Sidebar() {
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null);
   const [announcementCount, setAnnouncementCount] = useState(0);
   const [unreadByType, setUnreadByType] = useState<Record<string, number>>({});
+
+  // SOPs nav entry expands to show the user's accessible folders.
+  // We persist expansion in localStorage so it doesn't slam shut on
+  // every route change. Folders are lazy-loaded on first expand.
+  type SopFolder = {
+    id: string;
+    name: string;
+    parentId: string | null;
+    sopCountDeep?: number;
+  };
+  const [sopsExpanded, setSopsExpanded] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("sidebar:sopsExpanded") === "1";
+  });
+  const [sopFolders, setSopFolders] = useState<SopFolder[] | null>(null);
+  const [sopFoldersLoading, setSopFoldersLoading] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("sidebar:sopsExpanded", sopsExpanded ? "1" : "0");
+  }, [sopsExpanded]);
+
+  useEffect(() => {
+    if (!sopsExpanded || sopFolders !== null || sopFoldersLoading) return;
+    setSopFoldersLoading(true);
+    fetch("/api/sop-folders")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const items = (Array.isArray(d) ? d : d?.data) as SopFolder[] | undefined;
+        setSopFolders(items ?? []);
+      })
+      .catch(() => setSopFolders([]))
+      .finally(() => setSopFoldersLoading(false));
+  }, [sopsExpanded, sopFolders, sopFoldersLoading]);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -288,26 +324,102 @@ export function Sidebar() {
           const announcementBadge = item.key === "announcements" ? announcementCount : 0;
           const badgeCount = sectionUnread || announcementBadge;
           const hasBadge = badgeCount > 0;
+          const isSopsEntry = item.key === "sops";
+
           return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={cn("app-sidebar-link", isActive && "is-active", collapsed && "is-collapsed")}
-              title={collapsed ? tNav(item.key) : undefined}
-            >
-              <Icon size={16} />
-              {!collapsed && (
-                <>
-                  <span className="app-sidebar-label">{tNav(item.key)}</span>
-                  {hasBadge && (
-                    <span className="app-sidebar-badge">{badgeCount > 9 ? "9+" : badgeCount}</span>
+            <React.Fragment key={item.name}>
+              <div className={cn("app-sidebar-link-row", isSopsEntry && "has-expander")}>
+                <Link
+                  href={item.href}
+                  className={cn("app-sidebar-link", isActive && "is-active", collapsed && "is-collapsed")}
+                  title={collapsed ? tNav(item.key) : undefined}
+                >
+                  <Icon size={16} />
+                  {!collapsed && (
+                    <>
+                      <span className="app-sidebar-label">{tNav(item.key)}</span>
+                      {hasBadge && (
+                        <span className="app-sidebar-badge">{badgeCount > 9 ? "9+" : badgeCount}</span>
+                      )}
+                    </>
                   )}
-                </>
+                  {collapsed && hasBadge && (
+                    <span className="app-sidebar-dot-pip" aria-hidden />
+                  )}
+                </Link>
+                {isSopsEntry && !collapsed && (
+                  <button
+                    type="button"
+                    onClick={() => setSopsExpanded((v) => !v)}
+                    className={cn("app-sidebar-expander", sopsExpanded && "is-expanded")}
+                    aria-label={sopsExpanded ? "Collapse SOP folders" : "Expand SOP folders"}
+                    aria-expanded={sopsExpanded}
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                )}
+              </div>
+              {isSopsEntry && sopsExpanded && !collapsed && (
+                <div className="app-sidebar-subnav" role="group" aria-label="SOP folders">
+                  {sopFoldersLoading && sopFolders === null && (
+                    <div className="app-sidebar-subitem is-loading">Loading…</div>
+                  )}
+                  {sopFolders && sopFolders.length === 0 && (
+                    <div className="app-sidebar-subitem is-empty">No folders yet</div>
+                  )}
+                  {sopFolders && sopFolders.length > 0 && (() => {
+                    // Render roots first, then their children one level
+                    // deep. Two-level cap keeps the sidebar readable; full
+                    // tree navigation lives inside /sops itself.
+                    const byParent = new Map<string | null, SopFolder[]>();
+                    for (const f of sopFolders) {
+                      const arr = byParent.get(f.parentId) ?? [];
+                      arr.push(f);
+                      byParent.set(f.parentId, arr);
+                    }
+                    const roots = byParent.get(null) ?? [];
+                    const rendered: React.ReactNode[] = [];
+                    for (const root of roots) {
+                      const rootHref = `/sops?folderId=${root.id}`;
+                      const isOnFolder =
+                        pathname === "/sops" &&
+                        typeof window !== "undefined" &&
+                        new URLSearchParams(window.location.search).get("folderId") === root.id;
+                      rendered.push(
+                        <Link
+                          key={root.id}
+                          href={rootHref}
+                          className={cn("app-sidebar-subitem", isOnFolder && "is-active")}
+                        >
+                          <Folder size={12} />
+                          <span className="app-sidebar-sublabel">{root.name}</span>
+                          {typeof root.sopCountDeep === "number" && root.sopCountDeep > 0 && (
+                            <span className="app-sidebar-subcount">{root.sopCountDeep}</span>
+                          )}
+                        </Link>
+                      );
+                      const children = byParent.get(root.id) ?? [];
+                      for (const child of children) {
+                        const childHref = `/sops?folderId=${child.id}`;
+                        rendered.push(
+                          <Link
+                            key={child.id}
+                            href={childHref}
+                            className="app-sidebar-subitem is-nested"
+                          >
+                            <span className="app-sidebar-sublabel">{child.name}</span>
+                            {typeof child.sopCountDeep === "number" && child.sopCountDeep > 0 && (
+                              <span className="app-sidebar-subcount">{child.sopCountDeep}</span>
+                            )}
+                          </Link>
+                        );
+                      }
+                    }
+                    return rendered;
+                  })()}
+                </div>
               )}
-              {collapsed && hasBadge && (
-                <span className="app-sidebar-dot-pip" aria-hidden />
-              )}
-            </Link>
+            </React.Fragment>
           );
         })}
       </nav>

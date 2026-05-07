@@ -225,6 +225,87 @@ html.dark .app-sidebar-link.is-active::before {
   box-shadow: 0 0 6px #ff3d8a;
 }
 
+/* Expandable sidebar entries (currently SOPs only). The link
+   keeps its existing layout; the expander is a sibling button
+   so clicking it doesn't navigate. */
+.app-sidebar-link-row.has-expander {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.app-sidebar-link-row.has-expander > .app-sidebar-link {
+  flex: 1;
+}
+.app-sidebar-expander {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--b-t2);
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1), background 0.2s;
+  flex-shrink: 0;
+}
+.app-sidebar-expander:hover {
+  background: var(--b-card-2);
+  color: var(--b-fg);
+  border-color: var(--b-line);
+}
+.app-sidebar-expander.is-expanded {
+  transform: rotate(180deg);
+  color: var(--b-fg);
+}
+
+.app-sidebar-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 4px 22px;
+  margin-bottom: 2px;
+}
+.app-sidebar-subitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--b-t2);
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+.app-sidebar-subitem:hover {
+  background: var(--b-card-2);
+  color: var(--b-fg);
+}
+.app-sidebar-subitem.is-active {
+  background: var(--b-accent-tint);
+  color: var(--b-accent-text);
+}
+.app-sidebar-subitem.is-nested {
+  padding-left: 24px;
+}
+.app-sidebar-subitem.is-loading,
+.app-sidebar-subitem.is-empty {
+  opacity: 0.55;
+  font-style: italic;
+}
+.app-sidebar-sublabel {
+  flex: 1;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.app-sidebar-subcount {
+  font-size: 10px;
+  color: var(--b-t2);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
 /* Bottom section */
 .app-sidebar-bottom {
   padding: 10px 10px 14px;

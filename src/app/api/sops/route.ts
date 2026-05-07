@@ -105,7 +105,14 @@ export async function POST(req: NextRequest) {
   if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
   const body = await req.json();
-  const { title, description, category, subcategory, content, kraId, sopType, folderId, tags } = body;
+  const { title: rawTitle, description: rawDescription, category, subcategory, content, kraId, sopType, folderId, tags } = body;
+
+  // Trim before the emptiness check. A leading-space title used to slip
+  // past `if (!title)` and create a near-duplicate of an existing SOP
+  // (we hit this with "Lead Reallocation Rules" in prod). Same fix
+  // applied in PATCH.
+  const title = typeof rawTitle === "string" ? rawTitle.trim() : rawTitle;
+  const description = typeof rawDescription === "string" ? rawDescription.trim() : rawDescription;
 
   if (!title) return jsonError("SOP title is required");
 

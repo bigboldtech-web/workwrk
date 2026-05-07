@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { normalizeEnabledModules } from "@/lib/module-keys";
 
 export async function GET() {
   try {
@@ -51,9 +52,9 @@ export async function GET() {
       },
       settings: {
         companyProfile: settings.companyProfile || null,
-        enabledModules: settings.enabledModules || [
-          "people", "kra-kpi", "tasks", "sops", "reviews", "meetings", "checkins", "ai", "analytics",
-        ],
+        enabledModules: settings.enabledModules
+          ? normalizeEnabledModules(settings.enabledModules)
+          : ["people", "kra-kpi", "tasks", "sops", "reviews", "meetings", "checkins", "ai", "analytics"],
         businessType: settings.businessType || "",
         industry: settings.industry || "",
         teamSize: settings.teamSize || "",
@@ -197,7 +198,7 @@ export async function PATCH(req: Request) {
           data: {
             settings: {
               ...currentSettings,
-              enabledModules: data.enabledModules,
+              enabledModules: normalizeEnabledModules(data.enabledModules),
             },
           },
         });

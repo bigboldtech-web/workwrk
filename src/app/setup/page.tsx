@@ -73,14 +73,20 @@ const USE_CASES = [
 ];
 
 const MODULES = [
+  // Module ids must match the keys used by Settings → Modules and the
+  // sidebar's `moduleKey` filter. We hit a bug where setup wrote `goals`
+  // and `onboarding` while the rest of the system expected `kra-kpi`
+  // and `checkins`, and those nav items disappeared for any org that
+  // came in via this wizard. Keep this list in sync with
+  // src/app/(dashboard)/settings/page.tsx and src/components/layout/sidebar.tsx.
   { id: "people", name: "People & Org", icon: Users, desc: "Departments, roles, profiles, org chart", default: true },
-  { id: "goals", name: "Goals & KPIs", icon: Target, desc: "KRA/KPI engine, scoring, tracking" },
+  { id: "kra-kpi", name: "Goals & KPIs", icon: Target, desc: "KRA/KPI engine, scoring, tracking" },
   { id: "tasks", name: "Task Management", icon: CheckSquare, desc: "Tasks, subtasks, dependencies, RACI" },
   { id: "sops", name: "SOPs & Compliance", icon: BookOpen, desc: "Process documentation, compliance tracking" },
   { id: "reviews", name: "Performance Reviews", icon: Star, desc: "Review cycles, 360 feedback, calibration" },
   { id: "meetings", name: "Meetings & Check-ins", icon: MessageSquare, desc: "Standups, 1:1s, meeting notes" },
   { id: "analytics", name: "Reports & Analytics", icon: BarChart3, desc: "Dashboards, exports, insights" },
-  { id: "onboarding", name: "Onboarding & Training", icon: GraduationCap, desc: "Employee onboarding workflows" },
+  { id: "checkins", name: "Onboarding & Training", icon: GraduationCap, desc: "Employee onboarding workflows" },
   { id: "ai", name: "AI Assistant", icon: Bot, desc: "Smart suggestions and analysis" },
 ];
 
@@ -111,7 +117,7 @@ export default function SetupPage() {
     industry: "",
     useCase: "",
     teamSize: "",
-    enabledModules: ["people", "goals", "tasks", "sops", "reviews", "meetings", "analytics", "onboarding", "ai"],
+    enabledModules: ["people", "kra-kpi", "tasks", "sops", "reviews", "meetings", "analytics", "checkins", "ai"],
     departments: DEFAULT_DEPARTMENTS.map((d) => ({ ...d, enabled: true })),
     customDepartments: [] as { name: string; color: string; description: string }[],
     invites: [{ email: "", role: "EMPLOYEE" as string }],

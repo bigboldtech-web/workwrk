@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, isManager, isOrgAdmin, jsonError
 import { broadcastWebhook } from "@/lib/webhooks";
 import { enrichScribeScreenshots } from "@/lib/scribe-enrich";
 import { canWriteToFolder } from "@/lib/sop-access";
+import { isSOPContentEmpty, isSOPTitleEmpty } from "@/lib/sop-content";
 
 export async function GET(
   _req: NextRequest,
@@ -67,7 +68,12 @@ export async function PATCH(
   }
 
   const body = await req.json();
-  const { title, description, category, subcategory, content, status, version, folderId, tags } = body;
+  const { title: rawTitle, description: rawDescription, category, subcategory, content, status, version, folderId, tags } = body;
+
+  // Same trim rule as POST. Treat a whitespace-only string as an
+  // intentional blank, which the PUBLISHED guard below will catch.
+  const title = typeof rawTitle === "string" ? rawTitle.trim() : rawTitle;
+  const description = typeof rawDescription === "string" ? rawDescription.trim() : rawDescription;
 
   const data: Record<string, unknown> = {};
   if (title !== undefined) data.title = title;
@@ -103,40 +109,29 @@ export async function PATCH(
     data.folderId = next;
   }
 
-  if (status !== undefined) {
-    if (status === "PUBLISHED") {
-      // Refuse to publish a row that's empty. Earlier we shipped a
-      // bug where the publish flow would happily overwrite a real
-      // SOP's title + content with whatever was in the form (even
-      // when blank), nuking the live row. The version snapshot a
-      // few lines below would still preserve the previous v as a
-      // backup, but at the cost of an empty PUBLISHED row sitting
-      // in the customer's list. Easier to refuse the publish.
-      const proposedTitle = (data.title as string | undefined) ?? existing.title;
-      const proposedContent = (data.content as { html?: string; steps?: unknown[]; sections?: unknown[] } | undefined) ?? (existing.content as any);
+  // Editing a PUBLISHED row directly is allowed but dangerous — we
+  // had four prod SOPs end up empty because a PATCH (or a publish
+  // accepting a blank form) overwrote the live row with no recovery
+  // path. Two guards:
+  //   1) Refuse a mutation that would blank title/content/description.
+  //      Customers should archive, not silently empty a published SOP.
+  //   2) Snapshot the pre-mutation state to SOPVersion before changing
+  //      title/content/description on a PUBLISHED row, so a future
+  //      blank still has somewhere to roll back from.
+  const touchesContent = data.content !== undefined;
+  const touchesTitle = data.title !== undefined;
+  const touchesDescription = data.description !== undefined;
+  const isAlreadyPublished = existing.status === "PUBLISHED";
 
-      if (!proposedTitle || (typeof proposedTitle === "string" && proposedTitle.trim() === "")) {
-        return jsonError("SOP title is required before publishing");
-      }
+  if (isAlreadyPublished) {
+    if (touchesTitle && isSOPTitleEmpty(data.title)) {
+      return jsonError("Cannot blank the title of a published SOP. Archive it instead.");
+    }
+    if (touchesContent && isSOPContentEmpty(data.content)) {
+      return jsonError("Cannot blank the content of a published SOP. Archive it instead.");
+    }
 
-      const c = proposedContent ?? {};
-      const htmlEmpty = typeof c.html === "string" && c.html.replace(/<[^>]+>/g, "").trim() === "";
-      const stepsEmpty = Array.isArray(c.steps) && c.steps.length === 0;
-      const sectionsEmpty = Array.isArray(c.sections) && c.sections.length === 0;
-      const onlyHtml = "html" in c && !("steps" in c) && !("sections" in c);
-      const onlySteps = "steps" in c && !("html" in c) && !("sections" in c);
-      const onlySections = "sections" in c && !("html" in c) && !("steps" in c);
-      const isEmpty =
-        (onlyHtml && htmlEmpty) ||
-        (onlySteps && stepsEmpty) ||
-        (onlySections && sectionsEmpty);
-      if (isEmpty) {
-        return jsonError("Add some content before publishing");
-      }
-
-      data.status = status;
-      data.publishedAt = new Date();
-      // Save version snapshot before updating
+    if (touchesContent || touchesTitle || touchesDescription) {
       await prisma.sOPVersion.create({
         data: {
           sopId: id,
@@ -147,6 +142,42 @@ export async function PATCH(
           publishedBy: getUserId(session),
         },
       });
+    }
+  }
+
+  if (status !== undefined) {
+    if (status === "PUBLISHED") {
+      // Validating before the publish write-through prevents the
+      // original bug: a publish that accepts blank form values and
+      // silently nukes the live row. Helper covers `null`, `{}`, and
+      // mixed-shape edge cases the inline check used to miss.
+      const proposedTitle = (data.title as string | undefined) ?? existing.title;
+      const proposedContent = data.content !== undefined ? data.content : existing.content;
+
+      if (isSOPTitleEmpty(proposedTitle)) {
+        return jsonError("SOP title is required before publishing");
+      }
+      if (isSOPContentEmpty(proposedContent)) {
+        return jsonError("Add some content before publishing");
+      }
+
+      data.status = status;
+      data.publishedAt = new Date();
+      // Snapshot the existing pre-publish state so we can roll back to
+      // the prior draft if needed. Skip if we already snapshotted above
+      // (PUBLISHED → PUBLISHED with content edits already wrote one).
+      if (!isAlreadyPublished) {
+        await prisma.sOPVersion.create({
+          data: {
+            sopId: id,
+            version: existing.version,
+            title: existing.title,
+            description: existing.description,
+            content: existing.content as any,
+            publishedBy: getUserId(session),
+          },
+        });
+      }
     } else {
       data.status = status;
     }

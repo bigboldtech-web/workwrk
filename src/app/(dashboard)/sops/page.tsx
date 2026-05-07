@@ -27,7 +27,7 @@ import { FolderTree, type FolderNode } from "@/components/sops/folder-tree";
 import { CategoryTree, type CategoryNode } from "@/components/sops/category-tree";
 import { TagChips, type TagOption } from "@/components/sops/tag-chips";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -286,13 +286,17 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
 
 export default function SOPsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { canManageSOPs, isEmployee, accessLevel } = useRole();
   const isOrgAdmin = accessLevel === "SUPER_ADMIN" || accessLevel === "COMPANY_ADMIN";
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
-  const [folderFilter, setFolderFilter] = useState<string>("all");     // "all" | "none" | folderId
+  // Initial folder filter is seeded from `?folderId=<id>` so links from
+  // the sidebar's SOPs sub-nav land in the matching folder view.
+  const initialFolderFilter = searchParams?.get("folderId") ?? "all";
+  const [folderFilter, setFolderFilter] = useState<string>(initialFolderFilter); // "all" | "none" | folderId
   // Category filter — primary navigation. Values:
   //   "all" → no filter
   //   "uncategorized" → category IS NULL
@@ -446,6 +450,13 @@ export default function SOPsPage() {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Sync filter when the URL's ?folderId= changes — navigating between
+  // folders via the sidebar sub-nav should re-filter without a reload.
+  useEffect(() => {
+    const next = searchParams?.get("folderId") ?? "all";
+    setFolderFilter((prev) => (prev === next ? prev : next));
+  }, [searchParams]);
 
   useEffect(() => {
     setPage(1);

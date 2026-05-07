@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { isSOPContentEmpty, isSOPTitleEmpty } from "@/lib/sop-content";
 
 // GET: List all versions of an SOP
 export async function GET(
@@ -52,6 +53,15 @@ export async function POST(
     where: { id: versionId, sopId: id },
   });
   if (!version) return jsonError("Version not found", 404);
+
+  // Refuse rollback to an empty snapshot. The recovery scripts found
+  // SOPs whose v1 was good and v2 was empty; if the only saved
+  // versions for an SOP are empty (because the publish-blanks bug
+  // ran more than once), rollback would propagate the bug instead of
+  // recovering from it.
+  if (isSOPTitleEmpty(version.title) || isSOPContentEmpty(version.content)) {
+    return jsonError("That version is empty — pick a different one to roll back to.");
+  }
 
   // Save current as a version snapshot before rollback
   await prisma.sOPVersion.create({

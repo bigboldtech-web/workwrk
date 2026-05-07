@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
+import { normalizeEnabledModules } from "@/lib/module-keys";
 
 export async function GET() {
   try {
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
           industry,
           useCase,
           teamSize,
-          enabledModules,
+          enabledModules: normalizeEnabledModules(enabledModules),
         },
       },
     });
