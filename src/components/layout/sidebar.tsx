@@ -44,6 +44,7 @@ import {
   Heart,
   Palette,
   Folder,
+  Inbox,
 } from "lucide-react";
 
 type NavItem = {
@@ -58,6 +59,7 @@ type NavItem = {
 
 const navigation: NavItem[] = [
   { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Inbox", key: "inbox", href: "/inbox", icon: Inbox },
   { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone },
   { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette },
   { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true },

@@ -1,0 +1,187 @@
+"use client";
+
+// Cmd-K / Ctrl-K global navigation palette. Mirrors Workday's
+// search-driven nav (their #1 power-user pattern). For v1 it covers
+// every sidebar destination plus a small set of quick actions; data
+// search (people / SOPs / tasks by name) lands in v2 once we have a
+// unified search endpoint.
+
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { Command } from "cmdk";
+import { useRole } from "@/hooks/use-role";
+import {
+  LayoutDashboard, Inbox as InboxIcon, Megaphone, Users, Building2, Target,
+  CalendarDays, BookOpen, ListChecks, Star, MessageSquare, BarChart3,
+  GraduationCap, Heart, Lightbulb, Crosshair, Grid3x3, ClipboardCheck,
+  MessageSquareHeart, Shield, Package, Activity, Wrench, Link2, Bot,
+  Settings, FileText, Plus, UserPlus, Search,
+} from "lucide-react";
+
+type CommandItem = {
+  id: string;
+  label: string;
+  hint?: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  // Visibility predicate evaluated against role flags. Defaults to "always".
+  visible?: (role: { isManager: boolean; isAdmin: boolean }) => boolean;
+};
+
+const NAV: CommandItem[] = [
+  { id: "dashboard", label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { id: "inbox", label: "Inbox", href: "/inbox", icon: InboxIcon },
+  { id: "announcements", label: "Announcements", href: "/announcements", icon: Megaphone },
+  { id: "people", label: "People", href: "/people", icon: Users, visible: (r) => r.isManager },
+  { id: "organization", label: "Organization", href: "/organization", icon: Building2 },
+  { id: "kraKpi", label: "KRA & KPIs", href: "/kra-kpi", icon: Target },
+  { id: "tasks", label: "Work Calendar", href: "/tasks", icon: CalendarDays },
+  { id: "sops", label: "SOPs", href: "/sops", icon: BookOpen },
+  { id: "processRuns", label: "Process Runs", href: "/process-runs", icon: ListChecks, visible: (r) => r.isManager },
+  { id: "reviews", label: "Reviews", href: "/reviews", icon: Star },
+  { id: "meetings", label: "Meetings", href: "/meetings", icon: MessageSquare },
+  { id: "analytics", label: "Analytics", href: "/analytics", icon: BarChart3, visible: (r) => r.isManager },
+  { id: "onboarding", label: "Onboarding", href: "/onboarding", icon: GraduationCap, visible: (r) => r.isManager },
+  { id: "kudos", label: "Kudos", href: "/kudos", icon: Heart },
+  { id: "ideas", label: "Ideas", href: "/ideas", icon: Lightbulb },
+  { id: "okrs", label: "OKRs", href: "/okrs", icon: Crosshair },
+  { id: "talent", label: "Talent Grid", href: "/talent", icon: Grid3x3, visible: (r) => r.isManager },
+  { id: "surveys", label: "Surveys", href: "/surveys", icon: ClipboardCheck },
+  { id: "candor", label: "Candor", href: "/candor", icon: MessageSquareHeart },
+  { id: "policies", label: "Policies", href: "/policies", icon: Shield },
+  { id: "assets", label: "Assets", href: "/assets", icon: Package, visible: (r) => r.isManager },
+  { id: "activity", label: "Activity", href: "/activity", icon: Activity },
+  { id: "tools", label: "Tools", href: "/tools", icon: Wrench, visible: (r) => r.isManager },
+  { id: "integrations", label: "Integrations", href: "/integrations", icon: Link2, visible: (r) => r.isAdmin },
+  { id: "ai", label: "AI Assistant", href: "/ai", icon: Bot, visible: (r) => r.isManager },
+  { id: "settings", label: "Settings", href: "/settings", icon: Settings },
+  { id: "tags", label: "Tags & dimensions", href: "/settings/tags", icon: Settings, visible: (r) => r.isAdmin },
+  { id: "docs", label: "Docs", href: "/docs", icon: FileText },
+];
+
+const QUICK_ACTIONS: CommandItem[] = [
+  { id: "new-task", label: "Create task", hint: "go to calendar", href: "/tasks?create=1", icon: Plus },
+  { id: "new-sop", label: "Create SOP", hint: "go to SOPs", href: "/sops?create=1", icon: Plus, visible: (r) => r.isManager },
+  { id: "invite-person", label: "Invite a person", hint: "open people directory", href: "/people?invite=1", icon: UserPlus, visible: (r) => r.isManager },
+];
+
+export function CommandPalette() {
+  const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const { isManager, isAdmin } = useRole();
+
+  // Global keybinding. Cmd-K on mac, Ctrl-K elsewhere. Don't fire when
+  // a contenteditable / input has focus — typing in the SOP editor
+  // shouldn't open the palette. Esc closes when open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && open) {
+        e.preventDefault();
+        setOpen(false);
+        return;
+      }
+      if (e.key !== "k" && e.key !== "K") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        target?.isContentEditable ||
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT"
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  // Lock body scroll while open so the page underneath doesn't drift.
+  useEffect(() => {
+    if (!open) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, [open]);
+
+  const role = useMemo(() => ({ isManager, isAdmin }), [isManager, isAdmin]);
+
+  const visibleNav = NAV.filter((i) => !i.visible || i.visible(role));
+  const visibleActions = QUICK_ACTIONS.filter((i) => !i.visible || i.visible(role));
+
+  const onSelect = useCallback(
+    (href: string) => {
+      setOpen(false);
+      router.push(href);
+    },
+    [router],
+  );
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="cmd-palette-overlay" onClick={() => setOpen(false)} role="presentation">
+      <div className="cmd-palette" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <Command label="Command palette" className="cmd-palette-cmd" loop>
+          <div className="cmd-palette-input-row">
+            <Search size={14} className="cmd-palette-input-icon" aria-hidden />
+            <Command.Input
+              placeholder="Jump to a page or run an action…"
+              className="cmd-palette-input"
+              autoFocus
+            />
+            <kbd className="cmd-palette-kbd">esc</kbd>
+          </div>
+          <Command.List className="cmd-palette-list">
+            <Command.Empty className="cmd-palette-empty">No matches.</Command.Empty>
+
+            {visibleActions.length > 0 && (
+              <Command.Group heading="Quick actions" className="cmd-palette-group">
+                {visibleActions.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Command.Item
+                      key={item.id}
+                      value={`action ${item.label} ${item.hint ?? ""}`}
+                      onSelect={() => onSelect(item.href)}
+                      className="cmd-palette-item"
+                    >
+                      <Icon size={14} />
+                      <span className="cmd-palette-label">{item.label}</span>
+                      {item.hint && <span className="cmd-palette-hint">{item.hint}</span>}
+                    </Command.Item>
+                  );
+                })}
+              </Command.Group>
+            )}
+
+            <Command.Group heading="Navigate" className="cmd-palette-group">
+              {visibleNav.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Command.Item
+                    key={item.id}
+                    value={`nav ${item.label}`}
+                    onSelect={() => onSelect(item.href)}
+                    className="cmd-palette-item"
+                  >
+                    <Icon size={14} />
+                    <span className="cmd-palette-label">{item.label}</span>
+                    <span className="cmd-palette-hint">{item.href}</span>
+                  </Command.Item>
+                );
+              })}
+            </Command.Group>
+          </Command.List>
+        </Command>
+      </div>
+    </div>
+  );
+}

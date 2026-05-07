@@ -26,6 +26,7 @@ import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KudosReactions } from "@/components/kudos/kudos-reactions";
+import { TagPicker } from "@/components/tags/tag-picker";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
@@ -420,7 +421,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
 export default function UserProfilePage() {
   const { id } = useParams();
   const router = useRouter();
-  const { isAdmin } = useRole();
+  const { isAdmin, isManager } = useRole();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { success: toastSuccess, error: toastError } = useToast();
@@ -613,6 +614,16 @@ export default function UserProfilePage() {
                     <Users size={14} /> Reports to {user.manager.firstName} {user.manager.lastName}
                   </span>
                 )}
+              </div>
+              {/* Dimensional tags — cost center, business unit, region,
+                  project. Manager+ can edit. Same picker drops onto
+                  Tasks / OKRs / Expenses with a different entity tuple. */}
+              <div className="mt-3">
+                <TagPicker
+                  entityType="USER"
+                  entityId={user.id}
+                  canEdit={isManager}
+                />
               </div>
             </div>
 

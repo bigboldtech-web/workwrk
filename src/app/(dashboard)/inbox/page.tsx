@@ -1,0 +1,336 @@
+// Unified inbox — Workday's defining workflow pattern adapted to our
+// data. Aggregates "what needs me right now" across SOP assignments,
+// upcoming/overdue tasks, and pending reviews. Server-component so the
+// first paint already has the data — no skeleton flicker.
+
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair } from "lucide-react";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const TASK_HORIZON_DAYS = 7;
+const OKR_CADENCE_DAYS: Record<string, number> = {
+  WEEKLY: 7,
+  BIWEEKLY: 14,
+  MONTHLY: 31,
+};
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+function fmtRelative(date: Date | null | undefined): string {
+  if (!date) return "no due date";
+  const diff = date.getTime() - Date.now();
+  const days = Math.round(diff / DAY_MS);
+  if (days < -1) return `${Math.abs(days)} days overdue`;
+  if (days === -1) return "1 day overdue";
+  if (days === 0) return "due today";
+  if (days === 1) return "due tomorrow";
+  if (days <= 7) return `due in ${days} days`;
+  return date.toLocaleDateString();
+}
+
+function isOverdue(date: Date | null | undefined): boolean {
+  if (!date) return false;
+  return date.getTime() < Date.now() - DAY_MS; // strictly before yesterday
+}
+
+export default async function InboxPage() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/login");
+  const userId = (session.user as { id: string }).id;
+  const orgId = (session.user as { organizationId: string }).organizationId;
+
+  const horizonEnd = new Date(Date.now() + TASK_HORIZON_DAYS * DAY_MS);
+
+  // Four queries in parallel. Each is bounded by the user/org pair.
+  const [sopAssignments, tasks, reviews, myOkrs] = await Promise.all([
+    prisma.sOPAssignment.findMany({
+      where: {
+        userId,
+        completedAt: null,
+        sop: { organizationId: orgId, status: "PUBLISHED" },
+      },
+      orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
+      take: 50,
+      select: {
+        id: true,
+        sopId: true,
+        dueDate: true,
+        mandatory: true,
+        sop: { select: { title: true } },
+      },
+    }),
+    prisma.task.findMany({
+      where: {
+        organizationId: orgId,
+        assigneeId: userId,
+        status: { not: "COMPLETED" },
+        // Tasks with an end date in the past or within the horizon, OR
+        // tasks with no endAt but a `date` anchor within window.
+        OR: [
+          { endAt: { lte: horizonEnd } },
+          { AND: [{ endAt: null }, { date: { lte: horizonEnd } }] },
+        ],
+      },
+      orderBy: [{ endAt: "asc" }, { date: "asc" }],
+      take: 50,
+      select: {
+        id: true,
+        title: true,
+        endAt: true,
+        date: true,
+        priority: true,
+        status: true,
+      },
+    }),
+    prisma.review.findMany({
+      where: {
+        reviewerId: userId,
+        overallScore: null,
+        cycle: { organizationId: orgId },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 50,
+      select: {
+        id: true,
+        subject: { select: { firstName: true, lastName: true } },
+        cycle: { select: { name: true, endDate: true } },
+      },
+    }),
+    // OKRs I own that haven't seen a check-in within their cadence.
+    // Fetched broadly then filtered in JS so we can apply the cadence
+    // rule against the most recent KRCheckIn timestamp.
+    prisma.oKR.findMany({
+      where: {
+        organizationId: orgId,
+        ownerId: userId,
+        status: { not: "COMPLETED" },
+      },
+      take: 50,
+      select: {
+        id: true,
+        title: true,
+        progress: true,
+        checkInCadence: true,
+        keyResults: {
+          select: {
+            checkIns: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: { createdAt: true },
+            },
+          },
+        },
+      },
+    }),
+  ]);
+
+  // Compute "stale" OKRs: latest check-in across all KRs is older than
+  // the cadence allows (or no check-ins at all).
+  const staleOkrs = myOkrs
+    .map((okr) => {
+      const latest = okr.keyResults
+        .flatMap((kr) => kr.checkIns)
+        .map((c) => c.createdAt)
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+      const cadenceDays = OKR_CADENCE_DAYS[okr.checkInCadence] ?? 7;
+      const isStale = !latest || Date.now() - latest.getTime() > cadenceDays * DAY_MS;
+      const lastDays = latest
+        ? Math.floor((Date.now() - latest.getTime()) / DAY_MS)
+        : null;
+      return isStale ? { id: okr.id, title: okr.title, progress: okr.progress, lastDays } : null;
+    })
+    .filter((x): x is { id: string; title: string; progress: number; lastDays: number | null } => x !== null);
+
+  const total = sopAssignments.length + tasks.length + reviews.length + staleOkrs.length;
+  const overdueCount =
+    sopAssignments.filter((a) => isOverdue(a.dueDate)).length +
+    tasks.filter((t) => isOverdue(t.endAt ?? t.date)).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <InboxIcon size={22} /> Inbox
+          </h1>
+          <p className="text-muted text-sm mt-1">
+            {total === 0
+              ? "Nothing needs you right now."
+              : `${total} item${total === 1 ? "" : "s"} need you`}
+            {overdueCount > 0 && (
+              <span className="ml-2 inline-flex items-center gap-1 text-red-400">
+                <AlertTriangle size={12} /> {overdueCount} overdue
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {total === 0 && (
+        <Card>
+          <CardContent className="p-10 text-center text-muted text-sm">
+            You're all clear. New items show up here when SOPs are assigned to you,
+            tasks come due, or reviews need your input.
+          </CardContent>
+        </Card>
+      )}
+
+      {sopAssignments.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <BookOpen size={16} /> SOPs assigned to you
+              <span className="text-xs text-muted font-normal">({sopAssignments.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {sopAssignments.map((a) => {
+                const overdue = isOverdue(a.dueDate);
+                return (
+                  <li key={a.id}>
+                    <Link
+                      href={`/sops/${a.sopId}`}
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="text-sm font-medium truncate">{a.sop.title}</span>
+                        {a.mandatory && (
+                          <span className="text-[10px] uppercase tracking-wide text-orange-400 border border-orange-400/30 rounded px-1.5 py-0.5 flex-shrink-0">
+                            Mandatory
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-xs flex-shrink-0 ml-3 ${overdue ? "text-red-400" : "text-muted"}`}>
+                        {fmtRelative(a.dueDate)}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {tasks.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CheckSquare size={16} /> Tasks
+              <span className="text-xs text-muted font-normal">({tasks.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {tasks.map((t) => {
+                const due = t.endAt ?? t.date;
+                const overdue = isOverdue(due);
+                return (
+                  <li key={t.id}>
+                    <Link
+                      href={`/tasks?taskId=${t.id}`}
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="text-sm font-medium truncate">{t.title}</span>
+                        {t.priority === "HIGH" && (
+                          <span className="text-[10px] uppercase tracking-wide text-amber-400 border border-amber-400/30 rounded px-1.5 py-0.5 flex-shrink-0">
+                            High
+                          </span>
+                        )}
+                        {t.priority === "URGENT" && (
+                          <span className="text-[10px] uppercase tracking-wide text-red-400 border border-red-400/30 rounded px-1.5 py-0.5 flex-shrink-0">
+                            Urgent
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-xs flex-shrink-0 ml-3 ${overdue ? "text-red-400" : "text-muted"}`}>
+                        {fmtRelative(due)}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {staleOkrs.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Crosshair size={16} /> OKRs needing a check-in
+              <span className="text-xs text-muted font-normal">({staleOkrs.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {staleOkrs.map((o) => (
+                <li key={o.id}>
+                  <Link
+                    href={`/okrs/${o.id}`}
+                    className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-sm font-medium truncate">{o.title}</span>
+                      <span className="text-xs text-muted font-mono flex-shrink-0">{o.progress}%</span>
+                    </div>
+                    <span className="text-xs flex-shrink-0 ml-3 text-amber-400">
+                      {o.lastDays === null ? "no check-ins yet" : `${o.lastDays} days since last`}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {reviews.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Star size={16} /> Reviews waiting on you
+              <span className="text-xs text-muted font-normal">({reviews.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {reviews.map((r) => {
+                const subject = `${r.subject.firstName} ${r.subject.lastName}`.trim();
+                return (
+                  <li key={r.id}>
+                    <Link
+                      href={`/reviews/${r.id}`}
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="text-sm font-medium truncate">
+                          Review for {subject}
+                        </span>
+                        <span className="text-xs text-muted truncate">
+                          {r.cycle.name}
+                        </span>
+                      </div>
+                      <span className={`text-xs flex-shrink-0 ml-3 ${isOverdue(r.cycle.endDate) ? "text-red-400" : "text-muted"}`}>
+                        {fmtRelative(r.cycle.endDate)}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -311,6 +312,11 @@ export default function OKRsPage() {
                             <Button size="sm" variant="outline" className="text-xs" onClick={(e) => { e.stopPropagation(); setCheckInOkr(okr); setCheckInValues({}); }}>
                               Update Progress
                             </Button>
+                            <Link href={`/okrs/${okr.id}`} onClick={(e) => e.stopPropagation()}>
+                              <Button size="sm" variant="outline" className="text-xs">
+                                Open detail
+                              </Button>
+                            </Link>
                           </div>
                         </div>
                       )}

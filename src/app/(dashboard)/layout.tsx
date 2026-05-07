@@ -2,6 +2,7 @@
 
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
+import { CommandPalette } from "@/components/layout/command-palette";
 import { ToastProvider } from "@/components/ui/toast";
 import { DialogProvider } from "@/components/ui/dialog-provider";
 import { KudosFab } from "@/components/kudos/kudos-fab";
@@ -79,6 +80,7 @@ export default function DashboardLayout({
               <main className="app-content">{children}</main>
             </div>
             <KudosFab />
+            <CommandPalette />
             <ScreenProtection />
           </div>
         </TourProvider>

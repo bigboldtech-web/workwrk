@@ -56,6 +56,8 @@ model Organization {
   taskLabels          TaskLabel[]
   sopFolders          SOPFolder[]
   secrets             OrgSecret[]
+  tags                Tag[]
+  tagAssignments      TagAssignment[]
 
   @@index([slug])
 }
@@ -2112,4 +2114,87 @@ enum DeliveryStatus {
   DELIVERED
   FAILED
   RETRYING
+}
+
+// ==========================================
+// DIMENSIONAL TAGS (Worktags equivalent)
+// ==========================================
+// Polymorphic tagging — any entity (User, Task, KRA, OKR, Expense…)
+// can carry one or more tags. The intended use is for cost-center /
+// business-unit / region / project slicing on reports and budgets,
+// without bespoke schema per dimension. Modeled after Workday's
+// Worktags: a single tag travels across HR, Finance, and Planning
+// records so the CFO can drill down by region or project without
+// schema gymnastics.
+//
+// `entityType` + `entityId` is intentionally polymorphic. We trade
+// referential integrity for flexibility — adding a new taggable
+// entity (e.g. Phase 2 ATS Candidate) just adds a new enum value.
+// Cleanup of orphans is handled by a periodic cron, not the DB.
+
+model Tag {
+  id             String         @id @default(cuid())
+  name           String
+  type           TagType        @default(CUSTOM)
+  color          String?        // hex, optional UX
+  description    String?
+  archived       Boolean        @default(false)
+
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  assignments    TagAssignment[]
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([organizationId, type, name])
+  @@index([organizationId])
+  @@index([organizationId, type])
+  @@index([organizationId, archived])
+}
+
+model TagAssignment {
+  id             String         @id @default(cuid())
+  tagId          String
+  tag            Tag            @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  entityType     TagEntityType
+  entityId       String
+
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  assignedById   String?        // User.id — null on system-applied tags
+
+  createdAt      DateTime       @default(now())
+
+  @@unique([tagId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@index([organizationId, entityType])
+  @@index([tagId])
+}
+
+enum TagType {
+  COST_CENTER
+  BUSINESS_UNIT
+  LOCATION
+  REGION
+  PROJECT
+  FUNCTION
+  CUSTOM
+}
+
+enum TagEntityType {
+  USER
+  TASK
+  KRA
+  KPI
+  OKR
+  SOP
+  REVIEW
+  REVIEW_CYCLE
+  ASSET
+  EXPENSE
+  MEETING
 }
