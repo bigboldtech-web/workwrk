@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "_note": "NOT USED IN PRODUCTION — WorkwrK is hosted on aaPanel + PM2, not Vercel. The cron schedules below are reference values that are replicated as aaPanel cron jobs. See scripts/CRON-SETUP.md.",
   "crons": [
     {
       "path": "/api/tasks/run-sla-check",

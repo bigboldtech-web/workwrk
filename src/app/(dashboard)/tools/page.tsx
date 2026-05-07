@@ -60,10 +60,13 @@ export default function ToolsPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/tools").then((r) => r.ok ? r.json() : { data: [] }),
+      fetch("/api/tools").then((r) => r.ok ? r.json() : []),
       fetch("/api/users?limit=200").then((r) => r.ok ? r.json() : { data: [] }),
     ]).then(([t, u]) => {
-      setTools(t?.data || []);
+      // /api/tools returns the array directly via jsonSuccess(tools).
+      // Some other endpoints wrap in { data: [...] }, so handle both
+      // shapes — same pattern used for users below.
+      setTools(Array.isArray(t) ? t : (t?.data || []));
       setUsers(Array.isArray(u) ? u : u?.data || []);
     }).finally(() => setLoading(false));
   }, []);
@@ -94,7 +97,7 @@ export default function ToolsPage() {
         setShowFormPassword(false);
         setShowFormApiKey(false);
         const d = await fetch("/api/tools").then((r) => r.json());
-        setTools(d?.data || []);
+        setTools(Array.isArray(d) ? d : (d?.data || []));
         toastSuccess("Tool added");
       } else {
         // Surface server errors instead of silently swallowing them.
@@ -124,7 +127,7 @@ export default function ToolsPage() {
       setShowShare(null);
       setShareUserIds([]);
       const d = await fetch("/api/tools").then((r) => r.json());
-      setTools(d?.data || []);
+      setTools(Array.isArray(d) ? d : (d?.data || []));
     }
   }
 

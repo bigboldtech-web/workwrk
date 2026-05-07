@@ -1,25 +1,26 @@
 # WorkwrK Launch Checklist
 
-Last updated: 2026-05-06.
+Last updated: 2026-05-07.
 Owner: Ibrahim.
+Stack: aaPanel + Cloudflare DNS + PM2 + git-pull/npm-build/pm2-reload deploys.
 
-This is **the only thing you need to do** to take WorkwrK from
+This is the only thing you need to do to take WorkwrK from
 "code-ready" to "strangers can use it." Code is shippable today;
-what's left is environment setup and packaging on your side.
+what's left is server config and packaging.
 
-Each item below is one of:
+Each item is one of:
 - 🔴 **Blocker** — strangers can't use the app without this
 - 🟡 **Should-do** — fine to launch without, but ship within first week
 - 🟢 **Post-launch** — sometime in the first month
 
 ---
 
-## What I (Claude) finished for you in this round
+## What Claude finished for you
 
-- ✅ **Vercel cron schedules** — every cron endpoint (OKR reminders, surveys-rotate, email-queue, calendar-sync, etc.) wired in `vercel.json`. They'll fire automatically once you deploy.
-- ✅ **AppSumo redemption flow built end-to-end** — schema, migration applied to prod, customer-facing `/redeem` page (only org admins can redeem), staff `/admin/appsumo` page for bulk-importing codes from CSV + filtering by status + marking refunds. **Just paste codes and go live on AppSumo when you're ready.**
-- ✅ **Demo / sandbox seeder** — `scripts/seed-demo-org.ts` creates a "Sandbox" org with 8 users across 4 departments, 4 SOPs, 2 KRAs + 4 KPIs, 3 OKRs cascaded company → team → individual, 2 announcements, and 3 kudos. Reviewer login: `admin@sandbox.workwrk.com` / `demo-1234`.
-- ✅ **Marketing site verified** — `/privacy`, `/terms`, `/help-center`, `/compare`, all `/features/*` pages exist with real content.
+- ✅ **AppSumo redemption flow** — schema + migration deployed, customer `/redeem` page, staff `/admin/appsumo` bulk-import + filter + refund UI.
+- ✅ **Sandbox demo org seeded in prod** — 8 users, 4 SOPs, 2 KRAs, 4 KPIs, 3 cascaded OKRs. Reviewers log in at `admin@sandbox.workwrk.com` / `demo-1234`.
+- ✅ **Cron schedules documented** for aaPanel — see [scripts/CRON-SETUP.md](scripts/CRON-SETUP.md).
+- ✅ **Marketing site verified** — `/privacy`, `/terms`, `/help-center`, `/compare`, all `/features/*` populated.
 - ✅ **Production secrets generated** (below).
 - ✅ Type-check + build clean.
 
@@ -27,131 +28,148 @@ Each item below is one of:
 
 ## 🔴 Blockers — must do before public launch
 
-### 1. Rotate the Neon DB password (5 min)
-The current production password was pasted in chat. Treat it as compromised.
+### 1. Rotate the Neon DB password (5 min) — *do later, you said*
 - Neon dashboard → **Project: Theywrk** → **Settings** → **Reset password**
-- Update `DATABASE_URL` in Vercel env (Production + Preview)
-- Re-deploy
+- Update `DATABASE_URL` in your `.env.production` (or aaPanel Node config)
+- `pm2 restart workwrk`
 
 ### 2. Set production environment variables (10 min)
-In **Vercel → Settings → Environment Variables**, set these for **Production**:
+SSH in and edit your `.env.production` (or use aaPanel Node config UI).
 
-| Var | Value |
-|---|---|
-| `ADMIN_HOST` | `admin.workwrk.com` |
-| `APP_HOST` | `workwrk.com` |
-| `CUSTOM_DOMAINS_ENABLED` | `true` |
-| `CRON_SECRET` | `b205e8314f25686b30892b1adb60e654e35a9c1e427a15da9d62fe4a6f322eb1` |
-| `SECRETS_ENCRYPTION_KEY` | `e13f9e09c2096a2263b1cb3d7e0ae183a172be66c04e678759a2b446cdeedc68` |
+Add these:
+```
+ADMIN_HOST=admin.workwrk.com
+APP_HOST=workwrk.com
+CUSTOM_DOMAINS_ENABLED=true
+CRON_SECRET=b205e8314f25686b30892b1adb60e654e35a9c1e427a15da9d62fe4a6f322eb1
+SECRETS_ENCRYPTION_KEY=e13f9e09c2096a2263b1cb3d7e0ae183a172be66c04e678759a2b446cdeedc68
+```
 
-Existing vars to verify present:
-- `DATABASE_URL` (after rotation)
-- `NEXTAUTH_URL`, `NEXTAUTH_SECRET`
+Verify these existing ones are also present:
+- `DATABASE_URL`
+- `NEXTAUTH_URL=https://workwrk.com`
+- `NEXTAUTH_SECRET`
 - `ANTHROPIC_API_KEY`
 - `S3_*` (for SOP screenshots)
-- Email provider creds (`SMTP_*` or `RESEND_API_KEY` etc)
+- Email provider creds (`SMTP_*` or `RESEND_API_KEY`)
+
+Then: `pm2 restart workwrk` (replace `workwrk` with your actual PM2 process name; `pm2 ls` to find it).
 
 ### 3. Stripe configuration (30 min)
-- `STRIPE_SECRET_KEY` (live key, not test)
-- `STRIPE_WEBHOOK_SECRET` (from your Stripe webhook endpoint)
-- `STRIPE_PRICE_GROWTH_PER_USER`, `STRIPE_PRICE_TEAM_FLAT`, `STRIPE_PRICE_GROWTH_FLAT`, `STRIPE_PRICE_SCALE_FLAT` — one per plan
-- In Stripe dashboard, add webhook endpoint: `https://workwrk.com/api/billing/webhook`
-- Subscribe to events: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`
+Add to `.env.production`:
+```
+STRIPE_SECRET_KEY=<your live key, sk_live_...>
+STRIPE_WEBHOOK_SECRET=<from your Stripe webhook endpoint>
+STRIPE_PRICE_GROWTH_PER_USER=<price ID>
+STRIPE_PRICE_TEAM_FLAT=<price ID>
+STRIPE_PRICE_GROWTH_FLAT=<price ID>
+STRIPE_PRICE_SCALE_FLAT=<price ID>
+```
 
-### 4. DNS for admin subdomain (15 min)
-- Add CNAME: `admin.workwrk.com` → `cname.vercel-dns.com`
-- In Vercel → Settings → Domains, add `admin.workwrk.com` and verify
-- Once DNS propagates, the middleware automatically routes `/admin` only to that hostname
+In Stripe dashboard:
+1. **Developers → Webhooks → Add endpoint**
+2. URL: `https://workwrk.com/api/billing/webhook`
+3. Events: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`
+4. Copy the signing secret → that's `STRIPE_WEBHOOK_SECRET`
 
-### 5. Smoke test as 4 different roles (45 min)
-**Don't skip this.** Easiest path: run the demo seeder against prod (item 7 below) and log in with the five seeded accounts. Or create test users in Cashkr.
+Restart PM2 after env change.
 
-For each role, log in and verify:
-- Sidebar shows the right items (employees should NOT see AI / Tools / People / Process Runs / Analytics / Onboarding / Talent / Assets / Integrations)
-- Dashboard shows the right widgets
-- `/sops` shows the right SOPs (folder access scoping)
-- `/people` shows the right people (employees don't see it; managers see their team)
-- `/tasks` defaults to "My tasks"
-- Settings → Branding upsell shows for non-admins; works for admin
-- Settings → AI upsell shows for non-Enterprise
+### 4. DNS + admin subdomain (Cloudflare + aaPanel) (15 min)
+**Cloudflare:**
+- Dashboard → `workwrk.com` → DNS → **Add Record**
+- Type: `A`, Name: `admin`, IPv4: `<your server's public IP>`, Proxy: orange-clouded ON (or off — your call)
 
-### 6. Email deliverability (15 min)
-Send a real email from each transactional path:
-- Password reset
-- Team invite
-- One OKR reminder (manually trigger `/api/cron/okr-reminders`)
-Check inbox + spam folder. If hitting spam, fix SPF/DKIM/DMARC on the sending domain.
+**aaPanel:**
+1. Website → **Add Site**: domain = `admin.workwrk.com`, point to the **same Node app directory** as `workwrk.com`, same port.
+   - Or: keep one Node app, add `admin.workwrk.com` as an additional domain on the existing site.
+2. SSL → **Let's Encrypt** → enable for `admin.workwrk.com`.
+3. Reverse Proxy → set up the same proxy as your main site (proxy to `127.0.0.1:<your-node-port>`).
+
+The middleware reads the host header and routes `/admin` only when the host matches `ADMIN_HOST`. No code changes needed — both domains hit the same Node process, the middleware handles the split.
+
+### 5. Set up the cron jobs (10 min)
+Open [scripts/CRON-SETUP.md](scripts/CRON-SETUP.md) and add the 7 cron entries in aaPanel's Cron Manager. Each is a one-line curl. Without these:
+- Emails queue but never send
+- OKR reminders never fire
+- Webhook retries don't happen
+- Calendar sync stops
+
+### 6. Smoke test as 4 different roles (45 min)
+**Don't skip this.** Use the seeded Sandbox org in prod:
+
+| URL | Login | Verify |
+|---|---|---|
+| `https://workwrk.com/login` | `admin@sandbox.workwrk.com` / `demo-1234` (CEO/Admin) | Sees everything in sidebar; org-wide dashboard |
+| same | `engineering@sandbox.workwrk.com` / `demo-1234` (Manager) | Sees AI / Tools / People / Process Runs / Analytics; team-scoped data |
+| same | `alex@sandbox.workwrk.com` / `demo-1234` (Employee) | Does NOT see AI / Tools / People / Process Runs / Analytics / Onboarding / Talent / Assets / Integrations; personal-only dashboard |
+| same | Same Employee | `/sops` shows only assigned + folder-accessible SOPs; `/tasks` defaults to "My tasks" |
+
+If anything looks wrong, copy the URL + describe what you saw and I'll fix.
+
+### 7. Email deliverability (15 min)
+1. Trigger an invite: log in as Admin → People → Invite a real test address.
+2. Check inbox + spam folder.
+3. If hitting spam: set up SPF, DKIM, and DMARC records in Cloudflare for the sending domain. Most email providers (Resend, SendGrid, Postmark) give you the exact DNS rows to copy.
 
 ---
 
-## 🟡 Should-do — first week (or before AppSumo / G2 listing)
+## 🟡 Should-do — first week
 
-### 7. Run the demo seeder against prod (10 min)
-```bash
-DATABASE_URL=<prod url> SEED_PASSWORD=<your choice> npx tsx scripts/seed-demo-org.ts
-```
-Creates a `Sandbox` org reviewers can poke without signing up. Pin the
-login details in your AppSumo / G2 listing as "Try it as a reviewer."
+### 8. AppSumo deal terms + import codes
+The redemption flow is built. You need:
+- Decide tier counts (defaults built into the admin UI: T1 = Growth/5 seats, T2 = Scale/25 seats, T3 = Enterprise/unlimited).
+- Get codes from AppSumo merchant dashboard.
+- Visit `https://admin.workwrk.com/admin/appsumo` (after step 4) → **Bulk import** tab → paste codes → done.
+- Test by redeeming one code as a fresh test customer at `/redeem`.
 
-### 8. Set up AppSumo deal + import codes
-The redemption flow is built. You just need to:
-- Decide on tier counts (suggested defaults built into the admin import UI: T1 = Growth / 5 seats, T2 = Scale / 25 seats, T3 = Enterprise / unlimited)
-- Get codes from AppSumo merchant dashboard
-- Visit `https://admin.workwrk.com/admin/appsumo` (after DNS) → **Bulk import** tab → paste codes → done
-- Test by redeeming one code as a fresh test customer at `/redeem`
+### 9. Demo collateral
+- 60–90s Loom showing: SOP creation → assignment → compliance.
+- Sandbox login published on marketing pages: `https://workwrk.com/demo` already exists — link it.
+- Help center: skim once for typos.
 
-### 9. Public-facing collateral
-- **Demo video**: 60–90s Loom showing the SOP → assignment → compliance flow. Embed on marketing homepage + use on G2 + AppSumo.
-- **Public sandbox**: with the seed script run, you have one. Just publish the credentials.
-- **Help center**: already populated. Skim once for typos.
+### 10. G2 + AppSumo profile prep
+- Logo, screenshots, integrations, pricing all filled.
+- Comparison pages already live at `/compare`.
+- Seed 5+ G2 reviews from real customers.
 
-### 10. G2 profile prep
-- Profile completion at 90%+ (logo, screenshots, integrations, pricing)
-- Comparison pages already exist at `/compare` — re-skim to make sure tables are accurate
-- Seed 5+ reviews from real customers (Cashkr team members) to get past the "no reviews" trust gap
+### 11. Customer support
+- Real `support@workwrk.com` inbox someone monitors.
+- The `?` icon in topbar already links to `/help-center`.
 
-### 11. Customer support pipeline
-- A real `support@workwrk.com` inbox someone monitors
-- The in-app `?` button (already in topbar) links to `/help-center`
-- Slack notification on critical bugs
-
-### 12. Monitoring & alerts
-- Vercel deployment notifications
-- Sentry or similar for runtime errors (not yet wired)
-- Uptime monitor (UptimeRobot free tier is fine)
+### 12. Monitoring
+- Uptime: UptimeRobot free tier ping `https://workwrk.com/api/health` every 5 min.
+- Error tracking: Sentry isn't wired yet. Half-day to add if you want it.
+- aaPanel: enable email notifications on PM2 process crashes.
 
 ---
 
 ## 🟢 Post-launch — first month
 
-- Analytics dashboard for *you* (not the customer): MRR trend, signup funnel, churn
-- Performance budget on the app (Lighthouse score ≥ 80)
-- Mobile responsiveness audit on small screens
-- Backup / restore procedure documented
-- SOC 2 readiness if going upmarket
-- More integrations (Slack, Notion, Linear, Asana)
+- Founder analytics dashboard (MRR, signup funnel, churn) at `/admin/analytics`.
+- Lighthouse performance budget ≥ 80.
+- Mobile responsiveness audit.
+- Backup script for Neon (Neon has built-in PITR; document the restore procedure).
+- More integrations.
 
 ---
 
-## My honest founder take
+## Honest sequence to launch
 
-If you finish blockers 1–6 (about 2 hours of focused work), you can
-soft-launch this week. The seeded Sandbox org makes the smoke test
-faster — log in with five reviewer accounts in 30 minutes.
+1. Steps 2 → 5 today (env, DNS, crons) — the app actually starts behaving like prod.
+2. Step 6 (smoke test as 4 roles) — surfaces UX bugs.
+3. Steps 3 + 7 (Stripe + email) — anything you can test from inside.
+4. Steps 8–11 (collateral) — what you need to list.
 
-For **AppSumo**: do blockers 1–6 + items 7, 8, 9 = ready to list. The
-redemption flow exists; it just needs your deal terms and a CSV of codes.
+Soft-launch to friendly customers any time after step 6 passes.
+List on G2 once steps 9–11 are done.
+List on AppSumo once step 8 is done.
 
-For **G2**: do blockers 1–6 + items 9, 10, 11 = ready to list. Get five
-internal reviews from your Cashkr team to prime the well.
+## File reference
 
-## Files / references
-
-- [`vercel.json`](vercel.json) — deploy config + cron schedules
-- [`scripts/seed-demo-org.ts`](scripts/seed-demo-org.ts) — sandbox seeder
-- [`scripts/MIGRATE-SOPS.md`](scripts/MIGRATE-SOPS.md) — historical SOP folder migration record
-- [`src/app/api/appsumo/redeem/route.ts`](src/app/api/appsumo/redeem/route.ts) — customer redemption endpoint
-- [`src/app/(admin)/admin/appsumo/page.tsx`](src/app/(admin)/admin/appsumo/page.tsx) — staff bulk-import UI
-- [`src/lib/permissions.ts`](src/lib/permissions.ts) — single source of truth for default permissions
-- [`src/lib/access-levels.ts`](src/lib/access-levels.ts) — single source of truth for access level enum
+- [`scripts/CRON-SETUP.md`](scripts/CRON-SETUP.md) — exact aaPanel cron entries
+- [`scripts/seed-demo-org.ts`](scripts/seed-demo-org.ts) — sandbox seeder (already run)
+- [`vercel.json`](vercel.json) — **NOT USED** (kept as schedule reference)
+- [`src/app/api/appsumo/redeem/route.ts`](src/app/api/appsumo/redeem/route.ts) — customer redemption
+- [`src/app/(admin)/admin/appsumo/page.tsx`](src/app/(admin)/admin/appsumo/page.tsx) — staff bulk-import
+- [`src/lib/permissions.ts`](src/lib/permissions.ts) — permission matrix
 - [`src/middleware.ts`](src/middleware.ts) — admin host split + custom domain header
