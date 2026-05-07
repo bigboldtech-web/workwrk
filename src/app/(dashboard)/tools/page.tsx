@@ -41,6 +41,12 @@ export default function ToolsPage() {
   const [showShare, setShowShare] = useState<Tool | null>(null);
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [showPasswords, setShowPasswords] = useState<Set<string>>(new Set());
+  // Show/hide toggles for the *create* form's credential fields. Without
+  // this you can't verify what you pasted into a masked field — which
+  // matters because the password you store here is what gets shared
+  // with teammates verbatim.
+  const [showFormPassword, setShowFormPassword] = useState(false);
+  const [showFormApiKey, setShowFormApiKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [shareUserIds, setShareUserIds] = useState<string[]>([]);
@@ -85,11 +91,24 @@ export default function ToolsPage() {
       if (res.ok) {
         setShowCreate(false);
         setForm({ name: "", description: "", url: "", icon: "", category: "", username: "", password: "", apiKey: "", notes: "" });
+        setShowFormPassword(false);
+        setShowFormApiKey(false);
         const d = await fetch("/api/tools").then((r) => r.json());
         setTools(d?.data || []);
         toastSuccess("Tool added");
+      } else {
+        // Surface server errors instead of silently swallowing them.
+        // Common case: 403 if the role can't manage tools, or 400
+        // with a validation message. Keep the dialog + form data so
+        // the user doesn't have to retype.
+        const err = await res.json().catch(() => ({}));
+        toastError(err?.error || `Failed to add tool (HTTP ${res.status})`);
       }
-    } catch { toastError("Failed"); } finally { setSaving(false); }
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : "Network error — try again");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleShare() {
@@ -311,12 +330,46 @@ export default function ToolsPage() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-[10px]">Password</Label>
-                  <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••" className="h-8 text-xs" />
+                  <div className="relative">
+                    <Input
+                      type={showFormPassword ? "text" : "password"}
+                      value={form.password}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                      placeholder="paste or type"
+                      className="h-8 text-xs pr-8 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowFormPassword((v) => !v)}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-foreground"
+                      aria-label={showFormPassword ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showFormPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-[10px]">API Key (optional)</Label>
-                <Input value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder="sk-..." className="h-8 text-xs" />
+                <div className="relative">
+                  <Input
+                    type={showFormApiKey ? "text" : "password"}
+                    value={form.apiKey}
+                    onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+                    placeholder="sk-..."
+                    className="h-8 text-xs pr-8 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowFormApiKey((v) => !v)}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-foreground"
+                    aria-label={showFormApiKey ? "Hide API key" : "Show API key"}
+                    tabIndex={-1}
+                  >
+                    {showFormApiKey ? <EyeOff size={12} /> : <Eye size={12} />}
+                  </button>
+                </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-[10px]">Notes</Label>
