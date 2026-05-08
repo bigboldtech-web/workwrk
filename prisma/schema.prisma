@@ -61,6 +61,8 @@ model Organization {
   expenses            Expense[]
   compensationCycles    CompensationCycle[]
   compensationDecisions CompensationDecision[]
+  timeOffPolicies     TimeOffPolicy[]
+  timeOffRequests     TimeOffRequest[]
 
   @@index([slug])
 }
@@ -242,6 +244,8 @@ model User {
   expensesApproved    Expense[] @relation("ExpenseApprover")
   compDecisionsAsSubject  CompensationDecision[] @relation("CompDecisionSubject")
   compDecisionsProposed   CompensationDecision[] @relation("CompDecisionProposer")
+  timeOffRequested        TimeOffRequest[] @relation("TimeOffSubject")
+  timeOffApproved         TimeOffRequest[] @relation("TimeOffApprover")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -2366,4 +2370,92 @@ enum CompDecisionStatus {
   PROPOSED
   APPROVED
   REJECTED
+}
+
+// ==========================================
+// TIME OFF (Phase 2)
+// ==========================================
+// Org-defined leave policies (PTO, sick, parental, bereavement…) and
+// per-employee requests. Balances are computed lazily from policy
+// allowance minus approved/pending hours — no separate Balance table
+// to drift out of sync. Carryover and accrual lookbacks live in the
+// computation, not the schema.
+//
+// Timesheets (clock-in/out, hours per task) are a separate surface
+// that lands in v2 — they need a different UX (calendar grid + timer)
+// and different permission rules.
+
+model TimeOffPolicy {
+  id               String         @id @default(cuid())
+  organizationId   String
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name             String
+  type             TimeOffType    @default(PTO)
+  color            String?
+  description      String?
+
+  annualHours      Decimal        @db.Decimal(8, 2)
+  carryoverHours   Decimal        @default(0) @db.Decimal(8, 2)
+  requiresApproval Boolean        @default(true)
+  archived         Boolean        @default(false)
+
+  requests         TimeOffRequest[]
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, archived])
+}
+
+model TimeOffRequest {
+  id               String         @id @default(cuid())
+  organizationId   String
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId           String
+  user             User           @relation("TimeOffSubject", fields: [userId], references: [id])
+
+  policyId         String
+  policy           TimeOffPolicy  @relation(fields: [policyId], references: [id], onDelete: Restrict)
+
+  startDate        DateTime
+  endDate          DateTime
+  // Explicit so partial-day requests (e.g. 4-hour afternoon doctor
+  // visit) work — we don't infer days × 8 server-side.
+  hours            Decimal        @db.Decimal(6, 2)
+  reason           String?
+
+  status           TimeOffStatus  @default(PENDING)
+  approverId       String?
+  approver         User?          @relation("TimeOffApprover", fields: [approverId], references: [id])
+  decisionAt       DateTime?
+  decisionNote     String?
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([organizationId, status])
+  @@index([userId, status])
+  @@index([approverId, status])
+  @@index([userId, startDate])
+}
+
+enum TimeOffType {
+  PTO
+  SICK
+  PERSONAL
+  BEREAVEMENT
+  PARENTAL
+  UNPAID
+  OTHER
+}
+
+enum TimeOffStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
 }

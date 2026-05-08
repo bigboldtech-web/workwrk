@@ -9,7 +9,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign } from "lucide-react";
+import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign, CalendarOff } from "lucide-react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -49,10 +49,10 @@ export default async function InboxPage() {
 
   const horizonEnd = new Date(Date.now() + TASK_HORIZON_DAYS * DAY_MS);
 
-  // Six queries in parallel. Each is bounded by the user/org pair.
+  // Seven queries in parallel. Each is bounded by the user/org pair.
   // Comp decisions are HR-only (filtered server-side); we fetch
   // unconditionally and the empty result hides the section for non-HR.
-  const [sopAssignments, tasks, reviews, myOkrs, expensesToApprove, compToApprove] = await Promise.all([
+  const [sopAssignments, tasks, reviews, myOkrs, expensesToApprove, compToApprove, timeOffToApprove] = await Promise.all([
     prisma.sOPAssignment.findMany({
       where: {
         userId,
@@ -174,6 +174,26 @@ export default async function InboxPage() {
           },
         })
       : Promise.resolve([]),
+    // Time-off requests pinned to me as approver (or open queue when
+    // approverId is null). Skip rows the user submitted themselves.
+    prisma.timeOffRequest.findMany({
+      where: {
+        organizationId: orgId,
+        status: "PENDING",
+        OR: [{ approverId: userId }, { approverId: null }],
+        userId: { not: userId },
+      },
+      orderBy: { startDate: "asc" },
+      take: 25,
+      select: {
+        id: true,
+        startDate: true,
+        endDate: true,
+        hours: true,
+        user: { select: { firstName: true, lastName: true } },
+        policy: { select: { name: true } },
+      },
+    }),
   ]);
 
   // Compute "stale" OKRs: latest check-in across all KRs is older than
@@ -199,7 +219,8 @@ export default async function InboxPage() {
     reviews.length +
     staleOkrs.length +
     expensesToApprove.length +
-    compToApprove.length;
+    compToApprove.length +
+    timeOffToApprove.length;
   const overdueCount =
     sopAssignments.filter((a) => isOverdue(a.dueDate)).length +
     tasks.filter((t) => isOverdue(t.endAt ?? t.date)).length;
@@ -306,6 +327,45 @@ export default async function InboxPage() {
                       <span className={`text-xs flex-shrink-0 ml-3 ${overdue ? "text-red-400" : "text-muted"}`}>
                         {fmtRelative(due)}
                       </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {timeOffToApprove.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarOff size={16} /> Time off waiting on you
+              <span className="text-xs text-muted font-normal">({timeOffToApprove.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {timeOffToApprove.map((r) => {
+                const days = Math.floor((r.endDate.getTime() - r.startDate.getTime()) / DAY_MS) + 1;
+                return (
+                  <li key={r.id}>
+                    <Link
+                      href={`/time-off`}
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="text-sm font-medium truncate">
+                          {r.user ? `${r.user.firstName} ${r.user.lastName}` : "—"}
+                        </span>
+                        <span className="text-xs text-muted truncate">{r.policy.name}</span>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                        <span className="text-xs text-muted">
+                          {r.startDate.toLocaleDateString()}{days > 1 ? ` · ${days}d` : ""}
+                        </span>
+                        <span className="text-xs font-mono">{Number(r.hours).toFixed(0)}h</span>
+                      </div>
                     </Link>
                   </li>
                 );

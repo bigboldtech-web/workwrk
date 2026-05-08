@@ -15,7 +15,7 @@ import {
   CalendarDays, BookOpen, ListChecks, Star, MessageSquare, BarChart3,
   GraduationCap, Heart, Lightbulb, Crosshair, Grid3x3, ClipboardCheck,
   MessageSquareHeart, Shield, Package, Activity, Wrench, Link2, Bot,
-  Settings, FileText, Plus, UserPlus, Search, Receipt, DollarSign,
+  Settings, FileText, Plus, UserPlus, Search, Receipt, DollarSign, CalendarOff,
 } from "lucide-react";
 
 type CommandItem = {
@@ -38,6 +38,7 @@ const NAV: CommandItem[] = [
   { id: "tasks", label: "Work Calendar", href: "/tasks", icon: CalendarDays },
   { id: "expenses", label: "Expenses", href: "/expenses", icon: Receipt },
   { id: "compensation", label: "Compensation", href: "/compensation", icon: DollarSign, visible: (r) => r.isManager },
+  { id: "timeOff", label: "Time off", href: "/time-off", icon: CalendarOff },
   { id: "sops", label: "SOPs", href: "/sops", icon: BookOpen },
   { id: "processRuns", label: "Process Runs", href: "/process-runs", icon: ListChecks, visible: (r) => r.isManager },
   { id: "reviews", label: "Reviews", href: "/reviews", icon: Star },
@@ -64,6 +65,7 @@ const NAV: CommandItem[] = [
 const QUICK_ACTIONS: CommandItem[] = [
   { id: "new-task", label: "Create task", hint: "go to calendar", href: "/tasks?create=1", icon: Plus },
   { id: "new-expense", label: "Submit expense", hint: "open expenses", href: "/expenses?create=1", icon: Receipt },
+  { id: "request-time-off", label: "Request time off", hint: "open time off", href: "/time-off?create=1", icon: CalendarOff },
   { id: "new-sop", label: "Create SOP", hint: "go to SOPs", href: "/sops?create=1", icon: Plus, visible: (r) => r.isManager },
   { id: "invite-person", label: "Invite a person", hint: "open people directory", href: "/people?invite=1", icon: UserPlus, visible: (r) => r.isManager },
 ];
