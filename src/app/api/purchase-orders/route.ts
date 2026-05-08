@@ -17,6 +17,7 @@ import {
   isManager,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { tagFilterIds } from "@/lib/tag-filter";
 
 const VALID_STATUS = new Set(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "SENT", "RECEIVED", "CLOSED"]);
 
@@ -54,6 +55,15 @@ export async function GET(req: NextRequest) {
   if (status) {
     if (!VALID_STATUS.has(status)) return jsonError("Invalid status");
     if (scope !== "approve") where.status = status;
+  }
+
+  const tagsRaw = sp.get("tags");
+  if (tagsRaw) {
+    const matched = await tagFilterIds({ organizationId: orgId, entityType: "PURCHASE_ORDER", tagsRaw });
+    if (matched !== null) {
+      if (matched.length === 0) return jsonSuccess([]);
+      where.id = { in: matched };
+    }
   }
 
   const pos = await prisma.purchaseOrder.findMany({

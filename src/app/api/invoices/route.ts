@@ -11,6 +11,7 @@ import {
   isManager,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { tagFilterIds } from "@/lib/tag-filter";
 
 const VALID_STATUS = new Set(["PENDING", "APPROVED", "REJECTED", "PAID"]);
 
@@ -34,6 +35,15 @@ export async function GET(req: NextRequest) {
     const days = Number(dueWithin);
     if (Number.isFinite(days)) {
       where.dueDate = { lte: new Date(Date.now() + days * 24 * 3600 * 1000) };
+    }
+  }
+
+  const tagsRaw = sp.get("tags");
+  if (tagsRaw) {
+    const matched = await tagFilterIds({ organizationId: orgId, entityType: "INVOICE", tagsRaw });
+    if (matched !== null) {
+      if (matched.length === 0) return jsonSuccess([]);
+      where.id = { in: matched };
     }
   }
 

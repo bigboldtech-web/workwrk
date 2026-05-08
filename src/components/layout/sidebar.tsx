@@ -51,6 +51,8 @@ import {
   Clock,
   Briefcase,
   ShoppingCart,
+  Banknote,
+  BookText,
 } from "lucide-react";
 
 type NavItem = {
@@ -78,6 +80,10 @@ const navigation: NavItem[] = [
   { name: "Timesheets", key: "timesheets", href: "/timesheets", icon: Clock },
   { name: "Recruiting", key: "recruiting", href: "/recruiting", icon: Briefcase, managerOnly: true },
   { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true },
+  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true },
+  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true },
+  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart },
+  { name: "Financials", key: "financials", href: "/financials", icon: BookText, adminOnly: true },
   { name: "Learning", key: "learning", href: "/learning", icon: GraduationCap },
   { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops" },
   { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true },

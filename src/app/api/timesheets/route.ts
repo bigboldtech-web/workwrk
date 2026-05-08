@@ -21,6 +21,7 @@ import {
   isManager,
 } from "@/lib/api-helpers";
 import { weekStartUTC } from "@/lib/timesheet-week";
+import { tagFilterIds } from "@/lib/tag-filter";
 
 const MAX_LIMIT = 100;
 
@@ -51,6 +52,15 @@ export async function GET(req: NextRequest) {
     if (!isManager(session)) return jsonError("Forbidden", 403);
   } else {
     return jsonError("Invalid scope");
+  }
+
+  const tagsRaw = sp.get("tags");
+  if (tagsRaw) {
+    const matched = await tagFilterIds({ organizationId: orgId, entityType: "TIMESHEET", tagsRaw });
+    if (matched !== null) {
+      if (matched.length === 0) return jsonSuccess([]);
+      where.id = { in: matched };
+    }
   }
 
   const timesheets = await prisma.timesheet.findMany({

@@ -20,6 +20,7 @@ import {
   isOrgAdmin,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { tagFilterIds } from "@/lib/tag-filter";
 
 const VALID_CATEGORIES = new Set([
   "TRAVEL",
@@ -110,6 +111,16 @@ export async function GET(req: NextRequest) {
   }
   if (search) {
     where.description = { contains: search, mode: "insensitive" };
+  }
+
+  // Tag filter — narrows to expenses carrying ALL the requested tags.
+  const tagsRaw = sp.get("tags");
+  if (tagsRaw) {
+    const matched = await tagFilterIds({ organizationId: orgId, entityType: "EXPENSE", tagsRaw });
+    if (matched !== null) {
+      if (matched.length === 0) return jsonSuccess({ items: [], nextCursor: null });
+      where.id = { in: matched };
+    }
   }
 
   const items = await prisma.expense.findMany({

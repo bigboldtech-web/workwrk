@@ -5,6 +5,7 @@
 // gets the org running today and surfaces upcoming pay dates.
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -315,7 +316,9 @@ function PayRunsTab() {
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
                 <td className="px-4 py-2.5 text-xs">
-                  {new Date(r.periodStart).toLocaleDateString()} → {new Date(r.periodEnd).toLocaleDateString()}
+                  <Link href={`/payroll/${r.id}`} className="hover:underline">
+                    {new Date(r.periodStart).toLocaleDateString()} → {new Date(r.periodEnd).toLocaleDateString()}
+                  </Link>
                 </td>
                 <td className="px-4 py-2.5 text-xs">{r.payGroup.name}</td>
                 <td className="px-4 py-2.5 text-xs font-mono">{new Date(r.payDate).toLocaleDateString()}</td>

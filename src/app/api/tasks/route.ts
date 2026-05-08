@@ -7,6 +7,7 @@ import { genericNotificationTemplate } from "@/lib/email-templates";
 import { getTeamUserIds } from "@/lib/team";
 import { pushTaskToGoogle, deleteTaskFromGoogle } from "@/services/googleCalendarPush";
 import { GOOGLE_CAL_SOURCE } from "@/services/googleCalendar";
+import { tagFilterIds } from "@/lib/tag-filter";
 
 // GET: List tasks (calendar view)
 // Query params: userId, startDate, endDate, kraId
@@ -81,6 +82,17 @@ export async function GET(req: NextRequest) {
     Object.assign(where, spanFilter);
   }
   if (kraId) where.kraId = kraId;
+
+  // Optional tag filter — `?tags=tagId1,tagId2` narrows to tasks
+  // carrying ALL listed tags. Empty list = no filter (skip clause).
+  const tagsRaw = url.searchParams.get("tags");
+  if (tagsRaw) {
+    const matched = await tagFilterIds({ organizationId: orgId, entityType: "TASK", tagsRaw });
+    if (matched !== null) {
+      if (matched.length === 0) return jsonSuccess([]);
+      where.id = { in: matched };
+    }
+  }
 
   const tasks = await prisma.task.findMany({
     where,

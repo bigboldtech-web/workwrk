@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { BookOpen, Plus, BarChart3, Calendar as CalIcon } from "lucide-react";
+import { BookOpen, Plus, BarChart3, Calendar as CalIcon, FileText } from "lucide-react";
 
 type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
 
@@ -93,10 +93,12 @@ export default function FinancialsPage() {
         <TabsList>
           <TabsTrigger value="accounts">Chart of accounts</TabsTrigger>
           <TabsTrigger value="entries">Journal entries</TabsTrigger>
+          <TabsTrigger value="reports">Reports</TabsTrigger>
           <TabsTrigger value="calendar">Fiscal calendar</TabsTrigger>
         </TabsList>
         <TabsContent value="accounts" className="mt-4"><AccountsTab /></TabsContent>
         <TabsContent value="entries" className="mt-4"><EntriesTab /></TabsContent>
+        <TabsContent value="reports" className="mt-4"><ReportsTab /></TabsContent>
         <TabsContent value="calendar" className="mt-4"><CalendarTab /></TabsContent>
       </Tabs>
     </div>
@@ -350,6 +352,215 @@ function EntriesTab() {
         </table>
       </CardContent>
     </Card>
+  );
+}
+
+// ─── Reports ───────────────────────────────────────────────────────
+
+type AccountRow = { id: string; code: string; name: string; type: AccountType; debit: number; credit: number; balance: number };
+
+function fmtMoney(n: number): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(n);
+}
+
+function ReportsTab() {
+  const [report, setReport] = useState<"trial-balance" | "income-statement" | "balance-sheet">("trial-balance");
+  const today = new Date();
+  const [from, setFrom] = useState(`${today.getUTCFullYear()}-01-01`);
+  const [to, setTo] = useState(today.toISOString().slice(0, 10));
+  const [data, setData] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/financial-reports?report=${report}&from=${from}&to=${to}`);
+      const json = await res.json();
+      setData(json);
+    } finally { setLoading(false); }
+  }, [report, from, to]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-1.5">
+          {([
+            ["trial-balance", "Trial balance"],
+            ["income-statement", "P&L"],
+            ["balance-sheet", "Balance sheet"],
+          ] as const).map(([k, lbl]) => (
+            <button
+              key={k}
+              onClick={() => setReport(k)}
+              className={`px-2.5 py-1 rounded border text-xs ${
+                report === k ? "border-fg/30 text-fg" : "border-line text-muted hover:text-fg"
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <Label className="text-xs text-muted">From</Label>
+          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-7 text-xs w-36" />
+          <Label className="text-xs text-muted">To</Label>
+          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-7 text-xs w-36" />
+        </div>
+      </div>
+      {loading ? (
+        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+      ) : !data ? null : report === "trial-balance" ? (
+        <TrialBalanceView data={data as { rows: AccountRow[]; totalDebits: number; totalCredits: number; delta: number }} />
+      ) : report === "income-statement" ? (
+        <IncomeStatementView data={data as { revenue: AccountRow[]; expense: AccountRow[]; totalRevenue: number; totalExpense: number; netIncome: number }} />
+      ) : (
+        <BalanceSheetView data={data as { assets: AccountRow[]; liabilities: AccountRow[]; equity: AccountRow[]; totalAssets: number; totalLiabilities: number; totalEquityBooked: number; netIncome: number; totalEquity: number; delta: number }} />
+      )}
+    </>
+  );
+}
+
+function TrialBalanceView({ data }: { data: { rows: AccountRow[]; totalDebits: number; totalCredits: number; delta: number } }) {
+  if (data.rows.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-10 text-center text-sm text-muted">
+          No posted entries in this range. Post a journal entry to populate the trial balance.
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted border-b border-white/5">
+              <th className="px-4 py-2.5 font-normal">Code</th>
+              <th className="px-4 py-2.5 font-normal">Account</th>
+              <th className="px-4 py-2.5 font-normal">Type</th>
+              <th className="px-4 py-2.5 font-normal text-right">Debit</th>
+              <th className="px-4 py-2.5 font-normal text-right">Credit</th>
+              <th className="px-4 py-2.5 font-normal text-right">Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                <td className="px-4 py-2 font-mono text-xs">{r.code}</td>
+                <td className="px-4 py-2">{r.name}</td>
+                <td className="px-4 py-2 text-xs text-muted">{TYPE_LABEL[r.type]}</td>
+                <td className="px-4 py-2 text-right font-mono text-xs">{r.debit ? fmtMoney(r.debit) : "—"}</td>
+                <td className="px-4 py-2 text-right font-mono text-xs">{r.credit ? fmtMoney(r.credit) : "—"}</td>
+                <td className="px-4 py-2 text-right font-mono text-xs font-medium">{fmtMoney(r.balance)}</td>
+              </tr>
+            ))}
+            <tr className="border-t-2 border-fg/20 font-medium">
+              <td colSpan={3} className="px-4 py-3 text-right text-xs">Totals</td>
+              <td className="px-4 py-3 text-right font-mono text-xs">{fmtMoney(data.totalDebits)}</td>
+              <td className="px-4 py-3 text-right font-mono text-xs">{fmtMoney(data.totalCredits)}</td>
+              <td className={`px-4 py-3 text-right font-mono text-xs ${Math.abs(data.delta) > 0.005 ? "text-red-400" : "text-green-400"}`}>
+                {Math.abs(data.delta) > 0.005 ? `Δ ${fmtMoney(data.delta)}` : "Balanced"}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function IncomeStatementView({ data }: { data: { revenue: AccountRow[]; expense: AccountRow[]; totalRevenue: number; totalExpense: number; netIncome: number } }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <Card>
+        <CardContent className="p-4">
+          <div className="text-xs uppercase tracking-wide text-muted mb-2 flex items-center gap-1">
+            <FileText size={12} /> Revenue
+          </div>
+          <ReportLines rows={data.revenue} total={data.totalRevenue} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="p-4">
+          <div className="text-xs uppercase tracking-wide text-muted mb-2 flex items-center gap-1">
+            <FileText size={12} /> Expense
+          </div>
+          <ReportLines rows={data.expense} total={data.totalExpense} />
+        </CardContent>
+      </Card>
+      <Card className="md:col-span-2">
+        <CardContent className="p-4 flex items-center justify-between">
+          <div className="text-sm font-semibold">Net income</div>
+          <div className={`font-mono text-lg ${data.netIncome >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {fmtMoney(data.netIncome)}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function BalanceSheetView({ data }: { data: { assets: AccountRow[]; liabilities: AccountRow[]; equity: AccountRow[]; totalAssets: number; totalLiabilities: number; totalEquityBooked: number; netIncome: number; totalEquity: number; delta: number } }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <Card>
+        <CardContent className="p-4">
+          <div className="text-xs uppercase tracking-wide text-muted mb-2">Assets</div>
+          <ReportLines rows={data.assets} total={data.totalAssets} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="p-4">
+          <div className="text-xs uppercase tracking-wide text-muted mb-2">Liabilities</div>
+          <ReportLines rows={data.liabilities} total={data.totalLiabilities} />
+          <div className="border-t border-line my-3" />
+          <div className="text-xs uppercase tracking-wide text-muted mb-2">Equity</div>
+          <ReportLines rows={data.equity} total={data.totalEquityBooked} />
+          <div className="flex items-center justify-between text-xs mt-2">
+            <span className="text-muted">+ Net income (period)</span>
+            <span className="font-mono">{fmtMoney(data.netIncome)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs mt-1.5 font-semibold">
+            <span>Total equity</span>
+            <span className="font-mono">{fmtMoney(data.totalEquity)}</span>
+          </div>
+        </CardContent>
+      </Card>
+      <Card className="md:col-span-2">
+        <CardContent className="p-4 flex items-center justify-between">
+          <div className="text-sm font-semibold">Assets vs (Liabilities + Equity)</div>
+          <div className={`font-mono text-sm ${Math.abs(data.delta) > 0.005 ? "text-red-400" : "text-green-400"}`}>
+            {Math.abs(data.delta) > 0.005 ? `Out of balance: ${fmtMoney(data.delta)}` : "Balanced"}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ReportLines({ rows, total }: { rows: AccountRow[]; total: number }) {
+  if (rows.length === 0) {
+    return <div className="text-xs text-muted py-1">No accounts.</div>;
+  }
+  return (
+    <>
+      <ul className="space-y-1">
+        {rows.map((r) => (
+          <li key={r.id} className="flex items-center justify-between text-xs">
+            <span className="truncate"><span className="font-mono text-muted mr-2">{r.code}</span>{r.name}</span>
+            <span className="font-mono">{fmtMoney(r.balance)}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="border-t border-line my-2" />
+      <div className="flex items-center justify-between text-xs font-semibold">
+        <span>Total</span>
+        <span className="font-mono">{fmtMoney(total)}</span>
+      </div>
+    </>
   );
 }
 
