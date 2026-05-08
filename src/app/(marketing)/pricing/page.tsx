@@ -1,333 +1,426 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+// White-clean pricing page. Three tiers + Enterprise contact CTA.
+// Mirrors the landing-v2 aesthetic — white surfaces, single dark
+// CTA strip at the bottom, no dark bento chrome.
 
-import { Reveal, SectionHeader } from "@/components/bento";
-import { FaqClient } from "@/components/landing/faq-client";
-import { PricingPlans } from "@/components/pricing/pricing-plans";
+import Link from "next/link";
+import type { Metadata } from "next";
+import { Fragment } from "react";
+import { ArrowRight, Check, X } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Pricing — WorkwrK | Per-user or flat monthly, any currency",
+  title: "Pricing — WorkWrk",
   description:
-    "Two ways to pay. Per active user from $4/month or flat monthly tiers from $50. All plans in your currency — GST / VAT handled at checkout.",
-  alternates: { canonical: "https://workwrk.com/pricing" },
-  openGraph: {
-    title: "Pricing — WorkwrK",
-    description:
-      "Per-user or flat monthly. Starts free, scales to enterprise. Every currency.",
-    url: "https://workwrk.com/pricing",
-  },
+    "Simple, transparent pricing for teams of every size. Free forever for teams under 25. WorkWrk replaces 15+ tools so you save more than you spend.",
 };
 
-const faqItems = [
+type Plan = {
+  name: string;
+  tagline: string;
+  price: string;
+  priceSuffix?: string;
+  badge?: string;
+  cta: string;
+  ctaHref: string;
+  highlight?: boolean;
+  features: string[];
+  notIncluded?: string[];
+};
+
+const PLANS: Plan[] = [
   {
-    q: "How is per-user pricing different from flat-tier pricing?",
-    a: "Per-user ($4/user/month) is elastic — you only pay for active accounts, ideal for teams where headcount moves. Flat-tier is predictable — one fixed monthly fee per user band ($50 for 25, $150 for 100, $300 for 500). Pick whichever makes your accounting happier.",
+    name: "Starter",
+    tagline: "Everything to run a small team.",
+    price: "Free",
+    priceSuffix: "forever",
+    cta: "Get started",
+    ctaHref: "/signup",
+    features: [
+      "Up to 25 employees",
+      "All core modules: People, Tasks, SOPs, OKRs, Reviews",
+      "Inbox aggregating 12 work-streams",
+      "Cmd-K palette + global search",
+      "Expenses & Time off",
+      "1 GB file storage",
+      "18+ languages",
+      "Email support",
+    ],
+    notIncluded: [
+      "Procurement & Compensation cycles",
+      "Recruiting & ATS",
+      "SSO / SCIM",
+      "Audit trail viewer",
+    ],
   },
   {
-    q: "Will the price change when I switch currency?",
-    a: "Yes. All prices are canonically stored in USD and converted to your selected currency using our indicative rate. Finalised amount is locked at checkout. GST or VAT added where applicable.",
+    name: "Growth",
+    tagline: "For teams scaling past 50.",
+    price: "$8",
+    priceSuffix: "/user/month",
+    badge: "Most popular",
+    highlight: true,
+    cta: "Start 14-day trial",
+    ctaHref: "/signup",
+    features: [
+      "Everything in Starter",
+      "Unlimited employees",
+      "Procurement (POs + Invoices + Vendors)",
+      "Compensation cycles",
+      "Recruiting + Interview scheduling",
+      "Learning / LMS",
+      "Workforce planning",
+      "Worktags (cost-center / business-unit / region)",
+      "Bulk approve across all queues",
+      "CSV export across all modules",
+      "100 GB file storage",
+      "Priority support",
+    ],
+    notIncluded: [
+      "SSO / SCIM",
+      "Custom domains",
+      "SLA",
+    ],
   },
   {
-    q: "Can I switch between per-user and flat-tier later?",
-    a: "Yes, any time. Upgrades prorate. Downgrades take effect at the next billing cycle. No exit fees, no penalties.",
-  },
-  {
-    q: "What's the free tier actually include?",
-    a: "Up to 10 users. People, KRAs, KPIs, Tasks, up to 10 SOPs, monthly pulse reviews, kudos feed. No credit card. No expiry. Forever free — we make our money from teams that outgrow it.",
-  },
-  {
-    q: "GST, VAT, local invoicing — what's covered?",
-    a: "Indian GST compliant with full ITC. EU VAT handled (we're VAT registered). UK VAT, Singapore GST, UAE VAT too. Ask us about your jurisdiction — we've probably done it.",
-  },
-  {
-    q: "Do you offer annual discounts?",
-    a: "Yes. Annual billing saves 2 months across all paid plans. For Scale and Enterprise annual contracts, email sales@workwrk.com for custom terms.",
-  },
-  {
-    q: "What about education / NGO pricing?",
-    a: "50% off for registered educational institutions and NGOs (80G / 12A). Email hi@workwrk.com with your registration — we reply within a working day.",
-  },
-  {
-    q: "What happens after the 14-day trial?",
-    a: "You pick a plan, or we auto-drop you to the Starter free tier. No auto-charges, ever. We don't play that game.",
+    name: "Scale",
+    tagline: "For Fortune-500 / 500K-employee orgs.",
+    price: "$16",
+    priceSuffix: "/user/month",
+    cta: "Talk to sales",
+    ctaHref: "/contact",
+    features: [
+      "Everything in Growth",
+      "SAML SSO + SCIM 2.0 directory sync",
+      "Audit trail viewer + field-level diffs",
+      "Custom domains + white-label branding",
+      "10-tier RBAC + permission matrix",
+      "Field-level access controls",
+      "Data residency options",
+      "Dedicated CSM",
+      "99.9% uptime SLA",
+      "Unlimited storage",
+      "24/7 support",
+    ],
   },
 ];
 
-const COMPARE_ROWS: {
-  category: string;
-  items: { name: string; vals: (string | boolean)[] }[];
-}[] = [
+type ComparisonRow = {
+  feature: string;
+  starter: boolean | string;
+  growth: boolean | string;
+  scale: boolean | string;
+};
+
+const COMPARISON: Array<{ section: string; rows: ComparisonRow[] }> = [
   {
-    category: "Core",
-    items: [
-      { name: "People · org graph", vals: [true, true, true, true] },
-      { name: "KRA / KPI tracking", vals: ["Basic", true, true, true] },
-      { name: "Tasks · auto-escalation", vals: [true, true, true, true] },
-      { name: "SOPs", vals: ["10", "Unlimited", "Unlimited", "Unlimited"] },
+    section: "Core HR & Performance",
+    rows: [
+      { feature: "People directory + org chart", starter: true, growth: true, scale: true },
+      { feature: "OKRs + KRA/KPI engine", starter: true, growth: true, scale: true },
+      { feature: "Performance reviews + 360 feedback", starter: true, growth: true, scale: true },
+      { feature: "SOPs + compliance tracking", starter: true, growth: true, scale: true },
+      { feature: "Tasks + Gantt + calendar sync", starter: true, growth: true, scale: true },
+      { feature: "Onboarding workflows", starter: true, growth: true, scale: true },
     ],
   },
   {
-    category: "Performance",
-    items: [
-      { name: "48-hour review cycles", vals: [false, true, true, true] },
-      { name: "Composite scoring", vals: [false, true, true, true] },
-      { name: "Calibration σ flags", vals: [false, true, true, true] },
-      { name: "Custom weight vectors", vals: [false, false, true, true] },
+    section: "Spend & Operations",
+    rows: [
+      { feature: "Expenses + approval flow", starter: true, growth: true, scale: true },
+      { feature: "Time off + leave policies", starter: true, growth: true, scale: true },
+      { feature: "Timesheets + clock punch", starter: true, growth: true, scale: true },
+      { feature: "Compensation cycles", starter: false, growth: true, scale: true },
+      { feature: "Procurement (POs + Invoices)", starter: false, growth: true, scale: true },
+      { feature: "Vendor management", starter: false, growth: true, scale: true },
     ],
   },
   {
-    category: "AI + integrations",
-    items: [
-      { name: "AI Engine (queries/mo)", vals: ["—", "500", "5,000", "Unlimited"] },
-      { name: "Scribe SOP extraction", vals: [false, true, true, true] },
-      { name: "40+ native integrations", vals: ["5", true, true, true] },
-      { name: "Webhooks · REST API", vals: [false, true, true, true] },
+    section: "Talent",
+    rows: [
+      { feature: "Recruiting + ATS pipeline", starter: false, growth: true, scale: true },
+      { feature: "Interview scheduling + scorecards", starter: false, growth: true, scale: true },
+      { feature: "Learning / LMS", starter: false, growth: true, scale: true },
+      { feature: "Workforce planning", starter: false, growth: true, scale: true },
     ],
   },
   {
-    category: "Security + compliance",
-    items: [
-      { name: "SOC 2 Type II", vals: [true, true, true, true] },
-      { name: "DPDPA / GDPR compliant", vals: [true, true, true, true] },
-      { name: "SSO / SAML / SCIM", vals: [false, false, true, true] },
-      { name: "Dedicated region / VPC", vals: [false, false, false, true] },
+    section: "Platform",
+    rows: [
+      { feature: "Inbox (12 work-streams)", starter: true, growth: true, scale: true },
+      { feature: "Cmd-K palette", starter: true, growth: true, scale: true },
+      { feature: "Worktags / dimensional tagging", starter: false, growth: true, scale: true },
+      { feature: "AI agents + content generation", starter: true, growth: true, scale: true },
+      { feature: "Bulk approve + CSV export", starter: false, growth: true, scale: true },
+      { feature: "API + webhooks", starter: "Read only", growth: true, scale: true },
     ],
+  },
+  {
+    section: "Enterprise",
+    rows: [
+      { feature: "SAML SSO", starter: false, growth: false, scale: true },
+      { feature: "SCIM 2.0 directory sync", starter: false, growth: false, scale: true },
+      { feature: "Audit trail viewer", starter: false, growth: false, scale: true },
+      { feature: "Custom domains + white label", starter: false, growth: false, scale: true },
+      { feature: "Field-level access controls", starter: false, growth: false, scale: true },
+      { feature: "Data residency (EU / US / IN)", starter: false, growth: false, scale: true },
+      { feature: "99.9% uptime SLA", starter: false, growth: false, scale: true },
+      { feature: "Dedicated CSM", starter: false, growth: false, scale: true },
+    ],
+  },
+];
+
+const FAQ: Array<{ q: string; a: string }> = [
+  {
+    q: "Is Starter actually free forever?",
+    a: "Yes. Up to 25 employees, all core HR + performance + tasks + SOPs + Inbox + Cmd-K, no credit card required. No surprise upgrade walls. We earn money when you grow past 25 people or want Procurement / Comp / Recruiting / SSO.",
+  },
+  {
+    q: "Can I switch from Workday or BambooHR or Rippling?",
+    a: "Yes. Importer ingests CSV exports from any HRIS. Most teams migrate in a weekend; the platform layout maps cleanly to people / departments / roles, and Worktags handle whatever cost-center scheme you had. We help with the migration on Growth and Scale tiers.",
+  },
+  {
+    q: "Why is per-user pricing reasonable but Workday isn't?",
+    a: "Workday is built for global enterprise sales motions — six-figure floors, 18-month implementations, dedicated implementation partners. We're built for self-serve. You spin up an org in a weekend, configure it through the admin UI, and the whole platform pays for itself by replacing 15 fragmented tools.",
+  },
+  {
+    q: "Do you support Payroll and Benefits?",
+    a: "Payroll integrates with CheckHQ (US), Razorpay Payroll (IN), and Sequoia (US benefits). We don't process payroll directly — that's a regulated, jurisdiction-specific space best served by specialists. Our employees + comp + time off data flows into them.",
+  },
+  {
+    q: "What happens if I outgrow Growth?",
+    a: "Scale unlocks SSO / SCIM / Audit / SLA — the things Fortune-500 IT requires before they sign. You can self-serve upgrade in Settings, no contract renegotiation. Most customers at ~250 employees move up.",
   },
 ];
 
 export default function PricingPage() {
   return (
-    <>
-      <HeroBlock />
-      <PlansBlock />
-      <ComparisonBlock />
-      <FaqBlock items={faqItems} />
-      <CtaBlock />
-    </>
-  );
-}
+    <div className="bg-white text-slate-900">
+      {/* Hero */}
+      <section className="max-w-5xl mx-auto px-6 lg:px-10 pt-20 pb-12 text-center">
+        <h1 className="text-5xl lg:text-6xl font-semibold tracking-tight">
+          Simple pricing.{" "}
+          <span className="text-slate-400">Every tool in one bill.</span>
+        </h1>
+        <p className="mt-6 max-w-2xl mx-auto text-base lg:text-lg text-slate-600">
+          You're already paying for an HRIS, an ATS, a spend tool, a learning
+          platform, and 11 spreadsheets. WorkWrk replaces all of it for less
+          than what you pay for any one of them.
+        </p>
+      </section>
 
-function HeroBlock() {
-  return (
-    <section className="bento-section" style={{ paddingTop: 40 }}>
-      <div className="bento-container">
-        <Reveal>
-          <SectionHeader
-            label="Pricing"
-            title={
-              <>
-                Two ways to pay. <span className="hi">Your currency.</span>
-              </>
-            }
-            subtitle="Per active user for elastic teams, or flat monthly tiers for predictable budgeting. Prices shown in your selected currency — switch it from the globe in the nav."
-            aside={{
-              label: "Starts",
-              stat: "Free",
-              text: "Up to 10 users on the Starter tier · no expiry, no credit card.",
-            }}
-          />
-        </Reveal>
-      </div>
-    </section>
-  );
-}
+      {/* Plan cards */}
+      <section className="max-w-7xl mx-auto px-6 lg:px-10 pb-24">
+        <div className="grid lg:grid-cols-3 gap-6">
+          {PLANS.map((p) => (
+            <PlanCard key={p.name} plan={p} />
+          ))}
+        </div>
+        <p className="text-center text-sm text-slate-500 mt-10">
+          Prices in USD. INR / EUR / AED billed in local currency at sign-up.
+          {" "}
+          <Link href="/contact" className="text-slate-900 underline hover:no-underline">
+            Need a custom contract?
+          </Link>
+        </p>
+      </section>
 
-function PlansBlock() {
-  return (
-    <section className="bento-section" style={{ paddingTop: 0 }}>
-      <div className="bento-container">
-        <PricingPlans defaultMode="flat" />
-      </div>
-    </section>
-  );
-}
-
-function renderVal(v: string | boolean) {
-  if (v === true) return <span className="cp-tick">✓</span>;
-  if (v === false) return <span className="cp-x">—</span>;
-  return <span className="cp-val">{v}</span>;
-}
-
-function ComparisonBlock() {
-  return (
-    <section className="bento-section">
-      <div className="bento-container">
-        <Reveal>
-          <SectionHeader
-            label="Compare"
-            title={
-              <>
-                What&apos;s in each <span className="hi">tier, row by row.</span>
-              </>
-            }
-            subtitle="The flat-tier columns below are what you get. Per-user pricing gets the same feature set as the tier at your usage band."
-            aside={{
-              label: "No overages",
-              stat: "0",
-              text: "We never bill for surprise usage. You move up a tier — that's it.",
-            }}
-          />
-        </Reveal>
-
-        <Reveal>
-          <div className="cp-card">
-            <div className="cp-head">
-              <div>Feature</div>
-              <div>Starter</div>
-              <div>Team</div>
-              <div>
-                Growth <span className="cp-pop">Popular</span>
-              </div>
-              <div>Scale</div>
-            </div>
-            {COMPARE_ROWS.map((c) => (
-              <div key={c.category}>
-                <div className="cp-cat">{c.category}</div>
-                {c.items.map((r) => (
-                  <div key={r.name} className="cp-row">
-                    <div className="cp-name">{r.name}</div>
-                    {r.vals.map((v, i) => (
-                      <div key={i}>{renderVal(v)}</div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </Reveal>
-      </div>
-
-      <style>{`
-        .cp-card {
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: 28px;
-          padding: 12px 6px;
-          overflow: hidden;
-        }
-        .cp-head, .cp-row {
-          display: grid;
-          grid-template-columns: 1.6fr repeat(4, 1fr);
-          align-items: center;
-          padding: 14px 20px;
-          font-size: 13px;
-        }
-        .cp-head {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          text-transform: uppercase;
-          letter-spacing: 0.14em;
-          color: var(--b-t3);
-          border-bottom: 1px solid var(--b-line-2);
-        }
-        .cp-pop {
-          display: inline-block;
-          margin-left: 6px;
-          padding: 2px 7px;
-          background: var(--b-lime);
-          color: var(--b-bg);
-          border-radius: 100px;
-          font-size: 8.5px;
-          letter-spacing: 0.12em;
-        }
-        .cp-cat {
-          padding: 18px 20px 6px;
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          text-transform: uppercase;
-          letter-spacing: 0.16em;
-          color: var(--b-lime);
-        }
-        .cp-row { border-bottom: 1px dashed var(--b-line); }
-        .cp-row:last-child { border-bottom: none; }
-        .cp-name { color: var(--b-off); font-size: 13.5px; }
-        .cp-tick { color: var(--b-lime); font-weight: 700; }
-        .cp-x { color: var(--b-t4); }
-        .cp-val { font-family: var(--font-geist-mono), monospace; font-size: 12.5px; color: var(--b-t2); }
-
-        @media (max-width: 800px) {
-          .cp-head, .cp-row { grid-template-columns: 1.4fr 1fr 1fr; }
-          .cp-head > *:nth-child(4), .cp-head > *:nth-child(5),
-          .cp-row > *:nth-child(4), .cp-row > *:nth-child(5) { display: none; }
-        }
-      `}</style>
-    </section>
-  );
-}
-
-function FaqBlock({ items }: { items: { q: string; a: string }[] }) {
-  return (
-    <section className="bento-section">
-      <div className="bento-container">
-        <Reveal>
-          <SectionHeader
-            label="Pricing FAQ"
-            title={
-              <>
-                Every money question <span className="hi">we keep getting.</span>
-              </>
-            }
-            subtitle="If it's about money, it's here. Anything else, hi@workwrk.com."
-          />
-        </Reveal>
-        <FaqClient items={items} />
-      </div>
-    </section>
-  );
-}
-
-function CtaBlock() {
-  return (
-    <section className="bento-section-cta">
-      <div className="bento-container">
-        <Reveal>
-          <div
-            style={{
-              background: "var(--b-card)",
-              border: "1px solid var(--b-line)",
-              borderRadius: 36,
-              padding: "64px 48px",
-              textAlign: "center",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <h2
-              style={{
-                fontSize: "clamp(40px, 6vw, 72px)",
-                fontWeight: 600,
-                letterSpacing: "-0.04em",
-                lineHeight: 1,
-                marginBottom: 18,
-                color: "var(--b-fg)",
-              }}
-            >
-              Try it free for{" "}
-              <span style={{ color: "var(--b-lime)" }}>fourteen days.</span>
+      {/* Comparison table */}
+      <section className="bg-slate-50/50 border-y border-slate-100">
+        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-24">
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <h2 className="text-3xl lg:text-5xl font-semibold tracking-tight">
+              Compare every feature.
             </h2>
-            <p
-              style={{
-                fontSize: 16,
-                color: "var(--b-t2)",
-                maxWidth: 520,
-                margin: "0 auto 28px",
-                lineHeight: 1.55,
-              }}
-            >
-              No credit card. Full product access. Your data in the system by
-              end of day one.
+            <p className="mt-5 text-base lg:text-lg text-slate-600">
+              No fine print. The Starter tier really does include the whole
+              core platform — Growth and Scale add modules on top.
             </p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-              <Link href="/signup" className="bento-btn bento-btn-lime bento-btn-lg">
-                Start free trial →
-              </Link>
-              <Link href="/demo" className="bento-btn bento-btn-ghost bento-btn-lg">
-                Book a live walkthrough
-              </Link>
-            </div>
           </div>
-        </Reveal>
+
+          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50/40">
+                  <th className="text-left text-xs font-semibold text-slate-500 px-6 py-3">
+                    Feature
+                  </th>
+                  <th className="text-center text-xs font-semibold text-slate-700 px-6 py-3 w-32">
+                    Starter
+                  </th>
+                  <th className="text-center text-xs font-semibold text-slate-900 px-6 py-3 w-32">
+                    Growth
+                  </th>
+                  <th className="text-center text-xs font-semibold text-slate-700 px-6 py-3 w-32">
+                    Scale
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARISON.map((section, si) => (
+                  <Fragment key={`section-${si}`}>
+                    <tr className="bg-slate-50/40 border-y border-slate-100">
+                      <td colSpan={4} className="px-6 py-2 text-[10px] uppercase tracking-[0.18em] font-semibold text-slate-500">
+                        {section.section}
+                      </td>
+                    </tr>
+                    {section.rows.map((row, ri) => (
+                      <tr key={`row-${si}-${ri}`} className="border-b border-slate-100">
+                        <td className="px-6 py-3 text-slate-700">{row.feature}</td>
+                        <ComparisonCell value={row.starter} />
+                        <ComparisonCell value={row.growth} highlight />
+                        <ComparisonCell value={row.scale} />
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section className="max-w-3xl mx-auto px-6 lg:px-10 py-24">
+        <h2 className="text-3xl lg:text-5xl font-semibold tracking-tight text-center">
+          Questions, answered.
+        </h2>
+        <div className="mt-12 space-y-2">
+          {FAQ.map((item) => (
+            <details
+              key={item.q}
+              className="group rounded-xl border border-slate-200 bg-white open:bg-slate-50/50 transition-colors"
+            >
+              <summary className="cursor-pointer list-none px-6 py-4 flex items-center justify-between">
+                <span className="font-medium text-slate-900">{item.q}</span>
+                <span className="text-slate-400 group-open:rotate-45 transition-transform text-2xl leading-none">
+                  +
+                </span>
+              </summary>
+              <div className="px-6 pb-5 text-slate-600">{item.a}</div>
+            </details>
+          ))}
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      <section className="bg-slate-900 text-white">
+        <div className="max-w-5xl mx-auto px-6 lg:px-10 py-24 lg:py-32 text-center">
+          <h2 className="text-4xl lg:text-6xl font-semibold tracking-tight leading-[1.05]">
+            Start free.
+            <br />
+            <span className="text-slate-400">Upgrade when you need to.</span>
+          </h2>
+          <p className="mt-6 max-w-2xl mx-auto text-base lg:text-lg text-slate-300">
+            No demo gating. No "talk to sales" walls on Starter or Growth.
+            Self-serve in 7 days, not 7 months.
+          </p>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/signup"
+              className="inline-flex items-center gap-2 px-6 h-12 rounded-xl bg-white text-slate-900 font-medium hover:bg-slate-100 transition-colors"
+            >
+              Get started — it's free
+              <ArrowRight size={16} />
+            </Link>
+            <Link
+              href="/contact"
+              className="inline-flex items-center gap-2 px-6 h-12 rounded-xl border border-slate-700 text-white font-medium hover:bg-slate-800 transition-colors"
+            >
+              Talk to sales
+            </Link>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PlanCard({ plan }: { plan: Plan }) {
+  return (
+    <div
+      className={`relative rounded-2xl p-8 ${
+        plan.highlight
+          ? "bg-slate-900 text-white border border-slate-900 shadow-2xl shadow-slate-300/40"
+          : "bg-white border border-slate-200"
+      }`}
+    >
+      {plan.badge && (
+        <span
+          className={`absolute -top-3 right-6 px-3 h-6 inline-flex items-center text-[11px] font-semibold rounded-full ${
+            plan.highlight ? "bg-[#d4ff2e] text-slate-900" : "bg-slate-900 text-white"
+          }`}
+        >
+          {plan.badge}
+        </span>
+      )}
+      <h3 className={`text-lg font-semibold ${plan.highlight ? "text-white" : "text-slate-900"}`}>
+        {plan.name}
+      </h3>
+      <p className={`text-sm mt-1 ${plan.highlight ? "text-slate-300" : "text-slate-500"}`}>
+        {plan.tagline}
+      </p>
+
+      <div className="mt-6 flex items-baseline gap-1">
+        <span className={`text-5xl font-semibold ${plan.highlight ? "text-white" : "text-slate-900"}`}>
+          {plan.price}
+        </span>
+        {plan.priceSuffix && (
+          <span className={`text-sm ${plan.highlight ? "text-slate-400" : "text-slate-500"}`}>
+            {plan.priceSuffix}
+          </span>
+        )}
       </div>
-    </section>
+
+      <Link
+        href={plan.ctaHref}
+        className={`mt-6 inline-flex items-center justify-center w-full h-11 rounded-lg font-medium transition-colors ${
+          plan.highlight
+            ? "bg-[#d4ff2e] text-slate-900 hover:bg-[#c5ee20]"
+            : "bg-slate-900 text-white hover:bg-slate-800"
+        }`}
+      >
+        {plan.cta}
+      </Link>
+
+      <ul className={`mt-8 space-y-2.5 text-sm ${plan.highlight ? "text-slate-200" : "text-slate-700"}`}>
+        {plan.features.map((f) => (
+          <li key={f} className="flex items-start gap-2">
+            <Check
+              size={16}
+              className={`flex-shrink-0 mt-0.5 ${plan.highlight ? "text-[#d4ff2e]" : "text-emerald-600"}`}
+            />
+            <span>{f}</span>
+          </li>
+        ))}
+      </ul>
+
+      {plan.notIncluded && plan.notIncluded.length > 0 && (
+        <ul className={`mt-4 pt-4 border-t space-y-2 text-sm ${plan.highlight ? "border-slate-700 text-slate-500" : "border-slate-100 text-slate-400"}`}>
+          {plan.notIncluded.map((f) => (
+            <li key={f} className="flex items-start gap-2">
+              <X size={16} className="flex-shrink-0 mt-0.5 opacity-60" />
+              <span>{f}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ComparisonCell({ value, highlight }: { value: boolean | string; highlight?: boolean }) {
+  return (
+    <td
+      className={`text-center px-6 py-3 ${
+        highlight ? "bg-slate-50/40" : ""
+      }`}
+    >
+      {typeof value === "string" ? (
+        <span className="text-xs text-slate-500">{value}</span>
+      ) : value ? (
+        <Check size={16} className="text-emerald-600 inline" />
+      ) : (
+        <span className="text-slate-300 text-sm">—</span>
+      )}
+    </td>
   );
 }

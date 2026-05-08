@@ -1,343 +1,264 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+// White-clean compare page. Side-by-side vs Workday / BambooHR /
+// Rippling, with honest caveats. Strategy is segment-clarity, not
+// FUD — we genuinely lose to Workday on regulated payroll and to
+// Rippling on global EOR; we say so.
 
-import { Reveal, SectionHeader } from "@/components/bento";
+import Link from "next/link";
+import type { Metadata } from "next";
+import { Fragment } from "react";
+import { ArrowRight, Check, Minus, X } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Compare — WorkwrK vs Lattice, Leapsome, 15Five, and spreadsheets",
+  title: "Compare WorkWrk vs Workday, BambooHR, Rippling — WorkWrk",
   description:
-    "How WorkwrK compares to standalone review tools (Lattice, Leapsome, 15Five) and to spreadsheets. One spine vs stitched software.",
-  alternates: { canonical: "https://workwrk.com/compare" },
+    "Honest, line-by-line comparison of WorkWrk vs Workday, BambooHR, and Rippling. Where we win, where we don't, and which competitor is right for which segment.",
 };
 
-type Row = {
-  capability: string;
-  workwrk: string | boolean;
-  lattice: string | boolean;
-  leapsome: string | boolean;
-  fiveteen: string | boolean;
-  sheets: string | boolean;
-};
+type Cell = boolean | "partial" | string;
+type Row = { feature: string; workwrk: Cell; workday: Cell; bamboo: Cell; rippling: Cell; note?: string };
 
-const rows: { category: string; items: Row[] }[] = [
+const ROWS: Array<{ section: string; rows: Row[] }> = [
   {
-    category: "Core",
-    items: [
-      { capability: "People · org graph", workwrk: true, lattice: "Basic", leapsome: "Basic", fiveteen: false, sheets: "Manual" },
-      { capability: "KPIs · live from tools", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
-      { capability: "KRAs · per-role, AI-drafted", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: "Manual" },
-      { capability: "Tasks · auto-escalating", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
+    section: "Pricing & onboarding",
+    rows: [
+      { feature: "Free tier", workwrk: "Up to 25 users", workday: false, bamboo: false, rippling: false },
+      { feature: "Time to go live", workwrk: "9 days median", workday: "12–18 months", bamboo: "2–4 weeks", rippling: "1–3 weeks" },
+      { feature: "Self-serve setup", workwrk: true, workday: false, bamboo: true, rippling: "partial" },
+      { feature: "Per-user price (mid-market)", workwrk: "$8/mo", workday: "$50–120/mo", bamboo: "$8–15/mo", rippling: "$12–35/mo" },
+      { feature: "Implementation partner required", workwrk: false, workday: true, bamboo: false, rippling: false },
     ],
   },
   {
-    category: "Performance",
-    items: [
-      { capability: "Composite scoring", workwrk: true, lattice: "Limited", leapsome: "Limited", fiveteen: false, sheets: "DIY" },
-      { capability: "48-hour review cycle", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
-      { capability: "Calibration σ · auto-flag", workwrk: true, lattice: "Limited", leapsome: "Limited", fiveteen: false, sheets: false },
-      { capability: "Pre-filled from live KPIs", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
+    section: "Core HR",
+    rows: [
+      { feature: "People + org chart", workwrk: true, workday: true, bamboo: true, rippling: true },
+      { feature: "Onboarding workflows", workwrk: true, workday: true, bamboo: true, rippling: true },
+      { feature: "Custom RBAC tiers", workwrk: "10 tiers + matrix", workday: "Unlimited", bamboo: "5 roles", rippling: "Unlimited" },
+      { feature: "Multi-country payroll", workwrk: "via partners", workday: true, bamboo: false, rippling: true },
+      { feature: "Global EOR / contractors", workwrk: false, workday: "partial", bamboo: false, rippling: true, note: "Rippling wins here" },
     ],
   },
   {
-    category: "Process",
-    items: [
-      { capability: "Versioned SOPs", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
-      { capability: "Scribe screen-recording → SOP", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
-      { capability: "Process flows · branching", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
-      { capability: "Compliance tracking per user", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
+    section: "Performance & process",
+    rows: [
+      { feature: "OKRs + check-ins", workwrk: true, workday: true, bamboo: false, rippling: false },
+      { feature: "Performance reviews + 360", workwrk: true, workday: true, bamboo: true, rippling: "partial" },
+      { feature: "SOPs with versioning", workwrk: true, workday: false, bamboo: false, rippling: false, note: "Unique to WorkWrk" },
+      { feature: "Process compliance tracking", workwrk: true, workday: "partial", bamboo: false, rippling: false },
+      { feature: "AI content generation", workwrk: true, workday: "partial (Illuminate)", bamboo: false, rippling: false },
     ],
   },
   {
-    category: "Recognition",
-    items: [
-      { capability: "Values-tagged kudos", workwrk: true, lattice: "Limited", leapsome: "Limited", fiveteen: "Limited", sheets: false },
-      { capability: "Kudos feeds scoring", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
-      { capability: "Decay alerts (60-day silence)", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
+    section: "Spend & procurement",
+    rows: [
+      { feature: "Expenses module", workwrk: true, workday: true, bamboo: false, rippling: true },
+      { feature: "Compensation cycles", workwrk: true, workday: true, bamboo: "partial", rippling: "partial" },
+      { feature: "Procurement (PO + Invoice)", workwrk: true, workday: true, bamboo: false, rippling: false },
+      { feature: "Worktags / dimensional tagging", workwrk: true, workday: true, bamboo: false, rippling: false },
+      { feature: "Time off + timesheets", workwrk: true, workday: true, bamboo: true, rippling: true },
     ],
   },
   {
-    category: "AI",
-    items: [
-      { capability: "Reasoning across modules", workwrk: true, lattice: false, leapsome: "Chat", fiveteen: "Chat", sheets: false },
-      { capability: "AI-drafted KRAs with citations", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: false },
-      { capability: "Attrition risk · 27-day lead", workwrk: true, lattice: "Surveys", leapsome: "Surveys", fiveteen: "Surveys", sheets: false },
-      { capability: "Private by default (no training)", workwrk: true, lattice: "Varies", leapsome: "Varies", fiveteen: "Varies", sheets: "—" },
+    section: "Talent",
+    rows: [
+      { feature: "Recruiting / ATS", workwrk: true, workday: true, bamboo: true, rippling: false },
+      { feature: "Interview scheduling", workwrk: true, workday: true, bamboo: true, rippling: false },
+      { feature: "Learning / LMS", workwrk: true, workday: true, bamboo: false, rippling: false },
+      { feature: "Workforce planning", workwrk: true, workday: true, bamboo: false, rippling: false },
     ],
   },
   {
-    category: "Data + integrations",
-    items: [
-      { capability: "40+ native connectors", workwrk: true, lattice: "Some", leapsome: "Some", fiveteen: "Some", sheets: "Zapier" },
-      { capability: "SQL-friendly warehouse", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: "Is the sheet" },
-      { capability: "REST + webhooks API", workwrk: true, lattice: "Limited", leapsome: "Limited", fiveteen: "Limited", sheets: false },
+    section: "Platform",
+    rows: [
+      { feature: "Unified Inbox (cross-module approvals)", workwrk: "12 work-streams", workday: "partial (My Tasks)", bamboo: false, rippling: false, note: "WorkWrk's #1 daily-use surface" },
+      { feature: "Cmd-K global search", workwrk: true, workday: true, bamboo: false, rippling: "partial" },
+      { feature: "Bulk approve across queues", workwrk: true, workday: true, bamboo: "partial", rippling: "partial" },
+      { feature: "CSV export everywhere", workwrk: true, workday: true, bamboo: true, rippling: true },
+      { feature: "Public API + webhooks", workwrk: true, workday: true, bamboo: "partial", rippling: true },
     ],
   },
   {
-    category: "Compliance",
-    items: [
-      { capability: "SOC 2 Type II", workwrk: true, lattice: true, leapsome: true, fiveteen: true, sheets: "N/A" },
-      { capability: "DPDPA (India) native", workwrk: true, lattice: false, leapsome: false, fiveteen: false, sheets: "N/A" },
-      { capability: "GST / VAT local invoicing", workwrk: true, lattice: "US/EU first", leapsome: "US/EU first", fiveteen: "US/EU first", sheets: "N/A" },
-      { capability: "Signed audit log, verifiable offline", workwrk: true, lattice: "Limited", leapsome: "Limited", fiveteen: "Limited", sheets: false },
+    section: "Enterprise",
+    rows: [
+      { feature: "SAML SSO + SCIM 2.0", workwrk: "Scale tier", workday: true, bamboo: "Advantage tier", rippling: true },
+      { feature: "Field-level audit trail", workwrk: "Scale tier", workday: true, bamboo: "partial", rippling: "partial" },
+      { feature: "Custom domains + white label", workwrk: "Scale tier", workday: false, bamboo: false, rippling: false },
+      { feature: "Data residency (EU / US / IN)", workwrk: "Scale tier", workday: true, bamboo: "partial", rippling: "partial" },
     ],
   },
 ];
 
-const qualitatives = [
+const HONEST = [
   {
-    tone: "lime",
-    vs: "vs spreadsheets",
-    title: "Spreadsheets are where data goes to die.",
-    body: "The macro you built works — until the person who built it leaves. Formulas silently break. Version history is whichever tab is 'final (v14)'. WorkwrK gives you the same flexibility, with a real data model underneath.",
+    when: "Pick Workday if",
+    why: "You're 5,000+ employees with a global payroll footprint and a six-figure budget for an 18-month implementation. Workday's GL + Adaptive Planning + global payroll surface area is genuinely deeper than ours — they've built it for two decades.",
   },
   {
-    tone: "pink",
-    vs: "vs Lattice",
-    title: "Lattice is a review tool. You need a spine.",
-    body: "Lattice is a great review product — for US-first mid-market teams. What's missing is everything around it: SOPs, tasks, KPI connectors for Indian tools (Razorpay, Keka), and an AI that knows your org. We add the plumbing Lattice assumes your BI team already built.",
+    when: "Pick Rippling if",
+    why: "You need a global EOR / international contractor management platform. Their hire-anywhere infrastructure is unmatched, and their device management for IT is a real differentiator. We don't compete on EOR.",
   },
   {
-    tone: "blue",
-    vs: "vs Leapsome",
-    title: "Leapsome's feature-checklist is similar. Depth isn't.",
-    body: "Both run reviews, OKRs, and learning. Leapsome stops at the boundary of 'people ops software.' WorkwrK keeps going — into SOPs, into live KPIs from your stack, into AI that reasons across all of it. The checklist looks similar. The depth compounds very differently.",
+    when: "Pick BambooHR if",
+    why: "You're under 100 employees, you only need core HR + time off + onboarding, and you don't care about OKRs / SOPs / Procurement / Cmd-K. BambooHR is simpler than us at the very low end.",
   },
   {
-    tone: "amber",
-    vs: "vs 15Five",
-    title: "15Five is a pulse-survey tool with review features bolted on.",
-    body: "Weekly check-ins, OKRs, light performance. Works great for 50-person tech startups that want lightweight touch. Falls apart when you need SOPs across 12 warehouses or provider protocol tracking across 8 clinics. Different tool for a different shape of problem.",
+    when: "Pick WorkWrk if",
+    why: "You're 50–500 people, outgrew BambooHR-shaped tools, can't justify Workday's price floor, and want one platform that covers HR + Performance + Spend + Procurement + Recruiting + Learning with AI agents and Worktag-driven reporting baked in.",
   },
 ];
-
-function renderCell(v: string | boolean) {
-  if (v === true) return <span className="cm-tick">✓</span>;
-  if (v === false) return <span className="cm-x">—</span>;
-  return <span className="cm-val">{v}</span>;
-}
 
 export default function ComparePage() {
   return (
-    <>
-      <section className="bento-section" style={{ paddingTop: 56 }}>
-        <div className="bento-container">
-          <Reveal>
-            <SectionHeader
-              label="Compare"
-              title={
-                <>
-                  How WorkwrK stacks up against <span className="hi">the usual suspects.</span>
-                </>
-              }
-              subtitle="If you're currently using Lattice, Leapsome, 15Five, or a stack of spreadsheets — this is an honest row-by-row comparison. Pick the one that fits your shape of problem."
-              aside={{
-                label: "Honest take",
-                stat: "4",
-                text: "We don't tell you we're better at everything. We tell you where each tool actually shines.",
-              }}
-            />
-          </Reveal>
-        </div>
+    <div className="bg-white text-slate-900">
+      {/* Hero */}
+      <section className="max-w-5xl mx-auto px-6 lg:px-10 pt-20 pb-12 text-center">
+        <h1 className="text-5xl lg:text-6xl font-semibold tracking-tight">
+          Honest comparison.{" "}
+          <span className="text-slate-400">Pick the right tool.</span>
+        </h1>
+        <p className="mt-6 max-w-2xl mx-auto text-base lg:text-lg text-slate-600">
+          We genuinely lose on a few things — global EOR, full Adaptive Planning,
+          deep multi-country payroll. We say so up front instead of pretending
+          otherwise. Here's where each platform actually wins.
+        </p>
       </section>
 
-      <section className="bento-section" style={{ paddingTop: 0 }}>
-        <div className="bento-container">
-          <Reveal>
-            <div className="cm-card">
-              <div className="cm-head">
-                <div>Capability</div>
-                <div className="cm-us">WorkwrK</div>
-                <div>Lattice</div>
-                <div>Leapsome</div>
-                <div>15Five</div>
-                <div>Sheets</div>
-              </div>
-              {rows.map((c) => (
-                <div key={c.category}>
-                  <div className="cm-cat">{c.category}</div>
-                  {c.items.map((r) => (
-                    <div key={r.capability} className="cm-row">
-                      <div className="cm-name">{r.capability}</div>
-                      <div className="cm-cell cm-us-cell">{renderCell(r.workwrk)}</div>
-                      <div className="cm-cell">{renderCell(r.lattice)}</div>
-                      <div className="cm-cell">{renderCell(r.leapsome)}</div>
-                      <div className="cm-cell">{renderCell(r.fiveteen)}</div>
-                      <div className="cm-cell">{renderCell(r.sheets)}</div>
-                    </div>
+      {/* Comparison table */}
+      <section className="max-w-7xl mx-auto px-6 lg:px-10 pb-24">
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50/40 text-xs font-semibold">
+                <th className="text-left text-slate-500 px-4 sm:px-6 py-4 sticky left-0 bg-slate-50/40">
+                  Feature
+                </th>
+                <th className="text-center text-slate-900 px-3 sm:px-6 py-4 w-32 sm:w-36 bg-emerald-50/40 border-l border-slate-200">
+                  WorkWrk
+                </th>
+                <th className="text-center text-slate-700 px-3 sm:px-6 py-4 w-32 sm:w-36 border-l border-slate-200">
+                  Workday
+                </th>
+                <th className="text-center text-slate-700 px-3 sm:px-6 py-4 w-32 sm:w-36 border-l border-slate-200">
+                  BambooHR
+                </th>
+                <th className="text-center text-slate-700 px-3 sm:px-6 py-4 w-32 sm:w-36 border-l border-slate-200">
+                  Rippling
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {ROWS.map((section, si) => (
+                <Fragment key={`section-${si}`}>
+                  <tr className="bg-slate-50/40 border-y border-slate-100">
+                    <td colSpan={5} className="px-4 sm:px-6 py-2 text-[10px] uppercase tracking-[0.18em] font-semibold text-slate-500">
+                      {section.section}
+                    </td>
+                  </tr>
+                  {section.rows.map((row, ri) => (
+                    <tr key={`row-${si}-${ri}`} className="border-b border-slate-100 hover:bg-slate-50/30">
+                      <td className="px-4 sm:px-6 py-3.5 text-slate-700 sticky left-0 bg-white">
+                        <div>{row.feature}</div>
+                        {row.note && (
+                          <div className="text-[11px] text-slate-400 mt-0.5">{row.note}</div>
+                        )}
+                      </td>
+                      <CompareCell value={row.workwrk} highlight />
+                      <CompareCell value={row.workday} />
+                      <CompareCell value={row.bamboo} />
+                      <CompareCell value={row.rippling} />
+                    </tr>
                   ))}
-                </div>
+                </Fragment>
               ))}
-            </div>
-          </Reveal>
+            </tbody>
+          </table>
         </div>
       </section>
 
-      <section className="bento-section">
-        <div className="bento-container">
-          <Reveal>
-            <SectionHeader
-              label="The honest take"
-              title={
-                <>
-                  Not every team needs <span className="hi">a spine.</span>
-                </>
-              }
-              subtitle="Sometimes a focused tool is the right answer. Here's when we think each of these is the smart choice."
-            />
-          </Reveal>
-          <Reveal stagger className="cm-qgrid">
-            {qualitatives.map((q) => (
-              <article key={q.vs} className={`cm-q cm-q-${q.tone}`}>
-                <span className="cm-q-tag">{q.vs}</span>
-                <h3>{q.title}</h3>
-                <p>{q.body}</p>
-              </article>
-            ))}
-          </Reveal>
-        </div>
-      </section>
+      {/* Honest "pick X if" cards */}
+      <section className="bg-slate-50/50 border-y border-slate-100">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-24">
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <h2 className="text-3xl lg:text-5xl font-semibold tracking-tight">
+              Which tool's actually right for you.
+            </h2>
+            <p className="mt-5 text-base lg:text-lg text-slate-600">
+              Segment honesty over salesmanship. The right tool depends on
+              your size, geography, and which problems matter most.
+            </p>
+          </div>
 
-      <section className="bento-section-cta">
-        <div className="bento-container">
-          <Reveal>
-            <div className="cm-cta">
-              <h2>
-                Migrating from one of these? <span className="hi">We&apos;ll help.</span>
-              </h2>
-              <p>
-                Free migration support on Growth and Scale plans. We import your
-                existing review history, KRAs, and SOPs in one working day.
-              </p>
-              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-                <Link href="/demo" className="bento-btn bento-btn-lime bento-btn-lg">
-                  Book a migration call →
-                </Link>
-                <Link href="/signup" className="bento-btn bento-btn-ghost bento-btn-lg">
-                  Start 14-day trial
-                </Link>
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {HONEST.map((card, i) => (
+              <div
+                key={card.when}
+                className={`rounded-xl border p-6 ${
+                  i === 3
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white border-slate-200"
+                }`}
+              >
+                <p className={`text-xs uppercase tracking-[0.18em] font-semibold mb-3 ${
+                  i === 3 ? "text-slate-400" : "text-slate-500"
+                }`}>
+                  {card.when}
+                </p>
+                <p className={`text-sm leading-relaxed ${i === 3 ? "text-slate-200" : "text-slate-700"}`}>
+                  {card.why}
+                </p>
               </div>
-            </div>
-          </Reveal>
+            ))}
+          </div>
         </div>
       </section>
 
-      <style>{`
-        .cm-card {
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: 28px;
-          padding: 12px 6px;
-          overflow: hidden;
-        }
-        .cm-head, .cm-row {
-          display: grid;
-          grid-template-columns: 2fr repeat(5, 1fr);
-          align-items: center;
-          padding: 14px 20px;
-          font-size: 13px;
-        }
-        .cm-head {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          text-transform: uppercase;
-          letter-spacing: 0.14em;
-          color: var(--b-t3);
-          border-bottom: 1px solid var(--b-line-2);
-        }
-        .cm-us { color: var(--b-lime); }
-        .cm-cat {
-          padding: 18px 20px 6px;
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          text-transform: uppercase;
-          letter-spacing: 0.16em;
-          color: var(--b-lime);
-        }
-        .cm-row { border-bottom: 1px dashed var(--b-line); }
-        .cm-row:last-child { border-bottom: none; }
-        .cm-name { color: var(--b-off); font-size: 13.5px; }
-        .cm-cell { text-align: center; }
-        .cm-us-cell { background: rgba(212,255,46,0.05); border-radius: 4px; }
-        .cm-tick { color: var(--b-lime); font-weight: 700; }
-        .cm-x { color: var(--b-t4); }
-        .cm-val { font-family: var(--font-geist-mono), monospace; font-size: 11.5px; color: var(--b-t2); }
+      {/* CTA */}
+      <section className="bg-slate-900 text-white">
+        <div className="max-w-5xl mx-auto px-6 lg:px-10 py-24 text-center">
+          <h2 className="text-3xl lg:text-5xl font-semibold tracking-tight">
+            Try the one that actually fits.
+          </h2>
+          <p className="mt-5 text-slate-300 max-w-xl mx-auto">
+            Start free, no credit card. Self-migrate from your current tool in
+            a weekend.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/signup"
+              className="inline-flex items-center gap-2 px-6 h-12 rounded-xl bg-white text-slate-900 font-medium hover:bg-slate-100 transition-colors"
+            >
+              Get started — it's free
+              <ArrowRight size={16} />
+            </Link>
+            <Link
+              href="/contact"
+              className="inline-flex items-center gap-2 px-6 h-12 rounded-xl border border-slate-700 text-white font-medium hover:bg-slate-800 transition-colors"
+            >
+              Talk to sales
+            </Link>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
 
-        .cm-qgrid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 14px;
-          margin-top: 32px;
-        }
-        .cm-q {
-          padding: 32px 30px;
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-lg);
-          transition: all 0.3s;
-        }
-        .cm-q:hover { transform: translateY(-3px); border-color: var(--b-line-2); }
-        .cm-q-lime { border-color: rgba(212,255,46,0.3); }
-        .cm-q-pink { border-color: rgba(255,61,138,0.3); }
-        .cm-q-blue { border-color: rgba(74,158,255,0.3); }
-        .cm-q-amber { border-color: rgba(255,153,51,0.3); }
-        .cm-q-tag {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          display: block;
-          margin-bottom: 12px;
-        }
-        .cm-q-lime .cm-q-tag { color: var(--b-lime); }
-        .cm-q-pink .cm-q-tag { color: var(--b-pink); }
-        .cm-q-blue .cm-q-tag { color: var(--b-blue); }
-        .cm-q-amber .cm-q-tag { color: var(--b-amber); }
-        .cm-q h3 {
-          font-size: 24px;
-          font-weight: 600;
-          letter-spacing: -0.025em;
-          line-height: 1.2;
-          margin: 0 0 12px;
-        }
-        .cm-q p {
-          font-size: 14.5px;
-          color: var(--b-t2);
-          line-height: 1.55;
-          margin: 0;
-        }
-
-        .cm-cta {
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-xl);
-          padding: 64px 48px;
-          text-align: center;
-        }
-        .cm-cta h2 {
-          font-size: clamp(34px, 5vw, 56px);
-          font-weight: 600;
-          letter-spacing: -0.035em;
-          line-height: 1.05;
-          margin: 0 0 16px;
-        }
-        .cm-cta p {
-          font-size: 16px;
-          color: var(--b-t2);
-          max-width: 520px;
-          margin: 0 auto 28px;
-          line-height: 1.6;
-        }
-
-        @media (max-width: 960px) {
-          .cm-head, .cm-row { font-size: 11.5px; grid-template-columns: 1.6fr repeat(5, 1fr); padding: 10px 12px; }
-          .cm-qgrid { grid-template-columns: 1fr; }
-        }
-        @media (max-width: 700px) {
-          .cm-head, .cm-row { grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr; }
-          .cm-head > *:nth-child(5), .cm-head > *:nth-child(6),
-          .cm-row > *:nth-child(5), .cm-row > *:nth-child(6) { display: none; }
-        }
-      `}</style>
-    </>
+function CompareCell({ value, highlight }: { value: Cell; highlight?: boolean }) {
+  return (
+    <td
+      className={`text-center px-3 sm:px-6 py-3.5 border-l border-slate-100 ${
+        highlight ? "bg-emerald-50/30" : ""
+      }`}
+    >
+      {typeof value === "string" ? (
+        <span className="text-xs font-medium text-slate-700">{value}</span>
+      ) : value === true ? (
+        <Check size={16} className="text-emerald-600 inline" />
+      ) : value === "partial" ? (
+        <Minus size={16} className="text-amber-500 inline" />
+      ) : (
+        <X size={16} className="text-slate-300 inline" />
+      )}
+    </td>
   );
 }

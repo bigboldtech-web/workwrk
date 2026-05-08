@@ -7,7 +7,8 @@
 // Inline create dialog so the common case (submit a $30 lunch) is one
 // click away. Detail / cost-center tagging lives on /expenses/[id].
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
 import Link from "next/link";
 import {
   Card,
@@ -110,6 +111,11 @@ export default function ExpensesPage() {
   const [items, setItems] = useState<ExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  // Bulk-approve selection — only meaningful in the approve tab.
+  // Reset whenever tab or items change so stale ids don't linger.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  useEffect(() => { setSelectedIds(new Set()); }, [tab, items]);
+  const selectedArray = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
   const load = useCallback(
     async (scope: "mine" | "approve" | "all") => {
@@ -195,6 +201,19 @@ export default function ExpensesPage() {
                   rows={items}
                   showApprovalActions={tab === "approve"}
                   onDecide={decide}
+                  selectedIds={selectedIds}
+                  onToggleSelected={(id) => {
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      return next;
+                    });
+                  }}
+                  onToggleAll={(allSelected) => {
+                    if (allSelected) setSelectedIds(new Set());
+                    else setSelectedIds(new Set(items.filter((e) => e.status === "SUBMITTED").map((e) => e.id)));
+                  }}
                 />
               )}
             </CardContent>
@@ -211,6 +230,17 @@ export default function ExpensesPage() {
           }}
         />
       )}
+
+      {/* Floating bulk-action bar — mounts in the approve tab when
+          one or more SUBMITTED rows are checked. */}
+      {tab === "approve" && (
+        <BulkApproveBar
+          entityType="expense"
+          selectedIds={selectedArray}
+          onClear={() => setSelectedIds(new Set())}
+          onDone={() => load(tab)}
+        />
+      )}
     </div>
   );
 }
@@ -219,16 +249,35 @@ function ExpenseTable({
   rows,
   showApprovalActions,
   onDecide,
+  selectedIds,
+  onToggleSelected,
+  onToggleAll,
 }: {
   rows: ExpenseRow[];
   showApprovalActions: boolean;
   onDecide: (id: string, decision: "APPROVE" | "REJECT" | "REIMBURSE", note?: string) => void;
+  selectedIds: Set<string>;
+  onToggleSelected: (id: string) => void;
+  onToggleAll: (allSelected: boolean) => void;
 }) {
+  const submittedRows = rows.filter((r) => r.status === "SUBMITTED");
+  const allChecked = showApprovalActions && submittedRows.length > 0
+    && submittedRows.every((r) => selectedIds.has(r.id));
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-muted border-b border-white/5">
+            {showApprovalActions && (
+              <th className="px-3 py-2.5 w-8">
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  onChange={() => onToggleAll(allChecked)}
+                  aria-label="Select all submitted"
+                />
+              </th>
+            )}
             <th className="px-4 py-2.5 font-normal">Date</th>
             <th className="px-4 py-2.5 font-normal">Description</th>
             <th className="px-4 py-2.5 font-normal">Category</th>
@@ -242,8 +291,21 @@ function ExpenseTable({
           {rows.map((e) => {
             const style = STATUS_STYLE[e.status] ?? STATUS_STYLE.DRAFT;
             const StatusIcon = style.Icon;
+            const checkable = e.status === "SUBMITTED";
             return (
               <tr key={e.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                {showApprovalActions && (
+                  <td className="px-3 py-2.5">
+                    {checkable && (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(e.id)}
+                        onChange={() => onToggleSelected(e.id)}
+                        aria-label={`Select ${e.description}`}
+                      />
+                    )}
+                  </td>
+                )}
                 <td className="px-4 py-2.5 text-xs text-muted whitespace-nowrap">
                   {new Date(e.expenseDate).toLocaleDateString()}
                 </td>

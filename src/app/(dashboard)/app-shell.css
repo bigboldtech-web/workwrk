@@ -306,6 +306,51 @@ html.dark .app-sidebar-link.is-active::before {
   opacity: 0.7;
 }
 
+/* Floating bulk-approve bar. Pinned bottom-center while items are
+   selected in any approval queue. Doesn't shift layout — page
+   content keeps full height; the bar overlays. */
+.bulk-approve-bar {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--b-card);
+  border: 1px solid var(--b-line);
+  border-radius: 999px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+}
+.bulk-approve-count {
+  color: var(--b-fg);
+  font-weight: 500;
+}
+.bulk-approve-clear {
+  background: transparent;
+  border: 1px solid var(--b-line);
+  border-radius: 999px;
+  width: 22px; height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--b-t2);
+  cursor: pointer;
+}
+.bulk-approve-clear:hover {
+  background: var(--b-card-2);
+  color: var(--b-fg);
+}
+.bulk-approve-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+
 /* Active timesheet punch pill in the topbar. Only renders when a
    punch is running, so layout doesn't shift when idle. The clock
    text uses tabular-nums so the digits don't dance on tick. */

@@ -10,9 +10,10 @@
 // after my own actions only (other users' approvals re-flow on
 // router.refresh from the page).
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -110,6 +111,9 @@ export function TimeOffManager({
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  useEffect(() => { setSelectedIds(new Set()); }, [tab, requests]);
+  const selectedArray = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
   const load = useCallback(
     async (scope: typeof tab) => {
@@ -261,6 +265,19 @@ export function TimeOffManager({
                   showOwnerActions={tab === "mine"}
                   onDecide={decide}
                   onCancel={cancel}
+                  selectedIds={selectedIds}
+                  onToggleSelected={(id) => {
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      return next;
+                    });
+                  }}
+                  onToggleAll={(allSelected) => {
+                    if (allSelected) setSelectedIds(new Set());
+                    else setSelectedIds(new Set(requests.filter((r) => r.status === "PENDING").map((r) => r.id)));
+                  }}
                 />
               )}
             </CardContent>
@@ -279,6 +296,15 @@ export function TimeOffManager({
           }}
         />
       )}
+
+      {tab === "approve" && (
+        <BulkApproveBar
+          entityType="time-off"
+          selectedIds={selectedArray}
+          onClear={() => setSelectedIds(new Set())}
+          onDone={() => { load(tab); router.refresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -289,18 +315,37 @@ function RequestsTable({
   showOwnerActions,
   onDecide,
   onCancel,
+  selectedIds,
+  onToggleSelected,
+  onToggleAll,
 }: {
   rows: Request[];
   showApprovalActions: boolean;
   showOwnerActions: boolean;
   onDecide: (id: string, decision: "APPROVE" | "REJECT", note?: string) => void;
   onCancel: (id: string) => void;
+  selectedIds: Set<string>;
+  onToggleSelected: (id: string) => void;
+  onToggleAll: (allSelected: boolean) => void;
 }) {
+  const pendingRows = rows.filter((r) => r.status === "PENDING");
+  const allChecked = showApprovalActions && pendingRows.length > 0
+    && pendingRows.every((r) => selectedIds.has(r.id));
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-muted border-b border-white/5">
+            {showApprovalActions && (
+              <th className="px-3 py-2.5 w-8">
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  onChange={() => onToggleAll(allChecked)}
+                  aria-label="Select all pending"
+                />
+              </th>
+            )}
             <th className="px-4 py-2.5 font-normal">Employee</th>
             <th className="px-4 py-2.5 font-normal">Policy</th>
             <th className="px-4 py-2.5 font-normal">Dates</th>
@@ -314,8 +359,21 @@ function RequestsTable({
             const style = STATUS_STYLE[r.status];
             const StatusIcon = style.Icon;
             const days = daysBetween(r.startDate, r.endDate);
+            const checkable = r.status === "PENDING";
             return (
               <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                {showApprovalActions && (
+                  <td className="px-3 py-2.5">
+                    {checkable && (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(r.id)}
+                        onChange={() => onToggleSelected(r.id)}
+                        aria-label="Select request"
+                      />
+                    )}
+                  </td>
+                )}
                 <td className="px-4 py-2.5 text-xs">
                   {r.user ? `${r.user.firstName} ${r.user.lastName}` : "—"}
                 </td>

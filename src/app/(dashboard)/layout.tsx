@@ -44,8 +44,17 @@ export default function DashboardLayout({
   }, [status, router]);
 
   useEffect(() => {
-    // Lock the dashboard to dark mode; it's where the bento palette lives.
-    document.documentElement.classList.add("dark");
+    // Light is the new default — matches the ClickUp-clean direction.
+    // The Sidebar still has a Light/Dark toggle, and the user's choice
+    // is persisted by `next-themes` (handled at the root layout). On
+    // first mount we ensure neither class is forced; next-themes
+    // resolves to the user's preference (or light by default).
+    if (typeof document !== "undefined") {
+      // Don't force `dark` anymore. If a user previously had it set,
+      // next-themes picks it up from localStorage and re-applies.
+      // Brand-new visitors land in light mode.
+      document.documentElement.classList.remove("dark-forced");
+    }
   }, []);
 
   if (status === "loading" || (status === "authenticated" && !setupChecked)) {

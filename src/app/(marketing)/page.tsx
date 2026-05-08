@@ -1,4 +1,4 @@
-import { LandingPage } from "@/components/landing/landing-page";
+import { LandingV2 } from "@/components/landing/landing-v2";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -205,7 +205,7 @@ export default async function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <LandingPage />
+      <LandingV2 />
     </>
   );
 }
