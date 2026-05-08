@@ -15,7 +15,7 @@ import {
   CalendarDays, BookOpen, ListChecks, Star, MessageSquare, BarChart3,
   GraduationCap, Heart, Lightbulb, Crosshair, Grid3x3, ClipboardCheck,
   MessageSquareHeart, Shield, Package, Activity, Wrench, Link2, Bot,
-  Settings, FileText, Plus, UserPlus, Search, Receipt, DollarSign, CalendarOff, Clock, Briefcase,
+  Settings, FileText, Plus, UserPlus, Search, Receipt, DollarSign, CalendarOff, Clock, Briefcase, ShoppingCart,
 } from "lucide-react";
 
 type CommandItem = {
@@ -41,6 +41,7 @@ const NAV: CommandItem[] = [
   { id: "timeOff", label: "Time off", href: "/time-off", icon: CalendarOff },
   { id: "timesheets", label: "Timesheets", href: "/timesheets", icon: Clock },
   { id: "recruiting", label: "Recruiting", href: "/recruiting", icon: Briefcase, visible: (r) => r.isManager },
+  { id: "procurement", label: "Procurement", href: "/procurement", icon: ShoppingCart, visible: (r) => r.isManager },
   { id: "sops", label: "SOPs", href: "/sops", icon: BookOpen },
   { id: "processRuns", label: "Process Runs", href: "/process-runs", icon: ListChecks, visible: (r) => r.isManager },
   { id: "reviews", label: "Reviews", href: "/reviews", icon: Star },
@@ -61,6 +62,7 @@ const NAV: CommandItem[] = [
   { id: "ai", label: "AI Assistant", href: "/ai", icon: Bot, visible: (r) => r.isManager },
   { id: "settings", label: "Settings", href: "/settings", icon: Settings },
   { id: "tags", label: "Tags & dimensions", href: "/settings/tags", icon: Settings, visible: (r) => r.isAdmin },
+  { id: "identity", label: "Identity & SSO", href: "/settings/identity", icon: Settings, visible: (r) => r.isAdmin },
   { id: "docs", label: "Docs", href: "/docs", icon: FileText },
 ];
 

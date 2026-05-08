@@ -9,7 +9,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign, CalendarOff, Clock } from "lucide-react";
+import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText } from "lucide-react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -49,7 +49,7 @@ export default async function InboxPage() {
 
   const horizonEnd = new Date(Date.now() + TASK_HORIZON_DAYS * DAY_MS);
 
-  // Eight queries in parallel. Each is bounded by the user/org pair.
+  // Ten queries in parallel. Each is bounded by the user/org pair.
   // Comp decisions are HR-only (filtered server-side); we fetch
   // unconditionally and the empty result hides the section for non-HR.
   const [
@@ -61,6 +61,8 @@ export default async function InboxPage() {
     compToApprove,
     timeOffToApprove,
     timesheetsToApprove,
+    posToApprove,
+    invoicesToApprove,
   ] = await Promise.all([
     prisma.sOPAssignment.findMany({
       where: {
@@ -221,6 +223,43 @@ export default async function InboxPage() {
         _count: { select: { entries: true } },
       },
     }),
+    // Submitted POs assigned to me as approver (or open queue).
+    prisma.purchaseOrder.findMany({
+      where: {
+        organizationId: orgId,
+        status: "SUBMITTED",
+        OR: [{ approverId: userId }, { approverId: null }],
+        requesterId: { not: userId },
+      },
+      orderBy: { submittedAt: "asc" },
+      take: 25,
+      select: {
+        id: true,
+        number: true,
+        amount: true,
+        currency: true,
+        description: true,
+        vendor: { select: { name: true } },
+        requester: { select: { firstName: true, lastName: true } },
+      },
+    }),
+    // PENDING invoices org-wide (manager+ approves; finance pays).
+    prisma.invoice.findMany({
+      where: {
+        organizationId: orgId,
+        status: "PENDING",
+      },
+      orderBy: { dueDate: "asc" },
+      take: 25,
+      select: {
+        id: true,
+        invoiceNumber: true,
+        amount: true,
+        currency: true,
+        dueDate: true,
+        vendor: { select: { name: true } },
+      },
+    }),
   ]);
 
   // Compute "stale" OKRs: latest check-in across all KRs is older than
@@ -248,7 +287,9 @@ export default async function InboxPage() {
     expensesToApprove.length +
     compToApprove.length +
     timeOffToApprove.length +
-    timesheetsToApprove.length;
+    timesheetsToApprove.length +
+    posToApprove.length +
+    invoicesToApprove.length;
   const overdueCount =
     sopAssignments.filter((a) => isOverdue(a.dueDate)).length +
     tasks.filter((t) => isOverdue(t.endAt ?? t.date)).length;
@@ -355,6 +396,90 @@ export default async function InboxPage() {
                       <span className={`text-xs flex-shrink-0 ml-3 ${overdue ? "text-red-400" : "text-muted"}`}>
                         {fmtRelative(due)}
                       </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {posToApprove.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <ShoppingCart size={16} /> Purchase orders waiting on you
+              <span className="text-xs text-muted font-normal">({posToApprove.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {posToApprove.map((p) => {
+                const amount = Number(p.amount);
+                let amountLabel: string;
+                try {
+                  amountLabel = new Intl.NumberFormat(undefined, { style: "currency", currency: p.currency }).format(amount);
+                } catch {
+                  amountLabel = `${p.currency} ${amount.toFixed(2)}`;
+                }
+                return (
+                  <li key={p.id}>
+                    <Link
+                      href="/procurement"
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="font-mono text-xs text-muted">{p.number}</span>
+                        <span className="text-sm font-medium truncate">{p.vendor.name}</span>
+                        <span className="text-xs text-muted truncate">{p.description}</span>
+                      </div>
+                      <span className="text-xs font-mono flex-shrink-0 ml-3">{amountLabel}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {invoicesToApprove.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileText size={16} /> Invoices waiting on you
+              <span className="text-xs text-muted font-normal">({invoicesToApprove.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {invoicesToApprove.map((inv) => {
+                const amount = Number(inv.amount);
+                const overdue = inv.dueDate < new Date();
+                let amountLabel: string;
+                try {
+                  amountLabel = new Intl.NumberFormat(undefined, { style: "currency", currency: inv.currency }).format(amount);
+                } catch {
+                  amountLabel = `${inv.currency} ${amount.toFixed(2)}`;
+                }
+                return (
+                  <li key={inv.id}>
+                    <Link
+                      href="/procurement"
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="font-mono text-xs text-muted">{inv.invoiceNumber}</span>
+                        <span className="text-sm font-medium truncate">{inv.vendor.name}</span>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                        <span className={`text-xs ${overdue ? "text-red-400" : "text-muted"}`}>
+                          due {inv.dueDate.toLocaleDateString()}
+                          {overdue && " · overdue"}
+                        </span>
+                        <span className="text-xs font-mono">{amountLabel}</span>
+                      </div>
                     </Link>
                   </li>
                 );

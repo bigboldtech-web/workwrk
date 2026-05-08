@@ -306,6 +306,43 @@ html.dark .app-sidebar-link.is-active::before {
   opacity: 0.7;
 }
 
+/* Active timesheet punch pill in the topbar. Only renders when a
+   punch is running, so layout doesn't shift when idle. The clock
+   text uses tabular-nums so the digits don't dance on tick. */
+.active-punch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(212, 255, 46, 0.08);
+  border: 1px solid rgba(212, 255, 46, 0.3);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--b-fg);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  transition: background 0.15s, border-color 0.15s;
+}
+.active-punch-pill:hover {
+  background: rgba(212, 255, 46, 0.14);
+  border-color: rgba(212, 255, 46, 0.5);
+}
+.active-punch-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #d4ff2e;
+  box-shadow: 0 0 8px rgba(212, 255, 46, 0.6);
+  animation: punchPulse 1.6s ease-in-out infinite;
+}
+.active-punch-time {
+  font-weight: 600;
+}
+@keyframes punchPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
 /* Cmd-K command palette. Centered overlay, keyboard-driven, mirrors
    Workday's search-first navigation pattern. */
 .cmd-palette-overlay {

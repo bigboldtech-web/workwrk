@@ -18,6 +18,7 @@ import { getInitials } from "@/lib/utils";
 import { useTranslations } from "next-intl";
 import { LanguageSwitcher } from "./language-switcher";
 import { CurrencySwitcher } from "./currency-switcher";
+import { ActivePunchPill } from "./active-punch-pill";
 import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
 
 interface SearchResult {
@@ -301,6 +302,8 @@ export function Topbar() {
 
       {/* Right */}
       <div className="app-topbar-right">
+        <ActivePunchPill />
+
         <Link href="/tasks" className="app-quick-add">
           <Plus size={14} />
           Quick add
