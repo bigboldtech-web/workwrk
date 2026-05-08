@@ -46,7 +46,16 @@
     "settings": "Impostazioni",
     "signOut": "Esci",
     "lightMode": "Modalità chiara",
-    "darkMode": "Modalità scura"
+    "darkMode": "Modalità scura",
+    "inbox": "[it] Inbox",
+    "expenses": "[it] Expenses",
+    "compensation": "[it] Compensation",
+    "timeOff": "[it] Time off",
+    "timesheets": "[it] Timesheets",
+    "recruiting": "[it] Recruiting",
+    "procurement": "[it] Procurement",
+    "learning": "[it] Learning",
+    "workforcePlanning": "[it] Workforce Planning"
   },
   "auth": {
     "signIn": "Accedi",

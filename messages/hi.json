@@ -46,7 +46,16 @@
     "settings": "सेटिंग्स",
     "signOut": "साइन आउट",
     "lightMode": "लाइट मोड",
-    "darkMode": "डार्क मोड"
+    "darkMode": "डार्क मोड",
+    "inbox": "[hi] Inbox",
+    "expenses": "[hi] Expenses",
+    "compensation": "[hi] Compensation",
+    "timeOff": "[hi] Time off",
+    "timesheets": "[hi] Timesheets",
+    "recruiting": "[hi] Recruiting",
+    "procurement": "[hi] Procurement",
+    "learning": "[hi] Learning",
+    "workforcePlanning": "[hi] Workforce Planning"
   },
   "auth": {
     "signIn": "साइन इन",

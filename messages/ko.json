@@ -46,7 +46,16 @@
     "settings": "설정",
     "signOut": "로그아웃",
     "lightMode": "라이트 모드",
-    "darkMode": "다크 모드"
+    "darkMode": "다크 모드",
+    "inbox": "[ko] Inbox",
+    "expenses": "[ko] Expenses",
+    "compensation": "[ko] Compensation",
+    "timeOff": "[ko] Time off",
+    "timesheets": "[ko] Timesheets",
+    "recruiting": "[ko] Recruiting",
+    "procurement": "[ko] Procurement",
+    "learning": "[ko] Learning",
+    "workforcePlanning": "[ko] Workforce Planning"
   },
   "auth": {
     "signIn": "로그인",

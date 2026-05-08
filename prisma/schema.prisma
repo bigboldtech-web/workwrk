@@ -91,6 +91,15 @@ model Organization {
   journalEntries      JournalEntry[]
   costCenters         CostCenter[]
   salaryBands         SalaryBand[]
+  plans               BudgetPlan[]
+  planScenarios       PlanScenario[]
+  planLines           PlanLine[]
+  planDrivers         PlanDriver[]
+  workflows           Workflow[]
+  workflowRuns        WorkflowRun[]
+  customFields        CustomFieldDefinition[]
+  customFieldValues   CustomFieldValue[]
+  overtimePolicies    OvertimePolicy[]
 
   @@index([slug])
 }
@@ -3506,6 +3515,287 @@ enum AccrualFrequency {
   QUARTERLY
 }
 
+// ==========================================
+// Adaptive Planning (Phase 5 v3)
+//
+// Native budgeting + forecasting on top of the GL. A Plan is a
+// container (budget, forecast, strategic plan); its lines live in
+// PlanLine — one row per (account × period × cost center × scenario).
+// PlanScenario lets the org compare base/upside/downside without
+// duplicating the whole plan. Reports compare PlanLine.amount to
+// JournalLine sums for variance views.
+// ==========================================
+
+model BudgetPlan {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fiscalYearId   String
+  fiscalYear     FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  name           String
+  type           PlanType   @default(BUDGET)
+  status         PlanStatus @default(DRAFT)
+  // Plan versions — incrementing each time PUBLISH is hit. Lets the
+  // org audit "what did we forecast last quarter?" without locking
+  // editing on the active plan.
+  version        Int        @default(1)
+  baselineId     String?    // pointer to the version this was branched from
+  description    String?
+  publishedAt    DateTime?
+  archivedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  scenarios      PlanScenario[]
+  lines          PlanLine[]
+
+  @@unique([organizationId, fiscalYearId, name, version])
+  @@index([organizationId, status])
+  @@index([fiscalYearId])
+}
+
+enum PlanType {
+  BUDGET           // approved annual budget
+  FORECAST         // rolling re-forecast as actuals land
+  STRATEGIC        // 3-5 year outlook
+  WHAT_IF          // scratch scenario, never published
+}
+
+enum PlanStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+// Scenarios let one Plan contain Base / Upside / Downside views
+// without copying every line three times. A line that doesn't
+// reference a scenario falls under the Plan's default scenario,
+// which the API auto-creates on Plan create.
+model PlanScenario {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planId         String
+  plan           BudgetPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  name           String
+  // Quick-multiply factor applied to "Base" lines when the scenario
+  // hasn't been edited line-by-line. Set null for hand-edited
+  // scenarios.
+  multiplier     Decimal? @db.Decimal(8, 4)
+  notes          String?
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  lines          PlanLine[]
+
+  @@unique([planId, name])
+  @@index([planId])
+}
+
+model PlanLine {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planId         String
+  plan           BudgetPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  scenarioId     String
+  scenario       PlanScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        GlAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  costCenterId   String?
+  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  periodId       String
+  period         AccountingPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  amount         Decimal  @db.Decimal(14, 2)
+  driverId       String?
+  driver         PlanDriver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([planId, scenarioId, accountId, costCenterId, periodId])
+  @@index([planId, accountId])
+  @@index([periodId])
+  @@index([costCenterId])
+}
+
+// Driver = named assumption that justifies a number. "Headcount
+// growth: 25% YoY". "Revenue per rep: $250k". The formula is free
+// text for now — Studio v2 will parse + recompute.
+model PlanDriver {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  formula        String?  // human-readable for now
+  assumptions    Json     @default("{}")
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lines          PlanLine[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+// ==========================================
+// Studio (Phase 5 v3) — custom workflows + custom fields.
+//
+// Workflow lets an admin define a multi-step approval flow that
+// any Submittable record (PO, expense, comp decision, etc.) can
+// run through. WorkflowRun is one execution against one record.
+//
+// CustomFieldDefinition + CustomFieldValue add per-org fields to
+// any entity without schema migrations: definitions live in JSON,
+// values are key-value rows. Trade-off: no enforced data type at
+// the DB layer; the API validates against the definition.
+// ==========================================
+
+model Workflow {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  // Polymorphic target — workflows attach to a record type, not
+  // a specific instance. Same string used in TagEntityType where
+  // applicable; free strings allowed for new types.
+  targetType     String
+  active         Boolean  @default(true)
+  // Steps are stored as an ordered JSON array so admins can
+  // rearrange + insert without table juggling. Each step is
+  // { id, name, approverRule, slaHours, requireNote }.
+  steps          Json     @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  runs           WorkflowRun[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, targetType, active])
+}
+
+model WorkflowRun {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflowId     String
+  workflow       Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  // Polymorphic record reference — entityType + entityId.
+  entityType     String
+  entityId       String
+  status         WorkflowRunStatus @default(IN_PROGRESS)
+  currentStep    Int      @default(0)
+  // Step-by-step decisions captured as JSON so the audit trail is
+  // self-contained. Each entry: { step, decidedBy, decision, note,
+  // at }.
+  decisions      Json     @default("[]")
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  @@index([organizationId, status])
+  @@index([entityType, entityId])
+}
+
+enum WorkflowRunStatus {
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model CustomFieldDefinition {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Same polymorphic targetType pattern as Workflow.
+  targetType     String
+  key            String   // machine name, e.g. "cost_center_alt"
+  label          String   // display label
+  fieldType      CustomFieldType @default(TEXT)
+  required       Boolean  @default(false)
+  // Type-specific options stored as JSON: SELECT options, NUMBER
+  // min/max, DATE format, etc.
+  options        Json     @default("{}")
+  position       Int      @default(0)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  values         CustomFieldValue[]
+
+  @@unique([organizationId, targetType, key])
+  @@index([organizationId, targetType])
+}
+
+enum CustomFieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  DATE
+  CHECKBOX
+  SELECT
+  MULTI_SELECT
+  URL
+  EMAIL
+}
+
+model CustomFieldValue {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  definitionId   String
+  definition     CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  entityType     String
+  entityId       String
+  // Value stored as text — adapter on read converts back to the
+  // declared CustomFieldType. Null for "not set".
+  valueText      String?
+  // Numeric / date variants kept separate for indexable filtering.
+  valueNumber    Decimal? @db.Decimal(20, 6)
+  valueDate      DateTime?
+  // For MULTI_SELECT.
+  valueJson      Json?
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@unique([definitionId, entityType, entityId])
+  @@index([entityType, entityId])
+}
+
+// ==========================================
+// Overtime engine (Phase 4 v3 / Mobile Clock-in)
+//
+// OvertimePolicy captures the jurisdictional rules an org needs:
+// California: 8h daily / 40h weekly / 6th-day rules. Federal FLSA:
+// 40h weekly. Customer can layer their own rules on top. The
+// engine consumes TimeEntry rows + a policy and returns regular /
+// overtime / double-time hour buckets.
+// ==========================================
+
+model OvertimePolicy {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  jurisdiction   String   // free text: "US-CA", "US-FED", "AU-NSW"
+  // Daily threshold over which OT kicks in. Null = no daily rule.
+  dailyOtAfter   Decimal? @db.Decimal(4, 2)  // e.g. 8.00
+  dailyDtAfter   Decimal? @db.Decimal(4, 2)  // double-time threshold
+  // Weekly threshold over which OT kicks in. Null = no weekly rule.
+  weeklyOtAfter  Decimal? @db.Decimal(5, 2)  // e.g. 40.00
+  // Optional 7th-consecutive-day rule (CA): first 8h are OT, beyond
+  // 8h is DT. Null disables.
+  seventhDayOt   Boolean  @default(false)
+  active         Boolean  @default(true)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+}
+
 // Salary band — min / mid / max for a role within a location and
 // (optionally) a level. Used during compensation cycles to flag
 // out-of-band proposals before they're approved.
@@ -3573,6 +3863,7 @@ model GlAccount {
 
   debitLines     JournalLine[] @relation("JournalLineDebit")
   creditLines    JournalLine[] @relation("JournalLineCredit")
+  planLines      PlanLine[]
 
   @@unique([organizationId, code])
   @@index([organizationId, type])
@@ -3599,6 +3890,7 @@ model CostCenter {
   createdAt      DateTime @default(now())
 
   journalLines   JournalLine[]
+  planLines      PlanLine[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -3620,6 +3912,7 @@ model FiscalYear {
   createdAt      DateTime @default(now())
 
   periods        AccountingPeriod[]
+  budgetPlans    BudgetPlan[]
 
   @@unique([organizationId, label])
   @@index([organizationId, status])
@@ -3647,6 +3940,7 @@ model AccountingPeriod {
   createdAt      DateTime @default(now())
 
   journalEntries JournalEntry[]
+  planLines      PlanLine[]
 
   @@unique([fiscalYearId, label])
   @@index([organizationId, status])

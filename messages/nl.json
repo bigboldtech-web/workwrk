@@ -46,7 +46,16 @@
     "settings": "Instellingen",
     "signOut": "Uitloggen",
     "lightMode": "Lichte modus",
-    "darkMode": "Donkere modus"
+    "darkMode": "Donkere modus",
+    "inbox": "[nl] Inbox",
+    "expenses": "[nl] Expenses",
+    "compensation": "[nl] Compensation",
+    "timeOff": "[nl] Time off",
+    "timesheets": "[nl] Timesheets",
+    "recruiting": "[nl] Recruiting",
+    "procurement": "[nl] Procurement",
+    "learning": "[nl] Learning",
+    "workforcePlanning": "[nl] Workforce Planning"
   },
   "auth": {
     "signIn": "Inloggen",

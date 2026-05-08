@@ -46,7 +46,16 @@
     "settings": "Indstillinger",
     "signOut": "Log ud",
     "lightMode": "Lys tilstand",
-    "darkMode": "Mørk tilstand"
+    "darkMode": "Mørk tilstand",
+    "inbox": "[da] Inbox",
+    "expenses": "[da] Expenses",
+    "compensation": "[da] Compensation",
+    "timeOff": "[da] Time off",
+    "timesheets": "[da] Timesheets",
+    "recruiting": "[da] Recruiting",
+    "procurement": "[da] Procurement",
+    "learning": "[da] Learning",
+    "workforcePlanning": "[da] Workforce Planning"
   },
   "auth": {
     "signIn": "Log ind",

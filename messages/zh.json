@@ -46,7 +46,16 @@
     "settings": "设置",
     "signOut": "退出登录",
     "lightMode": "浅色模式",
-    "darkMode": "深色模式"
+    "darkMode": "深色模式",
+    "inbox": "[zh] Inbox",
+    "expenses": "[zh] Expenses",
+    "compensation": "[zh] Compensation",
+    "timeOff": "[zh] Time off",
+    "timesheets": "[zh] Timesheets",
+    "recruiting": "[zh] Recruiting",
+    "procurement": "[zh] Procurement",
+    "learning": "[zh] Learning",
+    "workforcePlanning": "[zh] Workforce Planning"
   },
   "auth": {
     "signIn": "登录",

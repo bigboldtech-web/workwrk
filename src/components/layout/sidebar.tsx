@@ -63,47 +63,80 @@ type NavItem = {
   moduleKey?: string;
   managerOnly?: boolean;
   adminOnly?: boolean;
+  // ClickUp-style "Coming Soon" badge — shown on items whose backend
+  // is wired but missing a vendor decision or a runtime piece. The
+  // link still opens the page so admins can preview; the badge
+  // signals "don't expect this to be production-grade yet."
+  comingSoon?: boolean;
+  // Each item also belongs to a section so the sidebar reads as a
+  // grouped table-of-contents instead of a 40-item flat list.
+  section: NavSection;
+  // Per-icon hue token for the ClickUp-look colored icon chip.
+  hue?: NavHue;
+};
+
+type NavSection = "core" | "people" | "work" | "finance" | "platform";
+type NavHue = "blue" | "green" | "amber" | "violet" | "pink" | "teal" | "sky" | "rose" | "lime" | "slate";
+
+const SECTION_LABEL: Record<NavSection, string> = {
+  core: "Home",
+  people: "People",
+  work: "Work",
+  finance: "Money",
+  platform: "Platform",
 };
 
 const navigation: NavItem[] = [
-  { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Inbox", key: "inbox", href: "/inbox", icon: Inbox },
-  { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone },
-  { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette },
-  { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true },
-  { name: "Organization", key: "organization", href: "/organization", icon: Building2 },
-  { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi" },
-  { name: "Work Calendar", key: "calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks" },
-  { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt },
-  { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true },
-  { name: "Time off", key: "timeOff", href: "/time-off", icon: CalendarOff },
-  { name: "Timesheets", key: "timesheets", href: "/timesheets", icon: Clock },
-  { name: "Recruiting", key: "recruiting", href: "/recruiting", icon: Briefcase, managerOnly: true },
-  { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true },
-  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true },
-  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true },
-  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart },
-  { name: "Financials", key: "financials", href: "/financials", icon: BookText, adminOnly: true },
-  { name: "Learning", key: "learning", href: "/learning", icon: GraduationCap },
-  { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops" },
-  { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true },
-  { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews" },
-  { name: "Meetings", key: "meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings" },
-  { name: "Analytics", key: "analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true },
-  { name: "Onboarding", key: "onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true },
-  { name: "Kudos", key: "kudos", href: "/kudos", icon: Heart },
-  { name: "Ideas", key: "ideas", href: "/ideas", icon: Lightbulb },
-  { name: "OKRs", key: "okrs", href: "/okrs", icon: Crosshair },
-  { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true },
-  { name: "Workforce Planning", key: "workforcePlanning", href: "/workforce-planning", icon: Target, managerOnly: true },
-  { name: "Surveys", key: "surveys", href: "/surveys", icon: ClipboardCheck },
-  { name: "Candor", key: "candor", href: "/candor", icon: MessageSquareHeart },
-  { name: "Policies", key: "policies", href: "/policies", icon: Shield },
-  { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true },
-  { name: "Activity", key: "activity", href: "/activity", icon: Activity },
-  { name: "Tools", key: "tools", href: "/tools", icon: Wrench, managerOnly: true },
-  { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true },
-  { name: "AI Assistant", key: "aiAssistant", href: "/ai", icon: Bot, moduleKey: "ai", managerOnly: true },
+  // Home
+  { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard, section: "core", hue: "blue" },
+  { name: "Inbox", key: "inbox", href: "/inbox", icon: Inbox, section: "core", hue: "violet" },
+  { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone, section: "core", hue: "amber" },
+  { name: "Activity", key: "activity", href: "/activity", icon: Activity, section: "core", hue: "slate" },
+  { name: "AI Assistant", key: "aiAssistant", href: "/ai", icon: Bot, moduleKey: "ai", managerOnly: true, section: "core", hue: "lime" },
+
+  // People
+  { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true, section: "people", hue: "blue" },
+  { name: "Organization", key: "organization", href: "/organization", icon: Building2, section: "people", hue: "sky" },
+  { name: "Onboarding", key: "onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true, section: "people", hue: "teal" },
+  { name: "Recruiting", key: "recruiting", href: "/recruiting", icon: Briefcase, managerOnly: true, section: "people", hue: "violet" },
+  { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true, section: "people", hue: "rose" },
+  { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews", section: "people", hue: "amber" },
+  { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true, section: "people", hue: "green" },
+  { name: "Kudos", key: "kudos", href: "/kudos", icon: Heart, section: "people", hue: "pink" },
+
+  // Work
+  { name: "Work Calendar", key: "calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks", section: "work", hue: "blue" },
+  { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi", section: "work", hue: "rose" },
+  { name: "OKRs", key: "okrs", href: "/okrs", icon: Crosshair, section: "work", hue: "violet" },
+  { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops", section: "work", hue: "teal" },
+  { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true, section: "work", hue: "sky" },
+  { name: "Meetings", key: "meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings", section: "work", hue: "amber" },
+  { name: "Time off", key: "timeOff", href: "/time-off", icon: CalendarOff, section: "work", hue: "lime" },
+  { name: "Timesheets", key: "timesheets", href: "/timesheets", icon: Clock, section: "work", hue: "blue" },
+  { name: "Clock in", key: "clock", href: "/clock", icon: Clock, section: "work", hue: "green" },
+  { name: "Learning", key: "learning", href: "/learning", icon: GraduationCap, section: "work", hue: "violet" },
+  { name: "Ideas", key: "ideas", href: "/ideas", icon: Lightbulb, section: "work", hue: "amber" },
+  { name: "Surveys", key: "surveys", href: "/surveys", icon: ClipboardCheck, section: "work", hue: "teal" },
+  { name: "Candor", key: "candor", href: "/candor", icon: MessageSquareHeart, section: "work", hue: "pink" },
+
+  // Money
+  { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "finance", hue: "amber" },
+  { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "finance", hue: "sky" },
+  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true, comingSoon: true, section: "finance", hue: "green" },
+  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true, comingSoon: true, section: "finance", hue: "pink" },
+  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, comingSoon: true, section: "finance", hue: "rose" },
+  { name: "Financials", key: "financials", href: "/financials", icon: BookText, adminOnly: true, section: "finance", hue: "blue" },
+  { name: "Planning", key: "planning", href: "/planning", icon: Target, adminOnly: true, section: "finance", hue: "violet" },
+
+  // Platform
+  { name: "Workforce Planning", key: "workforcePlanning", href: "/workforce-planning", icon: Target, managerOnly: true, section: "platform", hue: "violet" },
+  { name: "Analytics", key: "analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true, section: "platform", hue: "blue" },
+  { name: "Policies", key: "policies", href: "/policies", icon: Shield, section: "platform", hue: "rose" },
+  { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true, section: "platform", hue: "amber" },
+  { name: "Studio", key: "studio", href: "/studio", icon: Wrench, adminOnly: true, comingSoon: true, section: "platform", hue: "lime" },
+  { name: "Tools", key: "tools", href: "/tools", icon: Wrench, managerOnly: true, section: "platform", hue: "slate" },
+  { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true, section: "platform", hue: "sky" },
+  { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette, section: "platform", hue: "pink" },
 ];
 
 const bottomNav = [
@@ -336,9 +369,17 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Main nav */}
+      {/* Main nav — grouped into ClickUp-style sections */}
       <nav className="app-sidebar-nav">
-        {visibleNav.map((item) => {
+        {(["core", "people", "work", "finance", "platform"] as const).map((section) => {
+          const items = visibleNav.filter((i) => i.section === section);
+          if (items.length === 0) return null;
+          return (
+            <div key={section} className="app-sidebar-section">
+              {!collapsed && (
+                <div className="app-sidebar-section-label">{SECTION_LABEL[section]}</div>
+              )}
+              {items.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
           const notifType = NAV_KEY_TO_NOTIFICATION_TYPE[item.key];
@@ -353,14 +394,24 @@ export function Sidebar() {
               <div className={cn("app-sidebar-link-row", isSopsEntry && "has-expander")}>
                 <Link
                   href={item.href}
-                  className={cn("app-sidebar-link", isActive && "is-active", collapsed && "is-collapsed")}
+                  className={cn(
+                    "app-sidebar-link",
+                    isActive && "is-active",
+                    collapsed && "is-collapsed",
+                    item.hue && `hue-${item.hue}`,
+                  )}
                   title={collapsed ? tNav(item.key) : undefined}
                 >
-                  <Icon size={16} />
+                  <span className="app-sidebar-icon-chip" aria-hidden>
+                    <Icon size={14} />
+                  </span>
                   {!collapsed && (
                     <>
                       <span className="app-sidebar-label">{tNav(item.key)}</span>
-                      {hasBadge && (
+                      {item.comingSoon && (
+                        <span className="app-sidebar-soon-badge" aria-label="Coming soon">Soon</span>
+                      )}
+                      {hasBadge && !item.comingSoon && (
                         <span className="app-sidebar-badge">{badgeCount > 9 ? "9+" : badgeCount}</span>
                       )}
                     </>
@@ -442,6 +493,9 @@ export function Sidebar() {
                 </div>
               )}
             </React.Fragment>
+          );
+        })}
+            </div>
           );
         })}
       </nav>

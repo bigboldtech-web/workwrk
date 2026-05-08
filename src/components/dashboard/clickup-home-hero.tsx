@@ -221,26 +221,31 @@ export async function ClickupHomeHero() {
   }
 
   // Tiles — pick the 4 most relevant for this role.
+  // ClickUp-style: solid colored icon chip on a clean white card,
+  // rather than full-tile gradients that fight the rest of the page.
   const tiles: Array<{
     label: string;
     n: number;
     icon: LucideIcon;
     href: string;
-    accent: string;
+    chipBg: string;
+    chipFg: string;
   }> = [
     {
       label: "Tasks this week",
       n: taskCount,
       icon: CheckSquare,
       href: "/tasks",
-      accent: "from-blue-50 to-blue-100/50 border-blue-100 text-blue-700",
+      chipBg: "bg-blue-50",
+      chipFg: "text-blue-600",
     },
     {
       label: "SOPs to acknowledge",
       n: sopAssignmentCount,
       icon: BookOpen,
       href: "/sops/my-sops",
-      accent: "from-amber-50 to-amber-100/50 border-amber-100 text-amber-700",
+      chipBg: "bg-amber-50",
+      chipFg: "text-amber-600",
     },
   ];
   if (isManager) {
@@ -254,14 +259,16 @@ export async function ClickupHomeHero() {
         invoicesPendingCount,
       icon: InboxIcon,
       href: "/inbox",
-      accent: "from-emerald-50 to-emerald-100/50 border-emerald-100 text-emerald-700",
+      chipBg: "bg-emerald-50",
+      chipFg: "text-emerald-600",
     });
     tiles.push({
       label: "Interviews this week",
       n: upcomingInterviewsCount,
       icon: Briefcase,
       href: "/recruiting",
-      accent: "from-violet-50 to-violet-100/50 border-violet-100 text-violet-700",
+      chipBg: "bg-violet-50",
+      chipFg: "text-violet-600",
     });
   } else {
     tiles.push({
@@ -269,14 +276,16 @@ export async function ClickupHomeHero() {
       n: mandatoryCoursesCount,
       icon: GraduationCap,
       href: "/learning",
-      accent: "from-orange-50 to-orange-100/50 border-orange-100 text-orange-700",
+      chipBg: "bg-orange-50",
+      chipFg: "text-orange-600",
     });
     tiles.push({
       label: "Inbox total",
       n: inboxTotal,
       icon: InboxIcon,
       href: "/inbox",
-      accent: "from-emerald-50 to-emerald-100/50 border-emerald-100 text-emerald-700",
+      chipBg: "bg-emerald-50",
+      chipFg: "text-emerald-600",
     });
   }
 
@@ -310,7 +319,7 @@ export async function ClickupHomeHero() {
         </Link>
       </div>
 
-      {/* KPI tiles */}
+      {/* KPI tiles — ClickUp-style: clean white card, vivid icon chip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {tiles.map((t) => {
           const Icon = t.icon;
@@ -318,14 +327,16 @@ export async function ClickupHomeHero() {
             <Link
               key={t.label}
               href={t.href}
-              className={`relative rounded-xl border p-4 bg-gradient-to-br ${t.accent} transition-shadow hover:shadow-sm group`}
+              className="relative rounded-xl border border-slate-200 bg-white dark:bg-card dark:border-line p-4 transition-all hover:border-slate-300 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.06)] hover:-translate-y-0.5 group"
             >
               <div className="flex items-start justify-between gap-2">
-                <Icon size={18} className="opacity-70" />
-                <ArrowRight size={12} className="opacity-0 group-hover:opacity-60 transition-opacity" />
+                <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg ${t.chipBg} ${t.chipFg}`}>
+                  <Icon size={16} />
+                </span>
+                <ArrowRight size={12} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
               </div>
-              <p className="text-3xl font-semibold mt-3">{t.n}</p>
-              <p className="text-xs mt-1 opacity-80">{t.label}</p>
+              <p className="text-3xl font-bold mt-3 tabular-nums tracking-tight">{t.n}</p>
+              <p className="text-xs mt-1 text-slate-500 dark:text-muted">{t.label}</p>
             </Link>
           );
         })}

@@ -46,7 +46,16 @@
     "settings": "Asetukset",
     "signOut": "Kirjaudu ulos",
     "lightMode": "Vaalea tila",
-    "darkMode": "Tumma tila"
+    "darkMode": "Tumma tila",
+    "inbox": "[fi] Inbox",
+    "expenses": "[fi] Expenses",
+    "compensation": "[fi] Compensation",
+    "timeOff": "[fi] Time off",
+    "timesheets": "[fi] Timesheets",
+    "recruiting": "[fi] Recruiting",
+    "procurement": "[fi] Procurement",
+    "learning": "[fi] Learning",
+    "workforcePlanning": "[fi] Workforce Planning"
   },
   "auth": {
     "signIn": "Kirjaudu sisään",

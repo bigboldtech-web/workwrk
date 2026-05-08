@@ -46,7 +46,16 @@
     "settings": "Configurações",
     "signOut": "Sair",
     "lightMode": "Modo Claro",
-    "darkMode": "Modo Escuro"
+    "darkMode": "Modo Escuro",
+    "inbox": "[pt] Inbox",
+    "expenses": "[pt] Expenses",
+    "compensation": "[pt] Compensation",
+    "timeOff": "[pt] Time off",
+    "timesheets": "[pt] Timesheets",
+    "recruiting": "[pt] Recruiting",
+    "procurement": "[pt] Procurement",
+    "learning": "[pt] Learning",
+    "workforcePlanning": "[pt] Workforce Planning"
   },
   "auth": {
     "signIn": "Entrar",

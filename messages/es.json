@@ -46,7 +46,16 @@
     "settings": "Configuración",
     "signOut": "Cerrar Sesión",
     "lightMode": "Modo Claro",
-    "darkMode": "Modo Oscuro"
+    "darkMode": "Modo Oscuro",
+    "inbox": "[es] Inbox",
+    "expenses": "[es] Expenses",
+    "compensation": "[es] Compensation",
+    "timeOff": "[es] Time off",
+    "timesheets": "[es] Timesheets",
+    "recruiting": "[es] Recruiting",
+    "procurement": "[es] Procurement",
+    "learning": "[es] Learning",
+    "workforcePlanning": "[es] Workforce Planning"
   },
   "auth": {
     "signIn": "Iniciar Sesión",

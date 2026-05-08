@@ -353,3 +353,29 @@ body {
 :root:not(.dark) [class*="hover:bg-white/[0.04]"]:hover { background-color: rgba(0, 0, 0, 0.04) !important; }
 :root:not(.dark) [class*="hover:bg-white/5"]:hover { background-color: rgba(0, 0, 0, 0.04) !important; }
 :root:not(.dark) [class*="hover:bg-white/10"]:hover { background-color: rgba(0, 0, 0, 0.06) !important; }
+
+/* ================================================================
+ * Mobile table responsiveness.
+ *
+ * Most dashboard tables sit inside CardContent and assume desktop
+ * width. On a 375px viewport they overflow off-screen. Rather than
+ * wrap every <table> with overflow-x-auto by hand, scope a single
+ * rule: under 640px, any table inside a card-like container scrolls
+ * horizontally so the page itself doesn't.
+ * ================================================================ */
+
+@media (max-width: 640px) {
+  [class*="CardContent"] table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  [class*="CardContent"] table thead,
+  [class*="CardContent"] table tbody,
+  [class*="CardContent"] table tr {
+    display: table;
+    width: 100%;
+    table-layout: auto;
+  }
+}

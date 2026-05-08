@@ -46,7 +46,16 @@
     "settings": "設定",
     "signOut": "ログアウト",
     "lightMode": "ライトモード",
-    "darkMode": "ダークモード"
+    "darkMode": "ダークモード",
+    "inbox": "[ja] Inbox",
+    "expenses": "[ja] Expenses",
+    "compensation": "[ja] Compensation",
+    "timeOff": "[ja] Time off",
+    "timesheets": "[ja] Timesheets",
+    "recruiting": "[ja] Recruiting",
+    "procurement": "[ja] Procurement",
+    "learning": "[ja] Learning",
+    "workforcePlanning": "[ja] Workforce Planning"
   },
   "auth": {
     "signIn": "ログイン",

@@ -46,7 +46,16 @@
     "settings": "Ustawienia",
     "signOut": "Wyloguj się",
     "lightMode": "Tryb jasny",
-    "darkMode": "Tryb ciemny"
+    "darkMode": "Tryb ciemny",
+    "inbox": "[pl] Inbox",
+    "expenses": "[pl] Expenses",
+    "compensation": "[pl] Compensation",
+    "timeOff": "[pl] Time off",
+    "timesheets": "[pl] Timesheets",
+    "recruiting": "[pl] Recruiting",
+    "procurement": "[pl] Procurement",
+    "learning": "[pl] Learning",
+    "workforcePlanning": "[pl] Workforce Planning"
   },
   "auth": {
     "signIn": "Zaloguj się",

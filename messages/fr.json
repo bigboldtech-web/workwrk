@@ -46,7 +46,16 @@
     "settings": "Paramètres",
     "signOut": "Déconnexion",
     "lightMode": "Mode Clair",
-    "darkMode": "Mode Sombre"
+    "darkMode": "Mode Sombre",
+    "inbox": "[fr] Inbox",
+    "expenses": "[fr] Expenses",
+    "compensation": "[fr] Compensation",
+    "timeOff": "[fr] Time off",
+    "timesheets": "[fr] Timesheets",
+    "recruiting": "[fr] Recruiting",
+    "procurement": "[fr] Procurement",
+    "learning": "[fr] Learning",
+    "workforcePlanning": "[fr] Workforce Planning"
   },
   "auth": {
     "signIn": "Connexion",

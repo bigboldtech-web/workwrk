@@ -46,7 +46,16 @@
     "settings": "Innstillinger",
     "signOut": "Logg ut",
     "lightMode": "Lyst modus",
-    "darkMode": "Mørkt modus"
+    "darkMode": "Mørkt modus",
+    "inbox": "[no] Inbox",
+    "expenses": "[no] Expenses",
+    "compensation": "[no] Compensation",
+    "timeOff": "[no] Time off",
+    "timesheets": "[no] Timesheets",
+    "recruiting": "[no] Recruiting",
+    "procurement": "[no] Procurement",
+    "learning": "[no] Learning",
+    "workforcePlanning": "[no] Workforce Planning"
   },
   "auth": {
     "signIn": "Logg inn",

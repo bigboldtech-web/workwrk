@@ -46,7 +46,16 @@
     "settings": "הגדרות",
     "signOut": "התנתק",
     "lightMode": "מצב בהיר",
-    "darkMode": "מצב כהה"
+    "darkMode": "מצב כהה",
+    "inbox": "[he] Inbox",
+    "expenses": "[he] Expenses",
+    "compensation": "[he] Compensation",
+    "timeOff": "[he] Time off",
+    "timesheets": "[he] Timesheets",
+    "recruiting": "[he] Recruiting",
+    "procurement": "[he] Procurement",
+    "learning": "[he] Learning",
+    "workforcePlanning": "[he] Workforce Planning"
   },
   "auth": {
     "signIn": "התחברות",

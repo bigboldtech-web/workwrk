@@ -46,7 +46,16 @@
     "settings": "الإعدادات",
     "signOut": "تسجيل الخروج",
     "lightMode": "الوضع الفاتح",
-    "darkMode": "الوضع الداكن"
+    "darkMode": "الوضع الداكن",
+    "inbox": "[ar] Inbox",
+    "expenses": "[ar] Expenses",
+    "compensation": "[ar] Compensation",
+    "timeOff": "[ar] Time off",
+    "timesheets": "[ar] Timesheets",
+    "recruiting": "[ar] Recruiting",
+    "procurement": "[ar] Procurement",
+    "learning": "[ar] Learning",
+    "workforcePlanning": "[ar] Workforce Planning"
   },
   "auth": {
     "signIn": "تسجيل الدخول",

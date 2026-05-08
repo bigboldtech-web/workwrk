@@ -46,7 +46,16 @@
     "settings": "Inställningar",
     "signOut": "Logga ut",
     "lightMode": "Ljust läge",
-    "darkMode": "Mörkt läge"
+    "darkMode": "Mörkt läge",
+    "inbox": "[sv] Inbox",
+    "expenses": "[sv] Expenses",
+    "compensation": "[sv] Compensation",
+    "timeOff": "[sv] Time off",
+    "timesheets": "[sv] Timesheets",
+    "recruiting": "[sv] Recruiting",
+    "procurement": "[sv] Procurement",
+    "learning": "[sv] Learning",
+    "workforcePlanning": "[sv] Workforce Planning"
   },
   "auth": {
     "signIn": "Logga in",

@@ -46,7 +46,16 @@
     "settings": "Einstellungen",
     "signOut": "Abmelden",
     "lightMode": "Heller Modus",
-    "darkMode": "Dunkler Modus"
+    "darkMode": "Dunkler Modus",
+    "inbox": "[de] Inbox",
+    "expenses": "[de] Expenses",
+    "compensation": "[de] Compensation",
+    "timeOff": "[de] Time off",
+    "timesheets": "[de] Timesheets",
+    "recruiting": "[de] Recruiting",
+    "procurement": "[de] Procurement",
+    "learning": "[de] Learning",
+    "workforcePlanning": "[de] Workforce Planning"
   },
   "auth": {
     "signIn": "Anmelden",
