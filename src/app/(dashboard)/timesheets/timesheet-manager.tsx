@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
+import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
 import {
   Clock,
   Play,
@@ -545,6 +546,9 @@ function ApprovalQueue({
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedArray = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  const allSelected = rows.length > 0 && rows.every((r) => selectedIds.has(r.id));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -562,6 +566,20 @@ function ApprovalQueue({
   }, [toast]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setSelectedIds(new Set()); }, [rows]);
+
+  function toggleId(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(rows.map((r) => r.id)));
+  }
 
   async function decide(id: string, decision: "APPROVE" | "REJECT") {
     let note: string | null = null;
@@ -601,48 +619,72 @@ function ApprovalQueue({
   }
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <ul className="divide-y divide-white/5">
-          {rows.map((r) => (
-            <li key={r.id} className="p-4 flex items-center justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">
-                  {r.user ? `${r.user.firstName} ${r.user.lastName}` : "—"}
+    <>
+      <Card>
+        <CardContent className="p-0">
+          <div className="px-4 py-2 border-b border-line/40 flex items-center gap-2 text-xs text-muted">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAll}
+              aria-label="Select all"
+            />
+            <span>{allSelected ? "Clear selection" : "Select all"}</span>
+          </div>
+          <ul className="divide-y divide-white/5">
+            {rows.map((r) => (
+              <li key={r.id} className="p-4 flex items-center justify-between gap-3">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(r.id)}
+                  onChange={() => toggleId(r.id)}
+                  aria-label={`Select ${r.user?.firstName ?? "row"}`}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">
+                    {r.user ? `${r.user.firstName} ${r.user.lastName}` : "—"}
+                  </div>
+                  <div className="text-xs text-muted">
+                    Week of {new Date(r.weekStartDate).toLocaleDateString()} ·{" "}
+                    {r._count.entries} {r._count.entries === 1 ? "entry" : "entries"}
+                    {r.submittedAt && ` · submitted ${new Date(r.submittedAt).toLocaleDateString()}`}
+                  </div>
                 </div>
-                <div className="text-xs text-muted">
-                  Week of {new Date(r.weekStartDate).toLocaleDateString()} ·{" "}
-                  {r._count.entries} {r._count.entries === 1 ? "entry" : "entries"}
-                  {r.submittedAt && ` · submitted ${new Date(r.submittedAt).toLocaleDateString()}`}
+                <div className="flex items-center gap-1.5">
+                  <Link href={`/timesheets/${r.id}`} className="text-xs text-muted hover:text-fg">
+                    View
+                  </Link>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs text-red-400"
+                    disabled={busy === r.id}
+                    onClick={() => decide(r.id, "REJECT")}
+                  >
+                    <XCircle size={11} className="mr-1" /> Reject
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={busy === r.id}
+                    onClick={() => decide(r.id, "APPROVE")}
+                  >
+                    <CheckCircle2 size={11} className="mr-1" /> Approve
+                  </Button>
                 </div>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Link href={`/timesheets/${r.id}`} className="text-xs text-muted hover:text-fg">
-                  View
-                </Link>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs text-red-400"
-                  disabled={busy === r.id}
-                  onClick={() => decide(r.id, "REJECT")}
-                >
-                  <XCircle size={11} className="mr-1" /> Reject
-                </Button>
-                <Button
-                  size="sm"
-                  className="h-7 text-xs"
-                  disabled={busy === r.id}
-                  onClick={() => decide(r.id, "APPROVE")}
-                >
-                  <CheckCircle2 size={11} className="mr-1" /> Approve
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </CardContent>
-    </Card>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <BulkApproveBar
+        entityType="timesheet"
+        selectedIds={selectedArray}
+        onClear={() => setSelectedIds(new Set())}
+        onDone={load}
+      />
+    </>
   );
 }
 

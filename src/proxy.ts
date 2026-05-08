@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * Two routing concerns rolled into one middleware:
+ * Two routing concerns rolled into one proxy:
  *
  * 1. **Admin host split** — `/admin` lives on its own hostname
  *    (`admin.workwrk.com`) so customers on workwrk.com never even
@@ -20,12 +20,12 @@ import { NextRequest, NextResponse } from "next/server";
  *      ADMIN_HOST       = "admin.workwrk.com"  (staff panel)
  *      CUSTOM_DOMAINS_ENABLED = "true"         (off by default)
  *
- *    Implementation note: this middleware runs in the Edge
- *    runtime, where Prisma can't be loaded. We resolve the org via
- *    a tiny `/api/internal/resolve-domain` endpoint that runs in
- *    the Node runtime — middleware just sets the header from a
- *    cached value. For now we pass through the host header and
- *    leave deeper resolution to the auth layer.
+ *    Implementation note: this proxy runs in the Edge runtime,
+ *    where Prisma can't be loaded. We resolve the org via a tiny
+ *    `/api/internal/resolve-domain` endpoint that runs in the
+ *    Node runtime — proxy just sets the header from a cached
+ *    value. For now we pass through the host header and leave
+ *    deeper resolution to the auth layer.
  */
 
 const ADMIN_PATH_PREFIX = "/admin";
@@ -36,7 +36,7 @@ function hostMatches(reqHost: string, configured: string): boolean {
   return norm(reqHost) === norm(configured);
 }
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const adminHost = process.env.ADMIN_HOST?.trim();
   const appHost = process.env.APP_HOST?.trim();
   const reqHost = req.headers.get("host") || "";

@@ -251,11 +251,13 @@ function CompareCell({ value, highlight }: { value: Cell; highlight?: boolean })
       }`}
     >
       {typeof value === "string" ? (
-        <span className="text-xs font-medium text-slate-700">{value}</span>
+        value === "partial" ? (
+          <Minus size={16} className="text-amber-500 inline" />
+        ) : (
+          <span className="text-xs font-medium text-slate-700">{value}</span>
+        )
       ) : value === true ? (
         <Check size={16} className="text-emerald-600 inline" />
-      ) : value === "partial" ? (
-        <Minus size={16} className="text-amber-500 inline" />
       ) : (
         <X size={16} className="text-slate-300 inline" />
       )}

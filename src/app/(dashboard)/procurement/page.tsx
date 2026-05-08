@@ -4,7 +4,7 @@
 // Invoices. Each is a table with inline create dialogs and
 // state-transition buttons. Detail pages are v2.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
 import {
   Dialog,
   DialogContent,
@@ -264,6 +265,9 @@ function POsTab() {
   const [rows, setRows] = useState<PO[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedArray = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  useEffect(() => { setSelectedIds(new Set()); }, [tab, rows.length]);
 
   const load = useCallback(async (scope: typeof tab) => {
     setLoading(true);
@@ -275,6 +279,21 @@ function POsTab() {
   }, []);
 
   useEffect(() => { load(tab); }, [tab, load]);
+
+  const submittedRows = rows.filter((r) => r.status === "SUBMITTED");
+  const allSelected = submittedRows.length > 0 && submittedRows.every((r) => selectedIds.has(r.id));
+  function toggleId(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(submittedRows.map((r) => r.id)));
+  }
 
   async function action(id: string, action: string, opts?: { note?: string }) {
     const res = await fetch(`/api/purchase-orders/${id}`, {
@@ -326,6 +345,17 @@ function POsTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted border-b border-white/5">
+                  {tab === "approve" && (
+                    <th className="px-3 py-2.5 font-normal w-8">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleAll}
+                        aria-label="Select all submitted"
+                        disabled={submittedRows.length === 0}
+                      />
+                    </th>
+                  )}
                   <th className="px-4 py-2.5 font-normal">PO #</th>
                   <th className="px-4 py-2.5 font-normal">Vendor</th>
                   <th className="px-4 py-2.5 font-normal">Description</th>
@@ -338,6 +368,18 @@ function POsTab() {
               <tbody>
                 {rows.map((p) => (
                   <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    {tab === "approve" && (
+                      <td className="px-3 py-2.5">
+                        {p.status === "SUBMITTED" ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(p.id)}
+                            onChange={() => toggleId(p.id)}
+                            aria-label={`Select PO ${p.number}`}
+                          />
+                        ) : null}
+                      </td>
+                    )}
                     <td className="px-4 py-2.5 font-mono text-xs">{p.number}</td>
                     <td className="px-4 py-2.5 text-xs">{p.vendor.name}</td>
                     <td className="px-4 py-2.5 text-xs truncate max-w-xs">{p.description}</td>
@@ -359,6 +401,15 @@ function POsTab() {
 
       {showCreate && (
         <CreatePoDialog onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(tab); }} />
+      )}
+
+      {tab === "approve" && (
+        <BulkApproveBar
+          entityType="purchase-order"
+          selectedIds={selectedArray}
+          onClear={() => setSelectedIds(new Set())}
+          onDone={() => load(tab)}
+        />
       )}
     </>
   );
@@ -496,6 +547,9 @@ function InvoicesTab() {
   const [rows, setRows] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedArray = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  useEffect(() => { setSelectedIds(new Set()); }, [rows.length]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -507,6 +561,21 @@ function InvoicesTab() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const pendingRows = rows.filter((r) => r.status === "PENDING");
+  const allSelected = pendingRows.length > 0 && pendingRows.every((r) => selectedIds.has(r.id));
+  function toggleId(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(pendingRows.map((r) => r.id)));
+  }
 
   async function action(id: string, action: string, opts?: { note?: string }) {
     const res = await fetch(`/api/invoices/${id}`, {
@@ -546,6 +615,15 @@ function InvoicesTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted border-b border-white/5">
+                  <th className="px-3 py-2.5 font-normal w-8">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all pending"
+                      disabled={pendingRows.length === 0}
+                    />
+                  </th>
                   <th className="px-4 py-2.5 font-normal">Invoice #</th>
                   <th className="px-4 py-2.5 font-normal">Vendor</th>
                   <th className="px-4 py-2.5 font-normal">PO</th>
@@ -560,6 +638,16 @@ function InvoicesTab() {
                   const isOverdue = new Date(inv.dueDate) < new Date() && inv.status !== "PAID";
                   return (
                     <tr key={inv.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="px-3 py-2.5">
+                        {inv.status === "PENDING" ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(inv.id)}
+                            onChange={() => toggleId(inv.id)}
+                            aria-label={`Select invoice ${inv.invoiceNumber}`}
+                          />
+                        ) : null}
+                      </td>
                       <td className="px-4 py-2.5">
                         <div className="font-mono text-xs">{inv.invoiceNumber}</div>
                       </td>
@@ -608,6 +696,13 @@ function InvoicesTab() {
       {showCreate && (
         <CreateInvoiceDialog onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); }} />
       )}
+
+      <BulkApproveBar
+        entityType="invoice"
+        selectedIds={selectedArray}
+        onClear={() => setSelectedIds(new Set())}
+        onDone={load}
+      />
     </>
   );
 }

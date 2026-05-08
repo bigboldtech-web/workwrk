@@ -75,6 +75,21 @@ model Organization {
   invoices            Invoice[]
   headcountPlans      HeadcountPlan[]
   interviews          Interview[]
+  payGroups           PayGroup[]
+  payRuns             PayRun[]
+  earningCodes        EarningCode[]
+  deductionCodes      DeductionCode[]
+  payslips            Payslip[]
+  benefitPlans        BenefitPlan[]
+  openEnrollments     OpenEnrollment[]
+  enrollments         BenefitEnrollment[]
+  dependents          Dependent[]
+  lifeEvents          LifeEvent[]
+  glAccounts          GlAccount[]
+  fiscalYears         FiscalYear[]
+  accountingPeriods   AccountingPeriod[]
+  journalEntries      JournalEntry[]
+  costCenters         CostCenter[]
 
   @@index([slug])
 }
@@ -268,6 +283,12 @@ model User {
   purchaseOrdersApproved  PurchaseOrder[] @relation("POapprover")
   invoicesApproved        Invoice[] @relation("InvoiceApprover")
   interviewsAsInterviewer Interview[] @relation("InterviewInterviewer")
+  payslips                Payslip[] @relation("PayslipSubject")
+  benefitEnrollments      BenefitEnrollment[] @relation("BenefitEnrollmentSubject")
+  dependents              Dependent[] @relation("DependentOwner")
+  lifeEvents              LifeEvent[] @relation("LifeEventSubject")
+  journalEntriesPosted    JournalEntry[] @relation("JournalEntryPostedBy")
+  journalEntriesApproved  JournalEntry[] @relation("JournalEntryApprovedBy")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -3022,4 +3043,646 @@ enum InterviewStatus {
   COMPLETED
   CANCELLED
   NO_SHOW
+}
+
+// ==========================================
+// Payroll (Phase 4)
+//
+// Two-layer design: native records here capture every pay-period
+// fact (gross/net/taxes/deductions/GL postings) so the org keeps
+// the source of truth even if the org switches payroll vendors.
+// A pluggable provider adapter (CheckHQ today, Gusto/ADP/Rippling
+// later) handles tax calc + filing + direct deposit and writes
+// results back into Payslip / PayslipLine. This split means we
+// can swap vendors without losing history.
+// ==========================================
+
+model PayGroup {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  country        String   @default("US")
+  currency       String   @default("USD")
+  frequency      PayFrequency @default(BIWEEKLY)
+  // First-period anchor — every subsequent period start is derived
+  // from this date plus N×frequency. Stored explicitly so DST and
+  // calendar drift don't compound.
+  anchorDate     DateTime
+  // Days after period end that paychecks land. Bank cutoff buffer.
+  payOffsetDays  Int      @default(3)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  payRuns        PayRun[]
+  payslips       Payslip[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+enum PayFrequency {
+  WEEKLY
+  BIWEEKLY
+  SEMIMONTHLY
+  MONTHLY
+}
+
+model PayRun {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payGroupId     String
+  payGroup       PayGroup @relation(fields: [payGroupId], references: [id], onDelete: Cascade)
+  periodStart    DateTime
+  periodEnd      DateTime
+  payDate        DateTime
+  status         PayRunStatus @default(DRAFT)
+  // Totals are derived from Payslip rows but cached here so list
+  // views don't N+1. Recomputed on transition to CALCULATED.
+  totalGross     Decimal  @default(0) @db.Decimal(14, 2)
+  totalNet       Decimal  @default(0) @db.Decimal(14, 2)
+  totalTax       Decimal  @default(0) @db.Decimal(14, 2)
+  totalDeductions Decimal @default(0) @db.Decimal(14, 2)
+  // Vendor reference — opaque id from the provider (CheckHQ run id,
+  // etc.) so we can reconcile filings.
+  providerRef    String?
+  notes          String?
+  calculatedAt   DateTime?
+  postedAt       DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  payslips       Payslip[]
+
+  @@unique([payGroupId, periodStart])
+  @@index([organizationId, status])
+  @@index([payDate])
+}
+
+enum PayRunStatus {
+  DRAFT       // open for adjustments
+  CALCULATING // provider crunching numbers
+  CALCULATED  // ready for review
+  POSTED      // funds released; immutable
+  CANCELLED
+}
+
+// Earnings catalog — regular hours, overtime, bonus, commission.
+// Each org can extend with custom codes. taxable + W2 box mapping
+// captured here so a payroll run knows how to classify each line.
+model EarningCode {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  code           String   // e.g. "REG", "OT", "BONUS"
+  name           String
+  taxable        Boolean  @default(true)
+  // GL account hint — final mapping lives in the integration adapter.
+  glAccount      String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  payslipLines   PayslipLine[] @relation("PayslipLineEarning")
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+// Deductions catalog — pre-tax (401k, medical, HSA) vs post-tax
+// (Roth 401k, garnishment). preTax flag drives tax base calc.
+model DeductionCode {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  code           String   // e.g. "401K", "MED", "DEN"
+  name           String
+  preTax         Boolean  @default(false)
+  // Optional cap per pay period or per year — null means no cap.
+  perPeriodCap   Decimal? @db.Decimal(12, 2)
+  annualCap      Decimal? @db.Decimal(12, 2)
+  glAccount      String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  payslipLines   PayslipLine[] @relation("PayslipLineDeduction")
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+// One paystub for one employee for one pay period. Lines roll up
+// into the totals on the parent. Stored even after the run is
+// POSTED so the employee can always reprint.
+model Payslip {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payRunId       String
+  payRun         PayRun   @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  payGroupId     String
+  payGroup       PayGroup @relation(fields: [payGroupId], references: [id], onDelete: Restrict)
+  subjectId      String
+  subject        User     @relation("PayslipSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  // Cached totals — sum of lines. Recomputed when lines change.
+  gross          Decimal  @default(0) @db.Decimal(12, 2)
+  net            Decimal  @default(0) @db.Decimal(12, 2)
+  tax            Decimal  @default(0) @db.Decimal(12, 2)
+  deductions     Decimal  @default(0) @db.Decimal(12, 2)
+  hoursWorked    Decimal  @default(0) @db.Decimal(8, 2)
+  // Provider reference (CheckHQ paystub id) — null until posted.
+  providerRef    String?
+  // Where the paid funds went — stored for the employee record. Last
+  // 4 digits only; full account info lives at the provider.
+  payMethod      PayMethod @default(DIRECT_DEPOSIT)
+  bankLast4      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lines          PayslipLine[]
+
+  @@unique([payRunId, subjectId])
+  @@index([organizationId, subjectId])
+  @@index([payGroupId])
+}
+
+enum PayMethod {
+  DIRECT_DEPOSIT
+  CHECK
+  WIRE
+  MANUAL
+}
+
+// One line on a paystub. Either an earning OR a deduction OR a tax
+// — exactly one of those three id columns is non-null. Discriminated
+// by `kind` for fast filtering.
+model PayslipLine {
+  id              String   @id @default(cuid())
+  payslipId       String
+  payslip         Payslip  @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+  kind            PayslipLineKind
+  // For EARNING lines:
+  earningCodeId   String?
+  earningCode     EarningCode? @relation("PayslipLineEarning", fields: [earningCodeId], references: [id], onDelete: Restrict)
+  hours           Decimal? @db.Decimal(8, 2)
+  rate            Decimal? @db.Decimal(10, 4)
+  // For DEDUCTION lines:
+  deductionCodeId String?
+  deductionCode   DeductionCode? @relation("PayslipLineDeduction", fields: [deductionCodeId], references: [id], onDelete: Restrict)
+  // For TAX lines: human-readable label only. Provider does the math.
+  taxLabel        String?
+  amount          Decimal  @db.Decimal(12, 2)
+  // YTD running total at the moment this line was generated. Used
+  // for cap enforcement + W-2 reconciliation.
+  ytdAmount       Decimal? @db.Decimal(12, 2)
+
+  @@index([payslipId])
+  @@index([earningCodeId])
+  @@index([deductionCodeId])
+}
+
+enum PayslipLineKind {
+  EARNING
+  DEDUCTION
+  TAX
+}
+
+// ==========================================
+// Benefits (Phase 4)
+//
+// Plan catalog → open-enrollment windows → per-employee elections
+// → pay-period deduction lines. Dependents and life events drive
+// off-cycle changes (marriage, birth, qualifying event).
+// ==========================================
+
+model BenefitPlan {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  type           BenefitType
+  name           String
+  carrier        String?
+  description    String?
+  // Default tier costs per pay period — can be overridden per
+  // BenefitTier row for richer plans.
+  employeeCost   Decimal  @default(0) @db.Decimal(10, 2)
+  employerCost   Decimal  @default(0) @db.Decimal(10, 2)
+  // Effective window — outside this range the plan can't be elected.
+  effectiveFrom  DateTime
+  effectiveTo    DateTime?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tiers          BenefitTier[]
+  enrollments    BenefitEnrollment[]
+  enrollmentsInOpen OpenEnrollmentPlan[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, type])
+}
+
+enum BenefitType {
+  MEDICAL
+  DENTAL
+  VISION
+  LIFE
+  DISABILITY_SHORT
+  DISABILITY_LONG
+  RETIREMENT_401K
+  RETIREMENT_ROTH
+  HSA
+  FSA
+  COMMUTER
+  OTHER
+}
+
+model BenefitTier {
+  id             String   @id @default(cuid())
+  benefitPlanId  String
+  benefitPlan    BenefitPlan @relation(fields: [benefitPlanId], references: [id], onDelete: Cascade)
+  // Coverage tier label — "Employee", "Employee + Spouse",
+  // "Employee + Children", "Family", or org-custom strings.
+  tier           String
+  employeeCost   Decimal  @db.Decimal(10, 2)
+  employerCost   Decimal  @db.Decimal(10, 2)
+
+  enrollments    BenefitEnrollment[]
+
+  @@unique([benefitPlanId, tier])
+}
+
+model OpenEnrollment {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  // Window during which employees can submit elections.
+  startDate      DateTime
+  endDate        DateTime
+  // When the elections take effect (typically Jan 1).
+  effectiveDate  DateTime
+  status         OpenEnrollmentStatus @default(DRAFT)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  plans          OpenEnrollmentPlan[]
+  enrollments    BenefitEnrollment[]
+
+  @@index([organizationId, status])
+}
+
+enum OpenEnrollmentStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  ARCHIVED
+}
+
+// Junction — which plans are offered in a given OE window.
+model OpenEnrollmentPlan {
+  id               String   @id @default(cuid())
+  openEnrollmentId String
+  openEnrollment   OpenEnrollment @relation(fields: [openEnrollmentId], references: [id], onDelete: Cascade)
+  benefitPlanId    String
+  benefitPlan      BenefitPlan @relation(fields: [benefitPlanId], references: [id], onDelete: Cascade)
+
+  @@unique([openEnrollmentId, benefitPlanId])
+}
+
+// One employee's election for one plan. Always linked to the OE
+// window that produced it (or the LifeEvent for off-cycle changes).
+// Status moves DRAFT → SUBMITTED → ACTIVE → ENDED.
+model BenefitEnrollment {
+  id               String   @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subjectId        String
+  subject          User     @relation("BenefitEnrollmentSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  benefitPlanId    String
+  benefitPlan      BenefitPlan @relation(fields: [benefitPlanId], references: [id], onDelete: Restrict)
+  benefitTierId    String?
+  benefitTier      BenefitTier? @relation(fields: [benefitTierId], references: [id], onDelete: Restrict)
+  openEnrollmentId String?
+  openEnrollment   OpenEnrollment? @relation(fields: [openEnrollmentId], references: [id], onDelete: SetNull)
+  lifeEventId      String?
+  lifeEvent        LifeEvent? @relation(fields: [lifeEventId], references: [id], onDelete: SetNull)
+  // Per-pay-period cost snapshot at time of election. Pulling from
+  // BenefitTier directly would lose history when tier costs change.
+  employeeCost     Decimal  @db.Decimal(10, 2)
+  employerCost     Decimal  @db.Decimal(10, 2)
+  effectiveStart   DateTime
+  effectiveEnd     DateTime?
+  status           EnrollmentStatus @default(DRAFT)
+  notes            String?
+  // Provider reference (carrier confirmation id) — null until the
+  // adapter has acknowledged the election.
+  providerRef      String?
+  submittedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([organizationId, subjectId])
+  @@index([benefitPlanId, status])
+  @@index([openEnrollmentId])
+  @@index([lifeEventId])
+}
+
+enum EnrollmentStatus {
+  DRAFT
+  SUBMITTED
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+model Dependent {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerId        String
+  owner          User     @relation("DependentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  firstName      String
+  lastName       String
+  relationship   DependentRelationship
+  dateOfBirth    DateTime?
+  // Last 4 only — full SSN never stored at app layer; vendor handles.
+  ssnLast4       String?
+  // Whether this dependent currently appears on any benefit
+  // election. Maintained by the adapter when carriers confirm.
+  coveredOnPlan  Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, ownerId])
+}
+
+enum DependentRelationship {
+  SPOUSE
+  DOMESTIC_PARTNER
+  CHILD
+  STEPCHILD
+  OTHER
+}
+
+// Qualifying life event — opens an off-cycle election window for
+// the affected employee. The benefits team approves before it
+// becomes actionable.
+model LifeEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subjectId      String
+  subject        User     @relation("LifeEventSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  type           LifeEventType
+  eventDate      DateTime
+  status         LifeEventStatus @default(REPORTED)
+  // 60-day default window — adjustable per type / jurisdiction.
+  electionWindowEnd DateTime?
+  notes          String?
+  approvedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  enrollments    BenefitEnrollment[]
+
+  @@index([organizationId, subjectId])
+  @@index([status])
+}
+
+enum LifeEventType {
+  MARRIAGE
+  DIVORCE
+  BIRTH
+  ADOPTION
+  DEATH
+  GAIN_COVERAGE
+  LOSS_COVERAGE
+  DEPENDENT_LOSS
+  ADDRESS_CHANGE
+  OTHER
+}
+
+enum LifeEventStatus {
+  REPORTED
+  APPROVED
+  REJECTED
+  ENROLLED
+}
+
+// ==========================================
+// Core Financials (Phase 5)
+//
+// Native double-entry GL. Chart of accounts is per-org so a
+// scaling SaaS doesn't enforce a US-only hierarchy on a Dubai
+// customer. Journal entries are immutable once posted; reversals
+// happen via offsetting entries, never via mutation. Reports
+// (P&L, balance sheet, trial balance) read from JournalLine
+// aggregates; we never cache balances in a separate Account.balance
+// column because they always drift.
+// ==========================================
+
+// Chart-of-accounts entry. type drives report classification:
+//   ASSET / LIABILITY / EQUITY → balance sheet
+//   REVENUE / EXPENSE          → P&L
+// `parentId` lets the org build a hierarchy (e.g. Operating Expenses
+// → Salaries → US Salaries → Engineering Salaries).
+model GlAccount {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Account code — typically a 4-6 digit number (4000-Revenue,
+  // 6000-Expense, etc). Unique per org.
+  code           String
+  name           String
+  type           GlAccountType
+  parentId       String?
+  parent         GlAccount? @relation("GlAccountParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children       GlAccount[] @relation("GlAccountParent")
+  // Currency the account is denominated in. Multi-currency orgs run
+  // separate accounts per currency and consolidate via FX entries.
+  currency       String   @default("USD")
+  description    String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  debitLines     JournalLine[] @relation("JournalLineDebit")
+  creditLines    JournalLine[] @relation("JournalLineCredit")
+
+  @@unique([organizationId, code])
+  @@index([organizationId, type])
+  @@index([parentId])
+}
+
+enum GlAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+// Cost centers / business units. Optional dimension on every
+// journal line so reports can filter by department, branch, etc.
+model CostCenter {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  code           String
+  name           String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  journalLines   JournalLine[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+// Fiscal year container — one per org per year. Some orgs run
+// non-calendar years (Apr-Mar in India) so the start month is
+// configurable.
+model FiscalYear {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Human label — "FY2026", "FY27" — distinct from the date range.
+  label          String
+  startDate      DateTime
+  endDate        DateTime
+  status         FiscalYearStatus @default(OPEN)
+  closedAt       DateTime?
+  createdAt      DateTime @default(now())
+
+  periods        AccountingPeriod[]
+
+  @@unique([organizationId, label])
+  @@index([organizationId, status])
+}
+
+enum FiscalYearStatus {
+  OPEN
+  CLOSED
+}
+
+// Accounting period — usually monthly, sometimes 4-4-5 retail
+// calendar. Posting to a CLOSED period is rejected at the API
+// layer.
+model AccountingPeriod {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fiscalYearId   String
+  fiscalYear     FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  label          String   // "2026-01", "Jan 2026", etc.
+  startDate      DateTime
+  endDate        DateTime
+  status         AccountingPeriodStatus @default(OPEN)
+  closedAt       DateTime?
+  createdAt      DateTime @default(now())
+
+  journalEntries JournalEntry[]
+
+  @@unique([fiscalYearId, label])
+  @@index([organizationId, status])
+}
+
+enum AccountingPeriodStatus {
+  OPEN
+  CLOSED
+}
+
+// One journal entry — a self-balancing set of debit/credit lines.
+// Multiple sources auto-post here: payroll runs, AP invoices, AR
+// invoices, expense reimbursements. Manual entries are also
+// supported. Total debits MUST equal total credits — enforced at
+// the API layer because Prisma can't express the constraint.
+model JournalEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  periodId       String
+  period         AccountingPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  // Sequential per-org reference (JE-000123). Generated server-side.
+  reference      String
+  // Ledger date — drives which period the entry hits. Distinct from
+  // createdAt (when the row was inserted) to handle back-dated
+  // adjustments inside an open period.
+  postedAt       DateTime
+  description    String
+  // Origin of the entry. Auto-posted entries record the upstream
+  // entity in `sourceType` + `sourceId` so we can trace lineage.
+  source         JournalSource @default(MANUAL)
+  sourceType     String?
+  sourceId       String?
+  status         JournalStatus @default(DRAFT)
+  // Manual entries above an org-defined threshold need a second
+  // approver before posting. APPROVED → POSTED is irreversible.
+  postedById     String?
+  postedBy       User? @relation("JournalEntryPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
+  approvedById   String?
+  approvedBy     User? @relation("JournalEntryApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lines          JournalLine[]
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, postedAt])
+  @@index([periodId, status])
+  @@index([sourceType, sourceId])
+}
+
+enum JournalSource {
+  MANUAL
+  PAYROLL
+  AP_INVOICE      // bills from vendors (Procurement.Invoice)
+  AR_INVOICE      // customer invoices (future Sales module)
+  EXPENSE
+  PURCHASE_ORDER
+  ADJUSTMENT      // period close adjustments
+  OPENING_BALANCE
+  REVERSAL
+}
+
+enum JournalStatus {
+  DRAFT
+  PENDING        // submitted, awaiting approval
+  APPROVED
+  POSTED         // immutable
+  REVERSED       // a reversal entry exists referencing this one
+  VOIDED         // never posted; cancelled while still in draft/pending
+}
+
+// One side of a balanced entry. A line is EITHER a debit OR a
+// credit — both columns nullable, but the API enforces exactly one
+// non-null. amount is always positive; the side is in the column
+// choice.
+model JournalLine {
+  id             String   @id @default(cuid())
+  entryId        String
+  entry          JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  debitAccountId String?
+  debitAccount   GlAccount? @relation("JournalLineDebit", fields: [debitAccountId], references: [id], onDelete: Restrict)
+  creditAccountId String?
+  creditAccount  GlAccount? @relation("JournalLineCredit", fields: [creditAccountId], references: [id], onDelete: Restrict)
+  amount         Decimal  @db.Decimal(14, 2)
+  // Optional dimensions for reporting.
+  costCenterId   String?
+  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  description    String?
+  // Multi-currency: amount is in the entry's reporting currency;
+  // these capture the original transaction currency + rate.
+  txnCurrency    String?
+  txnAmount      Decimal? @db.Decimal(14, 2)
+  txnFxRate      Decimal? @db.Decimal(14, 8)
+
+  @@index([entryId])
+  @@index([debitAccountId])
+  @@index([creditAccountId])
+  @@index([costCenterId])
 }

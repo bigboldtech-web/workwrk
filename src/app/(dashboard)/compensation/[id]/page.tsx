@@ -8,7 +8,7 @@
 // Server detail endpoint already filters by viewer role, so we render
 // whatever it returns. Inline-editable cells call PATCH on each blur.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
 import {
   ChevronLeft,
   DollarSign,
@@ -80,6 +81,9 @@ export default function CompCycleDetailPage() {
   const [viewerRole, setViewerRole] = useState<ViewerRole>("MANAGER");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedArray = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  useEffect(() => { setSelectedIds(new Set()); }, [decisions.length]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -251,10 +255,33 @@ export default function CompCycleDetailPage() {
               busy={busy}
               onPatch={patchDecision}
               onDecide={decide}
+              selectedIds={selectedIds}
+              onToggle={(rowId) => {
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(rowId)) next.delete(rowId);
+                  else next.add(rowId);
+                  return next;
+                });
+              }}
+              onToggleAll={() => {
+                const proposed = decisions.filter((d) => d.status === "PROPOSED").map((d) => d.id);
+                const allSelected = proposed.length > 0 && proposed.every((id) => selectedIds.has(id));
+                setSelectedIds(allSelected ? new Set() : new Set(proposed));
+              }}
             />
           )}
         </CardContent>
       </Card>
+
+      {isAdmin && cycleEditable && (
+        <BulkApproveBar
+          entityType="comp-decision"
+          selectedIds={selectedArray}
+          onClear={() => setSelectedIds(new Set())}
+          onDone={load}
+        />
+      )}
     </div>
   );
 }
@@ -267,6 +294,9 @@ function DecisionsTable({
   busy,
   onPatch,
   onDecide,
+  selectedIds,
+  onToggle,
+  onToggleAll,
 }: {
   decisions: Decision[];
   cycle: Cycle;
@@ -275,12 +305,29 @@ function DecisionsTable({
   busy: string | null;
   onPatch: (id: string, patch: Record<string, unknown>) => void;
   onDecide: (id: string, decision: "APPROVE" | "REJECT") => void;
+  selectedIds: Set<string>;
+  onToggle: (id: string) => void;
+  onToggleAll: () => void;
 }) {
+  const proposed = decisions.filter((d) => d.status === "PROPOSED");
+  const allSelected = proposed.length > 0 && proposed.every((d) => selectedIds.has(d.id));
+  const showCheckbox = isAdmin && cycleEditable;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-muted border-b border-white/5">
+            {showCheckbox && (
+              <th className="px-3 py-2.5 font-normal w-8">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={onToggleAll}
+                  aria-label="Select all proposed"
+                  disabled={proposed.length === 0}
+                />
+              </th>
+            )}
             <th className="px-4 py-2.5 font-normal">Employee</th>
             <th className="px-4 py-2.5 font-normal text-right">Current</th>
             <th className="px-4 py-2.5 font-normal text-right">Proposed</th>
@@ -301,6 +348,9 @@ function DecisionsTable({
               busy={busy === d.id}
               onPatch={onPatch}
               onDecide={onDecide}
+              showCheckbox={showCheckbox}
+              selected={selectedIds.has(d.id)}
+              onToggle={() => onToggle(d.id)}
             />
           ))}
         </tbody>
@@ -317,6 +367,9 @@ function DecisionRow({
   busy,
   onPatch,
   onDecide,
+  showCheckbox,
+  selected,
+  onToggle,
 }: {
   decision: Decision;
   cycle: Cycle;
@@ -325,6 +378,9 @@ function DecisionRow({
   busy: boolean;
   onPatch: (id: string, patch: Record<string, unknown>) => void;
   onDecide: (id: string, decision: "APPROVE" | "REJECT") => void;
+  showCheckbox: boolean;
+  selected: boolean;
+  onToggle: () => void;
 }) {
   const editableStatus = decision.status === "DRAFT" || decision.status === "PROPOSED";
   const canEditFields = cycleEditable && editableStatus;
@@ -354,8 +410,21 @@ function DecisionRow({
       ? ((decision.proposedSalary - decision.currentSalary) / decision.currentSalary) * 100
       : decision.changePct;
 
+  const canBulkSelect = decision.status === "PROPOSED";
   return (
     <tr className="border-b border-white/5 hover:bg-white/[0.02]">
+      {showCheckbox && (
+        <td className="px-3 py-2 align-top">
+          {canBulkSelect ? (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggle}
+              aria-label="Select row"
+            />
+          ) : null}
+        </td>
+      )}
       <td className="px-4 py-2 align-top">
         <div className="font-medium text-sm">
           {decision.subject.firstName} {decision.subject.lastName}
