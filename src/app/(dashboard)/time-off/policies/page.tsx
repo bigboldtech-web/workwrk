@@ -108,7 +108,7 @@ export default function TimeOffPoliciesPage() {
         >
           <ChevronLeft size={12} /> Back to time off
         </Link>
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Time-off policies</h1>
             <p className="text-muted text-sm mt-1">

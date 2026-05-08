@@ -149,7 +149,7 @@ export default async function OkrDetailPage(
         >
           <ChevronLeft size={12} /> Back to OKRs
         </Link>
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <Crosshair size={20} />

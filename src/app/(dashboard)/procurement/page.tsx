@@ -301,9 +301,17 @@ function POsTab() {
             <TabsTrigger value="all">All</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button onClick={() => setShowCreate(true)}>
-          <Plus size={14} className="mr-1.5" /> New PO
-        </Button>
+        <div className="flex items-center gap-2">
+          <a
+            href="/api/export/purchase-orders"
+            className="inline-flex items-center gap-1.5 h-9 px-3 text-sm rounded-md border border-line text-fg hover:bg-card-2/40"
+          >
+            Export CSV
+          </a>
+          <Button onClick={() => setShowCreate(true)}>
+            <Plus size={14} className="mr-1.5" /> New PO
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -517,7 +525,13 @@ function InvoicesTab() {
 
   return (
     <>
-      <div className="flex justify-end mb-3">
+      <div className="flex justify-end mb-3 gap-2">
+        <a
+          href="/api/export/invoices"
+          className="inline-flex items-center gap-1.5 h-9 px-3 text-sm rounded-md border border-line text-fg hover:bg-card-2/40"
+        >
+          Export CSV
+        </a>
         <Button onClick={() => setShowCreate(true)}>
           <Plus size={14} className="mr-1.5" /> Record invoice
         </Button>

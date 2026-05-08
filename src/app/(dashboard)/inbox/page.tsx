@@ -9,7 +9,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText, GraduationCap } from "lucide-react";
+import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText, GraduationCap, Briefcase } from "lucide-react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -49,7 +49,7 @@ export default async function InboxPage() {
 
   const horizonEnd = new Date(Date.now() + TASK_HORIZON_DAYS * DAY_MS);
 
-  // Eleven queries in parallel. Each is bounded by the user/org pair.
+  // Twelve queries in parallel. Each is bounded by the user/org pair.
   // Comp decisions are HR-only (filtered server-side); we fetch
   // unconditionally and the empty result hides the section for non-HR.
   const [
@@ -64,6 +64,7 @@ export default async function InboxPage() {
     posToApprove,
     invoicesToApprove,
     incompleteMandatoryCourses,
+    upcomingInterviews,
   ] = await Promise.all([
     prisma.sOPAssignment.findMany({
       where: {
@@ -278,6 +279,32 @@ export default async function InboxPage() {
         course: { select: { id: true, title: true, duration: true } },
       },
     }),
+    // Interviews where I'm the interviewer in the next 7 days.
+    prisma.interview.findMany({
+      where: {
+        organizationId: orgId,
+        interviewerId: userId,
+        status: "SCHEDULED",
+        scheduledAt: {
+          gte: new Date(Date.now() - DAY_MS), // include today
+          lte: new Date(Date.now() + 7 * DAY_MS),
+        },
+      },
+      orderBy: { scheduledAt: "asc" },
+      take: 15,
+      select: {
+        id: true,
+        scheduledAt: true,
+        durationMinutes: true,
+        type: true,
+        application: {
+          include: {
+            candidate: { select: { firstName: true, lastName: true } },
+            job: { select: { title: true } },
+          },
+        },
+      },
+    }),
   ]);
 
   // Compute "stale" OKRs: latest check-in across all KRs is older than
@@ -308,7 +335,8 @@ export default async function InboxPage() {
     timesheetsToApprove.length +
     posToApprove.length +
     invoicesToApprove.length +
-    incompleteMandatoryCourses.length;
+    incompleteMandatoryCourses.length +
+    upcomingInterviews.length;
   const overdueCount =
     sopAssignments.filter((a) => isOverdue(a.dueDate)).length +
     tasks.filter((t) => isOverdue(t.endAt ?? t.date)).length;
@@ -415,6 +443,48 @@ export default async function InboxPage() {
                       <span className={`text-xs flex-shrink-0 ml-3 ${overdue ? "text-red-400" : "text-muted"}`}>
                         {fmtRelative(due)}
                       </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {upcomingInterviews.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Briefcase size={16} /> Interviews this week
+              <span className="text-xs text-muted font-normal">({upcomingInterviews.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {upcomingInterviews.map((iv) => {
+                const when = iv.scheduledAt;
+                return (
+                  <li key={iv.id}>
+                    <Link
+                      href="/recruiting"
+                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="text-sm font-medium truncate">
+                          {iv.application.candidate.firstName} {iv.application.candidate.lastName}
+                        </span>
+                        <span className="text-xs text-muted truncate">{iv.application.job.title}</span>
+                        <span className="text-[10px] uppercase tracking-wide text-muted">{iv.type}</span>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                        <span className="text-xs text-muted">
+                          {when.toLocaleDateString()}
+                          {" · "}
+                          {when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                        <span className="text-xs text-muted font-mono">{iv.durationMinutes}m</span>
+                      </div>
                     </Link>
                   </li>
                 );

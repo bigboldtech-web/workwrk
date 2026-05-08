@@ -158,6 +158,7 @@ export default function RecruitingPage() {
           <TabsTrigger value="jobs">Jobs</TabsTrigger>
           <TabsTrigger value="candidates">Candidates</TabsTrigger>
           <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
+          <TabsTrigger value="interviews">Interviews</TabsTrigger>
         </TabsList>
         <TabsContent value="jobs" className="mt-4">
           <JobsTab />
@@ -167,6 +168,9 @@ export default function RecruitingPage() {
         </TabsContent>
         <TabsContent value="pipeline" className="mt-4">
           <PipelineTab />
+        </TabsContent>
+        <TabsContent value="interviews" className="mt-4">
+          <InterviewsTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -814,4 +818,331 @@ function nextStage(s: Application["stage"]): Application["stage"] | null {
   const i = order.indexOf(s);
   if (i < 0 || i >= order.length - 1) return null;
   return order[i + 1] ?? null;
+}
+
+// ─── Interviews tab ────────────────────────────────────────────────
+
+type Interview = {
+  id: string;
+  scheduledAt: string;
+  durationMinutes: number;
+  type: string;
+  location: string | null;
+  status: "SCHEDULED" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
+  score: number | null;
+  notes: string | null;
+  interviewer: { id: string; firstName: string; lastName: string };
+  application: {
+    id: string;
+    candidate: { id: string; firstName: string; lastName: string };
+    job: { id: string; title: string };
+  };
+};
+
+const INTERVIEW_STATUS_STYLE: Record<string, string> = {
+  SCHEDULED: "text-blue-400 border-blue-400/30",
+  COMPLETED: "text-green-400 border-green-400/30",
+  CANCELLED: "text-muted border-white/20",
+  NO_SHOW: "text-red-400 border-red-400/30",
+};
+
+const INTERVIEW_TYPE_LABEL: Record<string, string> = {
+  SCREEN: "Phone screen",
+  TECHNICAL: "Technical",
+  BEHAVIORAL: "Behavioral",
+  ONSITE: "On-site",
+  FINAL: "Final",
+  OTHER: "Other",
+};
+
+function InterviewsTab() {
+  const { toast } = useToast();
+  const [scope, setScope] = useState<"mine" | "upcoming" | "all">("mine");
+  const [rows, setRows] = useState<Interview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [scheduling, setScheduling] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/interviews?scope=${scope}&limit=100`);
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data : []);
+    } finally { setLoading(false); }
+  }, [scope]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function patch(id: string, body: Record<string, unknown>) {
+    const res = await fetch(`/api/interviews/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast({ type: "error", title: "Couldn't update", description: data?.error });
+      return;
+    }
+    toast({ type: "success", title: "Updated" });
+    load();
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between mb-3">
+        <Tabs value={scope} onValueChange={(v) => setScope(v as typeof scope)}>
+          <TabsList>
+            <TabsTrigger value="mine">My interviews</TabsTrigger>
+            <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
+            <TabsTrigger value="all">All</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <Button onClick={() => setScheduling(true)}>
+          <Plus size={14} className="mr-1.5" /> Schedule
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+      ) : rows.length === 0 ? (
+        <Card><CardContent className="p-8 text-center text-sm text-muted">
+          {scope === "mine" ? "No interviews assigned to you." : "No interviews."}
+        </CardContent></Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted border-b border-white/5">
+                  <th className="px-4 py-2.5 font-normal">When</th>
+                  <th className="px-4 py-2.5 font-normal">Type</th>
+                  <th className="px-4 py-2.5 font-normal">Candidate</th>
+                  <th className="px-4 py-2.5 font-normal">Job</th>
+                  <th className="px-4 py-2.5 font-normal">Interviewer</th>
+                  <th className="px-4 py-2.5 font-normal">Status</th>
+                  <th className="px-4 py-2.5 font-normal text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((iv) => {
+                  const when = new Date(iv.scheduledAt);
+                  const isPast = when.getTime() < Date.now();
+                  return (
+                    <tr key={iv.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="px-4 py-2.5 text-xs">
+                        <div>{when.toLocaleDateString()}</div>
+                        <div className="text-[10px] text-muted">
+                          {when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          {" · "}
+                          {iv.durationMinutes}m
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs">{INTERVIEW_TYPE_LABEL[iv.type] ?? iv.type}</td>
+                      <td className="px-4 py-2.5 text-xs">
+                        {iv.application.candidate.firstName} {iv.application.candidate.lastName}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-muted">{iv.application.job.title}</td>
+                      <td className="px-4 py-2.5 text-xs">
+                        {iv.interviewer.firstName} {iv.interviewer.lastName}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Badge variant="outline" className={`text-[10px] ${INTERVIEW_STATUS_STYLE[iv.status]}`}>
+                          {iv.status}
+                        </Badge>
+                        {iv.score !== null && (
+                          <span className="ml-2 text-[10px] text-muted">{iv.score}/5</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {iv.status === "SCHEDULED" && (
+                            <>
+                              {isPast && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs"
+                                    onClick={() => {
+                                      const score = prompt("Score 1-5?");
+                                      if (score === null) return;
+                                      const s = Number(score);
+                                      if (!Number.isFinite(s) || s < 1 || s > 5) return;
+                                      const notes = prompt("Notes (optional)?") ?? null;
+                                      patch(iv.id, { status: "COMPLETED", score: s, notes });
+                                    }}
+                                  >
+                                    Mark complete
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs text-amber-400"
+                                    onClick={() => patch(iv.id, { status: "NO_SHOW" })}
+                                  >
+                                    No-show
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs text-red-400"
+                                onClick={() => {
+                                  if (confirm("Cancel this interview?")) patch(iv.id, { status: "CANCELLED" });
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {scheduling && (
+        <ScheduleInterviewDialog
+          onClose={() => setScheduling(false)}
+          onScheduled={() => { setScheduling(false); load(); }}
+        />
+      )}
+    </>
+  );
+}
+
+function ScheduleInterviewDialog({
+  onClose,
+  onScheduled,
+}: {
+  onClose: () => void;
+  onScheduled: () => void;
+}) {
+  const { toast } = useToast();
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [interviewers, setInterviewers] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([]);
+  const [applicationId, setApplicationId] = useState("");
+  const [interviewerId, setInterviewerId] = useState("");
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [durationMinutes, setDurationMinutes] = useState("30");
+  const [type, setType] = useState("SCREEN");
+  const [location, setLocation] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/recruiting/applications?limit=200").then((r) => (r.ok ? r.json() : [])),
+      fetch("/api/people?limit=500").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    ]).then(([apps, peopleResp]) => {
+      // Filter to non-terminated applications.
+      const live = (Array.isArray(apps) ? apps : []).filter(
+        (a: Application) => !["HIRED", "REJECTED", "WITHDRAWN"].includes(a.stage),
+      );
+      setApplications(live);
+      // /api/people sometimes returns { data: [...] }, sometimes a flat array.
+      const flat = Array.isArray(peopleResp) ? peopleResp : peopleResp?.data ?? [];
+      setInterviewers(flat);
+    });
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/interviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          applicationId,
+          interviewerId,
+          scheduledAt: new Date(scheduledAt).toISOString(),
+          durationMinutes: Number(durationMinutes) || 30,
+          type,
+          location: location.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ type: "error", title: "Couldn't schedule", description: data?.error });
+        return;
+      }
+      toast({ type: "success", title: "Interview scheduled" });
+      onScheduled();
+    } finally { setSaving(false); }
+  }
+
+  const valid = applicationId && interviewerId && scheduledAt;
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Schedule interview</DialogTitle></DialogHeader>
+        <div className="space-y-3 pt-1">
+          <div className="space-y-1.5">
+            <Label>Application</Label>
+            <Select value={applicationId} onValueChange={setApplicationId}>
+              <SelectTrigger><SelectValue placeholder="Pick an application" /></SelectTrigger>
+              <SelectContent>
+                {applications.length === 0 ? (
+                  <div className="p-2 text-xs text-muted">No active applications.</div>
+                ) : applications.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.candidate.firstName} {a.candidate.lastName} · {a.job.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Interviewer</Label>
+            <Select value={interviewerId} onValueChange={setInterviewerId}>
+              <SelectTrigger><SelectValue placeholder="Pick an interviewer" /></SelectTrigger>
+              <SelectContent>
+                {interviewers.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.firstName} {p.lastName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5 col-span-2">
+              <Label>When</Label>
+              <Input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Duration (min)</Label>
+              <Input value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} inputMode="numeric" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Type</Label>
+            <Select value={type} onValueChange={setType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(INTERVIEW_TYPE_LABEL).map(([v, l]) => (
+                  <SelectItem key={v} value={v}>{l}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Location (optional)</Label>
+            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Zoom URL or office room" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button disabled={!valid || saving} onClick={save}>{saving ? "Scheduling…" : "Schedule"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

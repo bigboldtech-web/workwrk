@@ -115,14 +115,22 @@ export default function AuditPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <ShieldCheck size={20} /> Audit trail
-        </h1>
-        <p className="text-muted text-sm mt-1">
-          Every action across the platform — who changed what, when, from
-          where. Source for SOX, SOC 2, and internal compliance reviews.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <ShieldCheck size={20} /> Audit trail
+          </h1>
+          <p className="text-muted text-sm mt-1">
+            Every action across the platform — who changed what, when, from
+            where. Source for SOX, SOC 2, and internal compliance reviews.
+          </p>
+        </div>
+        <a
+          href={`/api/export/audit${startDate || endDate ? `?${new URLSearchParams({ ...(startDate ? { startDate } : {}), ...(endDate ? { endDate } : {}) }).toString()}` : ""}`}
+          className="inline-flex items-center gap-1.5 h-9 px-3 text-sm rounded-md border border-line text-fg hover:bg-card-2/40 flex-shrink-0"
+        >
+          Export CSV
+        </a>
       </div>
 
       <Card>

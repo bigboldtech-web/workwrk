@@ -179,6 +179,14 @@ export function TimeOffManager({
               <a href="/time-off/policies">Manage policies</a>
             </Button>
           )}
+          {isManager && (
+            <a
+              href={`/api/export/time-off?scope=${tab === "mine" ? "mine" : "all"}`}
+              className="inline-flex items-center gap-1.5 h-9 px-3 text-sm rounded-md border border-line text-fg hover:bg-card-2/40"
+            >
+              Export CSV
+            </a>
+          )}
           <Button onClick={() => setShowCreate(true)} disabled={policies.length === 0}>
             <Plus size={14} className="mr-1.5" /> Request
           </Button>

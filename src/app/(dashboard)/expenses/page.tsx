@@ -159,9 +159,17 @@ export default function ExpensesPage() {
             Submit, approve, and audit reimbursable expenses.
           </p>
         </div>
-        <Button onClick={() => setShowCreate(true)}>
-          <Plus size={14} className="mr-1.5" /> New expense
-        </Button>
+        <div className="flex items-center gap-2">
+          <a
+            href={`/api/export/expenses?scope=${tab}`}
+            className="inline-flex items-center gap-1.5 h-9 px-3 text-sm rounded-md border border-line text-fg hover:bg-card-2/40"
+          >
+            Export CSV
+          </a>
+          <Button onClick={() => setShowCreate(true)}>
+            <Plus size={14} className="mr-1.5" /> New expense
+          </Button>
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>

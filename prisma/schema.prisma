@@ -74,6 +74,7 @@ model Organization {
   purchaseOrders      PurchaseOrder[]
   invoices            Invoice[]
   headcountPlans      HeadcountPlan[]
+  interviews          Interview[]
 
   @@index([slug])
 }
@@ -266,6 +267,7 @@ model User {
   purchaseOrdersRequested PurchaseOrder[] @relation("POrequester")
   purchaseOrdersApproved  PurchaseOrder[] @relation("POapprover")
   invoicesApproved        Invoice[] @relation("InvoiceApprover")
+  interviewsAsInterviewer Interview[] @relation("InterviewInterviewer")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -2691,6 +2693,8 @@ model Application {
 
   notes           String?
 
+  interviews      Interview[]
+
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -2961,4 +2965,61 @@ model HeadcountPlan {
 
   @@unique([organizationId, departmentId, period])
   @@index([organizationId, period])
+}
+
+// ==========================================
+// INTERVIEW SCHEDULING (Phase 2 v2 — extends ATS)
+// ==========================================
+// One Interview row per scheduled session against an Application.
+// Multi-interviewer rounds in v3; for v1 a single interviewer
+// suffices for SMB/mid-market hiring loops. Scorecard is a numeric
+// score + notes; structured per-competency rubric is v2.
+
+model Interview {
+  id              String          @id @default(cuid())
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  applicationId   String
+  application     Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  interviewerId   String
+  interviewer     User            @relation("InterviewInterviewer", fields: [interviewerId], references: [id])
+
+  scheduledAt     DateTime
+  durationMinutes Int             @default(30)
+  type            InterviewType   @default(SCREEN)
+  // Free-text — meeting URL, room name, or on-site address. Linking
+  // to the Meeting model is v2.
+  location        String?
+
+  status          InterviewStatus @default(SCHEDULED)
+
+  // Post-interview scorecard. 1-5 numeric; notes free-text. v2
+  // expands to per-competency rubric.
+  score           Int?
+  notes           String?
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([organizationId, status])
+  @@index([applicationId, status])
+  @@index([interviewerId, scheduledAt])
+}
+
+enum InterviewType {
+  SCREEN
+  TECHNICAL
+  BEHAVIORAL
+  ONSITE
+  FINAL
+  OTHER
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
 }
