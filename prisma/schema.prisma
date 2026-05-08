@@ -63,6 +63,8 @@ model Organization {
   compensationDecisions CompensationDecision[]
   timeOffPolicies     TimeOffPolicy[]
   timeOffRequests     TimeOffRequest[]
+  timesheets          Timesheet[]
+  timeEntries         TimeEntry[]
 
   @@index([slug])
 }
@@ -246,6 +248,9 @@ model User {
   compDecisionsProposed   CompensationDecision[] @relation("CompDecisionProposer")
   timeOffRequested        TimeOffRequest[] @relation("TimeOffSubject")
   timeOffApproved         TimeOffRequest[] @relation("TimeOffApprover")
+  timesheetsAsSubject     Timesheet[] @relation("TimesheetSubject")
+  timesheetsApproved      Timesheet[] @relation("TimesheetApprover")
+  timeEntriesAsSubject    TimeEntry[] @relation("TimeEntrySubject")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -573,6 +578,7 @@ model Task {
 
   comments         TaskComment[]
   labels           TaskLabelOnTask[]
+  timeEntries      TimeEntry[]
 
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
@@ -2458,4 +2464,112 @@ enum TimeOffStatus {
   APPROVED
   REJECTED
   CANCELLED
+}
+
+// ==========================================
+// TIME TRACKING / TIMESHEETS (Phase 2)
+// ==========================================
+// Two-mode: knowledge workers fill a weekly grid (web entry); hybrid /
+// hourly workers click clock-in/clock-out and the system computes the
+// minutes. Both produce TimeEntry rows owned by a weekly Timesheet
+// envelope that goes through manager approval.
+//
+// Cost-center / project attribution rides the polymorphic
+// TagAssignment table (entityType=TIME_ENTRY would extend the enum
+// later — for v1 we tag at the Timesheet level for weekly rollup, and
+// optionally link individual entries to a Task).
+//
+// Mobile, kiosks, and jurisdictional overtime rules (CA daily OT,
+// meal-break attestation, etc.) all sit behind this — schema doesn't
+// preclude them but UX is v2/v3.
+
+model Timesheet {
+  id              String          @id @default(cuid())
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId          String
+  user            User            @relation("TimesheetSubject", fields: [userId], references: [id])
+
+  // Week anchor — Monday 00:00 UTC of the week. Single canonical
+  // representation; the UI handles display in user's locale.
+  weekStartDate   DateTime
+
+  status          TimesheetStatus @default(DRAFT)
+  submittedAt     DateTime?
+
+  approverId      String?
+  approver        User?           @relation("TimesheetApprover", fields: [approverId], references: [id])
+  decisionAt      DateTime?
+  decisionNote    String?
+
+  entries         TimeEntry[]
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([userId, weekStartDate])
+  @@index([organizationId, status])
+  @@index([userId, weekStartDate])
+  @@index([approverId, status])
+}
+
+model TimeEntry {
+  id              String          @id @default(cuid())
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  timesheetId     String
+  timesheet       Timesheet       @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+
+  // Denormalized for cheap "is user currently clocked in" lookups
+  // without a join. Always equal to timesheet.userId.
+  userId          String
+  user            User            @relation("TimeEntrySubject", fields: [userId], references: [id])
+
+  // Day this entry counts toward — 00:00 UTC. An overnight shift may
+  // straddle two days; v1 anchors to the day the punch *started*.
+  day             DateTime
+
+  // Set on save. For active punches, hours is null until clockedOutAt
+  // arrives, then computed.
+  hours           Decimal?        @db.Decimal(5, 2)
+
+  clockedInAt     DateTime?
+  clockedOutAt    DateTime?
+
+  description     String?
+  source          TimeEntrySource @default(WEB)
+
+  // Optional link to an existing Task (the "what was I working on").
+  // Cost-center / business-unit / project tagging rides on the parent
+  // Timesheet via TagAssignment.
+  taskId          String?
+  task            Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([organizationId, day])
+  @@index([userId, day])
+  @@index([timesheetId])
+  // Hot index for "is this user clocked in right now?" — used on
+  // every page load by the topbar's active-punch widget.
+  @@index([userId, clockedOutAt])
+  @@index([taskId])
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum TimeEntrySource {
+  WEB
+  PUNCH
+  MOBILE
+  KIOSK
+  IMPORT
 }

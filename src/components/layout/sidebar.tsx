@@ -48,6 +48,7 @@ import {
   Receipt,
   DollarSign,
   CalendarOff,
+  Clock,
 } from "lucide-react";
 
 type NavItem = {
@@ -72,6 +73,7 @@ const navigation: NavItem[] = [
   { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt },
   { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true },
   { name: "Time off", key: "timeOff", href: "/time-off", icon: CalendarOff },
+  { name: "Timesheets", key: "timesheets", href: "/timesheets", icon: Clock },
   { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops" },
   { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true },
   { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews" },

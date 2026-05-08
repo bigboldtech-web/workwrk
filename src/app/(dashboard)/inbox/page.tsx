@@ -9,7 +9,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign, CalendarOff } from "lucide-react";
+import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign, CalendarOff, Clock } from "lucide-react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -49,10 +49,19 @@ export default async function InboxPage() {
 
   const horizonEnd = new Date(Date.now() + TASK_HORIZON_DAYS * DAY_MS);
 
-  // Seven queries in parallel. Each is bounded by the user/org pair.
+  // Eight queries in parallel. Each is bounded by the user/org pair.
   // Comp decisions are HR-only (filtered server-side); we fetch
   // unconditionally and the empty result hides the section for non-HR.
-  const [sopAssignments, tasks, reviews, myOkrs, expensesToApprove, compToApprove, timeOffToApprove] = await Promise.all([
+  const [
+    sopAssignments,
+    tasks,
+    reviews,
+    myOkrs,
+    expensesToApprove,
+    compToApprove,
+    timeOffToApprove,
+    timesheetsToApprove,
+  ] = await Promise.all([
     prisma.sOPAssignment.findMany({
       where: {
         userId,
@@ -194,6 +203,24 @@ export default async function InboxPage() {
         policy: { select: { name: true } },
       },
     }),
+    // Submitted timesheets I'm assigned to approve (or open queue).
+    prisma.timesheet.findMany({
+      where: {
+        organizationId: orgId,
+        status: "SUBMITTED",
+        OR: [{ approverId: userId }, { approverId: null }],
+        userId: { not: userId },
+      },
+      orderBy: { submittedAt: "asc" },
+      take: 25,
+      select: {
+        id: true,
+        weekStartDate: true,
+        submittedAt: true,
+        user: { select: { firstName: true, lastName: true } },
+        _count: { select: { entries: true } },
+      },
+    }),
   ]);
 
   // Compute "stale" OKRs: latest check-in across all KRs is older than
@@ -220,7 +247,8 @@ export default async function InboxPage() {
     staleOkrs.length +
     expensesToApprove.length +
     compToApprove.length +
-    timeOffToApprove.length;
+    timeOffToApprove.length +
+    timesheetsToApprove.length;
   const overdueCount =
     sopAssignments.filter((a) => isOverdue(a.dueDate)).length +
     tasks.filter((t) => isOverdue(t.endAt ?? t.date)).length;
@@ -331,6 +359,41 @@ export default async function InboxPage() {
                   </li>
                 );
               })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {timesheetsToApprove.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Clock size={16} /> Timesheets waiting on you
+              <span className="text-xs text-muted font-normal">({timesheetsToApprove.length})</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-white/5">
+              {timesheetsToApprove.map((t) => (
+                <li key={t.id}>
+                  <Link
+                    href="/timesheets"
+                    className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-sm font-medium truncate">
+                        {t.user ? `${t.user.firstName} ${t.user.lastName}` : "—"}
+                      </span>
+                      <span className="text-xs text-muted">
+                        Week of {t.weekStartDate.toLocaleDateString()}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted flex-shrink-0 ml-3">
+                      {t._count.entries} {t._count.entries === 1 ? "entry" : "entries"}
+                    </span>
+                  </Link>
+                </li>
+              ))}
             </ul>
           </CardContent>
         </Card>
