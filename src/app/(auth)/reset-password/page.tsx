@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Loader2, ArrowRight, CheckCircle2 } from "lucide-react";
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -46,89 +47,100 @@ function ResetPasswordForm() {
 
   if (!token) {
     return (
-      <div className="auth-card">
-        <Link href="/" className="auth-brand" aria-label="WorkwrK home">
-          <span className="auth-brand-dot" />
-          workwrk
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Reset link invalid</h1>
+          <p className="text-sm text-slate-500 mt-1.5">
+            This reset link is missing or expired. Request a fresh one.
+          </p>
+        </div>
+        <Link
+          href="/forgot-password"
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
+        >
+          Request new link <ArrowRight size={14} />
         </Link>
-        <h1 className="auth-title">
-          Reset link <span className="hi">invalid.</span>
-        </h1>
-        <p className="auth-sub">
-          This reset link is missing or expired. Request a fresh one and we&apos;ll
-          send you a new email.
-        </p>
-        <div className="auth-form">
-          <Link href="/forgot-password" className="bento-btn bento-btn-lime auth-submit">
-            Request new link <span className="arr">→</span>
+        <p className="text-sm text-slate-600 text-center">
+          Back to{" "}
+          <Link href="/login" className="text-violet-700 hover:text-violet-800 font-medium">
+            sign in
           </Link>
-        </div>
-        <div className="auth-foot">
-          Back to <Link href="/login">sign in</Link>
-        </div>
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="auth-card">
-      <Link href="/" className="auth-brand" aria-label="WorkwrK home">
-        <span className="auth-brand-dot" />
-        workwrk
-      </Link>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">
+          {success ? "Password reset" : "Set a new password"}
+        </h1>
+        <p className="text-sm text-slate-500 mt-1.5">
+          {success
+            ? "Redirecting you to sign in…"
+            : "Eight characters or more. Mix letters, numbers, and a symbol for safety."}
+        </p>
+      </div>
 
-      <h1 className="auth-title">
-        {success ? <>Password <span className="hi">reset.</span></> : <>Set a <span className="hi">new password.</span></>}
-      </h1>
-      <p className="auth-sub">
-        {success
-          ? "Redirecting you to sign in…"
-          : "Eight characters or more. Mix letters, numbers, and at least one symbol."}
-      </p>
+      {success ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm flex items-center gap-2">
+          <CheckCircle2 size={16} /> Done. Taking you to sign in…
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          {error && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-sm px-3 py-2">
+              {error}
+            </div>
+          )}
 
-      {!success && (
-        <form onSubmit={handleSubmit} className="auth-form" noValidate>
-          {error && <div className="auth-error">{error}</div>}
-
-          <div className="auth-field">
-            <label className="auth-label" htmlFor="password">New password</label>
+          <div className="space-y-1.5">
+            <label htmlFor="password" className="text-xs font-medium text-slate-700">
+              New password
+            </label>
             <input
               id="password"
               type="password"
-              className="auth-input"
-              placeholder="Min. 8 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="Min. 8 characters"
               autoComplete="new-password"
               minLength={8}
               required
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
             />
           </div>
 
-          <div className="auth-field">
-            <label className="auth-label" htmlFor="confirmPassword">Confirm password</label>
+          <div className="space-y-1.5">
+            <label htmlFor="confirmPassword" className="text-xs font-medium text-slate-700">
+              Confirm password
+            </label>
             <input
               id="confirmPassword"
               type="password"
-              className="auth-input"
-              placeholder="Same thing again"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Same thing again"
               autoComplete="new-password"
               minLength={8}
               required
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
             />
           </div>
 
-          <button type="submit" className="bento-btn bento-btn-lime auth-submit" disabled={loading}>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.18)] active:translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          >
             {loading ? (
               <>
-                <span className="auth-spinner" aria-hidden />
-                Resetting…
+                <Loader2 size={14} className="animate-spin" /> Resetting…
               </>
             ) : (
               <>
-                Reset password <span className="arr">→</span>
+                Reset password <ArrowRight size={14} />
               </>
             )}
           </button>

@@ -1,8 +1,15 @@
 "use client";
 
+// Sign-up screen. Two flows in one form:
+//   - Invited (token in querystring): join an existing org
+//   - Self-serve: spin up a new org + admin user
+//
+// Inside the white 2-pane auth shell.
+
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Loader2, ArrowRight, CheckCircle2 } from "lucide-react";
 
 type Invitation = {
   email: string;
@@ -81,151 +88,142 @@ function RegisterForm() {
   const invited = Boolean(token);
 
   return (
-    <div className="auth-card">
-      <Link href="/" className="auth-brand" aria-label="WorkwrK home">
-        <span className="auth-brand-dot" />
-        workwrk
-      </Link>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">
+          {invited ? `Join ${invitation?.organizationName ?? "the team"}` : "Start your free trial"}
+        </h1>
+        <p className="text-sm text-slate-500 mt-1.5">
+          {invited
+            ? invitation
+              ? `Invited as ${invitation.accessLevel.replace(/_/g, " ").toLowerCase()}. One form and you're in.`
+              : "Loading your invitation…"
+            : "No credit card. Full access for 14 days."}
+        </p>
+      </div>
 
-      <h1 className="auth-title">
-        {invited ? (
-          <>
-            Join <span className="hi">{invitation?.organizationName || "the team"}.</span>
-          </>
-        ) : (
-          <>
-            Start your <span className="hi">14-day trial.</span>
-          </>
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        {error && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-sm px-3 py-2">
+            {error}
+          </div>
         )}
-      </h1>
-      <p className="auth-sub">
-        {invited
-          ? invitation
-            ? `You've been invited as ${invitation.accessLevel.replace(/_/g, " ")}. One quick form and you're in.`
-            : "Loading your invitation details…"
-          : "No credit card. Full product access. Your data in the system by end of day one."}
-      </p>
-
-      <form onSubmit={handleSubmit} className="auth-form" noValidate>
-        {error && <div className="auth-error">{error}</div>}
 
         {invited && invitation && (
-          <div
-            style={{
-              padding: "12px 14px",
-              background: "rgba(212, 255, 46, 0.08)",
-              border: "1px solid rgba(212, 255, 46, 0.3)",
-              borderRadius: 12,
-              fontSize: 13,
-              color: "var(--b-lime)",
-              lineHeight: 1.4,
-            }}
-          >
-            Joining as <strong>{invitation.email}</strong>
+          <div className="rounded-lg border border-violet-200 bg-violet-50 text-violet-800 text-sm px-3 py-2 flex items-center gap-2">
+            <CheckCircle2 size={14} />
+            <span>Joining as <strong>{invitation.email}</strong></span>
           </div>
         )}
 
         {!invited && (
-          <div className="auth-field">
-            <label className="auth-label" htmlFor="orgName">Company name</label>
+          <div className="space-y-1.5">
+            <label htmlFor="orgName" className="text-xs font-medium text-slate-700">
+              Company name
+            </label>
             <input
               id="orgName"
               type="text"
-              className="auth-input"
-              placeholder="ScaleOps"
               value={formData.organizationName}
               onChange={(e) => update("organizationName", e.target.value)}
+              placeholder="ScaleOps"
               required
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
             />
           </div>
         )}
 
-        <div className="auth-row-2">
-          <div className="auth-field">
-            <label className="auth-label" htmlFor="firstName">First name</label>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label htmlFor="firstName" className="text-xs font-medium text-slate-700">
+              First name
+            </label>
             <input
               id="firstName"
               type="text"
-              className="auth-input"
-              placeholder="Priya"
               value={formData.firstName}
               onChange={(e) => update("firstName", e.target.value)}
+              placeholder="Priya"
               autoComplete="given-name"
               required
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
             />
           </div>
-          <div className="auth-field">
-            <label className="auth-label" htmlFor="lastName">Last name</label>
+          <div className="space-y-1.5">
+            <label htmlFor="lastName" className="text-xs font-medium text-slate-700">
+              Last name
+            </label>
             <input
               id="lastName"
               type="text"
-              className="auth-input"
-              placeholder="Sharma"
               value={formData.lastName}
               onChange={(e) => update("lastName", e.target.value)}
+              placeholder="Sharma"
               autoComplete="family-name"
               required
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
             />
           </div>
         </div>
 
         {!invited && (
-          <div className="auth-field">
-            <label className="auth-label" htmlFor="email">Work email</label>
+          <div className="space-y-1.5">
+            <label htmlFor="email" className="text-xs font-medium text-slate-700">
+              Work email
+            </label>
             <input
               id="email"
               type="email"
-              className="auth-input"
-              placeholder="priya@company.in"
               value={formData.email}
               onChange={(e) => update("email", e.target.value)}
+              placeholder="priya@company.com"
               autoComplete="email"
               required
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
             />
           </div>
         )}
 
-        <div className="auth-field">
-          <label className="auth-label" htmlFor="password">Password</label>
+        <div className="space-y-1.5">
+          <label htmlFor="password" className="text-xs font-medium text-slate-700">
+            Password
+          </label>
           <input
             id="password"
             type="password"
-            className="auth-input"
-            placeholder="Min. 8 characters"
             value={formData.password}
             onChange={(e) => update("password", e.target.value)}
+            placeholder="Min. 8 characters"
             autoComplete="new-password"
             minLength={8}
             required
+            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
           />
         </div>
 
         <button
           type="submit"
-          className="bento-btn bento-btn-lime auth-submit"
           disabled={loading || (invited && !invitation)}
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.18)] active:translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {loading ? (
             <>
-              <span className="auth-spinner" aria-hidden />
+              <Loader2 size={14} className="animate-spin" />
               {invited ? "Joining…" : "Creating account…"}
             </>
           ) : (
             <>
-              {invited ? "Join team" : "Create account"} <span className="arr">→</span>
+              {invited ? "Join team" : "Create account"} <ArrowRight size={14} />
             </>
           )}
         </button>
       </form>
 
-      <div className="auth-foot">
-        Already have an account? <Link href="/login">Sign in</Link>
-      </div>
-
-      <p className="auth-legal">
-        By creating an account you agree to our{" "}
-        <Link href="/terms">terms</Link> and{" "}
-        <Link href="/privacy">privacy policy</Link>. Your data stays in Mumbai.
+      <p className="text-sm text-slate-600 text-center">
+        Already have an account?{" "}
+        <Link href="/login" className="text-violet-700 hover:text-violet-800 font-medium">
+          Sign in
+        </Link>
       </p>
     </div>
   );

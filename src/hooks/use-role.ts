@@ -29,6 +29,7 @@ export function useRole() {
   const isExecutive = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL"].includes(accessLevel);
   const isMgr = MANAGER_ROLES.includes(accessLevel);
   const isAdm = ADMIN_ROLES.includes(accessLevel);
+  const isSuperAdm = accessLevel === "SUPER_ADMIN";
 
   // While permissions are loading, fall back to role-based defaults so the
   // UI doesn't flicker. Once loaded, we use the actual permission matrix.
@@ -37,6 +38,7 @@ export function useRole() {
     accessLevel,
     isManager: isMgr,
     isAdmin: isAdm,
+    isSuperAdmin: isSuperAdm,
     isEmployee: accessLevel === "EMPLOYEE" || accessLevel === "AGENT",
     isExecutive,
     canManagePeople: loading ? isMgr : can("people", "edit"),

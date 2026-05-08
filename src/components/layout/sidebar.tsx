@@ -63,6 +63,9 @@ type NavItem = {
   moduleKey?: string;
   managerOnly?: boolean;
   adminOnly?: boolean;
+  // Visible only to SUPER_ADMIN — the platform owner viewing all
+  // tenants. Used for the cross-org Admin console link.
+  superAdminOnly?: boolean;
   // ClickUp-style "Coming Soon" badge — shown on items whose backend
   // is wired but missing a vendor decision or a runtime piece. The
   // link still opens the page so admins can preview; the badge
@@ -137,6 +140,7 @@ const navigation: NavItem[] = [
   { name: "Tools", key: "tools", href: "/tools", icon: Wrench, managerOnly: true, section: "platform", hue: "slate" },
   { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true, section: "platform", hue: "sky" },
   { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette, section: "platform", hue: "pink" },
+  { name: "Admin Console", key: "admin", href: "/admin", icon: Shield, superAdminOnly: true, section: "platform", hue: "rose" },
 ];
 
 const bottomNav = [
@@ -301,9 +305,10 @@ export function Sidebar() {
     }).catch(() => {});
   }, [pathname, unreadByType]);
 
-  const { isManager: isManagerRole, isAdmin: isAdminRole } = useRole();
+  const { isManager: isManagerRole, isAdmin: isAdminRole, isSuperAdmin: isSuperAdminRole } = useRole();
 
   const visibleNav = navigation.filter((item) => {
+    if (item.superAdminOnly && !isSuperAdminRole) return false;
     if (item.adminOnly && !isAdminRole) return false;
     if (item.managerOnly && !isManagerRole) return false;
     if (item.moduleKey && enabledModules && !enabledModules.includes(item.moduleKey)) return false;

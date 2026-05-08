@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { Loader2, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
 
 function VerifyEmailInner() {
   const params = useSearchParams();
@@ -38,75 +39,88 @@ function VerifyEmailInner() {
       });
   }, [token]);
 
-  return (
-    <div className="auth-card">
-      <Link href="/" className="auth-brand" aria-label="WorkwrK home">
-        <span className="auth-brand-dot" />
-        workwrk
-      </Link>
+  if (state === "loading") {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Verifying…</h1>
+          <p className="text-sm text-slate-500 mt-1.5">Checking your token.</p>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 size={14} className="animate-spin" /> Talking to the server
+        </div>
+      </div>
+    );
+  }
 
-      {state === "loading" && (
-        <>
-          <h1 className="auth-title">Verifying…</h1>
-          <p className="auth-sub">Give us a second — checking your token.</p>
-          <div className="auth-form">
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span className="auth-spinner" aria-hidden />
-              <span style={{ color: "#a0a0a0", fontSize: 13 }}>Talking to the server</span>
-            </div>
-          </div>
-        </>
-      )}
-
-      {state === "ok" && (
-        <>
-          <h1 className="auth-title">
-            Email <span className="hi">verified.</span>
-          </h1>
-          <p className="auth-sub">
-            You're in. Jump straight to your workspace or sign in if you haven't already.
+  if (state === "ok") {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Email verified</h1>
+          <p className="text-sm text-slate-500 mt-1.5">
+            You're in. Jump straight to your workspace.
           </p>
-          <div className="auth-form">
-            <Link href="/dashboard" className="bento-btn bento-btn-lime auth-submit">
-              Open dashboard <span className="arr">→</span>
-            </Link>
-          </div>
-          <div className="auth-foot">
-            Not signed in? <Link href="/login">Log in</Link>
-          </div>
-        </>
-      )}
+        </div>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm flex items-center gap-2">
+          <CheckCircle2 size={16} /> All set.
+        </div>
+        <Link
+          href="/dashboard"
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
+        >
+          Open dashboard <ArrowRight size={14} />
+        </Link>
+        <p className="text-sm text-slate-600 text-center">
+          Not signed in?{" "}
+          <Link href="/login" className="text-violet-700 hover:text-violet-800 font-medium">
+            Log in
+          </Link>
+        </p>
+      </div>
+    );
+  }
 
-      {state === "already" && (
-        <>
-          <h1 className="auth-title">
-            Already <span className="hi">verified.</span>
-          </h1>
-          <p className="auth-sub">This email has been confirmed previously. No action needed.</p>
-          <div className="auth-form">
-            <Link href="/dashboard" className="bento-btn bento-btn-lime auth-submit">
-              Open dashboard <span className="arr">→</span>
-            </Link>
-          </div>
-        </>
-      )}
+  if (state === "already") {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Already verified</h1>
+          <p className="text-sm text-slate-500 mt-1.5">
+            This email has been confirmed previously. No action needed.
+          </p>
+        </div>
+        <Link
+          href="/dashboard"
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
+        >
+          Open dashboard <ArrowRight size={14} />
+        </Link>
+      </div>
+    );
+  }
 
-      {state === "error" && (
-        <>
-          <h1 className="auth-title">
-            Link <span className="hi">expired or invalid.</span>
-          </h1>
-          <p className="auth-sub">{msg}</p>
-          <div className="auth-form">
-            <Link href="/login" className="bento-btn bento-btn-lime auth-submit">
-              Back to sign in <span className="arr">→</span>
-            </Link>
-          </div>
-          <div className="auth-foot">
-            Need a new link? <Link href="/forgot-password">Request one</Link>
-          </div>
-        </>
-      )}
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Link expired or invalid</h1>
+        <p className="text-sm text-slate-500 mt-1.5">{msg}</p>
+      </div>
+      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 px-4 py-3 text-sm flex items-center gap-2">
+        <AlertCircle size={16} /> {msg}
+      </div>
+      <Link
+        href="/login"
+        className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
+      >
+        Back to sign in <ArrowRight size={14} />
+      </Link>
+      <p className="text-sm text-slate-600 text-center">
+        Need a new link?{" "}
+        <Link href="/forgot-password" className="text-violet-700 hover:text-violet-800 font-medium">
+          Request one
+        </Link>
+      </p>
     </div>
   );
 }
