@@ -42,6 +42,8 @@ const NAV: CommandItem[] = [
   { id: "timesheets", label: "Timesheets", href: "/timesheets", icon: Clock },
   { id: "recruiting", label: "Recruiting", href: "/recruiting", icon: Briefcase, visible: (r) => r.isManager },
   { id: "procurement", label: "Procurement", href: "/procurement", icon: ShoppingCart, visible: (r) => r.isManager },
+  { id: "learning", label: "Learning", href: "/learning", icon: GraduationCap },
+  { id: "workforcePlanning", label: "Workforce Planning", href: "/workforce-planning", icon: Target, visible: (r) => r.isManager },
   { id: "sops", label: "SOPs", href: "/sops", icon: BookOpen },
   { id: "processRuns", label: "Process Runs", href: "/process-runs", icon: ListChecks, visible: (r) => r.isManager },
   { id: "reviews", label: "Reviews", href: "/reviews", icon: Star },
@@ -63,6 +65,7 @@ const NAV: CommandItem[] = [
   { id: "settings", label: "Settings", href: "/settings", icon: Settings },
   { id: "tags", label: "Tags & dimensions", href: "/settings/tags", icon: Settings, visible: (r) => r.isAdmin },
   { id: "identity", label: "Identity & SSO", href: "/settings/identity", icon: Settings, visible: (r) => r.isAdmin },
+  { id: "audit", label: "Audit trail", href: "/settings/audit", icon: Settings, visible: (r) => r.isManager },
   { id: "docs", label: "Docs", href: "/docs", icon: FileText },
 ];
 

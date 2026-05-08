@@ -73,6 +73,7 @@ model Organization {
   vendors             Vendor[]
   purchaseOrders      PurchaseOrder[]
   invoices            Invoice[]
+  headcountPlans      HeadcountPlan[]
 
   @@index([slug])
 }
@@ -345,6 +346,7 @@ model Department {
   roles           Role[]
   goals           DepartmentGoal[]
   jobs            Job[]
+  headcountPlans  HeadcountPlan[]
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -2925,4 +2927,38 @@ enum InvoiceStatus {
   APPROVED
   REJECTED
   PAID
+}
+
+// ==========================================
+// WORKFORCE PLANNING (Phase 3)
+// ==========================================
+// Headcount + salary-budget planning per department per period.
+// Compared at view-time against live User.departmentId counts and
+// (when comp data is available) against the active comp cycle's
+// proposed salaries. Multi-scenario plans (Optimistic / Tight) are
+// v2 — add a `scenarioName` column when the time comes.
+
+model HeadcountPlan {
+  id               String        @id @default(cuid())
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  departmentId     String?
+  department       Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  // Free-form period token. Org picks granularity: "2026", "2026-Q1",
+  // "2026-H1", "FY27", etc. Treated opaquely server-side; the UI
+  // sorts asciibetically which matches lexical year/quarter ordering.
+  period           String
+
+  plannedHeadcount Int
+  plannedBudget    Decimal?      @db.Decimal(14, 2)
+  budgetCurrency   String        @default("USD")
+  notes            String?
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([organizationId, departmentId, period])
+  @@index([organizationId, period])
 }
