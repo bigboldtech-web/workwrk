@@ -298,14 +298,14 @@ export async function ClickupHomeHero() {
   ];
 
   return (
-    <div className="space-y-6 mb-8">
-      {/* Greeting + headline */}
-      <div className="flex items-end justify-between flex-wrap gap-3">
+    <div className="space-y-4 mb-6">
+      {/* Greeting + headline — ClickUp-tight, no oversized type */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-bold tracking-tight">
             {greeting}, {firstName}.
           </h1>
-          <p className="text-sm text-muted mt-1">
+          <p className="text-xs text-slate-500 dark:text-muted mt-1">
             {inboxTotal === 0
               ? "You're all clear today."
               : `${inboxTotal} item${inboxTotal === 1 ? "" : "s"} need you across the platform.`}
@@ -313,68 +313,70 @@ export async function ClickupHomeHero() {
         </div>
         <Link
           href="/inbox"
-          className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-fg transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700 hover:text-violet-800 transition-colors"
         >
-          Open Inbox <ArrowRight size={12} />
+          Open Inbox <ArrowRight size={11} />
         </Link>
       </div>
 
-      {/* KPI tiles — ClickUp-style: clean white card, vivid icon chip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* KPI tiles — compact ClickUp density: smaller padding, smaller chip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
         {tiles.map((t) => {
           const Icon = t.icon;
           return (
             <Link
               key={t.label}
               href={t.href}
-              className="relative rounded-xl border border-slate-200 bg-white dark:bg-card dark:border-line p-4 transition-all hover:border-slate-300 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.06)] hover:-translate-y-0.5 group"
+              className="relative rounded-lg border border-slate-200 bg-white dark:bg-card dark:border-line p-3 transition-all hover:border-violet-300 hover:shadow-[0_2px_10px_-2px_rgba(124,58,237,0.12)] group"
             >
-              <div className="flex items-start justify-between gap-2">
-                <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg ${t.chipBg} ${t.chipFg}`}>
-                  <Icon size={16} />
+              <div className="flex items-center gap-2.5">
+                <span className={`inline-flex items-center justify-center w-8 h-8 rounded-md ${t.chipBg} ${t.chipFg}`}>
+                  <Icon size={14} />
                 </span>
-                <ArrowRight size={12} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
+                <span className="flex-1 min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-muted font-medium truncate">{t.label}</p>
+                  <p className="text-xl font-bold tabular-nums tracking-tight leading-tight">{t.n}</p>
+                </span>
+                <ArrowRight size={11} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
-              <p className="text-3xl font-bold mt-3 tabular-nums tracking-tight">{t.n}</p>
-              <p className="text-xs mt-1 text-slate-500 dark:text-muted">{t.label}</p>
             </Link>
           );
         })}
       </div>
 
-      {/* Two-column: What needs you (preview) + Quick actions */}
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-xl border border-line bg-card p-4">
-          <div className="flex items-center justify-between mb-3">
+      {/* Two-column: What needs you (preview) + Quick actions — tighter borders + padding */}
+      <div className="grid lg:grid-cols-3 gap-3">
+        <div className="lg:col-span-2 rounded-lg border border-slate-200 dark:border-line bg-white dark:bg-card p-3">
+          <div className="flex items-center justify-between mb-2.5">
             <p className="text-sm font-semibold">What needs you</p>
             <Link
               href="/inbox"
-              className="text-xs text-muted hover:text-fg inline-flex items-center gap-1"
+              className="text-[11px] text-violet-700 hover:text-violet-800 inline-flex items-center gap-1 font-medium"
             >
               View all {inboxTotal > 0 && `(${inboxTotal})`} <ArrowRight size={10} />
             </Link>
           </div>
           {preview.length === 0 ? (
-            <p className="text-xs text-muted py-6 text-center">
+            <p className="text-xs text-slate-500 dark:text-muted py-5 text-center">
               Nothing pressing — clean Inbox.
             </p>
           ) : (
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-slate-100 dark:divide-white/5">
               {preview.slice(0, 5).map((p) => {
                 const Icon = p.icon;
                 return (
                   <li key={p.id}>
                     <Link
                       href={p.href}
-                      className="flex items-center gap-3 py-2.5 hover:bg-card-2/30 -mx-2 px-2 rounded transition-colors"
+                      className="flex items-center gap-2.5 py-2 hover:bg-slate-50 dark:hover:bg-card-2/30 -mx-2 px-2 rounded transition-colors"
                     >
                       <span
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${p.accent}`}
+                        className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${p.accent}`}
                       >
-                        <Icon size={13} />
+                        <Icon size={11} />
                       </span>
                       <span className="text-sm font-medium truncate flex-1">{p.title}</span>
-                      <span className="text-[11px] text-muted flex-shrink-0">{p.meta}</span>
+                      <span className="text-[10px] text-slate-500 dark:text-muted flex-shrink-0">{p.meta}</span>
                     </Link>
                   </li>
                 );
@@ -383,20 +385,20 @@ export async function ClickupHomeHero() {
           )}
         </div>
 
-        <div className="rounded-xl border border-line bg-card p-4">
-          <p className="text-sm font-semibold mb-3">Quick start</p>
-          <div className="space-y-1.5">
+        <div className="rounded-lg border border-slate-200 dark:border-line bg-white dark:bg-card p-3">
+          <p className="text-sm font-semibold mb-2.5">Quick start</p>
+          <div className="space-y-0.5">
             {quickActions.map((q) => {
               const Icon = q.icon;
               return (
                 <Link
                   key={q.label}
                   href={q.href}
-                  className="flex items-center gap-2.5 py-2 px-2.5 rounded-md hover:bg-card-2/40 transition-colors group"
+                  className="flex items-center gap-2.5 py-1.5 px-2 rounded-md hover:bg-violet-50 dark:hover:bg-card-2/40 transition-colors group"
                 >
-                  <Icon size={14} className="text-muted group-hover:text-fg transition-colors" />
-                  <span className="text-sm flex-1">{q.label}</span>
-                  <Plus size={11} className="text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Icon size={13} className="text-slate-500 dark:text-muted group-hover:text-violet-600 transition-colors" />
+                  <span className="text-[13px] flex-1">{q.label}</span>
+                  <Plus size={10} className="text-violet-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </Link>
               );
             })}

@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ChevronDown, ArrowRight } from "lucide-react";
+import { LogoMark } from "@/components/brand/logo";
 
 export function MarketingTopbar() {
   // Solidify the topbar background on scroll — mimics ClickUp's
@@ -28,11 +29,9 @@ export function MarketingTopbar() {
       }`}
     >
       <div className="max-w-7xl mx-auto px-6 lg:px-10 h-16 flex items-center justify-between gap-6">
-        <Link href="/" className="flex items-center gap-2 group">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-900 to-slate-700 flex items-center justify-center group-hover:from-violet-600 group-hover:to-violet-500 transition-colors">
-            <span className="text-white text-sm font-bold tracking-tight">W</span>
-          </div>
-          <span className="font-bold text-base text-slate-900 tracking-tight">workwrk</span>
+        <Link href="/" className="flex items-center gap-2.5 group">
+          <LogoMark size={28} className="transition-transform group-hover:scale-105" title="workwrk" />
+          <span className="font-bold text-lg text-slate-900 tracking-tight">workwrk</span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-1 text-sm text-slate-600">

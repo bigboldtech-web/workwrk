@@ -2,10 +2,11 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Light theme (default) — lime-accented on a neutral white.
- * The raw lime (#d4ff2e) is too bright for white surfaces. We use a slightly
- * darkened fill for primary buttons, a muted "strong" tone for lime text on
- * light backgrounds, and a low-glow shadow so the UI never feels pricky. */
+/* Light theme (default) — ClickUp-style violet accent on neutral white.
+ * Switched away from the early lime (#d4ff2e) palette: violet reads as
+ * "modern productivity SaaS" the way ClickUp / Asana / Linear do, and
+ * pops on white without the radioactive feel. Old lime utility classes
+ * are remapped further down so existing markup keeps working. */
 :root {
   --color-background: #FFFFFF;
   --color-foreground: #0A0A0A;
@@ -15,17 +16,17 @@
   --color-border: #DADAD7;
   --color-muted: #707070;
   --color-muted-2: #9A9A9A;
-  --color-accent: #c2eb1a;           /* button fill: a touch darker than lime */
-  --color-accent-light: #d4ff2e;
-  --accent: #c2eb1a;                 /* alias used in new components */
-  --accent-strong: #6b8c00;          /* readable lime-as-text on white */
-  --accent-soft: rgba(194, 235, 26, 0.14);
-  --accent-contrast: #0a0a0a;        /* foreground on any lime fill */
-  --accent-glow: 0 2px 10px -4px rgba(107, 140, 0, 0.35);
+  --color-accent: #7c3aed;           /* violet-600 — primary fill */
+  --color-accent-light: #8b5cf6;     /* violet-500 — hover */
+  --accent: #7c3aed;                 /* alias used by new components */
+  --accent-strong: #6d28d9;          /* violet-700 — readable accent text on white */
+  --accent-soft: rgba(124, 58, 237, 0.10);
+  --accent-contrast: #ffffff;        /* foreground on any violet fill */
+  --accent-glow: 0 4px 14px -4px rgba(124, 58, 237, 0.35);
   --scrollbar-color: #DADAD7;
 }
 
-/* Dark theme — bento palette */
+/* Dark theme — same violet accent, lifted for contrast on near-black. */
 .dark {
   --color-background: #0a0a0a;
   --color-foreground: #fafafa;
@@ -35,13 +36,13 @@
   --color-border: rgba(255, 255, 255, 0.08);
   --color-muted: #a0a0a0;
   --color-muted-2: #707070;
-  --color-accent: #d4ff2e;
-  --color-accent-light: #e2ff6b;
-  --accent: #d4ff2e;
-  --accent-strong: #d4ff2e;          /* lime pops against black, no dimming */
-  --accent-soft: rgba(212, 255, 46, 0.12);
-  --accent-contrast: #0a0a0a;
-  --accent-glow: 0 6px 18px -6px rgba(212, 255, 46, 0.55);
+  --color-accent: #8b5cf6;           /* violet-500 */
+  --color-accent-light: #a78bfa;     /* violet-400 */
+  --accent: #8b5cf6;
+  --accent-strong: #c4b5fd;          /* violet-300 — pops on black */
+  --accent-soft: rgba(139, 92, 246, 0.16);
+  --accent-contrast: #ffffff;
+  --accent-glow: 0 6px 18px -6px rgba(139, 92, 246, 0.55);
   --scrollbar-color: rgba(255, 255, 255, 0.14);
 }
 
