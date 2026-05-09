@@ -30,7 +30,7 @@ import { TagPicker } from "@/components/tags/tag-picker";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-[#d4ff2e]";
+  if (score >= 70) return "text-[color:var(--accent-strong)]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -51,7 +51,7 @@ function getPriorityStyle(p: string) {
   switch (p) {
     case "P0": return "bg-red-500/20 text-red-400";
     case "P1": return "bg-orange-500/20 text-orange-400";
-    case "P2": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
+    case "P2": return "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]";
     default: return "bg-slate-500/20 text-slate-400";
   }
 }
@@ -60,7 +60,7 @@ function getTaskStatusStyle(s: string) {
   switch (s) {
     case "COMPLETED": return "bg-green-500/20 text-green-400";
     case "IN_PROGRESS": return "bg-blue-500/20 text-blue-400";
-    case "IN_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
+    case "IN_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]";
     default: return "bg-slate-500/20 text-slate-400";
   }
 }
@@ -172,7 +172,7 @@ const FREQ_LABELS: Record<string, string> = {
 const FREQ_COLORS: Record<string, string> = {
   DAILY: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
   WEEKLY: "bg-blue-500/15 text-blue-400 border-blue-500/20",
-  MONTHLY: "bg-[rgba(212,255,46,0.1)] text-[#d4ff2e] border-[rgba(212,255,46,0.2)]",
+  MONTHLY: "bg-[rgba(212,255,46,0.1)] text-[color:var(--accent-strong)] border-[rgba(212,255,46,0.2)]",
   QUARTERLY: "bg-amber-500/15 text-amber-400 border-amber-500/20",
   ANNUALLY: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
 };
@@ -282,7 +282,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <Target size={15} className="text-[#d4ff2e] shrink-0" />
+                  <Target size={15} className="text-[color:var(--accent-strong)] shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold truncate">{a.kra?.name}</p>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -303,7 +303,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                     </div>
                   )}
                   <div className="text-right">
-                    <p className="text-lg font-bold font-mono text-[#d4ff2e]">{a.weightage}%</p>
+                    <p className="text-lg font-bold font-mono text-[color:var(--accent-strong)]">{a.weightage}%</p>
                     <p className="text-[9px] text-muted">weight</p>
                   </div>
                   {isExpanded ? <ChevronUp size={14} className="text-muted" /> : <ChevronDown size={14} className="text-muted" />}
@@ -542,7 +542,7 @@ export default function UserProfilePage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => (
@@ -567,7 +567,7 @@ export default function UserProfilePage() {
   const initials = `${user.firstName[0]}${user.lastName[0]}`;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="sm" onClick={() => router.push("/people")}>
@@ -582,7 +582,7 @@ export default function UserProfilePage() {
             <div className="relative group">
               <Avatar className="h-20 w-20 text-2xl">
                 {user.avatar ? <AvatarImage src={user.avatar} alt="" /> : null}
-                <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xl font-bold">
+                <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)] text-xl font-bold">
                   {initials}
                 </AvatarFallback>
               </Avatar>
@@ -742,7 +742,7 @@ export default function UserProfilePage() {
           <CardContent className="p-6">
             <div className="flex items-start gap-6">
               <div className="text-center">
-                <Zap size={20} className="mx-auto text-[#d4ff2e] mb-1" />
+                <Zap size={20} className="mx-auto text-[color:var(--accent-strong)] mb-1" />
                 <p className={`text-4xl font-bold font-mono ${getScoreColor(perf.compositeScore)}`}>
                   {perf.compositeScore}
                 </p>
@@ -773,7 +773,7 @@ export default function UserProfilePage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
-            <Target size={20} className="mx-auto text-[#d4ff2e] mb-1" />
+            <Target size={20} className="mx-auto text-[color:var(--accent-strong)] mb-1" />
             <p className={`text-2xl font-bold font-mono ${perf.avgKPI ? getScoreColor(perf.avgKPI) : "text-muted"}`}>
               {perf.avgKPI ?? "N/A"}
             </p>
@@ -843,7 +843,7 @@ export default function UserProfilePage() {
                       </span>
                     )}
                     {t.kra?.name && (
-                      <span className="text-[10px] text-[#d4ff2e]">{t.kra.name}</span>
+                      <span className="text-[10px] text-[color:var(--accent-strong)]">{t.kra.name}</span>
                     )}
                   </div>
                 </div>
@@ -950,7 +950,7 @@ export default function UserProfilePage() {
                     <p className="text-sm mt-1 italic text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
                     <div className="flex items-center gap-2 mt-2">
                       {k.companyValue && (
-                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[#d4ff2e]">{k.companyValue}</Badge>
+                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
                       )}
                       <span className="text-[10px] text-muted">{new Date(k.createdAt).toLocaleDateString()}</span>
                     </div>
@@ -999,7 +999,7 @@ export default function UserProfilePage() {
                   onClick={() => router.push(`/people/${r.id}`)}
                 >
                   <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-sm">
+                    <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)] text-sm">
                       {r.firstName[0]}{r.lastName[0]}
                     </AvatarFallback>
                   </Avatar>

@@ -196,7 +196,7 @@ function AccessControlManager() {
               <button
                 key={al.value}
                 onClick={() => setActiveLevel(al.value)}
-                className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${isActive ? "bg-[rgba(212,255,46,0.1)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground"}`}
+                className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${isActive ? "bg-[rgba(212,255,46,0.1)] text-[color:var(--accent-strong)]" : "hover:bg-surface-2 text-foreground"}`}
               >
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium">{al.label}</span>
@@ -413,7 +413,7 @@ function TeamMembersList() {
               return (
                 <div key={member.id} className="flex items-center gap-3 p-3 hover:bg-surface-2 transition-colors">
                   <Avatar className="h-9 w-9">
-                    <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xs">
+                    <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)] text-xs">
                       {member.firstName?.[0]}{member.lastName?.[0]}
                     </AvatarFallback>
                   </Avatar>
@@ -535,7 +535,7 @@ function KRACategoriesManager() {
           <div className="flex items-center gap-1">
             {editingId === cat.id ? (
               <>
-                <Button variant="ghost" size="sm" className="h-6 text-xs text-[#d4ff2e]" onClick={() => saveEdit(cat.id)}>Save</Button>
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-[color:var(--accent-strong)]" onClick={() => saveEdit(cat.id)}>Save</Button>
                 <Button variant="ghost" size="sm" className="h-6 text-xs text-muted" onClick={() => setEditingId(null)}>Cancel</Button>
               </>
             ) : (
@@ -601,7 +601,7 @@ function SOPCategoriesManager() {
             ))}
             <div className="flex items-center gap-1 mt-1">
               <Input value={newSubcats[cat.id] || ""} onChange={(e) => setNewSubcats({ ...newSubcats, [cat.id]: e.target.value })} placeholder="Add subcategory" className="h-6 text-[10px]" onKeyDown={(e) => e.key === "Enter" && addSubcategory(cat.id)} />
-              <Button variant="ghost" size="sm" className="h-6 text-[10px] text-[#d4ff2e]" onClick={() => addSubcategory(cat.id)}>+</Button>
+              <Button variant="ghost" size="sm" className="h-6 text-[10px] text-[color:var(--accent-strong)]" onClick={() => addSubcategory(cat.id)}>+</Button>
             </div>
           </div>
         </div>
@@ -981,8 +981,9 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Settings" }]}
           kicker="Settings · organization"
           title="Settings"
           subtitle="Manage your organization settings and preferences."
@@ -999,8 +1000,9 @@ export default function SettingsPage() {
   const weightTotal = scoreWeights.kpi + scoreWeights.manager + scoreWeights.peer + scoreWeights.self + (scoreWeights.sopCompliance || 0);
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Settings" }]}
         kicker="Settings · organization"
         title="Settings"
         subtitle="Manage your organization settings and preferences."

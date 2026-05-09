@@ -742,6 +742,7 @@ export default function DocsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Docs" }]}
         kicker="Help · in-app docs"
         title="Documentation"
         subtitle="Learn how to use every feature in WorkwrK."
@@ -878,11 +879,11 @@ export default function DocsPage() {
                   if (line.match(/^\d+\.\s/)) {
                     return (
                       <div key={i} className="flex gap-2 text-sm text-muted ml-2 mb-1">
-                        <span className="text-[#d4ff2e] font-mono text-xs mt-0.5">{line.match(/^(\d+)\./)?.[1]}.</span>
+                        <span className="text-[color:var(--accent-strong)] font-mono text-xs mt-0.5">{line.match(/^(\d+)\./)?.[1]}.</span>
                         <span dangerouslySetInnerHTML={{
                           __html: line.replace(/^\d+\.\s/, "")
                             .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
-                            .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-[#d4ff2e] hover:text-[#e2ff6b]">$1</a>'),
+                            .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">$1</a>'),
                         }} />
                       </div>
                     );
@@ -891,7 +892,7 @@ export default function DocsPage() {
                     const indent = line.startsWith("   - ");
                     return (
                       <div key={i} className={`flex gap-2 text-sm text-muted mb-1 ${indent ? "ml-6" : "ml-2"}`}>
-                        <span className="text-[#d4ff2e] mt-1.5"><div className="w-1 h-1 rounded-full bg-current" /></span>
+                        <span className="text-[color:var(--accent-strong)] mt-1.5"><div className="w-1 h-1 rounded-full bg-current" /></span>
                         <span dangerouslySetInnerHTML={{
                           __html: line.replace(/^-\s+/, "").replace(/^\s+-\s+/, "")
                             .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
@@ -905,7 +906,7 @@ export default function DocsPage() {
                       <p key={i} className="text-sm text-muted mb-3 leading-relaxed" dangerouslySetInnerHTML={{
                         __html: line
                           .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground">$1</strong>')
-                          .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-[#d4ff2e] hover:text-[#e2ff6b]">$1</a>')
+                          .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">$1</a>')
                           .replace(/`(.+?)`/g, '<code class="font-mono text-foreground bg-surface-2 px-1 rounded text-xs">$1</code>'),
                       }} />
                     );

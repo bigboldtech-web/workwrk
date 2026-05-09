@@ -214,7 +214,7 @@ export default function ToolsPage() {
           {selectedTool.description && <p className="text-sm text-muted">{selectedTool.description}</p>}
 
           {selectedTool.url && (
-            <a href={selectedTool.url} target="_blank" rel="noopener" className="flex items-center gap-1.5 text-xs text-[#d4ff2e] hover:underline">
+            <a href={selectedTool.url} target="_blank" rel="noopener" className="flex items-center gap-1.5 text-xs text-[color:var(--accent-strong)] hover:underline">
               <ExternalLink size={12} /> {selectedTool.url}
             </a>
           )}

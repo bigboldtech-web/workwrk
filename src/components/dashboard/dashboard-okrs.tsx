@@ -37,7 +37,7 @@ function levelLabel(level: string) {
 }
 
 function levelStyle(level: string) {
-  if (level === "COMPANY") return "bg-[rgba(212,255,46,0.1)] text-[#d4ff2e] border-[rgba(212,255,46,0.3)]";
+  if (level === "COMPANY") return "bg-[rgba(212,255,46,0.1)] text-[color:var(--accent-strong)] border-[rgba(212,255,46,0.3)]";
   if (level === "TEAM") return "bg-[rgba(74,158,255,0.1)] text-[#4a9eff] border-[rgba(74,158,255,0.3)]";
   return "bg-[rgba(255,153,51,0.1)] text-[#ff9933] border-[rgba(255,153,51,0.3)]";
 }
@@ -72,11 +72,11 @@ export function DashboardOkrs() {
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Crosshair size={16} className="text-[#d4ff2e]" />
+            <Crosshair size={16} className="text-[color:var(--accent-strong)]" />
             <h3 className="text-sm font-bold text-foreground">Your OKRs — {quarter}</h3>
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">{okrs.length}</Badge>
           </div>
-          <Link href="/okrs" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b] flex items-center gap-1">
+          <Link href="/okrs" className="text-xs text-[color:var(--accent-strong)] hover:text-[#e2ff6b] flex items-center gap-1">
             View all <ChevronRight size={12} />
           </Link>
         </div>
@@ -115,7 +115,7 @@ export function DashboardOkrs() {
           ))}
         </div>
         {sorted.length > 5 && (
-          <Link href="/okrs" className="block mt-2 text-center text-xs text-muted hover:text-[#d4ff2e] transition-colors">
+          <Link href="/okrs" className="block mt-2 text-center text-xs text-muted hover:text-[color:var(--accent-strong)] transition-colors">
             +{sorted.length - 5} more
           </Link>
         )}

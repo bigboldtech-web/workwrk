@@ -91,7 +91,7 @@ interface UserOption {
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-[#d4ff2e]";
+  if (score >= 70) return "text-[color:var(--accent-strong)]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -137,8 +137,9 @@ function SkeletonKpiCard() {
 
 function EmployeeKraView({ userId }: { userId: string }) {
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "KRA & KPIs" }]}
         kicker="Your numbers"
         title="My KRAs & KPIs"
         subtitle="Your performance metrics and targets — updated live."
@@ -774,7 +775,7 @@ export default function KraKpiPage() {
         <div className="space-y-3 pt-2 border-t border-border">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-medium">KPIs</Label>
-            <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6 gap-1" onClick={addInlineKpi}>
+            <Button variant="ghost" size="sm" className="text-xs text-[color:var(--accent-strong)] h-6 gap-1" onClick={addInlineKpi}>
               <Plus size={12} /> Add KPI
             </Button>
           </div>
@@ -907,7 +908,7 @@ export default function KraKpiPage() {
   );
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
         kicker="KRAs + KPIs · the measurement spine"
         title="KRA & KPIs"
@@ -922,7 +923,7 @@ export default function KraKpiPage() {
           <Button variant="outline" className="gap-2" onClick={() => setShowAssignDialog(true)}>
             <UserPlus size={16} /> Assign KRA
           </Button>
-          <Button variant="outline" className="gap-2 border-[rgba(212,255,46,0.3)] text-[#d4ff2e] hover:bg-[#e2ff6b]/10" onClick={() => { setAiJobTitle(""); setAiJobDescription(""); setAiResults(null); setShowAiDialog(true); }}>
+          <Button variant="outline" className="gap-2 border-[rgba(212,255,46,0.3)] text-[color:var(--accent-strong)] hover:bg-[#e2ff6b]/10" onClick={() => { setAiJobTitle(""); setAiJobDescription(""); setAiResults(null); setShowAiDialog(true); }}>
             <Sparkles size={16} /> Create with AI
           </Button>
           <Button className="gap-2" onClick={() => { resetKraForm(); setShowAddKraDialog(true); }}>
@@ -1155,7 +1156,7 @@ export default function KraKpiPage() {
                     <button onClick={() => toggleExpandKra(kra.id)} className="shrink-0 text-muted hover:text-foreground">
                       {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </button>
-                    <Target size={16} className="text-[#d4ff2e] shrink-0" />
+                    <Target size={16} className="text-[color:var(--accent-strong)] shrink-0" />
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpandKra(kra.id)}>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold">{kra.name}</span>
@@ -1167,7 +1168,7 @@ export default function KraKpiPage() {
                     <Badge variant="secondary" className="text-[10px] shrink-0">{kra.kpis?.length ?? 0} KPIs</Badge>
                     <span className="text-xs text-muted-2 shrink-0">{kra._count?.assignments ?? 0} assigned</span>
                     <div className="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openAssignForKra(kra.id)} title="Assign"><UserPlus size={14} className="text-[#d4ff2e]" /></Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openAssignForKra(kra.id)} title="Assign"><UserPlus size={14} className="text-[color:var(--accent-strong)]" /></Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditKra(kra)} title="Edit"><Pencil size={14} className="text-muted" /></Button>
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowDeleteConfirm({ type: "kra", id: kra.id })} title="Delete"><Trash2 size={14} className="text-red-400" /></Button>
                     </div>
@@ -1203,11 +1204,11 @@ export default function KraKpiPage() {
                                     </td>
                                     <td className="px-4 py-2.5 text-center"><Badge variant="outline" className="text-[9px]">{kpi.type}</Badge></td>
                                     <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.unit || "—"}</td>
-                                    <td className="px-4 py-2.5 text-center text-xs font-mono text-[#d4ff2e]">{kpi.targetValue != null ? kpi.targetValue : "—"}</td>
+                                    <td className="px-4 py-2.5 text-center text-xs font-mono text-[color:var(--accent-strong)]">{kpi.targetValue != null ? kpi.targetValue : "—"}</td>
                                     <td className="px-4 py-2.5 text-center text-xs text-muted">{kpi.frequency}</td>
                                     <td className="px-4 py-2.5 text-right">
                                       <div className="flex items-center justify-end gap-1">
-                                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1 text-[#d4ff2e] hover:text-[#e2ff6b]" onClick={() => openRecordForKpi(kpi)} title="Record a value">
+                                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1 text-[color:var(--accent-strong)] hover:text-[#e2ff6b]" onClick={() => openRecordForKpi(kpi)} title="Record a value">
                                           <BarChart3 size={11} /> Record
                                         </Button>
                                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEditKpi(kpi)} title="Edit"><Pencil size={12} className="text-muted" /></Button>
@@ -1265,7 +1266,7 @@ export default function KraKpiPage() {
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-[rgba(212,255,46,0.12)] flex items-center justify-center text-xs font-bold text-[#d4ff2e]">
+                      <div className="h-8 w-8 rounded-full bg-[rgba(212,255,46,0.12)] flex items-center justify-center text-xs font-bold text-[color:var(--accent-strong)]">
                         {group.user.firstName[0]}{group.user.lastName[0]}
                       </div>
                       <div>
@@ -1294,7 +1295,7 @@ export default function KraKpiPage() {
                     {group.assignments.map((a) => (
                       <div key={a.id} className="flex items-center justify-between rounded-lg border border-border bg-surface p-3">
                         <div className="flex items-center gap-3">
-                          <Target size={14} className="text-[#d4ff2e] flex-shrink-0" />
+                          <Target size={14} className="text-[color:var(--accent-strong)] flex-shrink-0" />
                           <div>
                             <p className="text-sm font-medium">{a.kra.name}</p>
                             <div className="flex items-center gap-2 mt-0.5">
@@ -1307,7 +1308,7 @@ export default function KraKpiPage() {
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="text-right">
-                            <p className="text-lg font-bold font-mono text-[#d4ff2e]">{a.weightage}%</p>
+                            <p className="text-lg font-bold font-mono text-[color:var(--accent-strong)]">{a.weightage}%</p>
                             <p className="text-[10px] text-muted">weightage</p>
                           </div>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowDeleteConfirm({ type: "assignment", id: a.id })} title="Remove">
@@ -1454,7 +1455,7 @@ export default function KraKpiPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>KRAs & Weightage</Label>
-                <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6" onClick={() => setMultiAssignKras([...multiAssignKras, { kraId: "", weightage: "" }])}>
+                <Button variant="ghost" size="sm" className="text-xs text-[color:var(--accent-strong)] h-6" onClick={() => setMultiAssignKras([...multiAssignKras, { kraId: "", weightage: "" }])}>
                   <Plus size={12} className="mr-1" /> Add KRA
                 </Button>
               </div>
@@ -1605,7 +1606,7 @@ export default function KraKpiPage() {
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles size={18} className="text-[#d4ff2e]" /> Generate KRAs & KPIs with AI
+              <Sparkles size={18} className="text-[color:var(--accent-strong)]" /> Generate KRAs & KPIs with AI
             </DialogTitle>
           </DialogHeader>
 
@@ -1638,7 +1639,7 @@ export default function KraKpiPage() {
                 <p className="text-sm text-muted">
                   Generated <span className="font-medium text-foreground">{aiResults.length} KRAs</span> with{" "}
                   <span className="font-medium text-foreground">{aiResults.reduce((sum: number, k: any) => sum + (k.kpis?.length || 0), 0)} KPIs</span>
-                  {" "}for <span className="font-medium text-[#d4ff2e]">{aiJobTitle}</span>. Edit as needed, then save.
+                  {" "}for <span className="font-medium text-[color:var(--accent-strong)]">{aiJobTitle}</span>. Edit as needed, then save.
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => setAiResults(null)} className="text-xs text-muted">
                   Regenerate

@@ -109,7 +109,7 @@ const STAGE_STYLE: Record<string, string> = {
   APPLIED: "text-muted border-white/20",
   SCREENING: "text-blue-400 border-blue-400/30",
   INTERVIEW: "text-amber-400 border-amber-400/30",
-  OFFER: "text-[#d4ff2e] border-[#d4ff2e]/30",
+  OFFER: "text-[color:var(--accent-strong)] border-[#d4ff2e]/30",
   HIRED: "text-green-400 border-green-400/30",
   REJECTED: "text-red-400 border-red-400/30",
   WITHDRAWN: "text-muted border-white/20",
@@ -117,7 +117,7 @@ const STAGE_STYLE: Record<string, string> = {
 
 const JOB_STATUS_STYLE: Record<string, string> = {
   DRAFT: "text-muted border-white/20",
-  OPEN: "text-[#d4ff2e] border-[#d4ff2e]/30",
+  OPEN: "text-[color:var(--accent-strong)] border-[#d4ff2e]/30",
   ON_HOLD: "text-amber-400 border-amber-400/30",
   CLOSED: "text-blue-400 border-blue-400/30",
   FILLED: "text-green-400 border-green-400/30",

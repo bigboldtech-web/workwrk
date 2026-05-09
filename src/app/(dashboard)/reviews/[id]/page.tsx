@@ -23,7 +23,7 @@ import { useAutosave } from "@/hooks/use-autosave";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-[#d4ff2e]";
+  if (score >= 70) return "text-[color:var(--accent-strong)]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -38,7 +38,7 @@ function getStatusBadge(status: string) {
   switch (status) {
     case "PENDING": return <Badge variant="secondary">Pending</Badge>;
     case "SELF_ASSESSMENT": return <Badge className="bg-blue-500/20 text-blue-400">Self-Assessment Done</Badge>;
-    case "MANAGER_REVIEW": return <Badge className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]">Manager Reviewed</Badge>;
+    case "MANAGER_REVIEW": return <Badge className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]">Manager Reviewed</Badge>;
     case "CALIBRATION": return <Badge variant="warning">Calibrated</Badge>;
     case "COMPLETED": return <Badge variant="success">Completed</Badge>;
     default: return <Badge variant="secondary">{status}</Badge>;
@@ -373,7 +373,7 @@ export default function ReviewCycleDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="h-32 bg-surface rounded-lg border border-border animate-pulse" />
         <div className="h-64 bg-surface rounded-lg border border-border animate-pulse" />
@@ -395,7 +395,7 @@ export default function ReviewCycleDetailPage() {
   const canSelfAssess = myReview && (myReview.status === "PENDING" || myReview.status === "SELF_ASSESSMENT");
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="sm" onClick={() => router.push("/reviews")}>
@@ -419,12 +419,12 @@ export default function ReviewCycleDetailPage() {
           </div>
           <div className="flex items-center gap-2 mb-2">
             <Progress value={stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0} className="h-2 flex-1" indicatorClassName="bg-[#d4ff2e]" />
-            <span className="text-sm font-mono text-[#d4ff2e]">{stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%</span>
+            <span className="text-sm font-mono text-[color:var(--accent-strong)]">{stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%</span>
           </div>
           <div className="flex items-center gap-4 text-xs text-muted">
             <span className="flex items-center gap-1"><Users size={12} /> {stats.total} total</span>
             <span className="flex items-center gap-1"><CheckCircle size={12} className="text-blue-400" /> {stats.selfDone} self done</span>
-            <span className="flex items-center gap-1"><Star size={12} className="text-[#d4ff2e]" /> {stats.managerDone} mgr done</span>
+            <span className="flex items-center gap-1"><Star size={12} className="text-[color:var(--accent-strong)]" /> {stats.managerDone} mgr done</span>
             <span className="flex items-center gap-1"><BarChart3 size={12} className="text-orange-400" /> {stats.calibrated} calibrated</span>
             <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-400" /> {stats.completed} completed</span>
           </div>
@@ -729,7 +729,7 @@ export default function ReviewCycleDetailPage() {
                         <div key={r.kraId} className="mb-2">
                           <div className="flex items-center gap-2">
                             <span className="text-xs">{r.kraName}</span>
-                            <span className="text-xs font-mono text-[#d4ff2e]">{r.rating}/5</span>
+                            <span className="text-xs font-mono text-[color:var(--accent-strong)]">{r.rating}/5</span>
                           </div>
                           {r.achievements && <p className="text-[10px] text-muted ml-2">{r.achievements}</p>}
                         </div>
@@ -749,7 +749,7 @@ export default function ReviewCycleDetailPage() {
                       <p className="text-xs font-medium text-muted mb-2">Peer Feedback ({selectedReview.peerFeedback.length})</p>
                       {selectedReview.peerFeedback.map((pf: any, i: number) => (
                         <div key={i} className="mb-2 text-[10px]">
-                          {!pf.anonymous && <span className="text-[#d4ff2e]">{pf.giver.firstName} {pf.giver.lastName}: </span>}
+                          {!pf.anonymous && <span className="text-[color:var(--accent-strong)]">{pf.giver.firstName} {pf.giver.lastName}: </span>}
                           {pf.strengths && <p className="text-green-400">Strengths: {pf.strengths}</p>}
                           {pf.improvements && <p className="text-orange-400">Improvements: {pf.improvements}</p>}
                           {pf.collaborationRating && <span className="text-muted">Collaboration: {pf.collaborationRating}/5</span>}
@@ -984,7 +984,7 @@ export default function ReviewCycleDetailPage() {
                 {[
                   { label: "Total Reviews", value: stats.total, icon: Users, color: "text-muted" },
                   { label: "Self-Assessment Done", value: stats.selfDone, icon: Star, color: "text-blue-400" },
-                  { label: "Manager Review Done", value: stats.managerDone, icon: CheckCircle, color: "text-[#d4ff2e]" },
+                  { label: "Manager Review Done", value: stats.managerDone, icon: CheckCircle, color: "text-[color:var(--accent-strong)]" },
                   { label: "Calibrated", value: stats.calibrated, icon: BarChart3, color: "text-orange-400" },
                   { label: "Completed", value: stats.completed, icon: CheckCircle, color: "text-green-400" },
                 ].map((stat) => (

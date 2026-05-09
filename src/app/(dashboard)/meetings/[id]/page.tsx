@@ -67,7 +67,7 @@ function getMeetingTypeLabel(type: string) {
 function getMeetingTypeColor(type: string) {
   switch (type) {
     case "DAILY_STANDUP": return "bg-blue-500/20 text-blue-400";
-    case "WEEKLY_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
+    case "WEEKLY_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]";
     case "ONE_ON_ONE": return "bg-green-500/20 text-green-400";
     case "QUARTERLY_REVIEW": return "bg-orange-500/20 text-orange-400";
     default: return "bg-slate-500/20 text-slate-400";
@@ -600,7 +600,7 @@ export default function MeetingDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="flex items-center gap-4">
           <div className="h-8 w-8 bg-surface-2 rounded animate-pulse" />
           <div className="h-6 w-64 bg-surface-2 rounded animate-pulse" />
@@ -623,7 +623,7 @@ export default function MeetingDetailPage() {
   const actionItemsTotal = meeting.actionItems.length;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -805,7 +805,7 @@ export default function MeetingDetailPage() {
                   {decisions.map((d, i) => (
                     <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-border bg-surface-3 group">
                       <div className="rounded-full bg-[rgba(212,255,46,0.08)] p-1.5 mt-0.5 shrink-0">
-                        <MessageSquare size={12} className="text-[#d4ff2e]" />
+                        <MessageSquare size={12} className="text-[color:var(--accent-strong)]" />
                       </div>
                       <div className="flex-1">
                         <p className="text-sm">{d.text}</p>
@@ -862,7 +862,7 @@ export default function MeetingDetailPage() {
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                         <Button variant="ghost" size="icon" className="h-6 w-6" title="Convert to Task" onClick={() => convertToTask(item.id)}>
-                          <ExternalLink size={12} className="text-[#d4ff2e]" />
+                          <ExternalLink size={12} className="text-[color:var(--accent-strong)]" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => deleteActionItem(item.id)}>
                           <Trash2 size={12} />

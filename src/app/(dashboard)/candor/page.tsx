@@ -211,8 +211,9 @@ export default function CandorPage() {
   const closedSessions = sessions.filter((s) => s.status === "CLOSED");
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Candor" }]}
         kicker="Candor · anonymous feedback"
         title="Candor"
         subtitle="Anonymous team feedback sessions. Honest, safe, actionable."
@@ -364,7 +365,7 @@ export default function CandorPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold">Prompts / Questions</Label>
-                <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6 gap-1" onClick={addPrompt}><Plus size={12} /> Add</Button>
+                <Button variant="ghost" size="sm" className="text-xs text-[color:var(--accent-strong)] h-6 gap-1" onClick={addPrompt}><Plus size={12} /> Add</Button>
               </div>
               {createPrompts.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 bg-surface-2 rounded-lg p-2">
@@ -427,7 +428,7 @@ export default function CandorPage() {
                           onClick={() => setAnswers({ ...answers, [prompt.id]: String(n) })}
                           className={`h-10 w-10 rounded-lg border text-sm font-bold transition-colors ${
                             answers[prompt.id] === String(n)
-                              ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]"
+                              ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]"
                               : "border-border hover:border-muted-2 text-muted"
                           }`}
                         >
@@ -465,7 +466,7 @@ export default function CandorPage() {
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <BarChart3 size={16} className="text-[#d4ff2e]" /> Results: {viewResults?.session?.title}
+              <BarChart3 size={16} className="text-[color:var(--accent-strong)]" /> Results: {viewResults?.session?.title}
             </DialogTitle>
           </DialogHeader>
           {viewResults && (
@@ -482,7 +483,7 @@ export default function CandorPage() {
                     {r.type === "rating" ? (
                       <div className="space-y-2">
                         <div className="flex items-center gap-3">
-                          <p className="text-3xl font-bold font-mono text-[#d4ff2e]">{r.average || "—"}</p>
+                          <p className="text-3xl font-bold font-mono text-[color:var(--accent-strong)]">{r.average || "—"}</p>
                           <div className="flex-1">
                             <div className="flex items-center gap-1">
                               {(r.distribution || []).map((d: any) => (

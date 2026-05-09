@@ -35,7 +35,7 @@ const STATUS_COLORS: Record<string, string> = {
   ON_TRACK: "bg-green-500/20 text-green-400",
   AT_RISK: "bg-amber-500/20 text-amber-400",
   BEHIND: "bg-red-500/20 text-red-400",
-  COMPLETED: "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]",
+  COMPLETED: "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]",
 };
 
 const LEVEL_ICONS: Record<string, typeof Globe> = {
@@ -182,8 +182,9 @@ export default function OKRsPage() {
   const avgProgress = okrs.length > 0 ? Math.round(okrs.reduce((s, o) => s + o.progress, 0) / okrs.length) : 0;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "OKRs" }]}
         kicker="OKRs · cascaded quarterly"
         title="OKRs"
         subtitle="Company → team → individual. Progress auto-computed from KPI readings."
@@ -270,7 +271,7 @@ export default function OKRsPage() {
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
                             <div className="text-right">
-                              <p className="text-lg font-bold font-mono text-[#d4ff2e]">{okr.progress}%</p>
+                              <p className="text-lg font-bold font-mono text-[color:var(--accent-strong)]">{okr.progress}%</p>
                               <p className="text-[10px] text-muted">{okr.keyResults.length} KRs</p>
                             </div>
                           </div>
@@ -427,7 +428,7 @@ export default function OKRsPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Key Results</Label>
-                <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6" onClick={() => setForm({ ...form, keyResults: [...form.keyResults, { title: "", targetValue: "100", unit: "%" }] })}>
+                <Button variant="ghost" size="sm" className="text-xs text-[color:var(--accent-strong)] h-6" onClick={() => setForm({ ...form, keyResults: [...form.keyResults, { title: "", targetValue: "100", unit: "%" }] })}>
                   <Plus size={12} className="mr-1" /> Add KR
                 </Button>
               </div>

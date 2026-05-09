@@ -87,8 +87,9 @@ function getScoreBg(score: number) {
 
 function LoadingSkeleton() {
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Analytics" }]}
         kicker="Analytics · BI-ready warehouse"
         title="Analytics"
         subtitle="Real-time dashboards and performance insights."
@@ -180,7 +181,7 @@ export default function AnalyticsPage() {
 
   if (!data || (data.keyMetrics.totalPeople === 0 && data.monthlyTrend.length === 0 && data.deptComparison.length === 0)) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <PageHeader
           kicker="Analytics · BI-ready warehouse"
           title="Analytics"
@@ -207,8 +208,9 @@ export default function AnalyticsPage() {
   ];
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Analytics" }]}
         kicker="Analytics · BI-ready warehouse"
         title="Analytics"
         subtitle="Performance insights and trends — pulled live from the spine."

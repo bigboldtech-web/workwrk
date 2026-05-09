@@ -125,8 +125,9 @@ export default function AnnouncementsPage() {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: t("title") }]}
         kicker="Comms · announcements"
         title={t("title")}
         subtitle={t("subtitle")}
@@ -153,13 +154,13 @@ export default function AnnouncementsPage() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
-                      <Megaphone size={16} className="mt-1 text-[#d4ff2e] shrink-0" />
+                      <Megaphone size={16} className="mt-1 text-[color:var(--accent-strong)] shrink-0" />
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="text-sm font-semibold">{a.title}</h3>
                           <Badge variant="outline" className="text-[10px]">{a.type}</Badge>
                           <Badge variant={a.priority === "URGENT" ? "destructive" : "secondary"} className="text-[10px]">{a.priority}</Badge>
-                          {a.pinned && <Pin size={12} className="text-[#d4ff2e]" />}
+                          {a.pinned && <Pin size={12} className="text-[color:var(--accent-strong)]" />}
                         </div>
                         <p className="text-xs text-muted">{a.content}</p>
                         <p className="text-[10px] text-muted-2 mt-2">

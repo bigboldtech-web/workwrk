@@ -49,7 +49,7 @@ function OrgChartNode({ user, allUsers, depth = 0 }: { user: any; allUsers: any[
       {/* Node */}
       <div className={`rounded-xl border ${borderColor} ${bgColor} p-4 min-w-[180px] max-w-[220px] text-center`}>
         <Avatar className="h-10 w-10 mx-auto mb-2">
-          <AvatarFallback className={`text-sm font-bold ${depth === 0 ? "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]" : "bg-border text-muted"}`}>
+          <AvatarFallback className={`text-sm font-bold ${depth === 0 ? "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]" : "bg-border text-muted"}`}>
             {user.firstName?.[0]}{user.lastName?.[0]}
           </AvatarFallback>
         </Avatar>
@@ -576,7 +576,7 @@ export default function OrganizationPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => (
@@ -588,8 +588,9 @@ export default function OrganizationPage() {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Organization" }]}
         kicker="Organization · structure"
         title="Organization"
         subtitle="Manage your company structure, departments, roles, and offices."
@@ -622,7 +623,7 @@ export default function OrganizationPage() {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="gap-1 border-[rgba(212,255,46,0.3)] text-[#d4ff2e] hover:bg-[rgba(212,255,46,0.08)]" onClick={aiGenerateProfile} disabled={aiGenerating}>
+                <Button variant="outline" size="sm" className="gap-1 border-[rgba(212,255,46,0.3)] text-[color:var(--accent-strong)] hover:bg-[rgba(212,255,46,0.08)]" onClick={aiGenerateProfile} disabled={aiGenerating}>
                   <Sparkles size={14} /> {aiGenerating ? "Generating..." : "AI Assist"}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setEditingProfile(true)}>
@@ -637,7 +638,7 @@ export default function OrganizationPage() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Target size={14} className="text-[#d4ff2e]" /> Mission
+                  <Target size={14} className="text-[color:var(--accent-strong)]" /> Mission
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -658,7 +659,7 @@ export default function OrganizationPage() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Eye size={14} className="text-[#d4ff2e]" /> Vision
+                  <Eye size={14} className="text-[color:var(--accent-strong)]" /> Vision
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -681,7 +682,7 @@ export default function OrganizationPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
-                <Building2 size={14} className="text-[#d4ff2e]" /> About the Company
+                <Building2 size={14} className="text-[color:var(--accent-strong)]" /> About the Company
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -699,7 +700,7 @@ export default function OrganizationPage() {
                 <div className="text-center py-4">
                   <p className="text-sm text-muted mb-2">No company description added yet.</p>
                   <p className="text-xs text-muted mb-3">A strong company description helps AI generate better KRAs, KPIs, and align everything to your business.</p>
-                  <Button variant="outline" size="sm" className="gap-1 border-[rgba(212,255,46,0.3)] text-[#d4ff2e]" onClick={aiGenerateProfile} disabled={aiGenerating}>
+                  <Button variant="outline" size="sm" className="gap-1 border-[rgba(212,255,46,0.3)] text-[color:var(--accent-strong)]" onClick={aiGenerateProfile} disabled={aiGenerating}>
                     <Sparkles size={14} /> {aiGenerating ? "Generating..." : "Generate with AI"}
                   </Button>
                 </div>
@@ -712,7 +713,7 @@ export default function OrganizationPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Heart size={14} className="text-[#d4ff2e]" /> Our Values
+                  <Heart size={14} className="text-[color:var(--accent-strong)]" /> Our Values
                 </CardTitle>
               </div>
             </CardHeader>
@@ -723,7 +724,7 @@ export default function OrganizationPage() {
                 <div className="flex flex-wrap gap-2">
                   {companyProfile.values.map((value, i) => (
                     <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[rgba(212,255,46,0.08)] border border-[rgba(212,255,46,0.2)]">
-                      <Sparkles size={12} className="text-[#d4ff2e]" />
+                      <Sparkles size={12} className="text-[color:var(--accent-strong)]" />
                       <span className="text-sm">{value}</span>
                       {editingProfile && (
                         <button onClick={() => removeValue(i)} className="ml-1 text-red-400 hover:text-red-300">
@@ -834,7 +835,7 @@ export default function OrganizationPage() {
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
-                <p className="text-2xl font-bold text-[#d4ff2e]">{companyProfile.values.length}</p>
+                <p className="text-2xl font-bold text-[color:var(--accent-strong)]">{companyProfile.values.length}</p>
                 <p className="text-xs text-muted">Core Values</p>
               </CardContent>
             </Card>
@@ -999,7 +1000,7 @@ export default function OrganizationPage() {
                     <tr key={role.id} className="border-b border-border/50 hover:bg-surface-2/50 transition-colors cursor-pointer">
                       <td className="p-4">
                         <div className="flex items-center gap-2">
-                          <Briefcase size={14} className="text-[#d4ff2e]" />
+                          <Briefcase size={14} className="text-[color:var(--accent-strong)]" />
                           <span className="text-sm font-medium">{role.title}</span>
                         </div>
                       </td>
@@ -1112,7 +1113,7 @@ export default function OrganizationPage() {
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-2 min-w-0">
-                        <Globe size={16} className="text-[#d4ff2e] flex-shrink-0" />
+                        <Globe size={16} className="text-[color:var(--accent-strong)] flex-shrink-0" />
                         <h3 className="font-semibold text-sm truncate">{office.name}</h3>
                         {office.isHeadquarters && <Badge variant="secondary" className="text-[10px]">HQ</Badge>}
                       </div>

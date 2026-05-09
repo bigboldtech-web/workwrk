@@ -36,7 +36,7 @@ const STATUS_STYLES: Record<string, { color: string; label: string }> = {
   UNDER_REVIEW: { color: "bg-amber-500/20 text-amber-400", label: "Under Review" },
   APPROVED: { color: "bg-green-500/20 text-green-400", label: "Approved" },
   REJECTED: { color: "bg-red-500/20 text-red-400", label: "Rejected" },
-  IMPLEMENTED: { color: "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]", label: "Implemented" },
+  IMPLEMENTED: { color: "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]", label: "Implemented" },
   REWARDED: { color: "bg-yellow-500/20 text-yellow-400", label: "Rewarded" },
 };
 
@@ -248,8 +248,9 @@ export default function IdeasPage() {
   const approved = ideas.filter((i) => ["APPROVED", "IMPLEMENTED", "REWARDED"].includes(i.status)).length;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Ideas" }]}
         kicker="Ideas · continuous improvement"
         title="Ideas board"
         subtitle={`${ideas.length} ideas · ${submitted} pending · ${approved} approved`}
@@ -345,10 +346,10 @@ export default function IdeasPage() {
                     {/* Vote */}
                     <button
                       onClick={() => handleVote(idea.id)}
-                      className={`flex flex-col items-center gap-0.5 shrink-0 pt-1 ${hasVoted ? "text-[#d4ff2e]" : "text-muted hover:text-[#e2ff6b]"} transition-colors`}
+                      className={`flex flex-col items-center gap-0.5 shrink-0 pt-1 ${hasVoted ? "text-[color:var(--accent-strong)]" : "text-muted hover:text-[#e2ff6b]"} transition-colors`}
                       aria-label={hasVoted ? "Remove vote" : "Upvote"}
                     >
-                      <ThumbsUp size={18} className={hasVoted ? "fill-[#d4ff2e] text-[#d4ff2e]" : ""} />
+                      <ThumbsUp size={18} className={hasVoted ? "fill-[#d4ff2e] text-[color:var(--accent-strong)]" : ""} />
                       <span className="text-xs font-bold">{idea._count.votes}</span>
                     </button>
 

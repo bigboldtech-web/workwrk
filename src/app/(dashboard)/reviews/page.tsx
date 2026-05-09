@@ -175,8 +175,9 @@ export default function ReviewsPage() {
   const activeCycle = cycles.find((c) => c.status === "ACTIVE" || c.status === "IN_CALIBRATION");
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Reviews" }]}
         kicker="Reviews · 48-hour cycles"
         title="Performance reviews"
         subtitle="Manage review cycles, assessments, and outcomes. Pre-filled with the quarter's live data."
@@ -242,7 +243,7 @@ export default function ReviewsPage() {
                 <>
                   <div className="flex items-center gap-2 mb-2">
                     <Progress value={pct} className="h-2 flex-1" indicatorClassName="bg-[#d4ff2e]" />
-                    <span className="text-sm font-mono text-[#d4ff2e]">{pct}%</span>
+                    <span className="text-sm font-mono text-[color:var(--accent-strong)]">{pct}%</span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted">
                     <span className="flex items-center gap-1"><Users size={12} /> {total} total</span>

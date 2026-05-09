@@ -11,6 +11,7 @@ import { TourProvider } from "@/components/tour-provider";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { applyDensity, getInitialDensity } from "@/lib/density";
 import "./app-shell.css";
 
 export default function DashboardLayout({
@@ -55,6 +56,9 @@ export default function DashboardLayout({
       // Brand-new visitors land in light mode.
       document.documentElement.classList.remove("dark-forced");
     }
+    // Apply user's stored density (compact / cozy) before first paint
+    // of any dashboard child. Compact is the default; cozy is opt-in.
+    applyDensity(getInitialDensity());
   }, []);
 
   if (status === "loading" || (status === "authenticated" && !setupChecked)) {

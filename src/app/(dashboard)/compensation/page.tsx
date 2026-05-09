@@ -20,7 +20,9 @@ import {
 } from "@/components/ui/dialog";
 import { useRole } from "@/hooks/use-role";
 import { useToast } from "@/components/ui/toast";
-import { Plus, DollarSign, Calendar, ChevronRight } from "lucide-react";
+import { Plus, Calendar, ChevronRight } from "lucide-react";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { FormGrid, FormRow } from "@/components/ui/form-row";
 
 type Cycle = {
   id: string;
@@ -36,9 +38,9 @@ type Cycle = {
 };
 
 const STATUS_STYLE: Record<string, string> = {
-  DRAFT: "text-muted border-white/20",
-  OPEN: "text-[#d4ff2e] border-[#d4ff2e]/30",
-  CLOSED: "text-blue-400 border-blue-400/30",
+  DRAFT: "text-muted border-border",
+  OPEN: "text-[color:var(--accent-strong)] border-[color:var(--accent-border)]",
+  CLOSED: "text-blue-600 border-blue-300",
 };
 
 export default function CompensationPage() {
@@ -65,23 +67,29 @@ export default function CompensationPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const openCount = cycles.filter((c) => c.status === "OPEN").length;
+  const draftCount = cycles.filter((c) => c.status === "DRAFT").length;
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <DollarSign size={20} /> Compensation
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            Annual / cycle-based pay reviews. Managers propose; HR finalizes.
-          </p>
-        </div>
-        {isAdmin && (
-          <Button onClick={() => setShowCreate(true)}>
+    <div className="space-y-3 animate-fade-in">
+      <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Compensation" }]}
+        kicker="Compensation · cycles"
+        title="Compensation"
+        subtitle="Annual / cycle-based pay reviews. Managers propose; HR finalizes."
+        stats={cycles.length > 0 ? [
+          { label: "Open", value: openCount },
+          { label: "Draft", value: draftCount },
+          { label: "Total cycles", value: cycles.length },
+        ] : undefined}
+      />
+      {isAdmin && (
+        <div className="flex justify-end">
+          <Button onClick={() => setShowCreate(true)} size="sm">
             <Plus size={14} className="mr-1.5" /> New cycle
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-8 text-sm text-muted">Loading…</div>
@@ -195,36 +203,30 @@ function CreateCycleDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader><DialogTitle>New compensation cycle</DialogTitle></DialogHeader>
-        <div className="space-y-3 pt-1">
-          <div className="space-y-1.5">
-            <Label>Name</Label>
+        <FormGrid cols={1} className="pt-1">
+          <FormRow label="Name" required>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 2026 Annual Comp Review" autoFocus />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Start date</Label>
+          </FormRow>
+          <FormGrid cols={2}>
+            <FormRow label="Start date">
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>End date</Label>
+            </FormRow>
+            <FormRow label="End date">
               <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Budget % (optional)</Label>
+            </FormRow>
+          </FormGrid>
+          <FormGrid cols={2}>
+            <FormRow label="Budget %" hint="Optional">
               <Input value={budgetPct} onChange={(e) => setBudgetPct(e.target.value)} placeholder="5.0" inputMode="decimal" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Reporting currency</Label>
+            </FormRow>
+            <FormRow label="Reporting currency">
               <Input value={reportingCurrency} onChange={(e) => setReportingCurrency(e.target.value.toUpperCase().slice(0, 3))} maxLength={3} />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Description (optional)</Label>
+            </FormRow>
+          </FormGrid>
+          <FormRow label="Description" hint="Optional">
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
-          </div>
-        </div>
+          </FormRow>
+        </FormGrid>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button disabled={!valid || saving} onClick={save}>

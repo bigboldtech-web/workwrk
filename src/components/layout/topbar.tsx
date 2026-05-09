@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X } from "lucide-react";
+import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import {
   DropdownMenu,
@@ -20,6 +20,9 @@ import { LanguageSwitcher } from "./language-switcher";
 import { CurrencySwitcher } from "./currency-switcher";
 import { ActivePunchPill } from "./active-punch-pill";
 import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
+import { ShortcutsOverlay, useShortcutsOverlay } from "./shortcuts-overlay";
+import { applyDensity, readDensity, type Density } from "@/lib/density";
+import { Kbd } from "@/components/ui/kbd";
 
 interface SearchResult {
   type: "person" | "task" | "sop" | "department" | "meeting";
@@ -84,6 +87,22 @@ export function Topbar() {
   const [searching, setSearching] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const shortcuts = useShortcutsOverlay();
+  // Density (compact / cozy) — read on mount and after density-change
+  // events so the user-menu radio reflects the current setting whether
+  // it was set by us or by another tab.
+  const [density, setDensity] = useState<Density>("compact");
+  useEffect(() => {
+    setDensity(readDensity());
+    const sync = () => setDensity(readDensity());
+    window.addEventListener("workwrk:density-change", sync);
+    return () => window.removeEventListener("workwrk:density-change", sync);
+  }, []);
+  const handleDensityChange = useCallback((d: Density) => {
+    applyDensity(d);
+    setDensity(d);
+  }, []);
 
   const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -234,6 +253,15 @@ export function Topbar() {
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        const input = document.getElementById("global-search") as HTMLInputElement | null;
+        input?.focus();
+        return;
+      }
+      // "/" focuses search, but only when the user isn't already typing.
+      if (e.key === "/") {
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
         e.preventDefault();
         const input = document.getElementById("global-search") as HTMLInputElement | null;
         input?.focus();
@@ -416,7 +444,7 @@ export function Topbar() {
               </span>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuLabel>My account</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
@@ -429,6 +457,24 @@ export function Topbar() {
               <Link href="/settings">{tNav("settings")}</Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DensityRow value={density} onChange={handleDensityChange} />
+            <DropdownMenuItem
+              onSelect={(e) => {
+                // Don't auto-close — we want the overlay to take over,
+                // and re-opening the menu after closing the overlay
+                // would be one extra click.
+                e.preventDefault();
+                shortcuts.setOpen(true);
+              }}
+              className="flex items-center justify-between gap-2 cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <Keyboard size={13} className="text-muted" />
+                <span className="text-sm">Keyboard shortcuts</span>
+              </span>
+              <Kbd keys="?" />
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => signOut({ callbackUrl: "/login" })}
               style={{ color: "#ff3d8a" }}
@@ -438,7 +484,51 @@ export function Topbar() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <ShortcutsOverlay open={shortcuts.open} onClose={shortcuts.close} />
     </header>
+  );
+}
+
+// Inline density selector that lives inside the user-menu dropdown.
+// Two pill buttons; the active one gets the violet accent. Persists to
+// localStorage and applies via [data-density] on <html> immediately.
+function DensityRow({
+  value,
+  onChange,
+}: {
+  value: Density;
+  onChange: (d: Density) => void;
+}) {
+  return (
+    <div className="px-2 py-1.5 text-xs">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-2 mb-1.5 px-1">
+        Display density
+      </p>
+      <div className="flex gap-1.5">
+        {([
+          { id: "compact", label: "Compact" },
+          { id: "cozy", label: "Cozy" },
+        ] as { id: Density; label: string }[]).map((opt) => {
+          const active = value === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => onChange(opt.id)}
+              className={
+                "flex-1 px-2 py-1 rounded-md text-[11.5px] font-medium border transition-colors " +
+                (active
+                  ? "bg-[color:var(--accent-soft)] border-[color:var(--accent-strong)] text-[color:var(--accent-strong)]"
+                  : "bg-transparent border-border text-muted hover:bg-surface-2 hover:text-foreground")
+              }
+              aria-pressed={active}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -472,7 +562,7 @@ function DesktopAlertsRow({
   } else if (enabled) {
     label = "Desktop alerts on";
     subtitle = "Ping + popup for new notifications";
-    icon = <BellRing size={14} className="text-[#d4ff2e]" />;
+    icon = <BellRing size={14} className="text-[color:var(--accent-strong)]" />;
     actionLabel = "Turn off";
     action = disable;
   } else if (permission === "granted" && pref === "off") {
@@ -494,7 +584,7 @@ function DesktopAlertsRow({
         <button
           type="button"
           onClick={action}
-          className="text-[10px] px-2 py-1 rounded border border-border hover:border-[#d4ff2e] hover:text-[#d4ff2e] transition-colors"
+          className="text-[10px] px-2 py-1 rounded border border-border hover:border-[#d4ff2e] hover:text-[color:var(--accent-strong)] transition-colors"
         >
           {actionLabel}
         </button>

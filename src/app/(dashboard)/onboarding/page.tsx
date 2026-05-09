@@ -157,7 +157,7 @@ export default function OnboardingPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-64 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => (
@@ -169,9 +169,10 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Onboarding" }]}
           kicker="Onboarding · journeys"
           title="Onboarding & training"
           subtitle="Manage employee onboarding and training programs."
@@ -268,7 +269,7 @@ export default function OnboardingPage() {
         <Card>
           <CardContent className="p-5">
             <div className="flex items-center gap-3">
-              <div className="rounded-lg p-2.5 bg-[rgba(212,255,46,0.08)]"><BookOpen className="h-5 w-5 text-[#d4ff2e]" /></div>
+              <div className="rounded-lg p-2.5 bg-[rgba(212,255,46,0.08)]"><BookOpen className="h-5 w-5 text-[color:var(--accent-strong)]" /></div>
               <div>
                 <p className="text-2xl font-bold">{templates.length}</p>
                 <p className="text-xs text-muted">Templates</p>
@@ -322,7 +323,7 @@ export default function OnboardingPage() {
                   <CardContent className="p-4">
                     <div className="flex items-center gap-4">
                       <Avatar className="h-12 w-12">
-                        <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]">
+                        <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]">
                           {inst.user?.firstName?.[0]}{inst.user?.lastName?.[0]}
                         </AvatarFallback>
                       </Avatar>
@@ -446,7 +447,7 @@ export default function OnboardingPage() {
                             <td className="py-3">
                               <div className="flex items-center gap-2">
                                 <Avatar className="h-7 w-7">
-                                  <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-[10px]">
+                                  <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)] text-[10px]">
                                     {inst.user?.firstName?.[0]}{inst.user?.lastName?.[0]}
                                   </AvatarFallback>
                                 </Avatar>

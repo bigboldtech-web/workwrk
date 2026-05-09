@@ -183,7 +183,7 @@ export default function CalendarSettingsPage() {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
         kicker="Settings · calendar"
         title="Google Calendar"
@@ -195,7 +195,7 @@ export default function CalendarSettingsPage() {
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Connection</CardTitle>
             {status?.connected ? (
-              <Badge variant="secondary" className="gap-1 text-xs"><CheckCircle2 size={11} className="text-[#d4ff2e]" /> Connected</Badge>
+              <Badge variant="secondary" className="gap-1 text-xs"><CheckCircle2 size={11} className="text-[color:var(--accent-strong)]" /> Connected</Badge>
             ) : (
               <Badge variant="outline" className="text-xs">Not connected</Badge>
             )}
@@ -251,7 +251,7 @@ export default function CalendarSettingsPage() {
               </div>
               {icsFeed.webcalUrl && (
                 <p className="text-[11px] text-muted">
-                  On Mac, click <a href={icsFeed.webcalUrl} className="text-[#d4ff2e] hover:underline">this webcal link</a> to subscribe in one step.
+                  On Mac, click <a href={icsFeed.webcalUrl} className="text-[color:var(--accent-strong)] hover:underline">this webcal link</a> to subscribe in one step.
                 </p>
               )}
               <div className="flex gap-2 pt-1">

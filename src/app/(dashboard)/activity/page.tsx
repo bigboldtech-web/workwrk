@@ -30,7 +30,7 @@ const ACTIVITY_ICONS: Record<string, any> = {
 const ACTIVITY_COLORS: Record<string, string> = {
   task_created: "text-blue-400 bg-blue-500/10",
   task_completed: "text-green-400 bg-green-500/10",
-  task_updated: "text-[#d4ff2e] bg-[rgba(212,255,46,0.08)]",
+  task_updated: "text-[color:var(--accent-strong)] bg-[rgba(212,255,46,0.08)]",
   user_added: "text-cyan-400 bg-cyan-500/10",
   sop_created: "text-orange-400 bg-orange-500/10",
   meeting_created: "text-yellow-400 bg-yellow-500/10",
@@ -140,8 +140,9 @@ export default function ActivityPage() {
 
   if (error) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Activity" }]}
           kicker="Activity · org-wide feed"
           title="Activity feed"
           subtitle="Track what's happening across your organization."
@@ -152,7 +153,7 @@ export default function ActivityPage() {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
         kicker="Activity · org-wide feed"
         title="Activity feed"
@@ -178,7 +179,7 @@ export default function ActivityPage() {
               onClick={() => setTypeFilter(f.value)}
               className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                 typeFilter === f.value
-                  ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
+                  ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
                   : "border-border text-muted hover:border-muted-2"
               }`}
             >
@@ -193,7 +194,7 @@ export default function ActivityPage() {
                 onClick={() => setShowMemberPicker(!showMemberPicker)}
                 className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${
                   selectedActorIds.length > 0
-                    ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
+                    ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
                     : "border-border text-muted hover:border-muted-2"
                 }`}
               >
@@ -208,7 +209,7 @@ export default function ActivityPage() {
                     <span className="text-[10px] uppercase tracking-wider text-muted">Show activity from</span>
                     <button
                       onClick={() => setSelectedActorIds([])}
-                      className="text-[10px] text-[#d4ff2e] hover:text-[#e2ff6b]"
+                      className="text-[10px] text-[color:var(--accent-strong)] hover:text-[#e2ff6b]"
                     >
                       Show all
                     </button>

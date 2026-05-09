@@ -76,7 +76,7 @@ export default function CourseDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="h-64 bg-surface-2 rounded-lg animate-pulse" />
       </div>
@@ -95,7 +95,7 @@ export default function CourseDetailPage() {
   const embedUrl = getEmbedUrl(videoUrl);
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -135,7 +135,7 @@ export default function CourseDetailPage() {
       {/* Video Embed */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2"><Play size={14} className="text-[#d4ff2e]" /> Course Video</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2"><Play size={14} className="text-[color:var(--accent-strong)]" /> Course Video</CardTitle>
         </CardHeader>
         <CardContent>
           {editing ? (
@@ -169,7 +169,7 @@ export default function CourseDetailPage() {
       {/* Course Content */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2"><BookOpen size={14} className="text-[#d4ff2e]" /> Course Content</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2"><BookOpen size={14} className="text-[color:var(--accent-strong)]" /> Course Content</CardTitle>
         </CardHeader>
         <CardContent>
           {editing ? (
@@ -187,7 +187,7 @@ export default function CourseDetailPage() {
       {/* Enrollments */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2"><Users size={14} className="text-[#d4ff2e]" /> Enrollments</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2"><Users size={14} className="text-[color:var(--accent-strong)]" /> Enrollments</CardTitle>
         </CardHeader>
         <CardContent>
           {course.enrollments && course.enrollments.length > 0 ? (

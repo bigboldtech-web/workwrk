@@ -57,7 +57,7 @@ function renderMarkdown(text: string) {
         const content = line.slice(2);
         return (
           <div key={i} className="flex gap-2 ml-2">
-            <span className="text-[#d4ff2e] flex-shrink-0">•</span>
+            <span className="text-[color:var(--accent-strong)] flex-shrink-0">•</span>
             <span dangerouslySetInnerHTML={{ __html: boldify(content) }} />
           </div>
         );
@@ -68,7 +68,7 @@ function renderMarkdown(text: string) {
       if (numMatch) {
         return (
           <div key={i} className="flex gap-2 ml-2">
-            <span className="text-[#d4ff2e] flex-shrink-0 font-mono text-xs mt-0.5">{numMatch[1]}.</span>
+            <span className="text-[color:var(--accent-strong)] flex-shrink-0 font-mono text-xs mt-0.5">{numMatch[1]}.</span>
             <span dangerouslySetInnerHTML={{ __html: boldify(numMatch[2]) }} />
           </div>
         );
@@ -96,7 +96,7 @@ function boldify(text: string): string {
   const escaped = escapeHtml(text);
   return escaped
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-foreground font-semibold">$1</strong>')
-    .replace(/`(.+?)`/g, '<code class="bg-border px-1 py-0.5 rounded text-[#d4ff2e] text-xs font-mono">$1</code>');
+    .replace(/`(.+?)`/g, '<code class="bg-border px-1 py-0.5 rounded text-[color:var(--accent-strong)] text-xs font-mono">$1</code>');
 }
 
 export default function AIPage() {
@@ -229,6 +229,7 @@ export default function AIPage() {
     <div className="flex h-[calc(100vh-7rem)] flex-col animate-fade-in">
       <div className="mb-4 flex items-center justify-between gap-4 flex-wrap">
         <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "AI Assistant" }]}
           kicker="AI · private-by-default"
           title="AI assistant"
           subtitle="Ask anything about your organization in plain English."
@@ -245,7 +246,7 @@ export default function AIPage() {
         <Card className="mb-4 border-[rgba(212,255,46,0.2)] bg-[rgba(212,255,46,0.06)]">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-3">
-              <BarChart3 size={16} className="text-[#d4ff2e]" />
+              <BarChart3 size={16} className="text-[color:var(--accent-strong)]" />
               <span className="text-sm font-medium">Weekly Digest</span>
               <Badge variant="secondary" className="text-[10px]">{digest.period}</Badge>
             </div>
@@ -280,7 +281,7 @@ export default function AIPage() {
             >
               {msg.role === "assistant" && (
                 <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-[rgba(212,255,46,0.08)] flex items-center justify-center">
-                  <Sparkles size={16} className="text-[#d4ff2e]" />
+                  <Sparkles size={16} className="text-[color:var(--accent-strong)]" />
                 </div>
               )}
               <div
@@ -291,20 +292,20 @@ export default function AIPage() {
                 }`}
               >
                 {msg.role === "assistant" && (
-                  <p className="text-[10px] text-[#d4ff2e] font-mono mb-1 font-medium">workwrk AI</p>
+                  <p className="text-[10px] text-[color:var(--accent-strong)] font-mono mb-1 font-medium">workwrk AI</p>
                 )}
                 <div className="text-sm leading-relaxed">
                   {msg.role === "assistant" ? renderMarkdown(msg.content) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
                 </div>
-                <p className={`text-[10px] mt-1 ${msg.role === "user" ? "text-[#d4ff2e]" : "text-muted"}`}>
+                <p className={`text-[10px] mt-1 ${msg.role === "user" ? "text-[color:var(--accent-strong)]" : "text-muted"}`}>
                   {msg.timestamp.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
               {msg.role === "user" && (
                 <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-[rgba(212,255,46,0.12)] flex items-center justify-center">
-                  <User size={16} className="text-[#d4ff2e]" />
+                  <User size={16} className="text-[color:var(--accent-strong)]" />
                 </div>
               )}
             </div>
@@ -313,7 +314,7 @@ export default function AIPage() {
           {loading && (
             <div className="flex gap-3 justify-start">
               <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-[rgba(212,255,46,0.08)] flex items-center justify-center">
-                <Sparkles size={16} className="text-[#d4ff2e]" />
+                <Sparkles size={16} className="text-[color:var(--accent-strong)]" />
               </div>
               <div className="bg-surface-2 border border-border rounded-xl px-4 py-3">
                 <div className="flex items-center gap-2 text-sm text-muted">

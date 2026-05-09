@@ -298,14 +298,14 @@ export async function ClickupHomeHero() {
   ];
 
   return (
-    <div className="space-y-4 mb-6">
+    <div className="space-y-3 mb-3">
       {/* Greeting + headline — ClickUp-tight, no oversized type */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="text-xl font-bold tracking-tight leading-tight">
             {greeting}, {firstName}.
           </h1>
-          <p className="text-xs text-slate-500 dark:text-muted mt-1">
+          <p className="text-[11.5px] text-slate-500 dark:text-muted mt-0.5">
             {inboxTotal === 0
               ? "You're all clear today."
               : `${inboxTotal} item${inboxTotal === 1 ? "" : "s"} need you across the platform.`}
@@ -313,14 +313,14 @@ export async function ClickupHomeHero() {
         </div>
         <Link
           href="/inbox"
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700 hover:text-violet-800 transition-colors"
+          className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-violet-700 hover:text-violet-800 transition-colors"
         >
           Open Inbox <ArrowRight size={11} />
         </Link>
       </div>
 
       {/* KPI tiles — compact ClickUp density: smaller padding, smaller chip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {tiles.map((t) => {
           const Icon = t.icon;
           return (
@@ -345,7 +345,7 @@ export async function ClickupHomeHero() {
       </div>
 
       {/* Two-column: What needs you (preview) + Quick actions — tighter borders + padding */}
-      <div className="grid lg:grid-cols-3 gap-3">
+      <div className="grid lg:grid-cols-3 gap-2">
         <div className="lg:col-span-2 rounded-lg border border-slate-200 dark:border-line bg-white dark:bg-card p-3">
           <div className="flex items-center justify-between mb-2.5">
             <p className="text-sm font-semibold">What needs you</p>

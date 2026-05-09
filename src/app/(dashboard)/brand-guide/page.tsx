@@ -99,7 +99,7 @@ export default function BrandGuidePage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-56 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -111,8 +111,9 @@ export default function BrandGuidePage() {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Brand Guide" }]}
         kicker="Company · brand"
         title="Brand Guide"
         subtitle="One source of truth for how the company sounds, looks, and shows up."
@@ -121,7 +122,7 @@ export default function BrandGuidePage() {
       {/* Top-bar with edit / status */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2 text-xs text-muted">
-          <Palette size={14} className="text-[#d4ff2e]" />
+          <Palette size={14} className="text-[color:var(--accent-strong)]" />
           {serverUpdatedAt ? (
             <span>Last updated {new Date(serverUpdatedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
           ) : (
@@ -161,7 +162,7 @@ export default function BrandGuidePage() {
         <TextSection
           title="Brand Story"
           subtitle="What we are, where we came from, why we exist."
-          icon={<BookOpen size={16} className="text-[#d4ff2e]" />}
+          icon={<BookOpen size={16} className="text-[color:var(--accent-strong)]" />}
           value={guide.story || ""}
           editable={editing}
           placeholder="The story of the company — who we are, what we do, why it matters."
@@ -171,7 +172,7 @@ export default function BrandGuidePage() {
         <TextSection
           title="Positioning"
           subtitle="Who it's for, what they get, why us."
-          icon={<Sparkles size={16} className="text-[#d4ff2e]" />}
+          icon={<Sparkles size={16} className="text-[color:var(--accent-strong)]" />}
           value={guide.positioning || ""}
           editable={editing}
           placeholder="Our audience, the problem we solve, and our unique value proposition."
@@ -181,7 +182,7 @@ export default function BrandGuidePage() {
         <TextSection
           title="Voice & Tone"
           subtitle="How we speak — the personality behind the words."
-          icon={<Mic size={16} className="text-[#d4ff2e]" />}
+          icon={<Mic size={16} className="text-[color:var(--accent-strong)]" />}
           value={guide.voiceAndTone || ""}
           editable={editing}
           placeholder="Examples of how we sound. Include do's and don'ts, playful vs. serious, first- vs. third-person."
@@ -191,7 +192,7 @@ export default function BrandGuidePage() {
         <TextSection
           title="Messaging"
           subtitle="Tagline, elevator pitch, key messages."
-          icon={<Megaphone size={16} className="text-[#d4ff2e]" />}
+          icon={<Megaphone size={16} className="text-[color:var(--accent-strong)]" />}
           value={guide.messaging || ""}
           editable={editing}
           placeholder="Tagline. Elevator pitch (30s). Top 3 key messages. Proof points."
@@ -220,7 +221,7 @@ export default function BrandGuidePage() {
         <TextSection
           title="Imagery"
           subtitle="Photography, illustration, and icon direction."
-          icon={<Camera size={16} className="text-[#d4ff2e]" />}
+          icon={<Camera size={16} className="text-[color:var(--accent-strong)]" />}
           value={guide.imageryGuidelines || ""}
           editable={editing}
           placeholder="Style direction for photos, illustrations, icons. What to lean into, what to avoid."
@@ -342,7 +343,7 @@ function LogoSection({
     <SectionShell
       title="Logo"
       subtitle="The primary mark and how to use it."
-      icon={<ImageIcon size={16} className="text-[#d4ff2e]" />}
+      icon={<ImageIcon size={16} className="text-[color:var(--accent-strong)]" />}
     >
       <div className="space-y-3">
         <div className="rounded-lg border border-border bg-surface-3 p-4 flex items-center justify-center min-h-[140px]">
@@ -435,7 +436,7 @@ function ColorsSection({
     <SectionShell
       title="Colors"
       subtitle="The palette — primary, secondary, and accents."
-      icon={<Palette size={16} className="text-[#d4ff2e]" />}
+      icon={<Palette size={16} className="text-[color:var(--accent-strong)]" />}
     >
       {colors.length === 0 && !editable && (
         <p className="text-xs text-muted italic">No colors defined yet.</p>
@@ -508,7 +509,7 @@ function ColorsSection({
           <button
             type="button"
             onClick={addColor}
-            className="rounded-lg border border-dashed border-border hover:border-[#d4ff2e] hover:text-[#d4ff2e] text-muted h-full min-h-[120px] flex flex-col items-center justify-center gap-1 text-xs"
+            className="rounded-lg border border-dashed border-border hover:border-[#d4ff2e] hover:text-[color:var(--accent-strong)] text-muted h-full min-h-[120px] flex flex-col items-center justify-center gap-1 text-xs"
           >
             <Plus size={16} />
             Add color
@@ -542,7 +543,7 @@ function TypographySection({
     <SectionShell
       title="Typography"
       subtitle="The typefaces and where they're used."
-      icon={<Type size={16} className="text-[#d4ff2e]" />}
+      icon={<Type size={16} className="text-[color:var(--accent-strong)]" />}
     >
       {fonts.length === 0 && !editable && (
         <p className="text-xs text-muted italic">No typefaces defined yet.</p>
@@ -596,7 +597,7 @@ function TypographySection({
                     href={f.source}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[10px] text-[#d4ff2e] hover:underline mt-1 inline-block"
+                    className="text-[10px] text-[color:var(--accent-strong)] hover:underline mt-1 inline-block"
                   >
                     Source ↗
                   </a>
@@ -609,7 +610,7 @@ function TypographySection({
           <button
             type="button"
             onClick={addFont}
-            className="w-full rounded-lg border border-dashed border-border hover:border-[#d4ff2e] hover:text-[#d4ff2e] text-muted py-2 flex items-center justify-center gap-1 text-xs"
+            className="w-full rounded-lg border border-dashed border-border hover:border-[#d4ff2e] hover:text-[color:var(--accent-strong)] text-muted py-2 flex items-center justify-center gap-1 text-xs"
           >
             <Plus size={14} /> Add font
           </button>
@@ -637,7 +638,7 @@ function AutosaveBadge({
   const common = "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ml-2";
   if (status === "saving") {
     return (
-      <span className={`${common} border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]`}>
+      <span className={`${common} border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]`}>
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#d4ff2e] animate-pulse" />
         Saving…
       </span>

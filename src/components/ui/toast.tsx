@@ -37,10 +37,10 @@ const icons: Record<ToastType, typeof CheckCircle> = {
 };
 
 const styles: Record<ToastType, string> = {
-  success: "border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]",
-  error: "border-[rgba(255,61,138,0.3)] bg-[rgba(255,61,138,0.08)] text-[#ff3d8a]",
-  warning: "border-[rgba(255,153,51,0.3)] bg-[rgba(255,153,51,0.08)] text-[#ff9933]",
-  info: "border-[rgba(74,158,255,0.3)] bg-[rgba(74,158,255,0.08)] text-[#4a9eff]",
+  success: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300",
+  error: "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300",
+  warning: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300",
+  info: "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300",
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {

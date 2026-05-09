@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/dashboard/page-header";
 import {
   Dialog,
   DialogContent,
@@ -167,44 +168,49 @@ export function TimeOffManager({
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <CalendarOff size={20} /> Time off
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            Request leave, see your balance, approve your team's requests.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isAdmin && (
-            <Button variant="outline" size="sm" asChild>
-              <a href="/time-off/policies">Manage policies</a>
-            </Button>
-          )}
-          {isManager && (
-            <a
-              href={`/api/export/time-off?scope=${tab === "mine" ? "mine" : "all"}`}
-              className="inline-flex items-center gap-1.5 h-9 px-3 text-sm rounded-md border border-line text-fg hover:bg-card-2/40"
-            >
-              Export CSV
-            </a>
-          )}
-          <Button onClick={() => setShowCreate(true)} disabled={policies.length === 0}>
-            <Plus size={14} className="mr-1.5" /> Request
+    <div className="space-y-3 animate-fade-in">
+      <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Time off" }]}
+        kicker="Time off · balance & requests"
+        title="Time off"
+        subtitle="Request leave, see your balance, approve your team's requests."
+        stats={[
+          {
+            label: "Remaining",
+            value: `${initialBalances
+              .reduce((sum, b) => sum + b.remainingHours, 0)
+              .toFixed(0)}h`,
+          },
+          { label: "Policies", value: policies.length },
+        ]}
+      />
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        {isAdmin && (
+          <Button variant="outline" size="sm" asChild>
+            <a href="/time-off/policies">Manage policies</a>
           </Button>
-        </div>
+        )}
+        {isManager && (
+          <a
+            href={`/api/export/time-off?scope=${tab === "mine" ? "mine" : "all"}`}
+            className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border text-foreground hover:bg-surface-2 transition-colors"
+          >
+            Export CSV
+          </a>
+        )}
+        <Button onClick={() => setShowCreate(true)} disabled={policies.length === 0} size="sm">
+          <Plus size={14} className="mr-1.5" /> Request
+        </Button>
       </div>
 
       {policies.length === 0 ? (
         <Card>
-          <CardContent className="p-8 text-center text-sm text-muted">
+          <CardContent className="p-6 text-center text-sm text-muted">
             No leave policies configured yet.
             {isAdmin && (
               <>
                 {" "}
-                <a href="/time-off/policies" className="text-[#d4ff2e] hover:underline">
+                <a href="/time-off/policies" className="text-[color:var(--accent-strong)] hover:underline font-medium">
                   Create one
                 </a>
                 {" "}so employees can request time off.
@@ -213,22 +219,25 @@ export function TimeOffManager({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           {initialBalances.map((b) => {
             const used = b.usedHours + b.pendingHours;
             const pct = b.annualHours > 0 ? (used / b.annualHours) * 100 : 0;
+            const tone =
+              b.color ?? (b.type === "VACATION" ? "#7c3aed" : b.type === "SICK" ? "#ff3d8a" : "#4a9eff");
             return (
-              <Card key={b.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-muted">{b.name}</p>
-                    <span className="text-[10px] uppercase tracking-wide text-muted">{b.type}</span>
+              <Card key={b.id} style={{ borderLeft: `3px solid ${tone}` }}>
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[11px] font-medium truncate">{b.name}</p>
+                    <span className="text-[9px] uppercase tracking-wide text-muted-2 ml-1">{b.type}</span>
                   </div>
-                  <p className="text-2xl font-bold font-mono">
-                    {b.remainingHours.toFixed(0)}<span className="text-sm text-muted ml-1">/ {b.annualHours.toFixed(0)}h</span>
+                  <p className="text-lg font-bold font-mono leading-none tabular-nums">
+                    {b.remainingHours.toFixed(0)}
+                    <span className="text-[11px] text-muted ml-1 font-normal">/ {b.annualHours.toFixed(0)}h</span>
                   </p>
                   <Progress value={pct} className="h-1 mt-2" />
-                  <p className="text-[10px] text-muted mt-1.5">
+                  <p className="text-[10px] text-muted mt-1">
                     {b.usedHours.toFixed(0)}h used
                     {b.pendingHours > 0 && ` · ${b.pendingHours.toFixed(0)}h pending`}
                   </p>

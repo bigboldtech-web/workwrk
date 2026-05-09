@@ -30,12 +30,12 @@ export function BirthdayCard() {
           <div className="flex justify-center gap-2 mb-3">
             <PartyPopper size={28} className="text-[#ff9933]" />
             <Cake size={28} className="text-[#ff3d8a]" />
-            <Gift size={28} className="text-[#d4ff2e]" />
+            <Gift size={28} className="text-[color:var(--accent-strong)]" />
           </div>
           <h2 className="text-xl font-bold mb-2 text-foreground">Happy Birthday! 🎂</h2>
           <p className="text-sm text-muted mb-1">
             Thank you for being a wonderful part of{" "}
-            <span className="font-semibold text-[#d4ff2e]">{companyName}</span>!
+            <span className="font-semibold text-[color:var(--accent-strong)]">{companyName}</span>!
           </p>
           <p className="text-xs text-muted">
             We appreciate everything you do and wish you an amazing year ahead!

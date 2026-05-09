@@ -148,7 +148,7 @@ export default function ProcessRunsPage() {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
         kicker="SOPs · process runs"
         title="Process runs"
@@ -284,7 +284,7 @@ export default function ProcessRunsPage() {
                     {/* Progress */}
                     <div className="flex items-center gap-3 shrink-0 min-w-[160px]">
                       <Progress value={run.progress} className="h-2 flex-1" />
-                      <span className="text-xs font-mono font-bold text-[#d4ff2e] w-10 text-right">
+                      <span className="text-xs font-mono font-bold text-[color:var(--accent-strong)] w-10 text-right">
                         {run.progress}%
                       </span>
                     </div>

@@ -68,7 +68,7 @@ interface UserOption {
 function getMeetingTypeColor(type: string) {
   switch (type) {
     case "DAILY_STANDUP": return "bg-blue-500/20 text-blue-400";
-    case "WEEKLY_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]";
+    case "WEEKLY_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]";
     case "ONE_ON_ONE": return "bg-green-500/20 text-green-400";
     case "QUARTERLY_REVIEW": return "bg-orange-500/20 text-orange-400";
     default: return "bg-slate-500/20 text-slate-400";
@@ -271,9 +271,10 @@ export default function MeetingsPage() {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Meetings" }]}
           kicker="Meetings · cadences"
           title="Meetings & check-ins"
           subtitle="Structured meeting cadences and daily check-ins."

@@ -25,7 +25,7 @@ const CADENCE_DAYS: Record<string, number> = {
 function statusColor(status: string): string {
   switch (status) {
     case "COMPLETED": return "text-green-400 border-green-400/30";
-    case "ON_TRACK": return "text-[#d4ff2e] border-[#d4ff2e]/30";
+    case "ON_TRACK": return "text-[color:var(--accent-strong)] border-[#d4ff2e]/30";
     case "AT_RISK": return "text-amber-400 border-amber-400/30";
     case "BEHIND": return "text-red-400 border-red-400/30";
     default: return "text-muted border-white/20";

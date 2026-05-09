@@ -10,12 +10,14 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import { useRole } from "@/hooks/use-role";
+import { getRecent, getPinned, subscribeSidebarPrefs } from "@/lib/sidebar-prefs";
 import {
   LayoutDashboard, Inbox as InboxIcon, Megaphone, Users, Building2, Target,
   CalendarDays, BookOpen, ListChecks, Star, MessageSquare, BarChart3,
   GraduationCap, Heart, Lightbulb, Crosshair, Grid3x3, ClipboardCheck,
   MessageSquareHeart, Shield, Package, Activity, Wrench, Link2, Bot,
   Settings, FileText, Plus, UserPlus, Search, Receipt, DollarSign, CalendarOff, Clock, Briefcase, ShoppingCart,
+  Pin, History,
 } from "lucide-react";
 
 type CommandItem = {
@@ -128,6 +130,31 @@ export function CommandPalette() {
   const visibleNav = NAV.filter((i) => !i.visible || i.visible(role));
   const visibleActions = QUICK_ACTIONS.filter((i) => !i.visible || i.visible(role));
 
+  // Pinned + recent items hoist into their own groups at the top of the
+  // palette so power users land on what they touch most without typing.
+  // Sourced from the sidebar-prefs store; keys map to NAV entries.
+  const [pinnedKeys, setPinnedKeys] = useState<string[]>([]);
+  const [recentKeys, setRecentKeys] = useState<string[]>([]);
+  useEffect(() => {
+    const sync = () => {
+      setPinnedKeys(getPinned());
+      setRecentKeys(getRecent());
+    };
+    sync();
+    return subscribeSidebarPrefs(sync);
+  }, []);
+  const navById = useMemo(() => {
+    const m = new Map<string, CommandItem>();
+    for (const item of visibleNav) m.set(item.id, item);
+    return m;
+  }, [visibleNav]);
+  const pinnedItems = pinnedKeys.map((k) => navById.get(k)).filter((x): x is CommandItem => !!x);
+  const recentItems = recentKeys
+    .filter((k) => !pinnedKeys.includes(k))
+    .map((k) => navById.get(k))
+    .filter((x): x is CommandItem => !!x)
+    .slice(0, 5);
+
   const onSelect = useCallback(
     (href: string) => {
       setOpen(false);
@@ -155,6 +182,48 @@ export function CommandPalette() {
           </div>
           <Command.List className="cmd-palette-list">
             <Command.Empty className="cmd-palette-empty">No matches.</Command.Empty>
+
+            {pinnedItems.length > 0 && (
+              <Command.Group heading="Pinned" className="cmd-palette-group">
+                {pinnedItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Command.Item
+                      key={`pin-${item.id}`}
+                      value={`pinned ${item.label}`}
+                      onSelect={() => onSelect(item.href)}
+                      className="cmd-palette-item"
+                    >
+                      <Pin size={12} className="cmd-palette-input-icon" />
+                      <Icon size={14} />
+                      <span className="cmd-palette-label">{item.label}</span>
+                      <span className="cmd-palette-hint">{item.href}</span>
+                    </Command.Item>
+                  );
+                })}
+              </Command.Group>
+            )}
+
+            {recentItems.length > 0 && (
+              <Command.Group heading="Recent" className="cmd-palette-group">
+                {recentItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Command.Item
+                      key={`recent-${item.id}`}
+                      value={`recent ${item.label}`}
+                      onSelect={() => onSelect(item.href)}
+                      className="cmd-palette-item"
+                    >
+                      <History size={12} className="cmd-palette-input-icon" />
+                      <Icon size={14} />
+                      <span className="cmd-palette-label">{item.label}</span>
+                      <span className="cmd-palette-hint">{item.href}</span>
+                    </Command.Item>
+                  );
+                })}
+              </Command.Group>
+            )}
 
             {visibleActions.length > 0 && (
               <Command.Group heading="Quick actions" className="cmd-palette-group">

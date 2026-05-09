@@ -55,7 +55,7 @@ function getTypeIcon(type: string) {
 function getStatusColor(status: string) {
   switch (status) {
     case "AVAILABLE": return "bg-green-500/10 text-green-400 border-green-500/20";
-    case "ASSIGNED": return "bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] border-[rgba(212,255,46,0.2)]";
+    case "ASSIGNED": return "bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)] border-[rgba(212,255,46,0.2)]";
     case "IN_REPAIR": return "bg-orange-500/10 text-orange-400 border-orange-500/20";
     case "RETIRED": return "bg-zinc-500/10 text-zinc-400 border-zinc-500/20";
     case "LOST": return "bg-red-500/10 text-red-400 border-red-500/20";
@@ -251,8 +251,9 @@ export default function AssetsPage() {
   const TypeIcon = selectedAsset ? getTypeIcon(selectedAsset.type) : Package;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Assets" }]}
         kicker="Assets · inventory"
         title="Assets"
         subtitle="Track and manage company assets assigned to employees."
@@ -270,7 +271,7 @@ export default function AssetsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold">{totalAssets}</p><p className="text-xs text-muted">Total Assets</p></CardContent></Card>
-        <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-[#d4ff2e]">{assigned}</p><p className="text-xs text-muted">Assigned</p></CardContent></Card>
+        <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-[color:var(--accent-strong)]">{assigned}</p><p className="text-xs text-muted">Assigned</p></CardContent></Card>
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-green-400">{available}</p><p className="text-xs text-muted">Available</p></CardContent></Card>
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-bold text-orange-400">{inRepair}</p><p className="text-xs text-muted">In Repair</p></CardContent></Card>
       </div>
@@ -339,7 +340,7 @@ export default function AssetsPage() {
                           <span className="text-[11px] text-muted">{ASSET_TYPES.find((t) => t.value === asset.type)?.label}</span>
                           {asset.brand && <span className="text-[11px] text-muted">· {asset.brand}</span>}
                           {asset.assignedTo && (
-                            <span className="text-[11px] text-[#d4ff2e]">· {asset.assignedTo.firstName} {asset.assignedTo.lastName}</span>
+                            <span className="text-[11px] text-[color:var(--accent-strong)]">· {asset.assignedTo.firstName} {asset.assignedTo.lastName}</span>
                           )}
                         </div>
                       </div>
@@ -425,7 +426,7 @@ export default function AssetsPage() {
                     <p className="text-[10px] uppercase tracking-wider text-muted mb-2">Assigned To</p>
                     <div className="flex items-center gap-3">
                       <Avatar className="h-8 w-8">
-                        <AvatarFallback className="text-xs bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]">
+                        <AvatarFallback className="text-xs bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]">
                           {selectedAsset.assignedTo.firstName[0]}{selectedAsset.assignedTo.lastName[0]}
                         </AvatarFallback>
                       </Avatar>

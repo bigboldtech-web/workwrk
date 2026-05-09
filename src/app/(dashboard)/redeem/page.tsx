@@ -58,7 +58,7 @@ export default function RedeemCodePage() {
 
   if (!isAdmin) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <PageHeader
           kicker="Redeem"
           title="AppSumo redemption"
@@ -72,7 +72,7 @@ export default function RedeemCodePage() {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
         kicker="Lifetime deal"
         title="Redeem your AppSumo code"
@@ -83,7 +83,7 @@ export default function RedeemCodePage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <KeyRound size={14} className="text-[#d4ff2e]" /> Enter your code
+              <KeyRound size={14} className="text-[color:var(--accent-strong)]" /> Enter your code
             </CardTitle>
             <CardDescription>
               Codes are single-use across the whole system. Once redeemed, the code is bound to
@@ -138,7 +138,7 @@ export default function RedeemCodePage() {
             </div>
             <div>
               <p className="font-semibold text-foreground">Refund window?</p>
-              <p className="text-muted">AppSumo&rsquo;s standard 60-day refund applies. Email <a href="mailto:support@workwrk.com" className="text-[#d4ff2e] hover:underline">support@workwrk.com</a> from the email you redeemed with.</p>
+              <p className="text-muted">AppSumo&rsquo;s standard 60-day refund applies. Email <a href="mailto:support@workwrk.com" className="text-[color:var(--accent-strong)] hover:underline">support@workwrk.com</a> from the email you redeemed with.</p>
             </div>
             <div>
               <p className="font-semibold text-foreground">Already on a paid plan?</p>

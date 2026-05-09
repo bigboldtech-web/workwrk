@@ -35,7 +35,7 @@ export function CurrencySwitcher() {
                 <span className="w-10 font-mono text-xs text-muted">{info.code}</span>
                 <span className="text-sm">{info.name}</span>
               </span>
-              {code === currency && <Check size={14} className="text-[#d4ff2e]" />}
+              {code === currency && <Check size={14} className="text-[color:var(--accent-strong)]" />}
             </DropdownMenuItem>
           );
         })}

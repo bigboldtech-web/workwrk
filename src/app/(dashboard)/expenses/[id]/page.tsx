@@ -47,7 +47,7 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   SUBMITTED: { label: "Submitted", className: "text-blue-400 border-blue-400/30" },
   APPROVED: { label: "Approved", className: "text-green-400 border-green-400/30" },
   REJECTED: { label: "Rejected", className: "text-red-400 border-red-400/30" },
-  REIMBURSED: { label: "Reimbursed", className: "text-[#d4ff2e] border-[#d4ff2e]/30" },
+  REIMBURSED: { label: "Reimbursed", className: "text-[color:var(--accent-strong)] border-[#d4ff2e]/30" },
 };
 
 function fmtMoney(amount: number, currency: string): string {
@@ -182,7 +182,7 @@ export default async function ExpenseDetailPage(
               href={expense.receiptUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm text-[#d4ff2e] hover:underline"
+              className="text-sm text-[color:var(--accent-strong)] hover:underline"
             >
               Open receipt ↗
             </a>
@@ -230,7 +230,7 @@ export default async function ExpenseDetailPage(
             )}
             {expense.reimbursedAt && (
               <li className="flex items-center gap-3">
-                <CheckCircle2 size={12} className="text-[#d4ff2e]" />
+                <CheckCircle2 size={12} className="text-[color:var(--accent-strong)]" />
                 <span>Reimbursed</span>
                 <span className="ml-auto text-xs text-muted">
                   {new Date(expense.reimbursedAt).toLocaleString()}

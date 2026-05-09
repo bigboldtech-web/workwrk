@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
@@ -8,9 +8,16 @@ import { cn } from "@/lib/utils";
 import { useRole } from "@/hooks/use-role";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
-import { Menu, Sun, Moon } from "lucide-react";
+import { Menu, Sun, Moon, Pin, PinOff, Clock as ClockIcon, Search as SearchIcon, X } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo";
 import { useBranding } from "@/hooks/use-branding";
+import {
+  getPinned,
+  getRecent,
+  togglePin as togglePinPref,
+  trackRecent,
+  subscribeSidebarPrefs,
+} from "@/lib/sidebar-prefs";
 import {
   LayoutDashboard,
   Users,
@@ -168,6 +175,79 @@ const PATH_TO_NOTIFICATION_TYPE: Record<string, string> = {
   "/reviews": "REVIEW",
 };
 
+// Pinned + Recent rows reuse the same look as a normal nav link, but
+// always render the pin/unpin button on the right (pinned rows show
+// "unpin", recent rows show "pin"). Kept as a pure function so the
+// markup stays in one place.
+type RenderArgs = {
+  item: NavItem;
+  pathname: string;
+  collapsed: boolean;
+  tNav: (key: string) => string;
+  unreadByType: Record<string, number>;
+  announcementCount: number;
+  pinned: boolean;
+  onTogglePin: (key: string) => void;
+  isSopsEntry: boolean;
+  sopsExpanded: boolean;
+  setSopsExpanded: React.Dispatch<React.SetStateAction<boolean>>;
+  sopFolders: unknown;
+  sopFoldersLoading: boolean;
+};
+
+function renderNavLink(args: RenderArgs) {
+  const { item, pathname, collapsed, tNav, unreadByType, announcementCount, pinned, onTogglePin } =
+    args;
+  const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+  const Icon = item.icon;
+  const notifType = NAV_KEY_TO_NOTIFICATION_TYPE[item.key];
+  const sectionUnread = notifType ? unreadByType[notifType] ?? 0 : 0;
+  const announcementBadge = item.key === "announcements" ? announcementCount : 0;
+  const badgeCount = sectionUnread || announcementBadge;
+  const hasBadge = badgeCount > 0;
+
+  return (
+    <div key={`${pinned ? "pin" : "recent"}-${item.key}`} className="app-sidebar-link-row">
+      <Link
+        href={item.href}
+        className={cn(
+          "app-sidebar-link",
+          isActive && "is-active",
+          collapsed && "is-collapsed",
+          item.hue && `hue-${item.hue}`,
+        )}
+        title={collapsed ? tNav(item.key) : undefined}
+      >
+        <span className="app-sidebar-icon-chip" aria-hidden>
+          <Icon size={14} />
+        </span>
+        {!collapsed && (
+          <>
+            <span className="app-sidebar-label">{tNav(item.key)}</span>
+            {hasBadge && (
+              <span className="app-sidebar-badge">{badgeCount > 9 ? "9+" : badgeCount}</span>
+            )}
+            <button
+              type="button"
+              className={cn("app-sidebar-pin", pinned && "is-pinned")}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onTogglePin(item.key);
+              }}
+              aria-label={pinned ? "Unpin" : "Pin"}
+              title={pinned ? "Unpin from top" : "Pin to top"}
+            >
+              {pinned ? <PinOff size={10} /> : <Pin size={10} />}
+            </button>
+          </>
+        )}
+        {collapsed && hasBadge && <span className="app-sidebar-dot-pip" aria-hidden />}
+      </Link>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -307,13 +387,87 @@ export function Sidebar() {
 
   const { isManager: isManagerRole, isAdmin: isAdminRole, isSuperAdmin: isSuperAdminRole } = useRole();
 
-  const visibleNav = navigation.filter((item) => {
-    if (item.superAdminOnly && !isSuperAdminRole) return false;
-    if (item.adminOnly && !isAdminRole) return false;
-    if (item.managerOnly && !isManagerRole) return false;
-    if (item.moduleKey && enabledModules && !enabledModules.includes(item.moduleKey)) return false;
-    return true;
-  });
+  const visibleNav = useMemo(
+    () =>
+      navigation.filter((item) => {
+        if (item.superAdminOnly && !isSuperAdminRole) return false;
+        if (item.adminOnly && !isAdminRole) return false;
+        if (item.managerOnly && !isManagerRole) return false;
+        if (item.moduleKey && enabledModules && !enabledModules.includes(item.moduleKey)) return false;
+        return true;
+      }),
+    [isSuperAdminRole, isAdminRole, isManagerRole, enabledModules],
+  );
+
+  // Lookup by key for pinned / recent rendering — we store keys in
+  // localStorage but need the full NavItem to render an icon + label.
+  const byKey = useMemo(() => {
+    const m = new Map<string, NavItem>();
+    for (const item of visibleNav) m.set(item.key, item);
+    return m;
+  }, [visibleNav]);
+
+  // Pinned + recent state, kept in sync with localStorage via the
+  // subscribeSidebarPrefs event so two tabs don't drift.
+  const [pinnedKeys, setPinnedKeys] = useState<string[]>([]);
+  const [recentKeys, setRecentKeys] = useState<string[]>([]);
+  useEffect(() => {
+    const sync = () => {
+      setPinnedKeys(getPinned());
+      setRecentKeys(getRecent());
+    };
+    sync();
+    return subscribeSidebarPrefs(sync);
+  }, []);
+
+  // Track route visits in the recent list. Match the pathname back to a
+  // nav item by `href` (longest prefix wins so /people/[id] still maps
+  // to "people").
+  useEffect(() => {
+    if (!pathname) return;
+    let bestMatch: NavItem | null = null;
+    for (const item of visibleNav) {
+      if (pathname === item.href || pathname.startsWith(item.href + "/")) {
+        if (!bestMatch || item.href.length > bestMatch.href.length) bestMatch = item;
+      }
+    }
+    if (bestMatch) trackRecent(bestMatch.key);
+  }, [pathname, visibleNav]);
+
+  // Quick filter — narrows the visible list as the user types. Sections
+  // collapse to nothing when their items don't match. Pinned + Recent
+  // groups are hidden while a filter is active to keep the result list
+  // focused on the search.
+  const [filter, setFilter] = useState("");
+  const filterLc = filter.trim().toLowerCase();
+  const filterMatches = useCallback(
+    (item: NavItem) => {
+      if (!filterLc) return true;
+      const label = (() => {
+        try {
+          return tNav(item.key).toLowerCase();
+        } catch {
+          return item.name.toLowerCase();
+        }
+      })();
+      return label.includes(filterLc) || item.name.toLowerCase().includes(filterLc);
+    },
+    [filterLc, tNav],
+  );
+
+  const handleTogglePin = useCallback((key: string) => {
+    const next = togglePinPref(key);
+    setPinnedKeys(next);
+  }, []);
+
+  // Pinned items in user-defined order.
+  const pinnedItems = pinnedKeys.map((k) => byKey.get(k)).filter((x): x is NavItem => !!x);
+  // Recent items, excluding any that are already pinned.
+  const recentItems = recentKeys
+    .filter((k) => !pinnedKeys.includes(k))
+    .map((k) => byKey.get(k))
+    .filter((x): x is NavItem => !!x)
+    .slice(0, 5);
 
   return (
     <>
@@ -374,10 +528,94 @@ export function Sidebar() {
         </button>
       </div>
 
+      {/* Quick filter — narrows the visible nav as the user types. Hidden
+          when the sidebar is collapsed since there's no room for the
+          input + the result list collapses to chips anyway. */}
+      {!collapsed && (
+        <div className="app-sidebar-filter">
+          <SearchIcon size={11} className="app-sidebar-filter-icon" aria-hidden />
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter menu…"
+            className="app-sidebar-filter-input"
+            aria-label="Filter sidebar"
+          />
+          {filter && (
+            <button
+              type="button"
+              onClick={() => setFilter("")}
+              className="app-sidebar-filter-clear"
+              aria-label="Clear filter"
+            >
+              <X size={10} />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Main nav — grouped into ClickUp-style sections */}
       <nav className="app-sidebar-nav">
+        {/* Pinned + Recent — only when not filtering, since the filter
+            view is meant to be a flat result list. */}
+        {!filterLc && pinnedItems.length > 0 && (
+          <div className="app-sidebar-section">
+            {!collapsed && (
+              <div className="app-sidebar-section-label">
+                <Pin size={9} style={{ marginRight: 4, display: "inline" }} aria-hidden />
+                Pinned
+              </div>
+            )}
+            {pinnedItems.map((item) =>
+              renderNavLink({
+                item,
+                pathname,
+                collapsed,
+                tNav,
+                unreadByType,
+                announcementCount,
+                pinned: true,
+                onTogglePin: handleTogglePin,
+                isSopsEntry: false, // Pinned section never expands SOPs
+                sopsExpanded: false,
+                setSopsExpanded,
+                sopFolders: null,
+                sopFoldersLoading: false,
+              }),
+            )}
+          </div>
+        )}
+        {!filterLc && recentItems.length > 0 && (
+          <div className="app-sidebar-section">
+            {!collapsed && (
+              <div className="app-sidebar-section-label">
+                <ClockIcon size={9} style={{ marginRight: 4, display: "inline" }} aria-hidden />
+                Recent
+              </div>
+            )}
+            {recentItems.map((item) =>
+              renderNavLink({
+                item,
+                pathname,
+                collapsed,
+                tNav,
+                unreadByType,
+                announcementCount,
+                pinned: false,
+                onTogglePin: handleTogglePin,
+                isSopsEntry: false,
+                sopsExpanded: false,
+                setSopsExpanded,
+                sopFolders: null,
+                sopFoldersLoading: false,
+              }),
+            )}
+          </div>
+        )}
+
         {(["core", "people", "work", "finance", "platform"] as const).map((section) => {
-          const items = visibleNav.filter((i) => i.section === section);
+          const items = visibleNav.filter((i) => i.section === section && filterMatches(i));
           if (items.length === 0) return null;
           return (
             <div key={section} className="app-sidebar-section">
@@ -393,6 +631,7 @@ export function Sidebar() {
           const badgeCount = sectionUnread || announcementBadge;
           const hasBadge = badgeCount > 0;
           const isSopsEntry = item.key === "sops";
+          const itemPinned = pinnedKeys.includes(item.key);
 
           return (
             <React.Fragment key={item.name}>
@@ -419,6 +658,19 @@ export function Sidebar() {
                       {hasBadge && !item.comingSoon && (
                         <span className="app-sidebar-badge">{badgeCount > 9 ? "9+" : badgeCount}</span>
                       )}
+                      <button
+                        type="button"
+                        className={cn("app-sidebar-pin", itemPinned && "is-pinned")}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleTogglePin(item.key);
+                        }}
+                        aria-label={itemPinned ? "Unpin" : "Pin"}
+                        title={itemPinned ? "Unpin from top" : "Pin to top"}
+                      >
+                        {itemPinned ? <PinOff size={10} /> : <Pin size={10} />}
+                      </button>
                     </>
                   )}
                   {collapsed && hasBadge && (

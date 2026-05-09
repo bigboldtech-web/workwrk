@@ -278,8 +278,9 @@ export default function IntegrationsPage() {
   const connectedTypes = new Set(integrations.map((i) => i.type));
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Integrations" }]}
         kicker="Integrations · connectors"
         title="Integrations"
         subtitle="Connect your existing tools to pull data into WorkwrK for performance intelligence."
@@ -289,7 +290,7 @@ export default function IntegrationsPage() {
       <Card className="border-[rgba(212,255,46,0.2)] bg-[rgba(212,255,46,0.06)]">
         <CardContent className="p-5 flex items-start gap-4">
           <div className="rounded-lg bg-[rgba(212,255,46,0.12)] p-2.5 flex-shrink-0">
-            <Zap size={20} className="text-[#d4ff2e]" />
+            <Zap size={20} className="text-[color:var(--accent-strong)]" />
           </div>
           <div>
             <h3 className="text-sm font-semibold">WorkwrK connects, it doesn&apos;t replace</h3>
@@ -419,7 +420,7 @@ export default function IntegrationsPage() {
                   <div className="mt-3 space-y-1">
                     {integration.dataTypes.map((dt) => (
                       <div key={dt} className="flex items-center gap-1.5 text-[11px] text-muted">
-                        <ArrowRight size={10} className="text-[#d4ff2e] flex-shrink-0" />
+                        <ArrowRight size={10} className="text-[color:var(--accent-strong)] flex-shrink-0" />
                         <span>{dt}</span>
                       </div>
                     ))}
@@ -606,7 +607,7 @@ export default function IntegrationsPage() {
             {/* Incoming webhook URL */}
             <div className="rounded-lg border border-border bg-background p-3">
               <p className="text-xs font-medium text-muted mb-1">Incoming Webhook URL</p>
-              <code className="text-[10px] text-[#d4ff2e] break-all">
+              <code className="text-[10px] text-[color:var(--accent-strong)] break-all">
                 {typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/{detailIntegration?.id}
               </code>
               <p className="text-[10px] text-muted mt-1">Use this URL to send data to WorkwrK from external services.</p>

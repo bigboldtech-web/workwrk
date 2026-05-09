@@ -26,6 +26,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { PageHeader, StatTile, StatTileGrid } from "@/components/dashboard/page-header";
+import { FormGrid, FormRow } from "@/components/ui/form-row";
 import {
   Users as UsersIcon,
   TrendingUp,
@@ -98,17 +100,22 @@ export function WorkforcePlanningView({
   const turnoverPct = totalActive > 0 ? (leaversThisYear / totalActive) * 100 : 0;
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Target size={20} /> Workforce planning
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            Headcount and budget plan vs live state. Plan period:{" "}
-            <code className="text-[#d4ff2e] font-mono">{period}</code>
-          </p>
-        </div>
+    <div className="space-y-3 animate-fade-in">
+      <PageHeader
+        breadcrumbs={[
+          { label: "Home", href: "/dashboard" },
+          { label: "Workforce planning" },
+        ]}
+        kicker={`Workforce · ${period}`}
+        title="Workforce planning"
+        subtitle="Headcount and budget plan vs live state. Switch the period to view a different quarter."
+        stats={[
+          { label: "Net growth", value: `${netGrowth >= 0 ? "+" : ""}${netGrowth}` },
+          { label: "Turnover", value: `${turnoverPct.toFixed(1)}%` },
+        ]}
+      />
+
+      <div className="flex items-center justify-end">
         <form
           className="flex items-center gap-2"
           onSubmit={(e) => {
@@ -126,51 +133,34 @@ export function WorkforcePlanningView({
         </form>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted">Active employees</p>
-            <p className="text-2xl font-bold mt-1 flex items-center gap-1.5">
-              <UsersIcon size={16} className="text-blue-400" />
-              {totalActive}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted">Open requisitions</p>
-            <p className="text-2xl font-bold mt-1 flex items-center gap-1.5">
-              <Target size={16} className="text-[#d4ff2e]" />
-              {openJobs}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted">Hires YTD</p>
-            <p className="text-2xl font-bold mt-1 flex items-center gap-1.5">
-              <UserPlus size={16} className="text-green-400" />
-              {hiresThisYear}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted">Leavers YTD ({turnoverPct.toFixed(1)}%)</p>
-            <p className="text-2xl font-bold mt-1 flex items-center gap-1.5">
-              <UserMinus size={16} className="text-red-400" />
-              {leaversThisYear}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="text-xs text-muted">
-        Net growth this year:{" "}
-        <span className={netGrowth >= 0 ? "text-green-400" : "text-red-400"}>
-          {netGrowth >= 0 ? "+" : ""}{netGrowth} {netGrowth >= 0 ? <TrendingUp size={10} className="inline" /> : <TrendingDown size={10} className="inline" />}
-        </span>
-      </div>
+      <StatTileGrid>
+        <StatTile
+          label="Active employees"
+          value={totalActive}
+          tone="blue"
+          icon={<UsersIcon size={14} />}
+        />
+        <StatTile
+          label="Open requisitions"
+          value={openJobs}
+          tone="violet"
+          icon={<Target size={14} />}
+        />
+        <StatTile
+          label="Hires YTD"
+          value={hiresThisYear}
+          tone="emerald"
+          icon={<UserPlus size={14} />}
+          delta={netGrowth >= 0 ? <span className="text-emerald-600 inline-flex items-center gap-0.5"><TrendingUp size={10} /> Net +{netGrowth}</span> : undefined}
+        />
+        <StatTile
+          label={`Leavers YTD (${turnoverPct.toFixed(1)}%)`}
+          value={leaversThisYear}
+          tone="pink"
+          icon={<UserMinus size={14} />}
+          delta={netGrowth < 0 ? <span className="text-rose-600 inline-flex items-center gap-0.5"><TrendingDown size={10} /> Net {netGrowth}</span> : undefined}
+        />
+      </StatTileGrid>
 
       <Card>
         <CardHeader className="pb-3">
@@ -316,9 +306,8 @@ function PlanDialog({
         <DialogHeader>
           <DialogTitle>{row.planId ? "Edit plan" : "New plan"} — {period}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3 pt-1">
-          <div className="space-y-1.5">
-            <Label>Department</Label>
+        <FormGrid cols={1} className="pt-1">
+          <FormRow label="Department">
             <Select value={departmentId || "org"} onValueChange={(v) => setDepartmentId(v === "org" ? "" : v)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -326,26 +315,22 @@ function PlanDialog({
                 {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Planned headcount</Label>
+          </FormRow>
+          <FormRow label="Planned headcount" required>
             <Input value={plannedHeadcount} onChange={(e) => setPlannedHeadcount(e.target.value)} inputMode="numeric" />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1.5 col-span-2">
-              <Label>Planned salary budget (optional)</Label>
+          </FormRow>
+          <div className="grid grid-cols-3 gap-2">
+            <FormRow label="Planned salary budget" hint="Optional" className="col-span-2">
               <Input value={plannedBudget} onChange={(e) => setPlannedBudget(e.target.value)} inputMode="decimal" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Currency</Label>
+            </FormRow>
+            <FormRow label="Currency">
               <Input value={budgetCurrency} onChange={(e) => setBudgetCurrency(e.target.value.toUpperCase().slice(0, 3))} maxLength={3} />
-            </div>
+            </FormRow>
           </div>
-          <div className="space-y-1.5">
-            <Label>Notes</Label>
+          <FormRow label="Notes">
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="What's this plan for?" />
-          </div>
-        </div>
+          </FormRow>
+        </FormGrid>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button disabled={saving || !plannedHeadcount} onClick={save}>{saving ? "Saving…" : "Save plan"}</Button>

@@ -191,10 +191,10 @@ export default function DashboardContent() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <PageHeader kicker="Your workspace · live" title={t("title")} subtitle={t("subtitle")} />
         <AnnouncementsBanner />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
             <Card key={i}>
               <CardContent className="p-5">
@@ -206,7 +206,7 @@ export default function DashboardContent() {
             </Card>
           ))}
         </div>
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
             <Card key={i}>
               <CardContent className="p-5 space-y-3">
@@ -232,7 +232,7 @@ export default function DashboardContent() {
 
   if (error || !data) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <PageHeader kicker="Your workspace · live" title={t("title")} subtitle={t("subtitle")} />
         <ErrorState message={error ?? undefined} onRetry={() => window.location.reload()} />
       </div>
@@ -253,7 +253,7 @@ export default function DashboardContent() {
       change: `+${apiStats.newPeopleThisMonth} this month`,
       trend: apiStats.newPeopleThisMonth > 0 ? "up" : "neutral",
       icon: Users,
-      color: "text-[#d4ff2e]",
+      color: "text-[color:var(--accent-strong)]",
       bgColor: "bg-[rgba(212,255,46,0.08)]",
     },
     {
@@ -286,7 +286,7 @@ export default function DashboardContent() {
   ];
 
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
         kicker="Your workspace · live"
         title="Dashboard"
@@ -327,7 +327,7 @@ export default function DashboardContent() {
           numbers (total people, avg performance, SOP compliance) are
           a manager / exec concern. Employees stay focused on their
           own widgets above. */}
-      {isManager && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {isManager && <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.title} className="hover:border-muted-2 transition-colors">
             <CardContent className="p-5">
@@ -360,7 +360,7 @@ export default function DashboardContent() {
           Alerts / Recent Activity / KPI Records / Kudos / Pending Surveys.
           All org-wide views, gated to managers and above. Employees
           already saw their personal versions of these widgets above. */}
-      {isManager && <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-4">
+      {isManager && <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
         {/* Top Performers */}
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
@@ -375,7 +375,7 @@ export default function DashboardContent() {
                 key={person.id}
                 className="flex items-center gap-3 rounded-lg border border-border bg-background/50 p-3"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(212,255,46,0.12)] text-xs font-bold text-[#d4ff2e]">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(212,255,46,0.12)] text-xs font-bold text-[color:var(--accent-strong)]">
                   {i + 1}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -390,7 +390,7 @@ export default function DashboardContent() {
               </div>
             ))}
             {topPerformers.length === 0 && (
-              <p className="text-xs text-muted text-center py-6">No KPI data yet. Set up KRAs and track KPI scores to see top performers here.</p>
+              <p className="text-xs text-muted text-center py-4">No KPI data yet. Set up KRAs and track KPI scores to see top performers here.</p>
             )}
           </CardContent>
         </Card>
@@ -400,7 +400,7 @@ export default function DashboardContent() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">KPI Updates</CardTitle>
-              <Link href="/kra-kpi" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b]">
+              <Link href="/kra-kpi" className="text-xs text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">
                 View all
               </Link>
             </div>
@@ -415,13 +415,13 @@ export default function DashboardContent() {
                   key={record.id}
                   className="flex items-start gap-3 rounded-lg border border-border bg-background/50 p-3"
                 >
-                  <Target size={14} className="text-[#d4ff2e] mt-0.5 flex-shrink-0" />
+                  <Target size={14} className="text-[color:var(--accent-strong)] mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{record.kpiName}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] text-muted">{record.userName}</span>
                       {achievement != null && (
-                        <span className={`text-[10px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-[#d4ff2e]" : "text-orange-400"}`}>
+                        <span className={`text-[10px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-[color:var(--accent-strong)]" : "text-orange-400"}`}>
                           {achievement}%
                         </span>
                       )}
@@ -431,7 +431,7 @@ export default function DashboardContent() {
               );
             })}
             {(!recentKpiRecords || recentKpiRecords.length === 0) && (
-              <p className="text-xs text-muted text-center py-6">No KPI records yet. Start tracking KPIs to see updates here.</p>
+              <p className="text-xs text-muted text-center py-4">No KPI records yet. Start tracking KPIs to see updates here.</p>
             )}
           </CardContent>
         </Card>
@@ -457,7 +457,7 @@ export default function DashboardContent() {
               </div>
             ))}
             {alerts.length === 0 && (
-              <p className="text-xs text-muted text-center py-6">No alerts right now. Everything looks good!</p>
+              <p className="text-xs text-muted text-center py-4">No alerts right now. Everything looks good!</p>
             )}
           </CardContent>
         </Card>
@@ -467,7 +467,7 @@ export default function DashboardContent() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Recent Activity</CardTitle>
-              <Link href="/activity" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b]">
+              <Link href="/activity" className="text-xs text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">
                 View all
               </Link>
             </div>
@@ -495,7 +495,7 @@ export default function DashboardContent() {
 
                 return (
                   <div key={item.id} className="flex items-start gap-2.5 rounded-lg border border-border bg-background/50 p-2.5">
-                    <Icon size={12} className="text-[#d4ff2e] mt-0.5 flex-shrink-0" />
+                    <Icon size={12} className="text-[color:var(--accent-strong)] mt-0.5 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs leading-snug line-clamp-2">{item.description}</p>
                       <p className="text-[10px] text-muted mt-0.5">
@@ -553,7 +553,7 @@ export default function DashboardContent() {
               <CardTitle className="text-base flex items-center gap-2">
                 <Heart size={16} className="text-pink-400" /> Recent Kudos
               </CardTitle>
-              <Link href="/kudos" className="text-xs text-[#d4ff2e] hover:underline">View all →</Link>
+              <Link href="/kudos" className="text-xs text-[color:var(--accent-strong)] hover:underline">View all →</Link>
             </div>
           </CardHeader>
           <CardContent>
@@ -579,7 +579,7 @@ export default function DashboardContent() {
                         <p className="text-sm mt-1.5 italic text-foreground leading-relaxed">&ldquo;{k.message}&rdquo;</p>
                         <div className="flex items-center gap-2 mt-2">
                           {k.companyValue && (
-                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[#d4ff2e]">{k.companyValue}</Badge>
+                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
                           )}
                           <span className="text-[10px] text-muted">{timeAgo}</span>
                         </div>
@@ -630,7 +630,7 @@ export default function DashboardContent() {
               </div>
             ))}
             {departmentPerformance.length === 0 && (
-              <p className="text-xs text-muted text-center py-6">No departments set up yet. Create departments in Organization settings.</p>
+              <p className="text-xs text-muted text-center py-4">No departments set up yet. Create departments in Organization settings.</p>
             )}
           </div>
         </CardContent>

@@ -2,14 +2,20 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { Breadcrumbs, type BreadcrumbItem } from "@/components/ui/breadcrumbs";
 
-type Tone = "lime" | "pink" | "blue" | "amber";
+type Tone = "violet" | "blue" | "amber" | "pink" | "emerald" | "lime";
 
 const toneHex: Record<Tone, string> = {
-  lime: "#d4ff2e",
-  pink: "#ff3d8a",
+  violet: "#7c3aed",
   blue: "#4a9eff",
   amber: "#ff9933",
+  pink: "#ff3d8a",
+  emerald: "#22c55e",
+  // Legacy: existing pages still pass `kickerTone="lime"`. The CSS now
+  // renders this as the violet bento mark so untouched callers inherit
+  // the new accent without a code change.
+  lime: "#7c3aed",
 };
 
 type HeaderAction = {
@@ -23,7 +29,8 @@ type HeaderAction = {
 
 export function PageHeader({
   kicker,
-  kickerTone = "lime",
+  kickerTone = "violet",
+  breadcrumbs,
   title,
   subtitle,
   actions,
@@ -31,6 +38,7 @@ export function PageHeader({
 }: {
   kicker?: string;
   kickerTone?: Tone;
+  breadcrumbs?: BreadcrumbItem[];
   title: ReactNode;
   subtitle?: ReactNode;
   actions?: HeaderAction[];
@@ -40,6 +48,7 @@ export function PageHeader({
   return (
     <header className="dash-page-header">
       <div className="dash-page-header-text">
+        {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} />}
         {kicker && (
           <span className="dash-page-kicker">
             <span
@@ -101,7 +110,7 @@ export function StatTile({
   label,
   value,
   delta,
-  tone = "lime",
+  tone = "violet",
   icon,
 }: {
   label: string;

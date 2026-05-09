@@ -181,7 +181,7 @@ function AutosaveIndicator({
 
   const common = "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border";
   if (status === "saving") {
-    return <span className={`${common} border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]`}>
+    return <span className={`${common} border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]`}>
       <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#d4ff2e] animate-pulse" />
       Saving…
     </span>;
@@ -374,7 +374,7 @@ function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: strin
         <div className="space-y-3">
           {/* Current version */}
           <div className="flex items-center gap-3 p-3 rounded-lg border border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.06)]">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.12)] text-[#d4ff2e] text-xs font-bold">v{currentVersion}</div>
+            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)] text-xs font-bold">v{currentVersion}</div>
             <div className="flex-1">
               <p className="text-sm font-medium">Current Version</p>
               <p className="text-xs text-muted">Live version</p>
@@ -913,7 +913,7 @@ export default function SOPDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="flex items-center gap-4">
           <div className="h-8 w-8 bg-surface-2 rounded animate-pulse" />
           <div className="h-6 w-64 bg-surface-2 rounded animate-pulse" />
@@ -947,12 +947,12 @@ export default function SOPDetailPage() {
   const assignOverdue = assignments.filter((a: any) => a.status !== "COMPLETED" && a.dueDate && new Date(a.dueDate) < new Date()).length;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       {/* Unsaved-backup restore banner */}
       {restorePrompt && (
         <Card className="border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.04)]">
           <CardContent className="p-4 flex items-center gap-3">
-            <AlertCircle size={18} className="text-[#d4ff2e] shrink-0" />
+            <AlertCircle size={18} className="text-[color:var(--accent-strong)] shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium">Unsaved changes found</p>
               <p className="text-xs text-muted">
@@ -1001,7 +1001,7 @@ export default function SOPDetailPage() {
           </Button>
           <div className="flex items-center gap-3 min-w-0">
             <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2 shrink-0">
-              <FileText size={20} className="text-[#d4ff2e]" />
+              <FileText size={20} className="text-[color:var(--accent-strong)]" />
             </div>
             <div className="min-w-0">
               {editing ? (
@@ -1092,8 +1092,8 @@ export default function SOPDetailPage() {
                       Share this link with anyone who needs to complete this process:
                     </p>
                     <div className="flex items-center gap-2 p-3 rounded-lg bg-surface-3 border border-border">
-                      <Link2 size={14} className="text-[#d4ff2e] shrink-0" />
-                      <code className="text-xs text-[#d4ff2e] flex-1 break-all">{shareLink}</code>
+                      <Link2 size={14} className="text-[color:var(--accent-strong)] shrink-0" />
+                      <code className="text-xs text-[color:var(--accent-strong)] flex-1 break-all">{shareLink}</code>
                       <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copyShareLink}>
                         <Copy size={12} />
                       </Button>
@@ -1356,7 +1356,7 @@ export default function SOPDetailPage() {
               {sop.sopType === "CHECKLIST" ? (
                 <div>
                   {aiGenerating && (
-                    <p className="text-xs text-[#d4ff2e] animate-pulse mb-2">Generating with AI...</p>
+                    <p className="text-xs text-[color:var(--accent-strong)] animate-pulse mb-2">Generating with AI...</p>
                   )}
                   <ChecklistBuilder
                     sections={checklistSections}
@@ -1421,7 +1421,7 @@ export default function SOPDetailPage() {
                           setProcessFlow({ type: "process_flow", steps: flowSteps });
                           setSop({ ...(sop as SOP), content: { ...(sop.content || {}), type: "process_flow", flow: { type: "process_flow", steps: flowSteps } } });
                         }}
-                        className="gap-1.5 text-xs text-muted hover:text-[#d4ff2e]"
+                        className="gap-1.5 text-xs text-muted hover:text-[color:var(--accent-strong)]"
                       >
                         <GitBranch size={12} /> Switch to process flow
                       </Button>
@@ -1457,7 +1457,7 @@ export default function SOPDetailPage() {
                                 persistRecordedStepsDebounced(s);
                               }}>▲</button>
                             )}
-                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] text-sm font-bold">
+                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)] text-sm font-bold">
                               {index + 1}
                             </div>
                             {editing && index < totalSteps - 1 && (
@@ -1593,7 +1593,7 @@ export default function SOPDetailPage() {
                         >
                           <GripVertical size={16} />
                         </div>
-                        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] text-xs font-bold shrink-0 mt-0.5">
+                        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)] text-xs font-bold shrink-0 mt-0.5">
                           {index + 1}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -1757,7 +1757,7 @@ export default function SOPDetailPage() {
                               >
                                 <td className="py-3 pr-4">
                                   <div className="flex items-center gap-2">
-                                    <div className="w-7 h-7 rounded-full bg-[rgba(212,255,46,0.08)] flex items-center justify-center text-xs font-bold text-[#d4ff2e]">
+                                    <div className="w-7 h-7 rounded-full bg-[rgba(212,255,46,0.08)] flex items-center justify-center text-xs font-bold text-[color:var(--accent-strong)]">
                                       {record.user.firstName[0]}
                                       {record.user.lastName[0]}
                                     </div>
@@ -1856,7 +1856,7 @@ export default function SOPDetailPage() {
                               <tr key={a.id} className="border-b border-border/50">
                                 <td className="py-3 pr-4">
                                   <div className="flex items-center gap-2">
-                                    <div className="w-7 h-7 rounded-full bg-[rgba(212,255,46,0.08)] flex items-center justify-center text-xs font-bold text-[#d4ff2e]">
+                                    <div className="w-7 h-7 rounded-full bg-[rgba(212,255,46,0.08)] flex items-center justify-center text-xs font-bold text-[color:var(--accent-strong)]">
                                       {a.user.firstName[0]}{a.user.lastName[0]}
                                     </div>
                                     <div>
@@ -2089,7 +2089,7 @@ export default function SOPDetailPage() {
                     <span className="text-xs text-muted">
                       Completion Rate
                     </span>
-                    <span className="text-sm font-mono font-bold text-[#d4ff2e]">
+                    <span className="text-sm font-mono font-bold text-[color:var(--accent-strong)]">
                       {Math.round(
                         (complianceCompleted.length / sop.compliance.length) *
                           100

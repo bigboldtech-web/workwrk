@@ -214,7 +214,7 @@ export default function MySOPsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -233,7 +233,7 @@ export default function MySOPsPage() {
   const activeKind = activeAssignment ? getSopKind(activeAssignment.sop) : null;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
         kicker="SOPs · personal queue"
         title="My SOPs"
@@ -289,9 +289,9 @@ export default function MySOPsPage() {
               <Card key={a.id} className="hover:border-muted-2 transition-all cursor-pointer" onClick={() => setActiveAssignment(a)}>
                 <CardContent className="p-4 flex items-center gap-4">
                   <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2.5 shrink-0">
-                    {kind === "richtext" && <PenLine size={18} className="text-[#d4ff2e]" />}
-                    {kind === "steps" && <FileText size={18} className="text-[#d4ff2e]" />}
-                    {kind === "recorded" && <Video size={18} className="text-[#d4ff2e]" />}
+                    {kind === "richtext" && <PenLine size={18} className="text-[color:var(--accent-strong)]" />}
+                    {kind === "steps" && <FileText size={18} className="text-[color:var(--accent-strong)]" />}
+                    {kind === "recorded" && <Video size={18} className="text-[color:var(--accent-strong)]" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -329,7 +329,7 @@ export default function MySOPsPage() {
               <Card key={a.id} className="hover:border-muted-2 transition-all cursor-pointer" onClick={() => setActiveAssignment(a)}>
                 <CardContent className="p-4 flex items-center gap-4">
                   <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2.5 shrink-0">
-                    <ListChecks size={18} className="text-[#d4ff2e]" />
+                    <ListChecks size={18} className="text-[color:var(--accent-strong)]" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -397,10 +397,10 @@ export default function MySOPsPage() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  {activeKind === "richtext" && <PenLine size={18} className="text-[#d4ff2e]" />}
-                  {activeKind === "steps" && <FileText size={18} className="text-[#d4ff2e]" />}
-                  {activeKind === "recorded" && <Video size={18} className="text-[#d4ff2e]" />}
-                  {activeKind === "checklist" && <ListChecks size={18} className="text-[#d4ff2e]" />}
+                  {activeKind === "richtext" && <PenLine size={18} className="text-[color:var(--accent-strong)]" />}
+                  {activeKind === "steps" && <FileText size={18} className="text-[color:var(--accent-strong)]" />}
+                  {activeKind === "recorded" && <Video size={18} className="text-[color:var(--accent-strong)]" />}
+                  {activeKind === "checklist" && <ListChecks size={18} className="text-[color:var(--accent-strong)]" />}
                   <span className="flex-1">{activeAssignment.sop.title}</span>
                   <KindBadge kind={activeKind} />
                 </DialogTitle>
@@ -486,7 +486,7 @@ export default function MySOPsPage() {
                   <div className="space-y-3 border-t border-border pt-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <Award size={14} className="text-[#d4ff2e]" /> Knowledge Quiz
+                        <Award size={14} className="text-[color:var(--accent-strong)]" /> Knowledge Quiz
                       </h3>
                       {activeAssignment.progress?.quizScore != null && (
                         <Badge variant={activeAssignment.progress.quizScore >= 70 ? "success" : "destructive"}>
@@ -520,7 +520,7 @@ export default function MySOPsPage() {
                                     value={opt}
                                     checked={quizAnswers[qi] === opt}
                                     onChange={() => setQuizAnswers({ ...quizAnswers, [qi]: opt })}
-                                    className="text-[#d4ff2e]"
+                                    className="text-[color:var(--accent-strong)]"
                                   />
                                   {opt}
                                 </label>
@@ -613,7 +613,7 @@ function StepByStepReader({
               aria-label={isChecked ? "Unmark step" : "Mark step"}
             >
               {isChecked ? (
-                <CheckSquare size={18} className="text-[#d4ff2e]" />
+                <CheckSquare size={18} className="text-[color:var(--accent-strong)]" />
               ) : (
                 <Square size={18} className="text-muted hover:text-[#e2ff6b]" />
               )}
@@ -653,7 +653,7 @@ function RecordedReader({ steps }: { steps: SOPStep[] }) {
       {steps.map((step, index) => (
         <div key={index} className="rounded-lg border border-border bg-surface-3 overflow-hidden">
           <div className="flex items-start gap-3 p-4">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.08)] text-[#d4ff2e] text-sm font-bold shrink-0">
+            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)] text-sm font-bold shrink-0">
               {index + 1}
             </div>
             <div className="flex-1 min-w-0">

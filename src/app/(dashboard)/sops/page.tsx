@@ -84,7 +84,7 @@ function getComplianceColor(score: number) {
 
 function getComplianceText(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-[#d4ff2e]";
+  if (score >= 70) return "text-[color:var(--accent-strong)]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -208,19 +208,19 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
         <div className="space-y-2 text-sm">
           <p className="font-medium">How to record:</p>
           <div className="flex items-start gap-2 p-2 rounded bg-surface">
-            <span className="text-[#d4ff2e] font-bold">1.</span>
+            <span className="text-[color:var(--accent-strong)] font-bold">1.</span>
             <span>Click the <strong>WorkwrK icon</strong> in your browser toolbar</span>
           </div>
           <div className="flex items-start gap-2 p-2 rounded bg-surface">
-            <span className="text-[#d4ff2e] font-bold">2.</span>
+            <span className="text-[color:var(--accent-strong)] font-bold">2.</span>
             <span>Click <strong>Start Recording</strong></span>
           </div>
           <div className="flex items-start gap-2 p-2 rounded bg-surface">
-            <span className="text-[#d4ff2e] font-bold">3.</span>
+            <span className="text-[color:var(--accent-strong)] font-bold">3.</span>
             <span>Navigate through the process — each click captures a step with screenshot</span>
           </div>
           <div className="flex items-start gap-2 p-2 rounded bg-surface">
-            <span className="text-[#d4ff2e] font-bold">4.</span>
+            <span className="text-[color:var(--accent-strong)] font-bold">4.</span>
             <span>Click <strong>Stop Recording</strong> — SOP is saved automatically</span>
           </div>
         </div>
@@ -249,27 +249,27 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
       <div className="space-y-2 text-sm">
         <p className="font-medium">Setup Instructions:</p>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-[#d4ff2e] font-bold">1.</span>
+          <span className="text-[color:var(--accent-strong)] font-bold">1.</span>
           <span>Click <strong>Download Extension</strong> below to get the ZIP file</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-[#d4ff2e] font-bold">2.</span>
+          <span className="text-[color:var(--accent-strong)] font-bold">2.</span>
           <span>Extract/unzip the downloaded file — you will get an <strong>extension</strong> folder</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-[#d4ff2e] font-bold">3.</span>
+          <span className="text-[color:var(--accent-strong)] font-bold">3.</span>
           <span>Open Chrome and type <code className="text-xs bg-surface-2 px-1 rounded">chrome://extensions</code> in the address bar</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-[#d4ff2e] font-bold">4.</span>
+          <span className="text-[color:var(--accent-strong)] font-bold">4.</span>
           <span>Enable <strong>Developer mode</strong> toggle (top right corner)</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-[#d4ff2e] font-bold">5.</span>
+          <span className="text-[color:var(--accent-strong)] font-bold">5.</span>
           <span>Click <strong>Load unpacked</strong> → select the <strong>extension</strong> folder from the extracted ZIP</span>
         </div>
         <div className="flex items-start gap-2 p-2 rounded bg-surface">
-          <span className="text-[#d4ff2e] font-bold">6.</span>
+          <span className="text-[color:var(--accent-strong)] font-bold">6.</span>
           <span>Refresh this page — the extension will be detected automatically</span>
         </div>
       </div>
@@ -835,8 +835,9 @@ export default function SOPsPage() {
   const publishedSops = sops.filter(s => s.status === "PUBLISHED");
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "SOPs" }]}
         kicker="SOPs · written · recorded · flows"
         title="SOPs"
         subtitle="Standard operating procedures — versioned and assignable. Compliance is tracked per-run, not here."
@@ -897,7 +898,7 @@ export default function SOPsPage() {
                       onClick={() => setSopType(opt.value)}
                       className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-all text-center ${
                         sopType === opt.value
-                          ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[#d4ff2e]"
+                          ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
                           : "border-border hover:border-muted-2 text-muted"
                       }`}
                     >
@@ -1010,7 +1011,7 @@ export default function SOPsPage() {
                 <Label>Tags <span className="text-muted text-[10px]">(optional)</span></Label>
                 <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface-2 p-2 min-h-[40px]">
                   {newSopTags.map((t) => (
-                    <span key={t} className="inline-flex items-center gap-1 rounded-full bg-[rgba(212,255,46,0.10)] text-[#d4ff2e] px-2 py-0.5 text-[11px]">
+                    <span key={t} className="inline-flex items-center gap-1 rounded-full bg-[rgba(212,255,46,0.10)] text-[color:var(--accent-strong)] px-2 py-0.5 text-[11px]">
                       #{t}
                       <button
                         type="button"
@@ -1108,7 +1109,7 @@ export default function SOPsPage() {
                       <p className="text-xs font-medium truncate">{sop.title}</p>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         {sop.category && <Badge variant="outline" className="text-[9px]">{sop.category}</Badge>}
-                        {sop.subcategory && <Badge variant="outline" className="text-[9px] text-[#d4ff2e]">{sop.subcategory}</Badge>}
+                        {sop.subcategory && <Badge variant="outline" className="text-[9px] text-[color:var(--accent-strong)]">{sop.subcategory}</Badge>}
                         <span className="text-[9px] text-muted">v{sop.version}</span>
                         <span className="text-[9px] text-muted">&middot; {formatDate(sop.createdAt)}</span>
                       </div>

@@ -34,7 +34,7 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg max-h-[85vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-4 p-7 duration-200 rounded-2xl",
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg max-h-[85vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-3 p-5 duration-200 rounded-xl",
         "border border-border bg-surface text-foreground",
         "shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]",
@@ -45,11 +45,11 @@ const DialogContent = React.forwardRef<
       {children}
       <DialogPrimitive.Close
         className={cn(
-          "absolute right-4 top-4 h-7 w-7 rounded-full",
+          "absolute right-3 top-3 h-6 w-6 rounded-full",
           "flex items-center justify-center",
           "bg-surface-2 border border-border",
           "text-muted hover:text-foreground hover:bg-surface-3 hover:border-[color:var(--b-line-2)]",
-          "focus:outline-none focus:ring-2 focus:ring-[#d4ff2e] focus:ring-offset-2 focus:ring-offset-surface",
+          "focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:ring-offset-2 focus:ring-offset-surface",
           "transition-all disabled:pointer-events-none",
         )}
       >
@@ -90,7 +90,7 @@ const DialogTitle = React.forwardRef<
   <DialogPrimitive.Title
     ref={ref}
     className={cn(
-      "text-[19px] font-semibold text-foreground tracking-tight leading-tight",
+      "text-[16px] font-semibold text-foreground tracking-tight leading-tight",
       className,
     )}
     {...props}
@@ -104,7 +104,7 @@ const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-[13.5px] text-muted leading-relaxed", className)}
+    className={cn("text-[12.5px] text-muted leading-relaxed", className)}
     {...props}
   />
 ));

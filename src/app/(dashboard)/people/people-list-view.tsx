@@ -66,7 +66,7 @@ interface Role {
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-[#d4ff2e]";
+  if (score >= 70) return "text-[color:var(--accent-strong)]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -421,8 +421,9 @@ export default function PeopleListView() {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "People" }]}
         kicker="People · the org graph"
         title="People"
         subtitle={`${total} team members across your organization.`}
@@ -644,13 +645,13 @@ export default function PeopleListView() {
 
       {/* People Grid */}
       {loading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <Card key={i}><CardContent className="p-5"><div className="flex items-start gap-4"><div className="h-12 w-12 rounded-full animate-pulse bg-surface-2" /><div className="flex-1 space-y-2"><div className="h-4 w-32 animate-pulse rounded bg-surface-2" /><div className="h-3 w-24 animate-pulse rounded bg-surface-2" /></div></div></CardContent></Card>
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((person) => {
             const isSelected = selectedIds.has(person.id);
             const copyEmail = () => {
@@ -825,7 +826,7 @@ export default function PeopleListView() {
       {/* Floating Bulk Action Bar */}
       {selectedIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-surface px-5 py-3 shadow-2xl">
-          <span className="text-sm font-medium text-[#d4ff2e]">{selectedIds.size} selected</span>
+          <span className="text-sm font-medium text-[color:var(--accent-strong)]">{selectedIds.size} selected</span>
           <div className="h-5 w-px bg-border" />
           <Button variant="outline" size="sm" onClick={() => { setBulkAction("change_department"); setBulkPayload({}); }}>
             <Building2 size={14} className="mr-1" /> Department
@@ -902,7 +903,7 @@ export default function PeopleListView() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label>KRAs & Weightage</Label>
-                    <Button variant="ghost" size="sm" className="text-xs text-[#d4ff2e] h-6" onClick={() => {
+                    <Button variant="ghost" size="sm" className="text-xs text-[color:var(--accent-strong)] h-6" onClick={() => {
                       const current = bulkPayload.kraEntries || [];
                       setBulkPayload({ ...bulkPayload, kraEntries: [...current, { kraId: "", weightage: "" }] });
                     }}>
@@ -1011,7 +1012,7 @@ export default function PeopleListView() {
                     <input type="file" className="hidden" accept=".csv" onChange={handleFileSelect} />
                   </label>
                 </div>
-                <a href="/api/people/bulk-import" download className="text-xs text-[#d4ff2e] hover:underline flex items-center gap-1">
+                <a href="/api/people/bulk-import" download className="text-xs text-[color:var(--accent-strong)] hover:underline flex items-center gap-1">
                   <Download size={12} /> Download CSV template
                 </a>
               </>

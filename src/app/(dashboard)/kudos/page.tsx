@@ -97,6 +97,7 @@ export default function KudosFeedPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Kudos" }]}
         kicker="Culture · live"
         title="Culture is what gets rewarded."
         subtitle="Peer-to-peer kudos tagged to your company values. Counted on profiles, surfaced in reviews, fed into composite scores. Great work stops being invisible."
@@ -142,7 +143,7 @@ export default function KudosFeedPage() {
             onClick={() => { setValueFilter(null); setPage(1); }}
             className={cn(
               "text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full border transition-colors",
-              valueFilter === null ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]" : "border-border text-muted hover:text-foreground",
+              valueFilter === null ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]" : "border-border text-muted hover:text-foreground",
             )}
           >
             All values
@@ -153,7 +154,7 @@ export default function KudosFeedPage() {
               onClick={() => { setValueFilter(valueFilter === v ? null : v); setPage(1); }}
               className={cn(
                 "text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full border transition-colors",
-                valueFilter === v ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]" : "border-border text-muted hover:text-foreground",
+                valueFilter === v ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]" : "border-border text-muted hover:text-foreground",
               )}
             >
               {v}
@@ -188,7 +189,7 @@ export default function KudosFeedPage() {
               {k.companyValue && (
                 <Badge
                   variant="outline"
-                  className="absolute top-4 right-4 text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[#d4ff2e] bg-[rgba(212,255,46,0.06)]"
+                  className="absolute top-4 right-4 text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[color:var(--accent-strong)] bg-[rgba(212,255,46,0.06)]"
                 >
                   {k.companyValue}
                 </Badge>
@@ -196,14 +197,14 @@ export default function KudosFeedPage() {
 
               <div className="flex items-center gap-2 mb-3 text-sm pr-28">
                 <Avatar className="h-6 w-6">
-                  <AvatarFallback className="text-[10px] bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]">
+                  <AvatarFallback className="text-[10px] bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]">
                     {k.giver.firstName[0]}{k.giver.lastName[0]}
                   </AvatarFallback>
                 </Avatar>
                 <span className="font-medium">{k.giver.firstName} {k.giver.lastName[0]}.</span>
                 <ArrowRight size={14} className="text-muted" />
                 <Avatar className="h-6 w-6">
-                  <AvatarFallback className="text-[10px] bg-[rgba(212,255,46,0.12)] text-[#d4ff2e]">
+                  <AvatarFallback className="text-[10px] bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]">
                     {k.receiver.firstName[0]}{k.receiver.lastName[0]}
                   </AvatarFallback>
                 </Avatar>

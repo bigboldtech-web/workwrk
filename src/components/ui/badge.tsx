@@ -7,18 +7,20 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
+        // Default = primary accent (violet). Used for "active",
+        // "selected", "in-progress" semantics.
         default:
-          "border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.1)] text-[#d4ff2e]",
+          "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300",
         secondary:
-          "border-border bg-surface-2 text-muted",
+          "border-slate-200 bg-slate-50 text-slate-600 dark:border-border dark:bg-surface-2 dark:text-muted",
         destructive:
-          "border-[rgba(255,61,138,0.3)] bg-[rgba(255,61,138,0.1)] text-[#ff3d8a]",
+          "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300",
         outline:
-          "border-border bg-transparent text-muted",
+          "border-slate-200 bg-transparent text-slate-600 dark:border-border dark:text-muted",
         success:
-          "border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.1)] text-[#d4ff2e]",
+          "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300",
         warning:
-          "border-[rgba(255,153,51,0.3)] bg-[rgba(255,153,51,0.1)] text-[#ff9933]",
+          "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300",
       },
     },
     defaultVariants: {

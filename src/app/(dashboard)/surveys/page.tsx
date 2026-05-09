@@ -327,8 +327,9 @@ export default function SurveysPage() {
   const pending = surveys.filter((s) => s.status === "ACTIVE" && !s.hasResponded).length;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Surveys" }]}
         kicker="Surveys · pulse"
         title="Pulse surveys"
         subtitle={`${surveys.length} surveys${pending > 0 ? ` · ${pending} pending` : ""}`}
@@ -969,7 +970,7 @@ function RatingBreakdown({ q }: { q: any }) {
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted">Average</span>
-        <span className="font-semibold text-[#d4ff2e]">{q.average != null ? q.average.toFixed(1) : "—"}</span>
+        <span className="font-semibold text-[color:var(--accent-strong)]">{q.average != null ? q.average.toFixed(1) : "—"}</span>
         <span className="text-muted ml-auto">{q.totalAnswered} answered</span>
       </div>
       <div className="space-y-1">
@@ -1048,7 +1049,7 @@ function ClosesInBadge({ closesAt }: { closesAt: string | Date }) {
 
 function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: "good" | "ok" | "bad" }) {
   const toneClass =
-    tone === "good" ? "text-[#d4ff2e]" :
+    tone === "good" ? "text-[color:var(--accent-strong)]" :
     tone === "bad" ? "text-red-400" :
     tone === "ok" ? "text-amber-400" :
     "text-foreground";

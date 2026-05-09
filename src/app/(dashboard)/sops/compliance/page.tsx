@@ -20,7 +20,7 @@ function formatDate(dateStr: string | null): string {
 
 function rateColor(rate: number) {
   if (rate >= 90) return "text-green-400";
-  if (rate >= 70) return "text-[#d4ff2e]";
+  if (rate >= 70) return "text-[color:var(--accent-strong)]";
   if (rate >= 50) return "text-orange-400";
   return "text-red-400";
 }
@@ -58,7 +58,7 @@ export default function SOPCompliancePage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-fade-in">
+      <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-64 bg-surface-2 rounded animate-pulse" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => (
@@ -77,7 +77,7 @@ export default function SOPCompliancePage() {
   const { overview, departmentCompliance, personScores, sopCompliance, overdueList } = data;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => router.push("/sops")} className="shrink-0">
           <ArrowLeft size={18} />
@@ -135,7 +135,7 @@ export default function SOPCompliancePage() {
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2">
-                        <Building size={16} className="text-[#d4ff2e]" />
+                        <Building size={16} className="text-[color:var(--accent-strong)]" />
                       </div>
                       <div>
                         <h3 className="font-semibold text-sm">{dept.name}</h3>
@@ -212,7 +212,7 @@ export default function SOPCompliancePage() {
               <Card key={s.sopId} className="hover:border-muted-2 transition-all cursor-pointer" onClick={() => router.push(`/sops/${s.sopId}`)}>
                 <CardContent className="p-4 flex items-center gap-4">
                   <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2 shrink-0">
-                    <FileText size={16} className="text-[#d4ff2e]" />
+                    <FileText size={16} className="text-[color:var(--accent-strong)]" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-sm truncate">{s.title}</h3>

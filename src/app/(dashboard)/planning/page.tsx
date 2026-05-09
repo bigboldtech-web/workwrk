@@ -8,6 +8,7 @@
 // keeps the planning concern focused.
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,9 +155,9 @@ function PlansTab() {
               </thead>
               <tbody>
                 {rows.map((p) => (
-                  <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={p.id} className="border-b border-white/5 hover:bg-violet-50/50 dark:hover:bg-card-2/30">
                     <td className="px-4 py-2.5">
-                      <div className="font-medium">{p.name}</div>
+                      <Link href={`/planning/${p.id}`} className="font-medium hover:text-violet-700">{p.name}</Link>
                       {p.description && <div className="text-[10px] text-muted">{p.description}</div>}
                     </td>
                     <td className="px-4 py-2.5 text-xs">{TYPE_LABEL[p.type]}</td>

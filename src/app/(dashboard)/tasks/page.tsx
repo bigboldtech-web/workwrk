@@ -296,8 +296,9 @@ export default function TasksPage() {
   }, [anchor]);
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Work calendar" }]}
         kicker="Tasks · auto-escalating"
         title="Work calendar"
         subtitle="Plan your day, schedule spans across the week, and see where time is going."
@@ -333,7 +334,7 @@ export default function TasksPage() {
                     <div className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border border-border bg-surface shadow-xl p-2 animate-in fade-in-0 zoom-in-95">
                       <div className="flex items-center justify-between mb-2 px-1">
                         <span className="text-[10px] uppercase tracking-wider text-muted">Team members</span>
-                        <button onClick={() => setSelectedMemberIds([])} className="text-[10px] text-[#d4ff2e] hover:text-[#e2ff6b]">
+                        <button onClick={() => setSelectedMemberIds([])} className="text-[10px] text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">
                           Show all
                         </button>
                       </div>
@@ -449,8 +450,8 @@ export default function TasksPage() {
               <div key={i} className={`min-h-[200px] rounded-lg border p-2 ${today ? "border-[rgba(212,255,46,0.4)] bg-[rgba(212,255,46,0.06)]" : "border-border bg-surface"}`}>
                 <div className="flex items-center justify-between mb-2">
                   <div>
-                    <p className={`text-[10px] font-medium ${today ? "text-[#d4ff2e]" : "text-muted"}`}>{DAY_NAMES[i]}</p>
-                    <p className={`text-lg font-bold ${today ? "text-[#d4ff2e]" : ""}`}>{date.getDate()}</p>
+                    <p className={`text-[10px] font-medium ${today ? "text-[color:var(--accent-strong)]" : "text-muted"}`}>{DAY_NAMES[i]}</p>
+                    <p className={`text-lg font-bold ${today ? "text-[color:var(--accent-strong)]" : ""}`}>{date.getDate()}</p>
                   </div>
                   <button
                     onClick={() => openNewTask(dateStr)}
@@ -488,14 +489,14 @@ export default function TasksPage() {
                               title={titleAttr}
                             >
                               <div className="flex items-start gap-1.5">
-                                {task.status === "COMPLETED" ? <CheckCircle2 size={11} className="mt-0.5 text-[#d4ff2e] shrink-0" />
+                                {task.status === "COMPLETED" ? <CheckCircle2 size={11} className="mt-0.5 text-[color:var(--accent-strong)] shrink-0" />
                                   : task.status === "IN_PROGRESS" ? <Play size={11} className="mt-0.5 text-amber-400 shrink-0" />
                                   : <Circle size={11} className="mt-0.5 text-muted shrink-0" />}
                                 <div className="flex-1 min-w-0">
                                   <p className={`text-[11px] font-medium truncate ${task.status === "COMPLETED" ? "line-through text-muted" : ""}`}>{task.title}</p>
                                   <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                                     {task.hoursSpent != null && <span className="text-[9px] text-muted-2">{task.hoursSpent}h</span>}
-                                    {task.category && <span className="text-[9px] text-[#d4ff2e]">{task.category}</span>}
+                                    {task.category && <span className="text-[9px] text-[color:var(--accent-strong)]">{task.category}</span>}
                                     {teamView && task.assignee && <span className="text-[9px] text-muted-2">{task.assignee.firstName}</span>}
                                     {(task.labels || []).slice(0, 2).map((lb) => (
                                       <span key={lb.labelId} className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: lb.label.color }} />
@@ -566,7 +567,7 @@ export default function TasksPage() {
                           <Card className="hover:border-muted-2 transition-colors cursor-pointer" onClick={() => openEditTask(task)}>
                             <CardContent className="p-3 flex items-center gap-3">
                               <button onClick={(e) => { e.stopPropagation(); toggleStatus(task.id, task.status); }} className="shrink-0">
-                                {task.status === "COMPLETED" ? <CheckCircle2 size={18} className="text-[#d4ff2e]" />
+                                {task.status === "COMPLETED" ? <CheckCircle2 size={18} className="text-[color:var(--accent-strong)]" />
                                   : task.status === "IN_PROGRESS" ? <Play size={18} className="text-amber-400" />
                                   : <Circle size={18} className="text-muted" />}
                               </button>

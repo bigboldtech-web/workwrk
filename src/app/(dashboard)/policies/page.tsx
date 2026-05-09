@@ -170,7 +170,7 @@ export default function PoliciesPage() {
                   <button onClick={() => { setSelectedPolicy(p); setCreating(false); }}
                     className={`w-full text-left p-3 hover:bg-surface-2 transition-colors ${selectedPolicy?.id === p.id ? "bg-[rgba(212,255,46,0.06)] border-l-2 border-l-[#d4ff2e]" : ""}`}>
                     <div className="flex items-center gap-2 mb-0.5">
-                      <Shield size={11} className="text-[#d4ff2e] shrink-0" />
+                      <Shield size={11} className="text-[color:var(--accent-strong)] shrink-0" />
                       <span className="text-xs font-semibold truncate flex-1">{p.title}</span>
                       {p.requiresAck && !p.acknowledged && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />}
                     </div>
@@ -249,7 +249,7 @@ export default function PoliciesPage() {
                 </div>
                 <div className="flex items-center gap-1">
                   {isManager && (
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-[#d4ff2e] hover:text-[#e2ff6b] hover:bg-[#e2ff6b]/10" onClick={() => startEditing(selectedPolicy)} title="Edit policy">
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-[color:var(--accent-strong)] hover:text-[#e2ff6b] hover:bg-[#e2ff6b]/10" onClick={() => startEditing(selectedPolicy)} title="Edit policy">
                       <Pencil size={14} />
                     </Button>
                   )}

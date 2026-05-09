@@ -274,7 +274,7 @@ function ScimCard() {
         </div>
         <p className="text-xs text-muted mt-1">
           Paste a token into your IdP's WorkWrk SCIM connector. Base URL:
-          <code className="ml-1 text-[#d4ff2e] font-mono">{scimBase}</code>
+          <code className="ml-1 text-[color:var(--accent-strong)] font-mono">{scimBase}</code>
         </p>
       </CardHeader>
       <CardContent className="p-0">

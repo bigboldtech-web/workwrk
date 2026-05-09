@@ -16,7 +16,7 @@ const BOX_LABELS: Record<string, { label: string; color: string; action: string 
   "3-3": { label: "Star", color: "bg-green-500/20 border-green-500/40", action: "Promote & Retain" },
   "3-2": { label: "High Performer", color: "bg-blue-500/20 border-blue-500/40", action: "Develop for Leadership" },
   "3-1": { label: "Specialist", color: "bg-cyan-500/20 border-cyan-500/40", action: "Leverage Expertise" },
-  "2-3": { label: "High Potential", color: "bg-[rgba(212,255,46,0.12)] border-[rgba(212,255,46,0.35)]", action: "Invest in Growth" },
+  "2-3": { label: "High Potential", color: "bg-violet-500/12 border-violet-500/35", action: "Invest in Growth" },
   "2-2": { label: "Core Player", color: "bg-amber-500/20 border-amber-500/40", action: "Coach & Develop" },
   "2-1": { label: "Average", color: "bg-slate-500/20 border-slate-500/40", action: "Set Clear Goals" },
   "1-3": { label: "Potential Gem", color: "bg-pink-500/20 border-pink-500/40", action: "Address Performance" },
@@ -73,9 +73,10 @@ export default function TalentPage() {
   const unplaced = users.filter((u: any) => !placedUserIds.has(u.id));
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3 animate-fade-in">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Talent" }]}
           kicker="Talent · 9-box grid"
           title="9-Box talent grid"
           subtitle="Performance vs potential assessment by quarter."
@@ -95,18 +96,18 @@ export default function TalentPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card><CardContent className="p-4 text-center">
-          <p className="text-2xl font-bold">{assessments.length}</p>
-          <p className="text-xs text-muted">Assessed</p>
+      <div className="grid grid-cols-3 gap-2">
+        <Card><CardContent className="p-3 text-center">
+          <p className="text-xl font-bold tabular-nums">{assessments.length}</p>
+          <p className="text-[10px] uppercase tracking-wider text-muted-2 mt-0.5">Assessed</p>
         </CardContent></Card>
-        <Card><CardContent className="p-4 text-center">
-          <p className="text-2xl font-bold text-green-400">{grid["3-3"]?.length || 0}</p>
-          <p className="text-xs text-muted">Stars</p>
+        <Card><CardContent className="p-3 text-center">
+          <p className="text-xl font-bold text-emerald-600 tabular-nums">{grid["3-3"]?.length || 0}</p>
+          <p className="text-[10px] uppercase tracking-wider text-muted-2 mt-0.5">Stars</p>
         </CardContent></Card>
-        <Card><CardContent className="p-4 text-center">
-          <p className="text-2xl font-bold text-red-400">{grid["1-1"]?.length || 0}</p>
-          <p className="text-xs text-muted">At Risk</p>
+        <Card><CardContent className="p-3 text-center">
+          <p className="text-xl font-bold text-rose-600 tabular-nums">{grid["1-1"]?.length || 0}</p>
+          <p className="text-[10px] uppercase tracking-wider text-muted-2 mt-0.5">At Risk</p>
         </CardContent></Card>
       </div>
 
@@ -114,8 +115,8 @@ export default function TalentPage() {
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
-            <Grid3x3 size={16} className="text-[#d4ff2e]" />
-            <CardTitle className="text-base">Talent Matrix</CardTitle>
+            <Grid3x3 size={14} className="text-[color:var(--accent-strong)]" />
+            <CardTitle>Talent Matrix</CardTitle>
           </div>
         </CardHeader>
         <CardContent>
