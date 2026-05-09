@@ -323,7 +323,7 @@ export default function AssetsPage() {
                 <ContextMenuTrigger asChild>
                   <button
                     onClick={() => setSelectedAsset(asset)}
-                    className={`w-full text-left p-3 rounded-lg border transition-all ${isSelected ? "border-[rgba(212,255,46,0.35)] bg-[#d4ff2e]/5" : "border-border hover:bg-surface-2"}`}
+                    className={`w-full text-left p-3 rounded-lg border transition-all ${isSelected ? "border-[rgba(212,255,46,0.35)] bg-violet-600/5" : "border-border hover:bg-surface-2"}`}
                   >
                     <div className="flex items-center gap-3">
                       <div className="shrink-0 w-8 h-8 rounded-lg bg-surface-2 flex items-center justify-center">

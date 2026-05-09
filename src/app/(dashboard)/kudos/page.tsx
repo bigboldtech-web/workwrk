@@ -115,7 +115,7 @@ export default function KudosFeedPage() {
               onClick={() => { setFilter(f); setPage(1); }}
               className={cn(
                 "px-3 py-1.5 text-xs font-medium rounded-md transition-colors capitalize",
-                filter === f ? "bg-[#d4ff2e] text-[#0a0a0a]" : "text-muted hover:text-foreground",
+                filter === f ? "bg-violet-600 text-[#0a0a0a]" : "text-muted hover:text-foreground",
               )}
             >
               {f === "all" ? "All" : f === "received" ? "Received by me" : "Given by me"}
@@ -143,7 +143,7 @@ export default function KudosFeedPage() {
             onClick={() => { setValueFilter(null); setPage(1); }}
             className={cn(
               "text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full border transition-colors",
-              valueFilter === null ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]" : "border-border text-muted hover:text-foreground",
+              valueFilter === null ? "border-violet-500 bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]" : "border-border text-muted hover:text-foreground",
             )}
           >
             All values
@@ -154,7 +154,7 @@ export default function KudosFeedPage() {
               onClick={() => { setValueFilter(valueFilter === v ? null : v); setPage(1); }}
               className={cn(
                 "text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full border transition-colors",
-                valueFilter === v ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]" : "border-border text-muted hover:text-foreground",
+                valueFilter === v ? "border-violet-500 bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]" : "border-border text-muted hover:text-foreground",
               )}
             >
               {v}
@@ -189,7 +189,7 @@ export default function KudosFeedPage() {
               {k.companyValue && (
                 <Badge
                   variant="outline"
-                  className="absolute top-4 right-4 text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[color:var(--accent-strong)] bg-[rgba(212,255,46,0.06)]"
+                  className="absolute top-4 right-4 text-[10px] uppercase tracking-wider border-violet-500/40 text-[color:var(--accent-strong)] bg-[rgba(212,255,46,0.06)]"
                 >
                   {k.companyValue}
                 </Badge>

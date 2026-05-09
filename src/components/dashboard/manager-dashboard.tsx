@@ -20,7 +20,7 @@ function getScoreColor(score: number) {
 
 function getScoreBg(score: number) {
   if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-[#d4ff2e]";
+  if (score >= 70) return "bg-violet-600";
   if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }

@@ -70,7 +70,7 @@ type Invoice = {
 const PO_STATUS_STYLE: Record<string, string> = {
   DRAFT: "text-muted border-white/20",
   SUBMITTED: "text-blue-400 border-blue-400/30",
-  APPROVED: "text-[color:var(--accent-strong)] border-[#d4ff2e]/30",
+  APPROVED: "text-[color:var(--accent-strong)] border-violet-500/30",
   REJECTED: "text-red-400 border-red-400/30",
   SENT: "text-amber-400 border-amber-400/30",
   RECEIVED: "text-green-400 border-green-400/30",

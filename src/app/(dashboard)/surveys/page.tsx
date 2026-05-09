@@ -751,7 +751,7 @@ export default function SurveysPage() {
                   <div className="flex gap-2">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <button key={n} onClick={() => setAnswers({ ...answers, [q.id]: n })}
-                        className={`h-10 w-10 rounded-lg border text-sm font-bold transition-colors ${answers[q.id] === n ? "bg-[#d4ff2e] text-[#0a0a0a] border-[#d4ff2e]" : "border-border hover:border-[#d4ff2e]"}`}>
+                        className={`h-10 w-10 rounded-lg border text-sm font-bold transition-colors ${answers[q.id] === n ? "bg-violet-600 text-[#0a0a0a] border-violet-500" : "border-border hover:border-violet-500"}`}>
                         {n}
                       </button>
                     ))}
@@ -760,7 +760,7 @@ export default function SurveysPage() {
                   <div className="flex gap-1">
                     {Array.from({ length: 11 }, (_, n) => (
                       <button key={n} onClick={() => setAnswers({ ...answers, [q.id]: n })}
-                        className={`h-8 w-8 rounded text-xs font-bold transition-colors ${answers[q.id] === n ? "bg-[#d4ff2e] text-[#0a0a0a]" : "border border-border hover:border-[#d4ff2e]"}`}>
+                        className={`h-8 w-8 rounded text-xs font-bold transition-colors ${answers[q.id] === n ? "bg-violet-600 text-[#0a0a0a]" : "border border-border hover:border-violet-500"}`}>
                         {n}
                       </button>
                     ))}
@@ -771,7 +771,7 @@ export default function SurveysPage() {
                       <button
                         key={opt}
                         onClick={() => setAnswers({ ...answers, [q.id]: opt })}
-                        className={`flex-1 h-10 rounded-lg border text-sm font-medium transition-colors ${answers[q.id] === opt ? "bg-[#d4ff2e] text-[#0a0a0a] border-[#d4ff2e]" : "border-border hover:border-[#d4ff2e]"}`}
+                        className={`flex-1 h-10 rounded-lg border text-sm font-medium transition-colors ${answers[q.id] === opt ? "bg-violet-600 text-[#0a0a0a] border-violet-500" : "border-border hover:border-violet-500"}`}
                       >
                         {opt}
                       </button>
@@ -785,10 +785,10 @@ export default function SurveysPage() {
                         <button
                           key={opt}
                           onClick={() => setAnswers({ ...answers, [q.id]: opt })}
-                          className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left text-sm transition-colors ${selected ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)]" : "border-border hover:bg-surface-2"}`}
+                          className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left text-sm transition-colors ${selected ? "border-violet-500 bg-[rgba(212,255,46,0.08)]" : "border-border hover:bg-surface-2"}`}
                         >
-                          <span className={`h-4 w-4 rounded-full border flex items-center justify-center shrink-0 ${selected ? "border-[#d4ff2e]" : "border-border"}`}>
-                            {selected && <span className="h-2 w-2 rounded-full bg-[#d4ff2e]" />}
+                          <span className={`h-4 w-4 rounded-full border flex items-center justify-center shrink-0 ${selected ? "border-violet-500" : "border-border"}`}>
+                            {selected && <span className="h-2 w-2 rounded-full bg-violet-600" />}
                           </span>
                           <span className="flex-1">{opt}</span>
                         </button>
@@ -807,9 +807,9 @@ export default function SurveysPage() {
                             const next = selected ? current.filter((x) => x !== opt) : [...current, opt];
                             setAnswers({ ...answers, [q.id]: next });
                           }}
-                          className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left text-sm transition-colors ${selected ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)]" : "border-border hover:bg-surface-2"}`}
+                          className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left text-sm transition-colors ${selected ? "border-violet-500 bg-[rgba(212,255,46,0.08)]" : "border-border hover:bg-surface-2"}`}
                         >
-                          <span className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${selected ? "border-[#d4ff2e] bg-[#d4ff2e]" : "border-border"}`}>
+                          <span className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${selected ? "border-violet-500 bg-violet-600" : "border-border"}`}>
                             {selected && <Check size={10} className="text-[#0a0a0a]" />}
                           </span>
                           <span className="flex-1">{opt}</span>

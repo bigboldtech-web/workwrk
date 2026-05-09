@@ -23,6 +23,9 @@ import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
 import { ShortcutsOverlay, useShortcutsOverlay } from "./shortcuts-overlay";
 import { applyDensity, readDensity, type Density } from "@/lib/density";
 import { Kbd } from "@/components/ui/kbd";
+import { useGoToNav } from "@/hooks/use-goto-nav";
+import { useTheme } from "next-themes";
+import { Sun, Moon, Monitor } from "lucide-react";
 
 interface SearchResult {
   type: "person" | "task" | "sop" | "department" | "meeting";
@@ -89,6 +92,12 @@ export function Topbar() {
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const shortcuts = useShortcutsOverlay();
+  useGoToNav();
+  // Theme — light / dark / system. We let next-themes manage persistence;
+  // the user menu pill row reflects whichever value is currently set.
+  const { theme, setTheme } = useTheme();
+  const [themeMounted, setThemeMounted] = useState(false);
+  useEffect(() => { setThemeMounted(true); }, []);
   // Density (compact / cozy) — read on mount and after density-change
   // events so the user-menu radio reflects the current setting whether
   // it was set by us or by another tab.
@@ -457,6 +466,9 @@ export function Topbar() {
               <Link href="/settings">{tNav("settings")}</Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            {themeMounted && (
+              <ThemeRow value={(theme as "light" | "dark" | "system" | undefined) ?? "system"} onChange={setTheme} />
+            )}
             <DensityRow value={density} onChange={handleDensityChange} />
             <DropdownMenuItem
               onSelect={(e) => {
@@ -532,6 +544,54 @@ function DensityRow({
   );
 }
 
+// Inline theme selector — three icon-tabbed buttons (light / dark /
+// system). Persists via next-themes; reading `theme` (not resolvedTheme)
+// keeps the "system" choice sticky across sessions.
+function ThemeRow({
+  value,
+  onChange,
+}: {
+  value: "light" | "dark" | "system";
+  onChange: (t: string) => void;
+}) {
+  const opts: { id: "light" | "dark" | "system"; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
+    { id: "light", label: "Light", Icon: Sun },
+    { id: "dark", label: "Dark", Icon: Moon },
+    { id: "system", label: "System", Icon: Monitor },
+  ];
+  return (
+    <div className="px-2 py-1.5 text-xs">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-2 mb-1.5 px-1">
+        Theme
+      </p>
+      <div className="flex gap-1">
+        {opts.map((o) => {
+          const active = value === o.id;
+          const Icon = o.Icon;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onChange(o.id)}
+              className={
+                "flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium border transition-colors " +
+                (active
+                  ? "bg-[color:var(--accent-soft)] border-[color:var(--accent-strong)] text-[color:var(--accent-strong)]"
+                  : "bg-transparent border-border text-muted hover:bg-surface-2 hover:text-foreground")
+              }
+              aria-pressed={active}
+              title={o.label}
+            >
+              <Icon size={12} />
+              <span>{o.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Small row inside the bell dropdown so users can enable / disable the
 // browser-level ding. Shown above the separator so it's always visible
 // even when the notifications list is empty.
@@ -584,7 +644,7 @@ function DesktopAlertsRow({
         <button
           type="button"
           onClick={action}
-          className="text-[10px] px-2 py-1 rounded border border-border hover:border-[#d4ff2e] hover:text-[color:var(--accent-strong)] transition-colors"
+          className="text-[10px] px-2 py-1 rounded border border-border hover:border-violet-500 hover:text-[color:var(--accent-strong)] transition-colors"
         >
           {actionLabel}
         </button>

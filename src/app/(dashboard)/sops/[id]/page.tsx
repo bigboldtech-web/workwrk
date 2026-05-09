@@ -182,7 +182,7 @@ function AutosaveIndicator({
   const common = "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border";
   if (status === "saving") {
     return <span className={`${common} border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]`}>
-      <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#d4ff2e] animate-pulse" />
+      <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-600 animate-pulse" />
       Saving…
     </span>;
   }
@@ -275,7 +275,7 @@ function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: 
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="text-[11px] px-2 py-1 rounded border border-dashed border-border text-muted hover:text-[#e2ff6b] hover:border-[#d4ff2e]"
+        className="text-[11px] px-2 py-1 rounded border border-dashed border-border text-muted hover:text-[#e2ff6b] hover:border-violet-500"
       >
         + Upload image
       </button>
@@ -1474,7 +1474,7 @@ export default function SOPDetailPage() {
                               <input
                                 type="text"
                                 defaultValue={step.description || `Step ${index + 1}`}
-                                className="w-full text-sm font-medium bg-transparent border-b border-border pb-1 focus:border-[#d4ff2e] focus:outline-none"
+                                className="w-full text-sm font-medium bg-transparent border-b border-border pb-1 focus:border-violet-500 focus:outline-none"
                                 onBlur={(e) => {
                                   const newSteps = [...(sop.content.steps as RecordedStep[])];
                                   newSteps[index] = { ...newSteps[index], description: e.target.value };
@@ -1583,7 +1583,7 @@ export default function SOPDetailPage() {
                         className={`flex items-start gap-3 p-3 rounded-lg border bg-surface-3 group transition-all ${
                           isDragging ? "opacity-40" : ""
                         } ${
-                          isDropTarget ? "border-[#d4ff2e] ring-1 ring-[rgba(212,255,46,0.35)]" : "border-border"
+                          isDropTarget ? "border-violet-500 ring-1 ring-[rgba(212,255,46,0.35)]" : "border-border"
                         }`}
                       >
                         <div

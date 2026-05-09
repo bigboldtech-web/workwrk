@@ -226,7 +226,7 @@ export default function AnalyticsPage() {
             ].map((opt) => (
               <button key={opt.value} onClick={() => setDateRange(opt.value)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  dateRange === opt.value ? "bg-[#d4ff2e] text-[#0a0a0a]" : "text-muted hover:text-foreground"
+                  dateRange === opt.value ? "bg-violet-600 text-[#0a0a0a]" : "text-muted hover:text-foreground"
                 }`}>
                 {opt.label}
               </button>

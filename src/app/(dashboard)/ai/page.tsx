@@ -287,7 +287,7 @@ export default function AIPage() {
               <div
                 className={`max-w-[70%] rounded-xl px-4 py-3 ${
                   msg.role === "user"
-                    ? "bg-[#d4ff2e] text-[#0a0a0a]"
+                    ? "bg-violet-600 text-[#0a0a0a]"
                     : "bg-surface-2 border border-border text-foreground"
                 }`}
               >
@@ -339,7 +339,7 @@ export default function AIPage() {
                   <button
                     key={q.text}
                     onClick={() => handleSend(q.text)}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted hover:border-[#d4ff2e]/40 hover:text-[#e2ff6b] transition-colors text-left"
+                    className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted hover:border-violet-500/40 hover:text-[#e2ff6b] transition-colors text-left"
                   >
                     <Icon size={12} className="flex-shrink-0" />
                     <span className="line-clamp-2">{q.text}</span>

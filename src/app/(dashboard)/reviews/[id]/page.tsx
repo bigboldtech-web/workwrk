@@ -418,7 +418,7 @@ export default function ReviewCycleDetailPage() {
             {getStatusBadge(cycle.status)}
           </div>
           <div className="flex items-center gap-2 mb-2">
-            <Progress value={stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0} className="h-2 flex-1" indicatorClassName="bg-[#d4ff2e]" />
+            <Progress value={stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0} className="h-2 flex-1" indicatorClassName="bg-violet-600" />
             <span className="text-sm font-mono text-[color:var(--accent-strong)]">{stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%</span>
           </div>
           <div className="flex items-center gap-4 text-xs text-muted">
@@ -564,7 +564,7 @@ export default function ReviewCycleDetailPage() {
                                 onClick={() => setKraRatings((prev) => ({ ...prev, [a.kra.id]: { ...prev[a.kra.id], rating: n, achievements: prev[a.kra.id]?.achievements || "" } }))}
                                 className={`h-8 w-8 rounded text-sm font-bold transition-colors ${
                                   kraRatings[a.kra.id]?.rating === n
-                                    ? "bg-[#d4ff2e] text-[#0a0a0a]"
+                                    ? "bg-violet-600 text-[#0a0a0a]"
                                     : "bg-border text-muted hover:bg-border"
                                 } ${!canSelfAssess ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                               >
@@ -774,7 +774,7 @@ export default function ReviewCycleDetailPage() {
                             onClick={() => setBehavioral((prev) => ({ ...prev, [key]: n }))}
                             className={`flex-1 h-9 rounded text-xs transition-colors ${
                               behavioral[key] === n
-                                ? "bg-[#d4ff2e] text-[#0a0a0a]"
+                                ? "bg-violet-600 text-[#0a0a0a]"
                                 : "bg-border text-muted hover:bg-border"
                             }`}
                             title={anchors[n - 1]}
@@ -891,7 +891,7 @@ export default function ReviewCycleDetailPage() {
                       { label: "<40", count: calibrationData.distribution.bottom, color: "bg-red-500" },
                       { label: "40-59", count: calibrationData.distribution.low, color: "bg-orange-500" },
                       { label: "60-74", count: calibrationData.distribution.mid, color: "bg-yellow-500" },
-                      { label: "75-89", count: calibrationData.distribution.high, color: "bg-[#d4ff2e]" },
+                      { label: "75-89", count: calibrationData.distribution.high, color: "bg-violet-600" },
                       { label: "90+", count: calibrationData.distribution.top, color: "bg-green-500" },
                     ].map((band) => {
                       const maxCount = Math.max(...Object.values(calibrationData.distribution) as number[], 1);
@@ -1047,7 +1047,7 @@ export default function ReviewCycleDetailPage() {
                     key={n}
                     onClick={() => setPeerCollabRating(n)}
                     className={`h-9 w-9 rounded text-sm font-bold transition-colors ${
-                      peerCollabRating === n ? "bg-[#d4ff2e] text-[#0a0a0a]" : "bg-border text-muted hover:bg-border"
+                      peerCollabRating === n ? "bg-violet-600 text-[#0a0a0a]" : "bg-border text-muted hover:bg-border"
                     }`}
                   >
                     {n}

@@ -18,7 +18,7 @@ interface OKR {
 }
 
 function progressColor(p: number) {
-  if (p >= 80) return "bg-[#d4ff2e]";
+  if (p >= 80) return "bg-violet-600";
   if (p >= 50) return "bg-[#4a9eff]";
   if (p >= 25) return "bg-[#ff9933]";
   return "bg-[#ff3d8a]";

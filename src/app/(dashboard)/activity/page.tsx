@@ -179,7 +179,7 @@ export default function ActivityPage() {
               onClick={() => setTypeFilter(f.value)}
               className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                 typeFilter === f.value
-                  ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
+                  ? "border-violet-500 bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
                   : "border-border text-muted hover:border-muted-2"
               }`}
             >
@@ -194,7 +194,7 @@ export default function ActivityPage() {
                 onClick={() => setShowMemberPicker(!showMemberPicker)}
                 className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${
                   selectedActorIds.length > 0
-                    ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
+                    ? "border-violet-500 bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
                     : "border-border text-muted hover:border-muted-2"
                 }`}
               >
@@ -241,7 +241,7 @@ export default function ActivityPage() {
                     })}
                   </div>
                   <div className="border-t border-border mt-2 pt-2 flex justify-end">
-                    <button onClick={() => setShowMemberPicker(false)} className="text-xs px-3 py-1 rounded-md bg-[#d4ff2e] text-[#0a0a0a]">Done</button>
+                    <button onClick={() => setShowMemberPicker(false)} className="text-xs px-3 py-1 rounded-md bg-violet-600 text-[#0a0a0a]">Done</button>
                   </div>
                 </div>
               )}

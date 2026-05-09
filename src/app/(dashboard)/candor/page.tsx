@@ -428,7 +428,7 @@ export default function CandorPage() {
                           onClick={() => setAnswers({ ...answers, [prompt.id]: String(n) })}
                           className={`h-10 w-10 rounded-lg border text-sm font-bold transition-colors ${
                             answers[prompt.id] === String(n)
-                              ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]"
+                              ? "border-violet-500 bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]"
                               : "border-border hover:border-muted-2 text-muted"
                           }`}
                         >

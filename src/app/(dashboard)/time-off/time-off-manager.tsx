@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,7 +38,6 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast";
 import {
-  CalendarOff,
   Plus,
   CheckCircle2,
   XCircle,

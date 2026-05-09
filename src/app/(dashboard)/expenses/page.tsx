@@ -93,7 +93,7 @@ const STATUS_STYLE: Record<string, { label: string; className: string; Icon: Rea
   SUBMITTED: { label: "Submitted", className: "text-blue-400 border-blue-400/30", Icon: Send },
   APPROVED: { label: "Approved", className: "text-green-400 border-green-400/30", Icon: CheckCircle2 },
   REJECTED: { label: "Rejected", className: "text-red-400 border-red-400/30", Icon: XCircle },
-  REIMBURSED: { label: "Reimbursed", className: "text-[color:var(--accent-strong)] border-[#d4ff2e]/30", Icon: CheckCircle2 },
+  REIMBURSED: { label: "Reimbursed", className: "text-[color:var(--accent-strong)] border-violet-500/30", Icon: CheckCircle2 },
 };
 
 function fmtMoney(amount: number, currency: string): string {

@@ -579,7 +579,7 @@ export default function DashboardContent() {
                         <p className="text-sm mt-1.5 italic text-foreground leading-relaxed">&ldquo;{k.message}&rdquo;</p>
                         <div className="flex items-center gap-2 mt-2">
                           {k.companyValue && (
-                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
+                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-violet-500/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
                           )}
                           <span className="text-[10px] text-muted">{timeAgo}</span>
                         </div>

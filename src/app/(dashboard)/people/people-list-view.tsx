@@ -32,6 +32,7 @@ import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { SavedViewsPicker } from "@/components/ui/saved-views-picker";
 
 interface Person {
   id: string;
@@ -636,6 +637,16 @@ export default function PeopleListView() {
             {selectedIds.size === filtered.length ? "Deselect All" : "Select All"}
           </Button>
         )}
+        <SavedViewsPicker<{ search: string; dept: string; status: string }>
+          scope="people"
+          currentState={{ search: searchQuery, dept: deptFilter, status: statusFilter }}
+          onLoad={(state) => {
+            setSearchQuery(state.search);
+            setDeptFilter(state.dept);
+            setStatusFilter(state.status);
+            setPage(1);
+          }}
+        />
       </div>
 
       {/* Bulk success toast */}
@@ -669,7 +680,7 @@ export default function PeopleListView() {
                     {canManagePeople && <button
                       onClick={(e) => { e.stopPropagation(); toggleSelect(person.id); }}
                       className={`mt-1 h-5 w-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-                        isSelected ? "border-[#d4ff2e] bg-[#d4ff2e]" : "border-border hover:border-muted"
+                        isSelected ? "border-violet-500 bg-violet-600" : "border-border hover:border-muted"
                       }`}
                     >
                       {isSelected && <span className="text-[#0a0a0a] text-xs font-bold">&#10003;</span>}

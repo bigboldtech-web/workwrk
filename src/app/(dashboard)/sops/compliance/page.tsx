@@ -27,7 +27,7 @@ function rateColor(rate: number) {
 
 function rateBarColor(rate: number) {
   if (rate >= 90) return "bg-green-500";
-  if (rate >= 70) return "bg-[#d4ff2e]";
+  if (rate >= 70) return "bg-violet-600";
   if (rate >= 50) return "bg-orange-500";
   return "bg-red-500";
 }

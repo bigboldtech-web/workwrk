@@ -77,7 +77,7 @@ function getStepsCount(sop: SOP): number {
 
 function getComplianceColor(score: number) {
   if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-[#d4ff2e]";
+  if (score >= 70) return "bg-violet-600";
   if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
@@ -235,7 +235,7 @@ function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
     <div className="space-y-4 py-4">
       {checking ? (
         <div className="p-4 text-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent mx-auto mb-2" />
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-violet-500 border-t-transparent mx-auto mb-2" />
           <p className="text-xs text-muted">Checking for extension...</p>
         </div>
       ) : (
@@ -829,7 +829,7 @@ export default function SOPsPage() {
   }, [isEmployee, router]);
 
   if (isEmployee) {
-    return <div className="flex items-center justify-center h-64"><div className="h-6 w-6 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent" /></div>;
+    return <div className="flex items-center justify-center h-64"><div className="h-6 w-6 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" /></div>;
   }
 
   const publishedSops = sops.filter(s => s.status === "PUBLISHED");
@@ -898,7 +898,7 @@ export default function SOPsPage() {
                       onClick={() => setSopType(opt.value)}
                       className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-all text-center ${
                         sopType === opt.value
-                          ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
+                          ? "border-violet-500 bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
                           : "border-border hover:border-muted-2 text-muted"
                       }`}
                     >

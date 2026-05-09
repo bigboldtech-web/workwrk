@@ -25,7 +25,7 @@ const CADENCE_DAYS: Record<string, number> = {
 function statusColor(status: string): string {
   switch (status) {
     case "COMPLETED": return "text-green-400 border-green-400/30";
-    case "ON_TRACK": return "text-[color:var(--accent-strong)] border-[#d4ff2e]/30";
+    case "ON_TRACK": return "text-[color:var(--accent-strong)] border-violet-500/30";
     case "AT_RISK": return "text-amber-400 border-amber-400/30";
     case "BEHIND": return "text-red-400 border-red-400/30";
     default: return "text-muted border-white/20";
@@ -265,7 +265,7 @@ export default async function OkrDetailPage(
             <ul className="space-y-3">
               {allCheckIns.map((c) => (
                 <li key={c.id} className="flex items-start gap-3 text-sm">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#d4ff2e] mt-2 flex-shrink-0" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-violet-600 mt-2 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-3">
                       <span className="truncate">

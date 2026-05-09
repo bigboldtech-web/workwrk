@@ -1498,7 +1498,7 @@ export default function SettingsPage() {
                       </p>
                       <div className="mt-2 h-1.5 w-full rounded-full bg-border">
                         <div
-                          className={`h-full rounded-full transition-all ${isOver ? "bg-red-500" : "bg-[#d4ff2e]"}`}
+                          className={`h-full rounded-full transition-all ${isOver ? "bg-red-500" : "bg-violet-600"}`}
                           style={{ width: `${Math.min(pct, 100)}%` }}
                         />
                       </div>

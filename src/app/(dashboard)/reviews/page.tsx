@@ -220,7 +220,7 @@ export default function ReviewsPage() {
       {/* Active Cycle Banner */}
       {!loading && activeCycle && (
         <Card
-          className="border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.06)] cursor-pointer hover:border-[#d4ff2e]/50 transition-colors"
+          className="border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.06)] cursor-pointer hover:border-violet-500/50 transition-colors"
           onClick={() => router.push(`/reviews/${activeCycle.id}`)}
         >
           <CardContent className="p-5">
@@ -242,7 +242,7 @@ export default function ReviewsPage() {
               return (
                 <>
                   <div className="flex items-center gap-2 mb-2">
-                    <Progress value={pct} className="h-2 flex-1" indicatorClassName="bg-[#d4ff2e]" />
+                    <Progress value={pct} className="h-2 flex-1" indicatorClassName="bg-violet-600" />
                     <span className="text-sm font-mono text-[color:var(--accent-strong)]">{pct}%</span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted">

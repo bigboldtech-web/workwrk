@@ -509,7 +509,7 @@ function ColorsSection({
           <button
             type="button"
             onClick={addColor}
-            className="rounded-lg border border-dashed border-border hover:border-[#d4ff2e] hover:text-[color:var(--accent-strong)] text-muted h-full min-h-[120px] flex flex-col items-center justify-center gap-1 text-xs"
+            className="rounded-lg border border-dashed border-border hover:border-violet-500 hover:text-[color:var(--accent-strong)] text-muted h-full min-h-[120px] flex flex-col items-center justify-center gap-1 text-xs"
           >
             <Plus size={16} />
             Add color
@@ -610,7 +610,7 @@ function TypographySection({
           <button
             type="button"
             onClick={addFont}
-            className="w-full rounded-lg border border-dashed border-border hover:border-[#d4ff2e] hover:text-[color:var(--accent-strong)] text-muted py-2 flex items-center justify-center gap-1 text-xs"
+            className="w-full rounded-lg border border-dashed border-border hover:border-violet-500 hover:text-[color:var(--accent-strong)] text-muted py-2 flex items-center justify-center gap-1 text-xs"
           >
             <Plus size={14} /> Add font
           </button>
@@ -639,7 +639,7 @@ function AutosaveBadge({
   if (status === "saving") {
     return (
       <span className={`${common} border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]`}>
-        <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#d4ff2e] animate-pulse" />
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-600 animate-pulse" />
         Saving…
       </span>
     );

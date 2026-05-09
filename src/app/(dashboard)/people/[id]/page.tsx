@@ -75,7 +75,7 @@ function getProgressColor(pct: number) {
 
 function getScoreBg(score: number) {
   if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-[#d4ff2e]";
+  if (score >= 70) return "bg-violet-600";
   if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
@@ -895,7 +895,7 @@ export default function UserProfilePage() {
                     <p className="text-sm font-medium">{s.name}</p>
                     <span className="text-xs text-muted">{s.selfRating}/10</span>
                   </div>
-                  <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-[#d4ff2e]" />
+                  <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-violet-600" />
                   {s.managerRating && (
                     <p className="text-[10px] text-muted mt-1">Manager rating: {s.managerRating}/10</p>
                   )}
@@ -950,7 +950,7 @@ export default function UserProfilePage() {
                     <p className="text-sm mt-1 italic text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
                     <div className="flex items-center gap-2 mt-2">
                       {k.companyValue && (
-                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#d4ff2e]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
+                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-violet-500/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
                       )}
                       <span className="text-[10px] text-muted">{new Date(k.createdAt).toLocaleDateString()}</span>
                     </div>
