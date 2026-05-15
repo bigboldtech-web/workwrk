@@ -23,6 +23,9 @@ export interface DataTableProps<T> {
   rowKey: (row: T, index: number) => string;
   onRowClick?: (row: T) => void;
   selectable?: boolean;
+  /** When set, only rows for which this returns true show a checkbox.
+   * "Select all" toggles only the selectable subset. */
+  rowSelectable?: (row: T) => boolean;
   selectedKeys?: string[];
   onSelectionChange?: (keys: string[]) => void;
   sort?: SortState;
@@ -40,6 +43,7 @@ export function DataTable<T>({
   rowKey,
   onRowClick,
   selectable,
+  rowSelectable,
   selectedKeys = [],
   onSelectionChange,
   sort,
@@ -50,12 +54,20 @@ export function DataTable<T>({
   rowAction,
   className,
 }: DataTableProps<T>) {
-  const allKeys = React.useMemo(() => rows.map((r, i) => rowKey(r, i)), [rows, rowKey]);
-  const allSelected = selectable && allKeys.length > 0 && selectedKeys.length === allKeys.length;
+  const selectableKeys = React.useMemo(
+    () =>
+      rows
+        .map((r, i) => ({ key: rowKey(r, i), ok: rowSelectable ? rowSelectable(r) : true }))
+        .filter((x) => x.ok)
+        .map((x) => x.key),
+    [rows, rowKey, rowSelectable],
+  );
+  const allSelected =
+    selectable && selectableKeys.length > 0 && selectableKeys.every((k) => selectedKeys.includes(k));
 
   function toggleAll() {
     if (!onSelectionChange) return;
-    onSelectionChange(allSelected ? [] : allKeys);
+    onSelectionChange(allSelected ? [] : selectableKeys);
   }
   function toggleOne(key: string) {
     if (!onSelectionChange) return;
@@ -135,6 +147,7 @@ export function DataTable<T>({
             rows.map((row, i) => {
               const key = rowKey(row, i);
               const selected = selectedKeys.includes(key);
+              const canSelect = rowSelectable ? rowSelectable(row) : true;
               return (
                 <tr
                   key={key}
@@ -144,12 +157,14 @@ export function DataTable<T>({
                 >
                   {selectable && (
                     <td className="dash-table-checkbox" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        aria-label="Select row"
-                        checked={selected}
-                        onChange={() => toggleOne(key)}
-                      />
+                      {canSelect ? (
+                        <input
+                          type="checkbox"
+                          aria-label="Select row"
+                          checked={selected}
+                          onChange={() => toggleOne(key)}
+                        />
+                      ) : null}
                     </td>
                   )}
                   {columns.map((col) => (

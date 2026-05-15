@@ -379,7 +379,7 @@ function MyWeek({
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="divide-y divide-white/5">
+          <div className="divide-y divide-border">
             {week.map((day, i) => {
               const k = dayKey(day.toISOString());
               const entries = byDay.get(k) ?? [];
@@ -631,7 +631,7 @@ function ApprovalQueue({
             />
             <span>{allSelected ? "Clear selection" : "Select all"}</span>
           </div>
-          <ul className="divide-y divide-white/5">
+          <ul className="divide-y divide-border">
             {rows.map((r) => (
               <li key={r.id} className="p-4 flex items-center justify-between gap-3">
                 <input

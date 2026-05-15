@@ -333,7 +333,7 @@ function ManageTab() {
               </thead>
               <tbody>
                 {courses.map((c) => (
-                  <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={c.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5">
                       <div className="font-medium">{c.title}</div>
                       {c.description && <div className="text-[10px] text-muted line-clamp-1">{c.description}</div>}

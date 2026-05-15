@@ -9,7 +9,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, CheckSquare, Star, Inbox as InboxIcon, AlertTriangle, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText, GraduationCap, Briefcase } from "lucide-react";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { BookOpen, CheckSquare, Star, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText, GraduationCap, Briefcase } from "lucide-react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -342,24 +343,21 @@ export default async function InboxPage() {
     tasks.filter((t) => isOverdue(t.endAt ?? t.date)).length;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <InboxIcon size={22} /> Inbox
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            {total === 0
-              ? "Nothing needs you right now."
-              : `${total} item${total === 1 ? "" : "s"} need you`}
-            {overdueCount > 0 && (
-              <span className="ml-2 inline-flex items-center gap-1 text-red-400">
-                <AlertTriangle size={12} /> {overdueCount} overdue
-              </span>
-            )}
-          </p>
-        </div>
-      </div>
+    <div className="space-y-3 animate-fade-in">
+      <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Inbox" }]}
+        kicker="Inbox · what needs you"
+        title="Inbox"
+        subtitle={
+          total === 0
+            ? "Nothing needs you right now."
+            : `${total} item${total === 1 ? "" : "s"} need you${overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}.`
+        }
+        stats={total > 0 ? [
+          { label: "Total", value: total },
+          ...(overdueCount > 0 ? [{ label: "Overdue", value: overdueCount }] : []),
+        ] : undefined}
+      />
 
       {total === 0 && (
         <Card>
@@ -379,14 +377,14 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {sopAssignments.map((a) => {
                 const overdue = isOverdue(a.dueDate);
                 return (
                   <li key={a.id}>
                     <Link
                       href={`/sops/${a.sopId}`}
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <span className="text-sm font-medium truncate">{a.sop.title}</span>
@@ -417,7 +415,7 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {tasks.map((t) => {
                 const due = t.endAt ?? t.date;
                 const overdue = isOverdue(due);
@@ -425,7 +423,7 @@ export default async function InboxPage() {
                   <li key={t.id}>
                     <Link
                       href={`/tasks?taskId=${t.id}`}
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <span className="text-sm font-medium truncate">{t.title}</span>
@@ -461,14 +459,14 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {upcomingInterviews.map((iv) => {
                 const when = iv.scheduledAt;
                 return (
                   <li key={iv.id}>
                     <Link
                       href="/recruiting"
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <span className="text-sm font-medium truncate">
@@ -503,12 +501,12 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {incompleteMandatoryCourses.map((e) => (
                 <li key={e.id}>
                   <Link
                     href="/learning"
-                    className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <span className="text-sm font-medium truncate">{e.course.title}</span>
@@ -534,7 +532,7 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {posToApprove.map((p) => {
                 const amount = Number(p.amount);
                 let amountLabel: string;
@@ -547,7 +545,7 @@ export default async function InboxPage() {
                   <li key={p.id}>
                     <Link
                       href="/procurement"
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <span className="font-mono text-xs text-muted">{p.number}</span>
@@ -573,7 +571,7 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {invoicesToApprove.map((inv) => {
                 const amount = Number(inv.amount);
                 const overdue = inv.dueDate < new Date();
@@ -587,7 +585,7 @@ export default async function InboxPage() {
                   <li key={inv.id}>
                     <Link
                       href="/procurement"
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <span className="font-mono text-xs text-muted">{inv.invoiceNumber}</span>
@@ -618,12 +616,12 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {timesheetsToApprove.map((t) => (
                 <li key={t.id}>
                   <Link
                     href="/timesheets"
-                    className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <span className="text-sm font-medium truncate">
@@ -653,14 +651,14 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {timeOffToApprove.map((r) => {
                 const days = Math.floor((r.endDate.getTime() - r.startDate.getTime()) / DAY_MS) + 1;
                 return (
                   <li key={r.id}>
                     <Link
                       href={`/time-off`}
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <span className="text-sm font-medium truncate">
@@ -692,7 +690,7 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {compToApprove.map((c) => {
                 const cur = c.currentSalary === null ? null : Number(c.currentSalary);
                 const prop = c.proposedSalary === null ? null : Number(c.proposedSalary);
@@ -701,7 +699,7 @@ export default async function InboxPage() {
                   <li key={c.id}>
                     <Link
                       href={`/compensation/${c.cycleId}`}
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <span className="text-sm font-medium truncate">
@@ -730,7 +728,7 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {expensesToApprove.map((e) => {
                 const amount = Number(e.amount);
                 const submittedAgo = e.submittedAt
@@ -746,7 +744,7 @@ export default async function InboxPage() {
                   <li key={e.id}>
                     <Link
                       href={`/expenses/${e.id}`}
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <span className="text-sm font-medium truncate">{e.description}</span>
@@ -782,12 +780,12 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {staleOkrs.map((o) => (
                 <li key={o.id}>
                   <Link
                     href={`/okrs/${o.id}`}
-                    className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                    className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <span className="text-sm font-medium truncate">{o.title}</span>
@@ -813,14 +811,14 @@ export default async function InboxPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {reviews.map((r) => {
                 const subject = `${r.subject.firstName} ${r.subject.lastName}`.trim();
                 return (
                   <li key={r.id}>
                     <Link
                       href={`/reviews/${r.id}`}
-                      className="flex items-center justify-between py-3 hover:bg-white/5 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <span className="text-sm font-medium truncate">

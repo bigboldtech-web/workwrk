@@ -10,12 +10,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
 import Link from "next/link";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -38,8 +32,9 @@ import {
 import { Label } from "@/components/ui/label";
 import { useRole } from "@/hooks/use-role";
 import { useToast } from "@/components/ui/toast";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import {
-  Receipt,
   Plus,
   CheckCircle2,
   XCircle,
@@ -154,28 +149,35 @@ export default function ExpensesPage() {
     load(tab);
   }
 
+  const totals = useMemo(() => {
+    const submitted = items.filter((i) => i.status === "SUBMITTED").length;
+    const approved = items.filter((i) => i.status === "APPROVED" || i.status === "REIMBURSED").length;
+    return { submitted, approved };
+  }, [items]);
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Receipt size={20} /> Expenses
-          </h1>
-          <p className="text-muted text-sm mt-1">
-            Submit, approve, and audit reimbursable expenses.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <a
-            href={`/api/export/expenses?scope=${tab}`}
-            className="inline-flex items-center gap-1.5 h-9 px-3 text-sm rounded-md border border-line text-fg hover:bg-card-2/40"
-          >
-            Export CSV
-          </a>
-          <Button onClick={() => setShowCreate(true)}>
-            <Plus size={14} className="mr-1.5" /> New expense
-          </Button>
-        </div>
+    <div className="space-y-3 animate-fade-in">
+      <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Expenses" }]}
+        kicker="Expenses · reimbursements"
+        title="Expenses"
+        subtitle="Submit, approve, and audit reimbursable expenses."
+        stats={items.length > 0 ? [
+          { label: "Submitted", value: totals.submitted },
+          { label: "Approved", value: totals.approved },
+          { label: "Total", value: items.length },
+        ] : undefined}
+      />
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        <a
+          href={`/api/export/expenses?scope=${tab}`}
+          className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border text-foreground hover:bg-surface-2 transition-colors"
+        >
+          Export CSV
+        </a>
+        <Button onClick={() => setShowCreate(true)} size="sm">
+          <Plus size={14} className="mr-1.5" /> New expense
+        </Button>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
@@ -185,39 +187,15 @@ export default function ExpensesPage() {
           {isManager && <TabsTrigger value="all">All</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value={tab} className="mt-4">
-          <Card>
-            <CardContent className="p-0">
-              {loading ? (
-                <div className="p-8 text-center text-sm text-muted">Loading…</div>
-              ) : items.length === 0 ? (
-                <div className="p-10 text-center text-sm text-muted">
-                  {tab === "mine" && "No expenses yet. Submit your first one above."}
-                  {tab === "approve" && "Nothing waiting on you."}
-                  {tab === "all" && "No expenses for this org."}
-                </div>
-              ) : (
-                <ExpenseTable
-                  rows={items}
-                  showApprovalActions={tab === "approve"}
-                  onDecide={decide}
-                  selectedIds={selectedIds}
-                  onToggleSelected={(id) => {
-                    setSelectedIds((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(id)) next.delete(id);
-                      else next.add(id);
-                      return next;
-                    });
-                  }}
-                  onToggleAll={(allSelected) => {
-                    if (allSelected) setSelectedIds(new Set());
-                    else setSelectedIds(new Set(items.filter((e) => e.status === "SUBMITTED").map((e) => e.id)));
-                  }}
-                />
-              )}
-            </CardContent>
-          </Card>
+        <TabsContent value={tab} className="mt-3">
+          <ExpensesDataTable
+            rows={items}
+            loading={loading}
+            tab={tab}
+            selectedKeys={selectedArray}
+            onSelectionChange={(keys) => setSelectedIds(new Set(keys))}
+            onDecide={decide}
+          />
         </TabsContent>
       </Tabs>
 
@@ -245,117 +223,132 @@ export default function ExpensesPage() {
   );
 }
 
-function ExpenseTable({
+function ExpensesDataTable({
   rows,
-  showApprovalActions,
+  loading,
+  tab,
+  selectedKeys,
+  onSelectionChange,
   onDecide,
-  selectedIds,
-  onToggleSelected,
-  onToggleAll,
 }: {
   rows: ExpenseRow[];
-  showApprovalActions: boolean;
+  loading: boolean;
+  tab: "mine" | "approve" | "all";
+  selectedKeys: string[];
+  onSelectionChange: (keys: string[]) => void;
   onDecide: (id: string, decision: "APPROVE" | "REJECT" | "REIMBURSE", note?: string) => void;
-  selectedIds: Set<string>;
-  onToggleSelected: (id: string) => void;
-  onToggleAll: (allSelected: boolean) => void;
 }) {
-  const submittedRows = rows.filter((r) => r.status === "SUBMITTED");
-  const allChecked = showApprovalActions && submittedRows.length > 0
-    && submittedRows.every((r) => selectedIds.has(r.id));
+  const showApprovalActions = tab === "approve";
+  const columns: DataTableColumn<ExpenseRow>[] = [
+    {
+      key: "date",
+      header: "Date",
+      sortable: true,
+      width: 110,
+      cell: (e) => (
+        <span className="text-muted whitespace-nowrap">
+          {new Date(e.expenseDate).toLocaleDateString()}
+        </span>
+      ),
+    },
+    {
+      key: "description",
+      header: "Description",
+      sortable: true,
+      cell: (e) => (
+        <Link href={`/expenses/${e.id}`} className="font-medium hover:underline">
+          {e.description}
+        </Link>
+      ),
+    },
+    {
+      key: "category",
+      header: "Category",
+      width: 140,
+      cell: (e) => (
+        <span className="text-muted">{CATEGORY_LABEL[e.category] ?? e.category}</span>
+      ),
+    },
+    {
+      key: "amount",
+      header: "Amount",
+      align: "right",
+      sortable: true,
+      width: 120,
+      cell: (e) => <span className="font-mono">{fmtMoney(e.amount, e.currency)}</span>,
+    },
+    {
+      key: "reporter",
+      header: "Reporter",
+      width: 140,
+      cell: (e) => (
+        <span className="text-muted truncate block">
+          {e.reporter ? `${e.reporter.firstName} ${e.reporter.lastName}` : "—"}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      width: 130,
+      cell: (e) => {
+        const style = STATUS_STYLE[e.status] ?? STATUS_STYLE.DRAFT;
+        const StatusIcon = style.Icon;
+        return (
+          <Badge variant="outline" className={`text-[10px] gap-1 ${style.className}`}>
+            <StatusIcon size={10} />
+            {style.label}
+          </Badge>
+        );
+      },
+    },
+  ];
+
+  const emptyMessage =
+    tab === "mine" ? "No expenses yet. Submit your first one above."
+    : tab === "approve" ? "Nothing waiting on you."
+    : "No expenses for this org.";
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs text-muted border-b border-white/5">
-            {showApprovalActions && (
-              <th className="px-3 py-2.5 w-8">
-                <input
-                  type="checkbox"
-                  checked={allChecked}
-                  onChange={() => onToggleAll(allChecked)}
-                  aria-label="Select all submitted"
-                />
-              </th>
-            )}
-            <th className="px-4 py-2.5 font-normal">Date</th>
-            <th className="px-4 py-2.5 font-normal">Description</th>
-            <th className="px-4 py-2.5 font-normal">Category</th>
-            <th className="px-4 py-2.5 font-normal text-right">Amount</th>
-            <th className="px-4 py-2.5 font-normal">Reporter</th>
-            <th className="px-4 py-2.5 font-normal">Status</th>
-            {showApprovalActions && <th className="px-4 py-2.5 font-normal text-right">Actions</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((e) => {
-            const style = STATUS_STYLE[e.status] ?? STATUS_STYLE.DRAFT;
-            const StatusIcon = style.Icon;
-            const checkable = e.status === "SUBMITTED";
-            return (
-              <tr key={e.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                {showApprovalActions && (
-                  <td className="px-3 py-2.5">
-                    {checkable && (
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(e.id)}
-                        onChange={() => onToggleSelected(e.id)}
-                        aria-label={`Select ${e.description}`}
-                      />
-                    )}
-                  </td>
-                )}
-                <td className="px-4 py-2.5 text-xs text-muted whitespace-nowrap">
-                  {new Date(e.expenseDate).toLocaleDateString()}
-                </td>
-                <td className="px-4 py-2.5">
-                  <Link href={`/expenses/${e.id}`} className="font-medium hover:underline">
-                    {e.description}
-                  </Link>
-                </td>
-                <td className="px-4 py-2.5 text-xs text-muted">{CATEGORY_LABEL[e.category] ?? e.category}</td>
-                <td className="px-4 py-2.5 text-right font-mono">{fmtMoney(e.amount, e.currency)}</td>
-                <td className="px-4 py-2.5 text-xs text-muted truncate max-w-32">
-                  {e.reporter ? `${e.reporter.firstName} ${e.reporter.lastName}` : "—"}
-                </td>
-                <td className="px-4 py-2.5">
-                  <Badge variant="outline" className={`text-[10px] gap-1 ${style.className}`}>
-                    <StatusIcon size={10} />
-                    {style.label}
-                  </Badge>
-                </td>
-                {showApprovalActions && (
-                  <td className="px-4 py-2.5 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        onClick={() => onDecide(e.id, "APPROVE")}
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs text-red-400"
-                        onClick={() => {
-                          const note = prompt("Reason for rejection?") ?? undefined;
-                          if (note !== undefined) onDecide(e.id, "REJECT", note);
-                        }}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <DataTable<ExpenseRow>
+      columns={columns}
+      rows={rows}
+      rowKey={(r) => r.id}
+      loading={loading}
+      empty={emptyMessage}
+      selectable={showApprovalActions}
+      rowSelectable={(r) => r.status === "SUBMITTED"}
+      selectedKeys={selectedKeys}
+      onSelectionChange={onSelectionChange}
+      rowAction={
+        showApprovalActions
+          ? (e) =>
+              e.status === "SUBMITTED" ? (
+                <div className="flex items-center justify-end gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => onDecide(e.id, "APPROVE")}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs text-rose-500"
+                    onClick={() => {
+                      const note = prompt("Reason for rejection?") ?? undefined;
+                      if (note !== undefined) onDecide(e.id, "REJECT", note);
+                    }}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              ) : null
+          : undefined
+      }
+    />
   );
 }
 

@@ -169,7 +169,7 @@ function VendorsTab() {
               </thead>
               <tbody>
                 {rows.map((v) => (
-                  <tr key={v.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={v.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2">
                         <Building2 size={12} className="text-muted" />
@@ -367,7 +367,7 @@ function POsTab() {
               </thead>
               <tbody>
                 {rows.map((p) => (
-                  <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={p.id} className="border-b border-white/5 hover:bg-surface-2">
                     {tab === "approve" && (
                       <td className="px-3 py-2.5">
                         {p.status === "SUBMITTED" ? (
@@ -637,7 +637,7 @@ function InvoicesTab() {
                 {rows.map((inv) => {
                   const isOverdue = new Date(inv.dueDate) < new Date() && inv.status !== "PAID";
                   return (
-                    <tr key={inv.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <tr key={inv.id} className="border-b border-white/5 hover:bg-surface-2">
                       <td className="px-3 py-2.5">
                         {inv.status === "PENDING" ? (
                           <input

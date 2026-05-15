@@ -347,7 +347,7 @@ function VarianceTab() {
                   const goodColor = (r.variance > 0 && !isExpenseLike) || (r.variance < 0 && isExpenseLike);
                   const badColor = (r.variance < 0 && !isExpenseLike) || (r.variance > 0 && isExpenseLike);
                   return (
-                    <tr key={`${r.accountId}-${r.periodId}-${i}`} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <tr key={`${r.accountId}-${r.periodId}-${i}`} className="border-b border-white/5 hover:bg-surface-2">
                       <td className="px-4 py-2 text-xs">
                         <span className="font-mono text-muted mr-2">{r.accountCode}</span>{r.accountName}
                       </td>

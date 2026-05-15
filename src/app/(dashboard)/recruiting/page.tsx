@@ -246,7 +246,7 @@ function JobsTab() {
               </thead>
               <tbody>
                 {rows.map((j) => (
-                  <tr key={j.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={j.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5">
                       <div className="font-medium">{j.title}</div>
                       <div className="text-[10px] text-muted">
@@ -460,7 +460,7 @@ function CandidatesTab() {
               </thead>
               <tbody>
                 {rows.map((c) => (
-                  <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={c.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5">
                       <div className="font-medium">{c.firstName} {c.lastName}</div>
                       {c.hiredUserId && (
@@ -690,6 +690,12 @@ function PipelineTab() {
   const { toast } = useToast();
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
+  // Drag-and-drop state. `draggingId` is the in-flight app; `dropTarget`
+  // is the stage column under the cursor. We track both client-side so
+  // the visual feedback (faded card + highlighted column) doesn't
+  // require a re-fetch.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<Application["stage"] | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -726,6 +732,9 @@ function PipelineTab() {
       if (reason === null) return;
       body = { ...body, rejectionReason: reason };
     }
+    // Optimistic move so DnD feels instant; rolled back on failure.
+    const prev = apps;
+    setApps((cur) => cur.map((a) => (a.id === appId ? { ...a, stage } : a)));
     const res = await fetch(`/api/recruiting/applications/${appId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -734,10 +743,24 @@ function PipelineTab() {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       toast({ type: "error", title: "Couldn't move", description: data?.error });
+      setApps(prev);
       return;
     }
     toast({ type: "success", title: `Moved to ${STAGE_LABEL[stage]}` });
-    load();
+    // No full reload needed — the optimistic state is correct on success.
+    // If the server enriches fields we missed, a future visit refetches.
+  }
+
+  // Find the app being dragged so we can no-op a same-stage drop without
+  // bothering the server.
+  function handleDrop(stage: Application["stage"]) {
+    const id = draggingId;
+    setDraggingId(null);
+    setDropTarget(null);
+    if (!id) return;
+    const app = apps.find((a) => a.id === id);
+    if (!app || app.stage === stage) return;
+    move(id, stage);
   }
 
   if (loading) return <div className="text-sm text-muted text-center py-8">Loading…</div>;
@@ -746,8 +769,32 @@ function PipelineTab() {
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
       {STAGES.map((s) => {
         const list = byStage.get(s) ?? [];
+        const isDropTarget = dropTarget === s;
         return (
-          <Card key={s} className="min-h-[200px]">
+          <Card
+            key={s}
+            className={
+              "min-h-[200px] transition-colors " +
+              (isDropTarget ? "border-[color:var(--accent-strong)] bg-[color:var(--accent-soft)]" : "")
+            }
+            onDragOver={(e) => {
+              if (!draggingId) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (dropTarget !== s) setDropTarget(s);
+            }}
+            onDragLeave={(e) => {
+              // Only clear when we leave the card entirely, not when
+              // entering a child element (relatedTarget will be inside).
+              if (!(e.currentTarget as Node).contains(e.relatedTarget as Node | null)) {
+                if (dropTarget === s) setDropTarget(null);
+              }
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              handleDrop(s);
+            }}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="text-xs uppercase tracking-wide flex items-center justify-between">
                 <span>{STAGE_LABEL[s]}</span>
@@ -756,10 +803,17 @@ function PipelineTab() {
             </CardHeader>
             <CardContent className="space-y-2 p-3">
               {list.length === 0 ? (
-                <p className="text-[10px] text-muted">—</p>
+                <p className="text-[10px] text-muted">{isDropTarget ? "Drop here" : "—"}</p>
               ) : (
                 list.map((a) => (
-                  <ApplicationCard key={a.id} app={a} onMove={move} />
+                  <ApplicationCard
+                    key={a.id}
+                    app={a}
+                    onMove={move}
+                    isDragging={draggingId === a.id}
+                    onDragStart={() => setDraggingId(a.id)}
+                    onDragEnd={() => { setDraggingId(null); setDropTarget(null); }}
+                  />
                 ))
               )}
             </CardContent>
@@ -773,13 +827,30 @@ function PipelineTab() {
 function ApplicationCard({
   app,
   onMove,
+  isDragging,
+  onDragStart,
+  onDragEnd,
 }: {
   app: Application;
   onMove: (id: string, stage: Application["stage"]) => void;
+  isDragging?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
 }) {
   const next = nextStage(app.stage);
   return (
-    <div className="rounded-md border border-white/10 bg-card-2/30 p-2 text-xs hover:border-white/20 transition-colors">
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("application/x-app-id", app.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart?.();
+      }}
+      onDragEnd={() => onDragEnd?.()}
+      className={
+        "rounded-md border border-white/10 bg-card-2/30 p-2 text-xs hover:border-white/20 transition-all cursor-grab active:cursor-grabbing " +
+        (isDragging ? "opacity-40" : "")
+      }>
       <div className="font-medium truncate">
         {app.candidate.firstName} {app.candidate.lastName}
       </div>
@@ -929,7 +1000,7 @@ function InterviewsTab() {
                   const when = new Date(iv.scheduledAt);
                   const isPast = when.getTime() < Date.now();
                   return (
-                    <tr key={iv.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <tr key={iv.id} className="border-b border-white/5 hover:bg-surface-2">
                       <td className="px-4 py-2.5 text-xs">
                         <div>{when.toLocaleDateString()}</div>
                         <div className="text-[10px] text-muted">

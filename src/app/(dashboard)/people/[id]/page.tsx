@@ -177,7 +177,30 @@ const FREQ_COLORS: Record<string, string> = {
   ANNUALLY: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
 };
 
+// ─── Local data shapes ──────────────────────────────────────────────
+// Lookup arrays only. The full UserDetail shape from /api/users/[id]
+// is too polymorphic to hand-type without mirroring the entire Prisma
+// include tree (kpiRecords / scoreHistory / performanceSummary / _count
+// / etc.). We leave `user` as `any` for now and tighten the rest.
+
+interface DeptOpt { id: string; name: string }
+interface RoleOpt { id: string; title?: string; name?: string; description?: string | null; departmentId?: string | null; level?: string }
+interface OfficeOpt { id: string; name: string; city?: string | null; country?: string | null; isHeadquarters?: boolean }
+interface UserOpt { id: string; firstName?: string; lastName?: string; role?: { title?: string } | null; accessLevel?: string }
+interface AssetRow {
+  id: string;
+  name?: string;
+  type?: string;
+  brand?: string | null;
+  model?: string | null;
+  serialNumber?: string | null;
+  imeiNumber?: string | null;
+  condition?: string | null;
+  assignedAt?: string | null;
+}
+
 function KraAssignmentsTab({ userId }: { userId: string }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedKras, setExpandedKras] = useState<Set<string>>(new Set());
@@ -201,7 +224,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
         const items = Array.isArray(data) ? data : data.assignments ?? data.data ?? [];
         setAssignments(items);
         // Auto-expand all KRAs so user sees everything
-        setExpandedKras(new Set(items.map((a: any) => a.id)));
+        setExpandedKras(new Set(items.map((a: { id: string }) => a.id)));
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -215,6 +238,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
     });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const totalWeightage = assignments.reduce((sum: number, a: any) => sum + (a.weightage || 0), 0);
 
   if (loading) {
@@ -256,6 +280,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
         indicatorClassName={totalWeightage === 100 ? "bg-green-500" : "bg-orange-500"}
       />
 
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
       {assignments.map((a: any) => {
         const isExpanded = expandedKras.has(a.id);
         const kpis = a.kra?.kpis ?? [];
@@ -263,7 +288,9 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
         // Calculate overall KRA score from KPIs
         let totalPct = 0;
         let recordedCount = 0;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const kpiDetails = kpis.map((kpi: any) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const record = kpi.records?.find((r: any) => r.period === selectedPeriod) || kpi.records?.[0];
           const target = record?.targetValue || kpi.targetValue || 0;
           const actual = record?.actualValue ?? null;
@@ -326,6 +353,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                   {kpiDetails.length === 0 ? (
                     <p className="text-xs text-muted p-4 text-center">No KPIs defined for this KRA</p>
                   ) : (
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     kpiDetails.map((kpi: any, i: number) => (
                       <div key={i} className="px-4 py-3">
                         {/* KPI Header Row */}
@@ -422,6 +450,7 @@ export default function UserProfilePage() {
   const { id } = useParams();
   const router = useRouter();
   const { isAdmin, isManager } = useRole();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { success: toastSuccess, error: toastError } = useToast();
@@ -435,10 +464,10 @@ export default function UserProfilePage() {
   const [editDob, setEditDob] = useState("");
   const [editOfficeId, setEditOfficeId] = useState("");
   const [editManagerId, setEditManagerId] = useState("");
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [roles, setRoles] = useState<any[]>([]);
-  const [offices, setOffices] = useState<any[]>([]);
-  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<DeptOpt[]>([]);
+  const [roles, setRoles] = useState<RoleOpt[]>([]);
+  const [offices, setOffices] = useState<OfficeOpt[]>([]);
+  const [allUsers, setAllUsers] = useState<UserOpt[]>([]);
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -495,7 +524,7 @@ export default function UserProfilePage() {
   const handleSaveEdit = async () => {
     setSaving(true);
     try {
-      const body: any = {};
+      const body: Record<string, unknown> = {};
       if (editDepartmentId) body.departmentId = editDepartmentId;
       if (editRoleId) body.roleId = editRoleId;
       // Only include accessLevel when it actually changed AND the caller
@@ -523,8 +552,9 @@ export default function UserProfilePage() {
       setUser(updated);
       setShowEditDialog(false);
       toastSuccess("Profile updated successfully");
-    } catch (err: any) {
-      toastError(err?.message || "Failed to update profile");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update profile";
+      toastError(message);
     } finally {
       setSaving(false);
     }
@@ -544,7 +574,7 @@ export default function UserProfilePage() {
     return (
       <div className="space-y-3 animate-fade-in">
         <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="h-28 bg-surface rounded-lg border border-border animate-pulse" />
           ))}
@@ -637,7 +667,7 @@ export default function UserProfilePage() {
                     <Select value={editDepartmentId} onValueChange={setEditDepartmentId}>
                       <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
                       <SelectContent>
-                        {departments.map((d: any) => (
+                        {departments.map((d) => (
                           <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
                         ))}
                       </SelectContent>
@@ -648,7 +678,7 @@ export default function UserProfilePage() {
                     <Select value={editRoleId} onValueChange={setEditRoleId}>
                       <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
                       <SelectContent>
-                        {roles.map((r: any) => (
+                        {roles.map((r) => (
                           <SelectItem key={r.id} value={r.id}>{r.title}</SelectItem>
                         ))}
                       </SelectContent>
@@ -676,7 +706,7 @@ export default function UserProfilePage() {
                       <SelectContent>
                         <SelectItem value="none">— No reporting manager —</SelectItem>
                         {allUsers
-                          .filter((u) => u.id !== id && ["MANAGER", "TEAM_LEAD", "HR", "DIRECTOR", "VP", "C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(u.accessLevel))
+                          .filter((u) => u.id !== id && u.accessLevel != null && ["MANAGER", "TEAM_LEAD", "HR", "DIRECTOR", "VP", "C_LEVEL", "COMPANY_ADMIN", "SUPER_ADMIN"].includes(u.accessLevel))
                           .map((u) => (
                             <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName}</SelectItem>
                           ))
@@ -698,7 +728,7 @@ export default function UserProfilePage() {
                     </Select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>Date of Birth</Label>
                     <Input type="date" value={editDob} onChange={(e) => setEditDob(e.target.value)} />
@@ -714,7 +744,7 @@ export default function UserProfilePage() {
                             No offices yet. Add one in <span className="text-[color:var(--accent-strong)]">Organization → Offices</span>.
                           </div>
                         ) : (
-                          offices.map((o: any) => (
+                          offices.map((o) => (
                             <SelectItem key={o.id} value={o.id}>
                               {o.name}{o.city ? ` · ${o.city}` : ""}{o.isHeadquarters ? " (HQ)" : ""}
                             </SelectItem>
@@ -828,6 +858,7 @@ export default function UserProfilePage() {
           {!user.tasks || user.tasks.length === 0 ? (
             <p className="text-muted text-sm py-8 text-center">No calendar entries yet</p>
           ) : (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.tasks.map((t: any) => (
               <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3">
                 <div className={`h-2 w-2 rounded-full flex-shrink-0 ${
@@ -860,6 +891,7 @@ export default function UserProfilePage() {
           {user.kpiRecords.length === 0 ? (
             <p className="text-muted text-sm py-8 text-center">No KPI records yet</p>
           ) : (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.kpiRecords.map((r: any) => (
               <div key={r.id} className="rounded-lg border border-border bg-surface p-3">
                 <div className="flex items-center justify-between">
@@ -888,7 +920,8 @@ export default function UserProfilePage() {
           {user.skills.length === 0 ? (
             <p className="text-muted text-sm py-8 text-center">No skills added yet</p>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {user.skills.map((s: any) => (
                 <div key={s.id} className="rounded-lg border border-border bg-surface p-3">
                   <div className="flex items-center justify-between mb-2">
@@ -909,6 +942,7 @@ export default function UserProfilePage() {
           {user.reviewsAsSubject.length === 0 ? (
             <p className="text-muted text-sm py-8 text-center">No reviews yet</p>
           ) : (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.reviewsAsSubject.map((r: any) => (
               <div key={r.id} className="rounded-lg border border-border bg-surface p-4">
                 <div className="flex items-center justify-between">
@@ -939,6 +973,7 @@ export default function UserProfilePage() {
           {(!user.kudosReceived || user.kudosReceived.length === 0) ? (
             <p className="text-muted text-sm py-8 text-center">No kudos received yet</p>
           ) : (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.kudosReceived.map((k: any) => (
               <div key={k.id} className="rounded-lg border border-border bg-surface p-4">
                 <div className="flex items-start gap-3">
@@ -973,6 +1008,7 @@ export default function UserProfilePage() {
           {user.checkIns.length === 0 ? (
             <p className="text-muted text-sm py-8 text-center">No check-ins yet</p>
           ) : (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.checkIns.map((c: any) => (
               <div key={c.id} className="rounded-lg border border-border bg-surface p-3">
                 <div className="flex items-center justify-between mb-2">
@@ -991,7 +1027,8 @@ export default function UserProfilePage() {
           {user.directReports.length === 0 ? (
             <p className="text-muted text-sm py-8 text-center">No direct reports</p>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {user.directReports.map((r: any) => (
                 <div
                   key={r.id}
@@ -1023,7 +1060,7 @@ export default function UserProfilePage() {
 }
 
 function AssetsTab({ userId }: { userId: string }) {
-  const [assets, setAssets] = useState<any[]>([]);
+  const [assets, setAssets] = useState<AssetRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1046,13 +1083,13 @@ function AssetsTab({ userId }: { userId: string }) {
     );
   }
 
-  const typeIcons: Record<string, any> = { LAPTOP: Laptop, DESKTOP: Monitor, MONITOR: Monitor, PHONE: Smartphone };
+  const typeIcons: Record<string, React.ComponentType<{ size?: number; className?: string }>> = { LAPTOP: Laptop, DESKTOP: Monitor, MONITOR: Monitor, PHONE: Smartphone };
 
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted mb-3">{assets.length} asset{assets.length !== 1 ? "s" : ""} assigned</p>
-      {assets.map((asset: any) => {
-        const Icon = typeIcons[asset.type] || Package;
+      {assets.map((asset) => {
+        const Icon = (asset.type && typeIcons[asset.type]) || Package;
         return (
           <Card key={asset.id}>
             <CardContent className="p-3">

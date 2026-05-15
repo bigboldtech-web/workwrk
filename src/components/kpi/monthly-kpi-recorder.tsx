@@ -17,6 +17,8 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { useAutosave } from "@/hooks/use-autosave";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
 import {
   getCurrentPeriod,
   getLastPeriod,
@@ -123,37 +125,62 @@ export function MonthlyKpiRecorder({ userId }: Props) {
     }));
   };
 
-  const handleSaveAll = async () => {
-    if (!selectedPeriod) return;
-    setSaving(true);
-    try {
-      const records = Object.entries(formData).map(([kpiId, data]) => ({
+  // Shared save core — called both by the explicit "Save All" button
+  // and by the debounced autosave. `silent=true` skips the success toast
+  // (autosave fires often; the indicator next to the button is feedback
+  // enough) and skips the post-save refetch since the user is likely
+  // mid-edit on another field.
+  const saveCore = useCallback(
+    async (snapshot: RecordFormData, silent: boolean): Promise<void> => {
+      if (!selectedPeriod) return;
+      const records = Object.entries(snapshot).map(([kpiId, data]) => ({
         kpiId,
         actualValue: data.actualValue ? Number(data.actualValue) : null,
         managerNotes: data.managerNotes || null,
       }));
-
       const res = await fetch("/api/kpi-records/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, period: selectedPeriod, records }),
       });
-
       if (!res.ok) {
-        const err = await res.json();
-        toastError(err.error || "Failed to save");
-        return;
+        const err = await res.json().catch(() => ({}));
+        // Throw so useAutosave's catch flips status to "error" — toast
+        // only when the user explicitly hit the button.
+        if (!silent) toastError(err.error || "Failed to save");
+        throw new Error(err.error || "Failed to save");
       }
+      if (!silent) {
+        const result = await res.json();
+        toastSuccess(`Saved ${(result.data || result).saved} KPI records for ${formatPeriodLabel(selectedPeriod)}`);
+        fetchKpis(selectedPeriod);
+      }
+    },
+    [selectedPeriod, userId, toastError, toastSuccess, fetchKpis],
+  );
 
-      const result = await res.json();
-      toastSuccess(`Saved ${(result.data || result).saved} KPI records for ${formatPeriodLabel(selectedPeriod)}`);
-      fetchKpis(selectedPeriod);
+  const handleSaveAll = async () => {
+    if (!selectedPeriod) return;
+    setSaving(true);
+    try {
+      await saveCore(formData, false);
     } catch {
-      toastError("Failed to save KPI records");
+      // saveCore already toasted on hard failure path.
     } finally {
       setSaving(false);
     }
   };
+
+  // Debounced autosave: fires 2s after the user stops typing in any KPI
+  // input. Disabled until a period is selected + initial data loaded so
+  // hydration doesn't trigger a no-op POST.
+  const autosaveEnabled = !!selectedPeriod && !loading && Object.keys(formData).length > 0;
+  const autosave = useAutosave<RecordFormData>({
+    snapshot: formData,
+    enabled: autosaveEnabled,
+    delay: 2000,
+    save: (snapshot) => saveCore(snapshot, true),
+  });
 
   const toggleKra = (kraId: string) => {
     setExpandedKras((prev) => {
@@ -178,7 +205,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
     return (
       <Card>
         <CardContent className="p-8 text-center">
-          <Target size={40} className="mx-auto text-[#d4ff2e] mb-4" />
+          <Target size={40} className="mx-auto text-[color:var(--accent-strong)] mb-4" />
           <h3 className="text-lg font-semibold mb-2">Record Monthly KPIs</h3>
           <p className="text-sm text-muted mb-6">
             Select a period to record or update KPI scores
@@ -203,7 +230,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
     return (
       <Card>
         <CardContent className="p-8 text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent mx-auto" />
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-violet-500 border-t-transparent mx-auto" />
           <p className="text-sm text-muted mt-3">Loading KPIs...</p>
         </CardContent>
       </Card>
@@ -249,11 +276,14 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-2 min-w-[120px]">
                 <Progress value={overallProgress} className="h-2 flex-1" />
-                <span className="text-xs font-mono text-[#d4ff2e]">{overallProgress}%</span>
+                <span className="text-xs font-mono text-[color:var(--accent-strong)]">{overallProgress}%</span>
               </div>
+              {autosaveEnabled && (
+                <AutosaveIndicator status={autosave.status} lastSavedAt={autosave.lastSavedAt} />
+              )}
               <Button onClick={handleSaveAll} disabled={saving} className="gap-1.5">
                 <Save size={14} /> {saving ? "Saving..." : "Save All"}
               </Button>
@@ -384,7 +414,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                           <p className={`text-sm font-mono font-bold ${
                             score == null ? "text-muted-2"
                             : score >= 90 ? "text-green-400"
-                            : score >= 70 ? "text-[#d4ff2e]"
+                            : score >= 70 ? "text-[color:var(--accent-strong)]"
                             : score >= 50 ? "text-orange-400"
                             : "text-red-400"
                           }`}>

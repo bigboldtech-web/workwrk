@@ -232,7 +232,7 @@ function SnapshotRow({
       : "text-green-400";
 
   return (
-    <tr className="border-b border-white/5 hover:bg-white/[0.02]">
+    <tr className="border-b border-white/5 hover:bg-surface-2">
       <td className="px-4 py-2.5 font-medium">{row.name}</td>
       <td className="px-4 py-2.5 text-right font-mono text-xs">{row.currentHeadcount}</td>
       <td className="px-4 py-2.5 text-right font-mono text-xs">{row.plannedHeadcount ?? "—"}</td>

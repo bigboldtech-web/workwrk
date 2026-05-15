@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,6 +156,9 @@ export default function OnboardingPage() {
 
   const activeOnboarding = instances.filter((i) => i.status !== "COMPLETED");
   const completedOnboarding = instances.filter((i) => i.status === "COMPLETED");
+  // Surface a personal "My onboarding" link at the top when the viewer
+  // is themselves a learner — easy to miss otherwise since this page
+  // defaults to the manager / HR perspective.
 
   if (loading) {
     return (
@@ -170,6 +175,7 @@ export default function OnboardingPage() {
 
   return (
     <div className="space-y-3 animate-fade-in">
+      <MyOnboardingHint />
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <PageHeader
           breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Onboarding" }]}
@@ -609,5 +615,69 @@ export default function OnboardingPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+// One-shot fetch + render: if the current user has an active onboarding
+// instance of their own, show a small banner pointing at /onboarding/me.
+// Renders nothing when there's no active instance — silent and safe for
+// managers who aren't being onboarded.
+function MyOnboardingHint() {
+  const { data: session } = useSession();
+  const userId = (session?.user as { id?: string } | undefined)?.id ?? null;
+  const [mine, setMine] = useState<{ active: number; doneSteps: number; totalSteps: number } | null>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    fetch("/api/onboarding?type=instances&mine=true", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const list = (Array.isArray(data) ? data : data?.data ?? []) as Array<{
+          status: string;
+          template: { steps?: unknown[] };
+          progress: Array<{ stepIndex: number; completed: boolean }>;
+        }>;
+        const active = list.filter((i) => i.status !== "COMPLETED");
+        if (active.length === 0) {
+          setMine(null);
+          return;
+        }
+        const totalSteps = active.reduce((s, i) => s + (i.template.steps?.length ?? 0), 0);
+        const doneSteps = active.reduce(
+          (s, i) => s + i.progress.filter((p) => p.completed).length,
+          0,
+        );
+        setMine({ active: active.length, doneSteps, totalSteps });
+      })
+      .catch(() => {
+        if (!cancelled) setMine(null);
+      });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  if (!mine) return null;
+  const pct = mine.totalSteps > 0 ? Math.round((mine.doneSteps / mine.totalSteps) * 100) : 0;
+  return (
+    <Link
+      href="/onboarding/me"
+      className="block rounded-md border border-[color:var(--accent-border)] bg-[color:var(--accent-soft)] px-3 py-2 hover:bg-[color:var(--accent-tint)] transition-colors"
+    >
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <GraduationCap size={14} className="text-[color:var(--accent-strong)] flex-shrink-0" />
+          <span className="text-[12.5px] text-[color:var(--accent-strong)] font-medium">
+            You have {mine.active === 1 ? "an active onboarding journey" : `${mine.active} active journeys`}
+          </span>
+          <span className="text-[11px] text-muted">
+            · {mine.doneSteps}/{mine.totalSteps} steps · {pct}%
+          </span>
+        </div>
+        <span className="text-[11.5px] text-[color:var(--accent-strong)] font-medium">
+          Open your checklist →
+        </span>
+      </div>
+    </Link>
   );
 }

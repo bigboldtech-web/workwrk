@@ -210,7 +210,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
               {rows.length === 0 ? (
                 <p className="text-xs text-muted">No {TYPE_LABELS[type].toLowerCase()} yet.</p>
               ) : (
-                <ul className="divide-y divide-white/5">
+                <ul className="divide-y divide-border">
                   {rows.map((t) => (
                     <li
                       key={t.id}

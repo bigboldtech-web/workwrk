@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { Wrench, Plus, GitBranch, ListPlus, Trash2 } from "lucide-react";
+import { Wrench, Plus, GitBranch, ListPlus, Trash2, GripVertical } from "lucide-react";
 
 type WorkflowStep = {
   id: string;
@@ -323,27 +323,40 @@ function CustomFieldsTab() {
       ) : (
         <div className="space-y-3">
           {Array.from(grouped.entries()).map(([target, fields]) => (
-            <Card key={target}>
-              <CardContent className="p-4">
-                <div className="text-xs uppercase tracking-widest text-muted mb-2">{target}</div>
-                <ul className="divide-y divide-white/5">
-                  {fields.map((f) => (
-                    <li key={f.id} className="py-2 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-medium">
-                          {f.label}
-                          {f.required && <span className="text-red-400 ml-1">*</span>}
-                        </div>
-                        <div className="text-[10px] text-muted font-mono">{f.key} · {FIELD_TYPE_LABEL[f.fieldType]}</div>
-                      </div>
-                      <Badge variant="outline" className={`text-[10px] ${f.active ? "text-green-400 border-green-400/30" : "text-muted border-white/20"}`}>
-                        {f.active ? "Active" : "Disabled"}
-                      </Badge>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
+            <FieldGroup
+              key={target}
+              targetType={target}
+              fields={fields}
+              onReorder={async (newOrder) => {
+                // Optimistic: rewrite local positions in render order so
+                // the drop snaps immediately. Then fan out PATCH calls;
+                // any failure triggers a refetch to roll back.
+                setRows((prev) => {
+                  const byId = new Map(newOrder.map((f, i) => [f.id, i]));
+                  return prev.map((r) =>
+                    r.targetType === target && byId.has(r.id)
+                      ? { ...r, position: byId.get(r.id)! }
+                      : r,
+                  );
+                });
+                try {
+                  await Promise.all(
+                    newOrder.map((f, i) =>
+                      fetch(`/api/custom-fields/${f.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ position: i }),
+                      }).then((r) => {
+                        if (!r.ok) throw new Error("position save failed");
+                      }),
+                    ),
+                  );
+                } catch {
+                  toast({ type: "error", title: "Couldn't save new order — reloading" });
+                  load();
+                }
+              }}
+            />
           ))}
         </div>
       )}
@@ -465,5 +478,120 @@ function CreateFieldDialog({ onClose, onCreated }: { onClose: () => void; onCrea
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// One target-type group inside the custom-fields list. Local state
+// holds the in-flight ordering so a drag feels instant; we only call
+// `onReorder` on drop with the final array. Re-syncs from props on
+// every re-render so a parent refetch wins over local state.
+function FieldGroup({
+  targetType,
+  fields,
+  onReorder,
+}: {
+  targetType: string;
+  fields: CustomField[];
+  onReorder: (newOrder: CustomField[]) => Promise<void>;
+}) {
+  // Sort by position so the user sees the same order the API would
+  // return on a refetch. Stable across renders since we control the
+  // sort key explicitly.
+  const sorted = [...fields].sort((a, b) => a.position - b.position);
+  const [local, setLocal] = useState<CustomField[]>(sorted);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropBeforeId, setDropBeforeId] = useState<string | null>(null);
+  // Sync local state with props whenever the parent's `fields` array
+  // changes (e.g., a refetch after a failed save). Using JSON-string
+  // of ids as the dep so we don't re-sync on every parent render.
+  const propsKey = sorted.map((f) => f.id).join(",");
+  useEffect(() => {
+    setLocal(sorted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propsKey]);
+
+  function handleDrop(targetId: string | null) {
+    const dragId = draggingId;
+    setDraggingId(null);
+    setDropBeforeId(null);
+    if (!dragId) return;
+    const fromIdx = local.findIndex((f) => f.id === dragId);
+    if (fromIdx < 0) return;
+    let toIdx = targetId === null ? local.length : local.findIndex((f) => f.id === targetId);
+    if (toIdx < 0) return;
+    if (toIdx > fromIdx) toIdx -= 1;
+    if (toIdx === fromIdx) return;
+    const next = [...local];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    setLocal(next);
+    onReorder(next);
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="text-xs uppercase tracking-widest text-muted mb-2">{targetType}</div>
+        <ul className="divide-y divide-border">
+          {local.map((f) => {
+            const isDragging = draggingId === f.id;
+            const showDropLine = dropBeforeId === f.id;
+            return (
+              <li
+                key={f.id}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("application/x-custom-field-id", f.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  setDraggingId(f.id);
+                }}
+                onDragEnd={() => { setDraggingId(null); setDropBeforeId(null); }}
+                onDragOver={(e) => {
+                  if (!draggingId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dropBeforeId !== f.id) setDropBeforeId(f.id);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDrop(f.id);
+                }}
+                className={
+                  "py-2 flex items-center justify-between gap-3 transition-opacity " +
+                  (isDragging ? "opacity-40 " : "") +
+                  (showDropLine ? "border-t-2 border-[color:var(--accent-strong)] -mt-px " : "")
+                }
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <GripVertical
+                    size={12}
+                    className="text-muted-2 cursor-grab active:cursor-grabbing flex-shrink-0"
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {f.label}
+                      {f.required && <span className="text-red-400 ml-1">*</span>}
+                    </div>
+                    <div className="text-[10px] text-muted font-mono truncate">{f.key} · {FIELD_TYPE_LABEL[f.fieldType]}</div>
+                  </div>
+                </div>
+                <Badge variant="outline" className={`text-[10px] flex-shrink-0 ${f.active ? "text-green-400 border-green-400/30" : "text-muted border-white/20"}`}>
+                  {f.active ? "Active" : "Disabled"}
+                </Badge>
+              </li>
+            );
+          })}
+          {/* Trailing drop zone — drag to the bottom to send a field to
+              the end of its group. Same handler with a null target. */}
+          <li
+            onDragOver={(e) => { if (draggingId) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
+            onDrop={(e) => { e.preventDefault(); handleDrop(null); }}
+            className="h-2"
+            aria-hidden
+          />
+        </ul>
+      </CardContent>
+    </Card>
   );
 }

@@ -9,17 +9,15 @@
 // whatever it returns. Inline-editable cells call PATCH on each blur.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
+import { useParams } from "next/navigation"; // useRouter removed — back nav lives in breadcrumbs now
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
+import { PageHeader } from "@/components/dashboard/page-header";
 import {
-  ChevronLeft,
-  DollarSign,
   CheckCircle2,
   XCircle,
   Send,
@@ -74,7 +72,6 @@ function fmtMoney(n: number | null, currency: string): string {
 
 export default function CompCycleDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
   const { toast } = useToast();
   const [cycle, setCycle] = useState<Cycle | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -192,48 +189,76 @@ export default function CompCycleDetailPage() {
   const isAdmin = viewerRole === "ADMIN";
   const cycleEditable = cycle.status !== "CLOSED";
 
+  // Headline stats for the page-header chips. Drives quick visual
+  // triage: how much budget have we proposed, how many decisions are
+  // still in-flight, etc.
+  const proposedSum = decisions.reduce(
+    (sum, d) => sum + (d.proposedSalary ?? 0),
+    0,
+  );
+  const proposedCount = decisions.filter((d) => d.status === "PROPOSED").length;
+  const approvedCount = decisions.filter((d) => d.status === "APPROVED").length;
+
   return (
-    <div className="space-y-5">
-      <div>
-        <Link
-          href="/compensation"
-          className="inline-flex items-center gap-1 text-xs text-muted hover:text-fg mb-3"
-        >
-          <ChevronLeft size={12} /> Back to cycles
-        </Link>
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <DollarSign size={20} />
-              <h1 className="text-2xl font-bold tracking-tight">{cycle.name}</h1>
-              <Badge variant="outline" className="text-[10px]">{cycle.status}</Badge>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 text-xs text-muted mt-2">
-              <span>{new Date(cycle.startDate).toLocaleDateString()} → {new Date(cycle.endDate).toLocaleDateString()}</span>
-              <span>{cycle.reportingCurrency}</span>
-              {cycle.budgetPct !== null && <span>budget {cycle.budgetPct}%</span>}
-              {cycle.description && <span className="opacity-80">· {cycle.description}</span>}
-            </div>
-          </div>
-          {isAdmin && (
-            <div className="flex flex-wrap gap-2 flex-shrink-0">
-              {cycle.status === "DRAFT" && decisions.length === 0 && (
-                <Button variant="outline" onClick={seedCycle}>
-                  <Sparkles size={14} className="mr-1.5" /> Seed from employees
-                </Button>
-              )}
-              {cycle.status === "DRAFT" && (
-                <Button onClick={() => transitionCycle("OPEN")}>Open for managers</Button>
-              )}
-              {cycle.status === "OPEN" && (
-                <Button variant="outline" onClick={() => transitionCycle("CLOSED")}>
-                  <Lock size={14} className="mr-1.5" /> Close cycle
-                </Button>
-              )}
-            </div>
+    <div className="space-y-3 animate-fade-in">
+      <PageHeader
+        breadcrumbs={[
+          { label: "Home", href: "/dashboard" },
+          { label: "Compensation", href: "/compensation" },
+          { label: cycle.name },
+        ]}
+        kicker={`Cycle · ${cycle.status.toLowerCase()}`}
+        title={
+          <span className="inline-flex items-center gap-2">
+            {cycle.name}
+            <Badge variant="outline" className="text-[10px]">{cycle.status}</Badge>
+          </span>
+        }
+        subtitle={
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>
+              {new Date(cycle.startDate).toLocaleDateString()} → {new Date(cycle.endDate).toLocaleDateString()}
+            </span>
+            <span>·</span>
+            <span>{cycle.reportingCurrency}</span>
+            {cycle.budgetPct !== null && (
+              <>
+                <span>·</span>
+                <span>budget {cycle.budgetPct}%</span>
+              </>
+            )}
+            {cycle.description && (
+              <>
+                <span>·</span>
+                <span className="opacity-80">{cycle.description}</span>
+              </>
+            )}
+          </span>
+        }
+        stats={[
+          { label: "Decisions", value: decisions.length },
+          { label: "Proposed", value: proposedCount },
+          { label: "Approved", value: approvedCount },
+          { label: `Proposed sum (${cycle.reportingCurrency})`, value: fmtMoney(proposedSum, cycle.reportingCurrency) },
+        ]}
+      />
+      {isAdmin && (
+        <div className="flex flex-wrap gap-2 justify-end">
+          {cycle.status === "DRAFT" && decisions.length === 0 && (
+            <Button variant="outline" size="sm" onClick={seedCycle}>
+              <Sparkles size={14} className="mr-1.5" /> Seed from employees
+            </Button>
+          )}
+          {cycle.status === "DRAFT" && (
+            <Button size="sm" onClick={() => transitionCycle("OPEN")}>Open for managers</Button>
+          )}
+          {cycle.status === "OPEN" && (
+            <Button variant="outline" size="sm" onClick={() => transitionCycle("CLOSED")}>
+              <Lock size={14} className="mr-1.5" /> Close cycle
+            </Button>
           )}
         </div>
-      </div>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -249,7 +274,6 @@ export default function CompCycleDetailPage() {
           ) : (
             <DecisionsTable
               decisions={decisions}
-              cycle={cycle}
               isAdmin={isAdmin}
               cycleEditable={cycleEditable}
               busy={busy}
@@ -288,7 +312,6 @@ export default function CompCycleDetailPage() {
 
 function DecisionsTable({
   decisions,
-  cycle,
   isAdmin,
   cycleEditable,
   busy,
@@ -299,7 +322,6 @@ function DecisionsTable({
   onToggleAll,
 }: {
   decisions: Decision[];
-  cycle: Cycle;
   isAdmin: boolean;
   cycleEditable: boolean;
   busy: string | null;
@@ -328,13 +350,14 @@ function DecisionsTable({
                 />
               </th>
             )}
-            <th className="px-4 py-2.5 font-normal">Employee</th>
-            <th className="px-4 py-2.5 font-normal text-right">Current</th>
-            <th className="px-4 py-2.5 font-normal text-right">Proposed</th>
-            <th className="px-4 py-2.5 font-normal text-right">Δ%</th>
-            <th className="px-4 py-2.5 font-normal text-right">Bonus</th>
-            <th className="px-4 py-2.5 font-normal">Status</th>
-            <th className="px-4 py-2.5 font-normal text-right">Actions</th>
+            <th className="px-3 py-2 font-normal">Employee</th>
+            <th className="px-3 py-2 font-normal text-right">Current</th>
+            <th className="px-3 py-2 font-normal text-right">Proposed</th>
+            <th className="px-3 py-2 font-normal text-right">Δ%</th>
+            <th className="px-3 py-2 font-normal text-right">Bonus</th>
+            <th className="px-3 py-2 font-normal">Reasoning</th>
+            <th className="px-3 py-2 font-normal">Status</th>
+            <th className="px-3 py-2 font-normal text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -342,7 +365,6 @@ function DecisionsTable({
             <DecisionRow
               key={d.id}
               decision={d}
-              cycle={cycle}
               isAdmin={isAdmin}
               cycleEditable={cycleEditable}
               busy={busy === d.id}
@@ -361,7 +383,6 @@ function DecisionsTable({
 
 function DecisionRow({
   decision,
-  cycle,
   isAdmin,
   cycleEditable,
   busy,
@@ -372,7 +393,6 @@ function DecisionRow({
   onToggle,
 }: {
   decision: Decision;
-  cycle: Cycle;
   isAdmin: boolean;
   cycleEditable: boolean;
   busy: boolean;
@@ -396,6 +416,7 @@ function DecisionRow({
   const [bonus, setBonus] = useState<string>(
     decision.bonusAmount === null ? "" : String(decision.bonusAmount),
   );
+  const [reasoning, setReasoning] = useState<string>(decision.reasoning ?? "");
 
   // Re-sync if the row was patched server-side (e.g. proposedBy
   // auto-claimed).
@@ -403,7 +424,8 @@ function DecisionRow({
     setCurrent(decision.currentSalary === null ? "" : String(decision.currentSalary));
     setProposed(decision.proposedSalary === null ? "" : String(decision.proposedSalary));
     setBonus(decision.bonusAmount === null ? "" : String(decision.bonusAmount));
-  }, [decision.currentSalary, decision.proposedSalary, decision.bonusAmount]);
+    setReasoning(decision.reasoning ?? "");
+  }, [decision.currentSalary, decision.proposedSalary, decision.bonusAmount, decision.reasoning]);
 
   const computedPct =
     decision.currentSalary && decision.proposedSalary && decision.currentSalary > 0
@@ -412,9 +434,9 @@ function DecisionRow({
 
   const canBulkSelect = decision.status === "PROPOSED";
   return (
-    <tr className="border-b border-white/5 hover:bg-white/[0.02]">
+    <tr className="border-b border-white/5 hover:bg-surface-2">
       {showCheckbox && (
-        <td className="px-3 py-2 align-top">
+        <td className="px-3 py-1.5 align-top">
           {canBulkSelect ? (
             <input
               type="checkbox"
@@ -425,7 +447,7 @@ function DecisionRow({
           ) : null}
         </td>
       )}
-      <td className="px-4 py-2 align-top">
+      <td className="px-3 py-1.5 align-top">
         <div className="font-medium text-sm">
           {decision.subject.firstName} {decision.subject.lastName}
         </div>
@@ -436,7 +458,7 @@ function DecisionRow({
           </div>
         )}
       </td>
-      <td className="px-4 py-2 text-right">
+      <td className="px-3 py-1.5 text-right">
         {canEditFields ? (
           <Input
             inputMode="decimal"
@@ -454,7 +476,7 @@ function DecisionRow({
           <span className="font-mono text-xs">{fmtMoney(decision.currentSalary, decision.currency)}</span>
         )}
       </td>
-      <td className="px-4 py-2 text-right">
+      <td className="px-3 py-1.5 text-right">
         {canEditFields ? (
           <Input
             inputMode="decimal"
@@ -472,12 +494,12 @@ function DecisionRow({
           <span className="font-mono text-xs">{fmtMoney(decision.proposedSalary, decision.currency)}</span>
         )}
       </td>
-      <td className="px-4 py-2 text-right text-xs font-mono">
+      <td className="px-3 py-1.5 text-right text-xs font-mono">
         {computedPct === null
           ? "—"
           : `${computedPct >= 0 ? "+" : ""}${computedPct.toFixed(1)}%`}
       </td>
-      <td className="px-4 py-2 text-right">
+      <td className="px-3 py-1.5 text-right">
         {canEditFields ? (
           <Input
             inputMode="decimal"
@@ -495,12 +517,47 @@ function DecisionRow({
           <span className="font-mono text-xs">{fmtMoney(decision.bonusAmount, decision.currency)}</span>
         )}
       </td>
-      <td className="px-4 py-2">
-        <Badge variant="outline" className={`text-[10px] ${DECISION_STYLE[decision.status]}`}>
-          {decision.status}
-        </Badge>
+      <td className="px-3 py-1.5 align-top">
+        {canEditFields ? (
+          <Input
+            value={reasoning}
+            onChange={(e) => setReasoning(e.target.value)}
+            onBlur={() => {
+              const newVal = reasoning.trim() || null;
+              if ((newVal ?? "") === (decision.reasoning ?? "")) return;
+              onPatch(decision.id, { reasoning: newVal });
+            }}
+            className="h-7 text-xs w-40"
+            placeholder="Why this proposal?"
+            maxLength={240}
+          />
+        ) : decision.reasoning ? (
+          <span
+            className="text-[11.5px] text-muted line-clamp-2 max-w-[180px] inline-block"
+            title={decision.reasoning}
+          >
+            {decision.reasoning}
+          </span>
+        ) : (
+          <span className="text-[11.5px] text-muted-2">—</span>
+        )}
       </td>
-      <td className="px-4 py-2 text-right">
+      <td className="px-3 py-1.5 align-top">
+        <div className="flex flex-col gap-0.5">
+          <Badge variant="outline" className={`text-[10px] w-fit ${DECISION_STYLE[decision.status]}`}>
+            {decision.status}
+          </Badge>
+          {decision.decisionNote && (decision.status === "APPROVED" || decision.status === "REJECTED") && (
+            <span
+              className="text-[10px] text-muted-2 line-clamp-1 max-w-[140px]"
+              title={`Note: ${decision.decisionNote}`}
+            >
+              note: {decision.decisionNote}
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-1.5 text-right">
         <div className="flex items-center justify-end gap-1 flex-wrap">
           {decision.status === "DRAFT" && cycleEditable && (
             <Button

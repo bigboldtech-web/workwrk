@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import {
   Megaphone, Plus, Pin, PinOff, Trash2, AlertTriangle, PartyPopper, FileText, Calendar, Copy,
+  Clock, Globe, Building2, Users as UsersIcon,
 } from "lucide-react";
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
@@ -41,17 +42,87 @@ const PRIORITIES = [
   { value: "URGENT", label: "Urgent" },
 ];
 
+type AudienceMode = "ALL" | "DEPARTMENTS" | "OFFICES" | "USERS";
+type TargetAudience =
+  | { mode: "ALL" }
+  | { mode: "DEPARTMENTS"; departmentIds: string[] }
+  | { mode: "OFFICES"; officeIds: string[] }
+  | { mode: "USERS"; userIds: string[] };
+
+interface DeptOption { id: string; name: string }
+interface OfficeOption { id: string; name: string; city?: string | null; country?: string | null }
+interface UserOption { id: string; firstName: string; lastName: string; role?: { title: string } | null }
+
+function describeAudience(a: TargetAudience | null | undefined, counts: { depts: number; offices: number; users: number } | null): string {
+  if (!a || a.mode === "ALL") return "Everyone";
+  if (a.mode === "DEPARTMENTS") {
+    const n = (a as Extract<TargetAudience, { mode: "DEPARTMENTS" }>).departmentIds.length;
+    return n === 0 ? "Everyone" : `${n} dept${n === 1 ? "" : "s"}`;
+  }
+  if (a.mode === "OFFICES") {
+    const n = (a as Extract<TargetAudience, { mode: "OFFICES" }>).officeIds.length;
+    return n === 0 ? "Everyone" : `${n} office${n === 1 ? "" : "s"}`;
+  }
+  if (a.mode === "USERS") {
+    const n = (a as Extract<TargetAudience, { mode: "USERS" }>).userIds.length;
+    return n === 0 ? "Everyone" : `${n} person${n === 1 ? "" : "s"}`;
+  }
+  // Unknown shape — degrade gracefully rather than throw.
+  void counts;
+  return "Custom audience";
+}
+
 export default function AnnouncementsPage() {
   const { isManager } = useRole();
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
+  // Audience + scheduling are separate state slices so the form object
+  // can stay a flat string-keyed bag (re-used by API).
+  const [audienceMode, setAudienceMode] = useState<AudienceMode>("ALL");
+  const [audienceDepts, setAudienceDepts] = useState<string[]>([]);
+  const [audienceOffices, setAudienceOffices] = useState<string[]>([]);
+  const [audienceUsers, setAudienceUsers] = useState<string[]>([]);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleAt, setScheduleAt] = useState("");
+  // Lookups for the audience picker. Lazy-loaded when the dialog opens.
+  const [depts, setDepts] = useState<DeptOption[]>([]);
+  const [offices, setOffices] = useState<OfficeOption[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [lookupsLoaded, setLookupsLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const { success: toastSuccess, error: toastError } = useToast();
   const confirm = useConfirm();
   const t = useTranslations("announcements");
   const tCommon = useTranslations("common");
+
+  function resetForm() {
+    setForm({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
+    setAudienceMode("ALL");
+    setAudienceDepts([]);
+    setAudienceOffices([]);
+    setAudienceUsers([]);
+    setScheduleEnabled(false);
+    setScheduleAt("");
+  }
+
+  // Hydrate audience-picker lookups the first time the create dialog
+  // opens. Three parallel fetches; failures keep that list empty so the
+  // user can still pick from whichever lookups succeeded.
+  useEffect(() => {
+    if (!showCreate || lookupsLoaded || !isManager) return;
+    Promise.all([
+      fetch("/api/departments").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch("/api/offices").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch("/api/users?limit=500").then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+    ]).then(([d, o, u]) => {
+      setDepts(Array.isArray(d) ? d : d?.data || []);
+      setOffices(Array.isArray(o) ? o : o?.data || []);
+      setUsers(Array.isArray(u) ? u : u?.data || []);
+      setLookupsLoaded(true);
+    });
+  }, [showCreate, lookupsLoaded, isManager]);
 
   useEffect(() => {
     fetch("/api/announcements", { cache: "no-store" })
@@ -97,8 +168,26 @@ export default function AnnouncementsPage() {
     } catch { toastError("Failed to delete"); }
   }
 
+  // Build the JSON payload for `targetAudience`. ALL with no selection
+  // stays null so the API stores `undefined` and the post broadcasts.
+  function buildAudiencePayload(): TargetAudience | null {
+    if (audienceMode === "ALL") return null;
+    if (audienceMode === "DEPARTMENTS" && audienceDepts.length > 0)
+      return { mode: "DEPARTMENTS", departmentIds: audienceDepts };
+    if (audienceMode === "OFFICES" && audienceOffices.length > 0)
+      return { mode: "OFFICES", officeIds: audienceOffices };
+    if (audienceMode === "USERS" && audienceUsers.length > 0)
+      return { mode: "USERS", userIds: audienceUsers };
+    return null;
+  }
+
   async function handleCreate() {
     if (!form.title.trim() || !form.content.trim() || !form.expiresAt) return;
+    if (scheduleEnabled && !scheduleAt) {
+      toastError("Pick a publish time, or turn off scheduling");
+      return;
+    }
+    const targetAudience = buildAudiencePayload();
     setSaving(true);
     try {
       const res = await fetch("/api/announcements", {
@@ -107,6 +196,8 @@ export default function AnnouncementsPage() {
         body: JSON.stringify({
           ...form,
           expiresAt: form.expiresAt,
+          targetAudience,
+          publishedAt: scheduleEnabled && scheduleAt ? new Date(scheduleAt).toISOString() : undefined,
         }),
       });
       if (res.ok) {
@@ -118,8 +209,11 @@ export default function AnnouncementsPage() {
           setAnnouncements(Array.isArray(items) ? items : []);
         }
         setShowCreate(false);
-        setForm({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
-        toastSuccess("Announcement published");
+        resetForm();
+        toastSuccess(scheduleEnabled ? "Announcement scheduled" : "Announcement published");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Failed to publish");
       }
     } catch { toastError("Failed to publish"); } finally { setSaving(false); }
   }
@@ -148,21 +242,39 @@ export default function AnnouncementsPage() {
         </CardContent></Card>
       ) : (
         <div className="space-y-3">
-          {announcements.map((a) => (
+          {announcements.map((a) => {
+            const publishedAt = a.publishedAt ? new Date(a.publishedAt) : null;
+            const isScheduled = !!publishedAt && publishedAt.getTime() > Date.now();
+            const audience: TargetAudience | null = a.targetAudience ?? null;
+            const audienceLabel = describeAudience(audience, null);
+            return (
             <ContextMenu key={a.id}>
               <ContextMenuTrigger asChild>
-                <Card>
+                <Card className={isScheduled ? "border-dashed opacity-90" : undefined}>
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
                       <Megaphone size={16} className="mt-1 text-[color:var(--accent-strong)] shrink-0" />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <h3 className="text-sm font-semibold">{a.title}</h3>
                           <Badge variant="outline" className="text-[10px]">{a.type}</Badge>
                           <Badge variant={a.priority === "URGENT" ? "destructive" : "secondary"} className="text-[10px]">{a.priority}</Badge>
-                          {a.pinned && <Pin size={12} className="text-[color:var(--accent-strong)]" />}
+                          {a.pinned && <Pin size={12} className="text-[color:var(--accent-strong)]" aria-label="Pinned" />}
+                          <Badge variant="outline" className="text-[10px] gap-1">
+                            {audience?.mode === "DEPARTMENTS" ? <Building2 size={9} /> :
+                              audience?.mode === "OFFICES" ? <Building2 size={9} /> :
+                              audience?.mode === "USERS" ? <UsersIcon size={9} /> :
+                              <Globe size={9} />}
+                            {audienceLabel}
+                          </Badge>
+                          {isScheduled && (
+                            <Badge variant="outline" className="text-[10px] gap-1 text-amber-600 border-amber-300">
+                              <Clock size={9} />
+                              Scheduled · {publishedAt!.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </Badge>
+                          )}
                         </div>
-                        <p className="text-xs text-muted">{a.content}</p>
+                        <p className="text-xs text-muted whitespace-pre-wrap">{a.content}</p>
                         <p className="text-[10px] text-muted-2 mt-2">
                           {new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                           {a.expiresAt && ` · Expires ${new Date(a.expiresAt).toLocaleDateString()}`}
@@ -191,7 +303,8 @@ export default function AnnouncementsPage() {
                 )}
               </ContextMenuContent>
             </ContextMenu>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -245,15 +358,202 @@ export default function AnnouncementsPage() {
                 </label>
               </div>
             </div>
+
+            {/* Audience targeting. ALL is the default (matches old
+                behavior); switching to DEPARTMENTS/OFFICES/USERS opens
+                an inline picker for that lookup. Empty selection falls
+                back to "everyone" on submit. */}
+            <div className="space-y-2 border-t border-border pt-3">
+              <Label className="flex items-center gap-1.5">
+                <UsersIcon size={12} className="text-muted" /> Audience
+              </Label>
+              <div className="inline-flex rounded-md border border-border p-0.5 bg-surface-2 w-full">
+                {([
+                  { id: "ALL" as const, label: "Everyone", Icon: Globe },
+                  { id: "DEPARTMENTS" as const, label: "Departments", Icon: Building2 },
+                  { id: "OFFICES" as const, label: "Offices", Icon: Building2 },
+                  { id: "USERS" as const, label: "People", Icon: UsersIcon },
+                ]).map((m) => {
+                  const active = audienceMode === m.id;
+                  const Icon = m.Icon;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setAudienceMode(m.id)}
+                      className={
+                        "flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 rounded text-[11.5px] font-medium transition-colors " +
+                        (active
+                          ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)]"
+                          : "text-muted hover:bg-surface-3 hover:text-foreground")
+                      }
+                      aria-pressed={active}
+                    >
+                      <Icon size={11} />
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {audienceMode === "DEPARTMENTS" && (
+                <CheckboxList
+                  items={depts.map((d) => ({ id: d.id, label: d.name }))}
+                  selected={audienceDepts}
+                  onChange={setAudienceDepts}
+                  emptyLabel="No departments to pick from"
+                />
+              )}
+              {audienceMode === "OFFICES" && (
+                <CheckboxList
+                  items={offices.map((o) => ({
+                    id: o.id,
+                    label: o.city ? `${o.name} — ${o.city}` : o.name,
+                  }))}
+                  selected={audienceOffices}
+                  onChange={setAudienceOffices}
+                  emptyLabel="No offices to pick from"
+                />
+              )}
+              {audienceMode === "USERS" && (
+                <CheckboxList
+                  items={users.map((u) => ({
+                    id: u.id,
+                    label: `${u.firstName} ${u.lastName}${u.role?.title ? ` · ${u.role.title}` : ""}`,
+                  }))}
+                  selected={audienceUsers}
+                  onChange={setAudienceUsers}
+                  searchable
+                  emptyLabel="No people to pick from"
+                />
+              )}
+              {audienceMode !== "ALL" && (
+                <p className="text-[10.5px] text-muted-2">
+                  Leave empty to broadcast to everyone.
+                </p>
+              )}
+            </div>
+
+            {/* Scheduling. Off by default — flipping it on shows a
+                datetime input that must be in the future. Past values
+                fall back to "publish now" server-side. */}
+            <div className="space-y-2 border-t border-border pt-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={scheduleEnabled}
+                  onChange={(e) => setScheduleEnabled(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="text-[12.5px] font-medium inline-flex items-center gap-1.5">
+                  <Clock size={12} className="text-muted" /> Schedule for later
+                </span>
+              </label>
+              {scheduleEnabled && (
+                <Input
+                  type="datetime-local"
+                  value={scheduleAt}
+                  onChange={(e) => setScheduleAt(e.target.value)}
+                  min={new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16)}
+                />
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>{tCommon("cancel")}</Button>
-            <Button onClick={handleCreate} disabled={saving || !form.title.trim() || !form.content.trim() || !form.expiresAt}>
-              {saving ? t("publishing") : t("publish")}
+            <Button
+              onClick={handleCreate}
+              disabled={
+                saving
+                || !form.title.trim()
+                || !form.content.trim()
+                || !form.expiresAt
+                || (scheduleEnabled && !scheduleAt)
+              }
+            >
+              {saving
+                ? (scheduleEnabled ? "Scheduling…" : t("publishing"))
+                : (scheduleEnabled ? "Schedule" : t("publish"))}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// Generic scrollable checkbox list used by the audience picker. Items
+// render in their given order; `searchable` adds a tiny input that
+// filters by label substring (useful when there are 100+ users).
+function CheckboxList({
+  items,
+  selected,
+  onChange,
+  searchable,
+  emptyLabel,
+}: {
+  items: { id: string; label: string }[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  searchable?: boolean;
+  emptyLabel: string;
+}) {
+  const [q, setQ] = useState("");
+  const lc = q.trim().toLowerCase();
+  const visible = lc ? items.filter((i) => i.label.toLowerCase().includes(lc)) : items;
+
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  }
+
+  return (
+    <div className="border border-border rounded-md bg-surface">
+      {searchable && (
+        <div className="border-b border-border p-1.5">
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search…"
+            className="h-7 text-[12px]"
+          />
+        </div>
+      )}
+      <div className="max-h-40 overflow-y-auto">
+        {items.length === 0 ? (
+          <p className="px-3 py-3 text-[11.5px] text-muted-2 text-center">{emptyLabel}</p>
+        ) : visible.length === 0 ? (
+          <p className="px-3 py-3 text-[11.5px] text-muted-2 text-center">No matches.</p>
+        ) : (
+          visible.map((i) => {
+            const checked = selected.includes(i.id);
+            return (
+              <label
+                key={i.id}
+                className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] cursor-pointer hover:bg-surface-2"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(i.id)}
+                  className="rounded"
+                />
+                <span className="truncate">{i.label}</span>
+              </label>
+            );
+          })
+        )}
+      </div>
+      {selected.length > 0 && (
+        <div className="border-t border-border px-2 py-1 flex items-center justify-between text-[10.5px] text-muted">
+          <span>{selected.length} selected</span>
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-muted hover:text-foreground"
+          >
+            Clear
+          </button>
+        </div>
+      )}
     </div>
   );
 }

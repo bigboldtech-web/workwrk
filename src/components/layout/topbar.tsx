@@ -442,6 +442,12 @@ export function Topbar() {
             <button type="button" className="app-user-btn" aria-label="User menu">
               <span className="app-user-avatar" aria-hidden>
                 {avatar ? (
+                  // Avatars come from arbitrary upload URLs (S3-presigned and
+                  // potentially other domains). next/image requires every
+                  // host to be allow-listed in next.config; until that's
+                  // configured we use a plain <img>. Same pattern as the
+                  // sidebar brand logo.
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={avatar} alt="" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />
                 ) : (
                   initials

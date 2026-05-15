@@ -154,7 +154,7 @@ function SamlCard() {
               <Label>Issuer (Entity ID)</Label>
               <Input value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://idp.example.com/saml" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>SSO URL</Label>
                 <Input value={ssoUrl} onChange={(e) => setSsoUrl(e.target.value)} placeholder="https://idp.example.com/sso" />

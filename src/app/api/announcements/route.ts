@@ -42,13 +42,29 @@ export async function POST(req: NextRequest) {
   const orgId = getOrgId(session);
   const userId = getUserId(session);
   const body = await req.json();
-  const { title, content, type, priority, pinned, expiresAt, targetAudience } = body;
+  const { title, content, type, priority, pinned, expiresAt, targetAudience, publishedAt } = body;
 
   if (!title?.trim() || !content?.trim()) return jsonError("Title and content required");
   if (!expiresAt) return jsonError("Expiry date is required");
   const expiryDate = new Date(`${String(expiresAt).slice(0, 10)}T23:59:59.999Z`);
   if (isNaN(expiryDate.getTime())) return jsonError("Invalid expiry date");
   if (expiryDate.getTime() <= Date.now()) return jsonError("Expiry date must be in the future");
+
+  // Scheduled publish: a client-supplied `publishedAt` in the future
+  // means the post is deferred. Past / missing values fall back to "now"
+  // so the existing UX (publish immediately) stays the default.
+  let publishAt = new Date();
+  let isScheduled = false;
+  if (publishedAt) {
+    const parsed = new Date(publishedAt);
+    if (!isNaN(parsed.getTime()) && parsed.getTime() > Date.now()) {
+      publishAt = parsed;
+      isScheduled = true;
+    }
+  }
+  if (publishAt.getTime() >= expiryDate.getTime()) {
+    return jsonError("Publish time must be before the expiry date");
+  }
 
   try {
   const announcement = await prisma.announcement.create({
@@ -58,13 +74,21 @@ export async function POST(req: NextRequest) {
       type: type || "INFO",
       priority: priority || "NORMAL",
       pinned: pinned === true,
-      publishedAt: new Date(),
+      publishedAt: publishAt,
       expiresAt: expiryDate,
       targetAudience: targetAudience || undefined,
       authorId: userId,
       organizationId: orgId,
     },
   });
+
+  // Scheduled posts skip the immediate notify/email blast — a separate
+  // cron / scheduler (not built here) is expected to fire on the
+  // publishedAt boundary. Documented as a follow-up so this code path
+  // stays predictable: post saved, no notifications yet.
+  if (isScheduled) {
+    return jsonSuccess({ ...announcement, scheduled: true }, 201);
+  }
 
   // Notify all org users (skip the author). Errors here must NOT roll back
   // the announcement — it's already persisted. Log and move on.

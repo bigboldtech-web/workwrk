@@ -20,11 +20,20 @@ export async function GET(req: NextRequest) {
     return jsonSuccess(templates);
   }
 
+  // `?mine=true` scopes the result to instances assigned to the caller.
+  // Used by the /onboarding/me page so a new hire sees only their own
+  // active journeys instead of the org-wide list.
+  const mineOnly = url.searchParams.get("mine") === "true";
+  const userId = getUserId(session);
+
   const instances = await prisma.onboardingInstance.findMany({
-    where: { template: { organizationId: orgId } },
+    where: {
+      template: { organizationId: orgId },
+      ...(mineOnly ? { userId } : {}),
+    },
     include: {
       user: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } } } },
-      buddy: { select: { id: true, firstName: true, lastName: true } },
+      buddy: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } },
       template: { select: { name: true, steps: true, durationDays: true } },
     },
     orderBy: { createdAt: "desc" },

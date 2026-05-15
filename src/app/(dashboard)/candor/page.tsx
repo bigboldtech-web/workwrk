@@ -209,6 +209,10 @@ export default function CandorPage() {
   const activeSessions = sessions.filter((s) => s.status === "ACTIVE");
   const draftSessions = sessions.filter((s) => s.status === "DRAFT");
   const closedSessions = sessions.filter((s) => s.status === "CLOSED");
+  // Headline stats. For employees the most useful is "what's waiting on
+  // me to answer" so we count active sessions they haven't responded to.
+  const pendingForMe = activeSessions.filter((s) => !hasResponded(s.id)).length;
+  const totalResponses = sessions.reduce((sum, s) => sum + (s.responseCount || 0), 0);
 
   return (
     <div className="space-y-3 animate-fade-in">
@@ -217,6 +221,11 @@ export default function CandorPage() {
         kicker="Candor · anonymous feedback"
         title="Candor"
         subtitle="Anonymous team feedback sessions. Honest, safe, actionable."
+        stats={sessions.length > 0 ? [
+          { label: "Waiting on you", value: pendingForMe },
+          { label: "Active", value: activeSessions.length },
+          { label: "Responses", value: totalResponses },
+        ] : undefined}
         actions={
           isManager
             ? [{
@@ -372,10 +381,11 @@ export default function CandorPage() {
                   <select
                     value={p.type}
                     onChange={(e) => updatePrompt(p.id, "type", e.target.value)}
-                    className="h-8 rounded-md border border-border bg-background px-2 text-xs w-24 shrink-0"
+                    className="h-8 rounded-md border border-border bg-background px-2 text-xs w-28 shrink-0"
                   >
                     <option value="text">Text</option>
                     <option value="rating">Rating 1-5</option>
+                    <option value="start_stop_continue">Start/Stop/Continue</option>
                   </select>
                   <Input
                     value={p.text}
@@ -428,7 +438,7 @@ export default function CandorPage() {
                           onClick={() => setAnswers({ ...answers, [prompt.id]: String(n) })}
                           className={`h-10 w-10 rounded-lg border text-sm font-bold transition-colors ${
                             answers[prompt.id] === String(n)
-                              ? "border-violet-500 bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]"
+                              ? "border-violet-500 bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)]"
                               : "border-border hover:border-muted-2 text-muted"
                           }`}
                         >
@@ -439,6 +449,11 @@ export default function CandorPage() {
                         {answers[prompt.id] === "1" ? "Poor" : answers[prompt.id] === "2" ? "Fair" : answers[prompt.id] === "3" ? "OK" : answers[prompt.id] === "4" ? "Good" : answers[prompt.id] === "5" ? "Excellent" : ""}
                       </span>
                     </div>
+                  ) : prompt.type === "start_stop_continue" ? (
+                    <StartStopContinueInput
+                      value={answers[prompt.id] || ""}
+                      onChange={(v) => setAnswers({ ...answers, [prompt.id]: v })}
+                    />
                   ) : (
                     <Textarea
                       value={answers[prompt.id] || ""}
@@ -489,7 +504,7 @@ export default function CandorPage() {
                               {(r.distribution || []).map((d: any) => (
                                 <div key={d.value} className="flex-1 text-center">
                                   <div
-                                    className="mx-auto rounded-sm bg-[rgba(212,255,46,0.18)]"
+                                    className="mx-auto rounded-sm bg-[color:var(--accent-soft)]"
                                     style={{ height: `${Math.max(4, (d.count / Math.max(r.count, 1)) * 40)}px` }}
                                   />
                                   <p className="text-[10px] text-muted mt-1">{d.value}</p>
@@ -501,6 +516,8 @@ export default function CandorPage() {
                         </div>
                         <p className="text-[10px] text-muted">{r.count} rating{r.count !== 1 ? "s" : ""}</p>
                       </div>
+                    ) : r.type === "start_stop_continue" ? (
+                      <StartStopContinueResults responses={(r.responses || []) as string[]} count={r.count} />
                     ) : (
                       <div className="space-y-2">
                         {(r.responses || []).length === 0 ? (
@@ -522,6 +539,107 @@ export default function CandorPage() {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// Start / Stop / Continue input. Three labeled textareas backed by a
+// single JSON-encoded string answer so the existing CandorResponse
+// schema (flat answer values) doesn't need to change. The results view
+// decodes the same JSON shape.
+function StartStopContinueInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  let parsed: { start?: string; stop?: string; continue?: string } = {};
+  try {
+    if (value) parsed = JSON.parse(value);
+  } catch {
+    parsed = {};
+  }
+  function patch(key: "start" | "stop" | "continue", v: string) {
+    const next = { ...parsed, [key]: v };
+    onChange(JSON.stringify(next));
+  }
+  const rows: { id: "start" | "stop" | "continue"; label: string; color: string }[] = [
+    { id: "start", label: "Start doing", color: "border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-500/5" },
+    { id: "stop", label: "Stop doing", color: "border-rose-500/40 bg-rose-50/50 dark:bg-rose-500/5" },
+    { id: "continue", label: "Continue doing", color: "border-blue-500/40 bg-blue-50/50 dark:bg-blue-500/5" },
+  ];
+  return (
+    <div className="space-y-2">
+      {rows.map((r) => (
+        <div key={r.id} className={`rounded-md border ${r.color} p-2`}>
+          <Label className="text-[10.5px] uppercase tracking-wider text-muted-2 font-semibold">{r.label}</Label>
+          <Textarea
+            value={(parsed[r.id] as string | undefined) ?? ""}
+            onChange={(e) => patch(r.id, e.target.value)}
+            placeholder={`What should the team ${r.id} doing?`}
+            rows={2}
+            className="text-sm mt-1 bg-surface"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Start / Stop / Continue aggregated results. Each JSON-encoded response
+// is split back into its three buckets and shown column-style so the
+// manager can scan all "start" answers, all "stop" answers, etc.
+function StartStopContinueResults({
+  responses,
+  count,
+}: {
+  responses: string[];
+  count: number;
+}) {
+  const buckets: Record<"start" | "stop" | "continue", string[]> = { start: [], stop: [], continue: [] };
+  for (const raw of responses) {
+    try {
+      const parsed = JSON.parse(raw) as { start?: string; stop?: string; continue?: string };
+      (["start", "stop", "continue"] as const).forEach((k) => {
+        const v = (parsed[k] ?? "").trim();
+        if (v) buckets[k].push(v);
+      });
+    } catch {
+      // Legacy / malformed: treat raw text as a "continue" answer so it
+      // shows up rather than getting dropped silently.
+      const trimmed = (raw ?? "").trim();
+      if (trimmed) buckets.continue.push(trimmed);
+    }
+  }
+  const cols: { id: "start" | "stop" | "continue"; label: string; chip: string }[] = [
+    { id: "start", label: "Start", chip: "text-emerald-700 bg-emerald-50 border-emerald-200" },
+    { id: "stop", label: "Stop", chip: "text-rose-700 bg-rose-50 border-rose-200" },
+    { id: "continue", label: "Continue", chip: "text-blue-700 bg-blue-50 border-blue-200" },
+  ];
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        {cols.map((c) => (
+          <div key={c.id} className="space-y-1.5">
+            <div className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider border rounded-full px-1.5 py-0.5 ${c.chip}`}>
+              {c.label} · {buckets[c.id].length}
+            </div>
+            {buckets[c.id].length === 0 ? (
+              <p className="text-[11px] text-muted-2 italic">No responses</p>
+            ) : (
+              <ul className="space-y-1">
+                {buckets[c.id].map((text, i) => (
+                  <li key={i} className="rounded-md bg-surface-2 px-2 py-1.5 text-[12px] text-muted">
+                    {text}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted">{count} response{count !== 1 ? "s" : ""}</p>
     </div>
   );
 }

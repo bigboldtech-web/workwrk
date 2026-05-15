@@ -5,12 +5,23 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import {
-  Bot, Send, Sparkles, User, Loader2, History, Trash2,
-  TrendingUp, AlertTriangle, Users, CheckSquare, BarChart3, BookOpen,
+  Send, Sparkles, User, Loader2, History, Trash2, BookmarkPlus, Bookmark,
+  TrendingUp, AlertTriangle, Users, CheckSquare, BarChart3, BookOpen, ChevronDown,
 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/dashboard/page-header";
+import {
+  getSavedPrompts, saveAIPrompt, removeAIPrompt, subscribeAIPrompts, type SavedPrompt,
+} from "@/lib/ai-prompts";
 
 type Message = {
   id: string;
@@ -114,8 +125,19 @@ export default function AIPage() {
   const [digest, setDigest] = useState<Digest | null>(null);
   const [loadingDigest, setLoadingDigest] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
+  // Prompt library (localStorage) + query history (server). Both live
+  // in topbar-style dropdowns next to the input so the chat surface
+  // doesn't lose vertical space.
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
+  const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [savePromptName, setSavePromptName] = useState("");
+  const [pastQueries, setPastQueries] = useState<{ id: string; query: string; createdAt: string }[]>([]);
+  useEffect(() => {
+    setSavedPrompts(getSavedPrompts());
+    return subscribeAIPrompts(() => setSavedPrompts(getSavedPrompts()));
+  }, []);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { error: toastError } = useToast();
+  const { error: toastError, success: toastSuccess } = useToast();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -135,10 +157,21 @@ export default function AIPage() {
     fetch("/api/ai")
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
-        if (data?.history && data.history.length > 0) {
+        // Server response is wrapped by jsonSuccess: `{ data: { history } }`.
+        // Older shape may have surfaced `data.history` directly — accept
+        // both so a half-rolled-out server doesn't break the page.
+        const history = data?.data?.history ?? data?.history;
+        if (Array.isArray(history) && history.length > 0) {
           setShowHistory(true);
+          // Stash for the History dropdown — distinct from the chat
+          // messages array which mixes user + assistant turns.
+          setPastQueries(
+            history.map((h: { id: string; query: string; createdAt: string }) => ({
+              id: h.id, query: h.query, createdAt: h.createdAt,
+            })),
+          );
           const historicalMessages: Message[] = [];
-          for (const entry of data.history.slice(-10)) {
+          for (const entry of history.slice(-10)) {
             historicalMessages.push({
               id: `h-u-${entry.id}`,
               role: "user",
@@ -351,7 +384,131 @@ export default function AIPage() {
         )}
 
         {/* Input */}
-        <div className="border-t border-border p-4">
+        <div className="border-t border-border p-4 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Saved prompts library — user's localStorage favorites. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11.5px] font-medium border border-border bg-surface hover:bg-surface-2 text-muted hover:text-foreground transition-colors"
+                >
+                  <Bookmark size={11} />
+                  Library
+                  {savedPrompts.length > 0 && (
+                    <Badge variant="secondary" className="ml-0.5 text-[10px] px-1.5 py-0">
+                      {savedPrompts.length}
+                    </Badge>
+                  )}
+                  <ChevronDown size={10} className="opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-72">
+                <DropdownMenuLabel>Your prompts</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {savedPrompts.length === 0 ? (
+                  <div className="px-2 py-2 text-[11.5px] text-muted-2">
+                    Save a prompt below to reuse it later.
+                  </div>
+                ) : (
+                  savedPrompts.map((p) => (
+                    <DropdownMenuItem
+                      key={p.id}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setInput(p.text);
+                      }}
+                      className="flex items-start justify-between gap-2"
+                    >
+                      <span className="flex-1 min-w-0">
+                        <span className="text-[12px] font-medium block truncate">{p.name}</span>
+                        <span className="text-[10.5px] text-muted-2 line-clamp-1 block">{p.text}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          removeAIPrompt(p.id);
+                        }}
+                        className="text-muted-2 hover:text-rose-500 flex-shrink-0 mt-0.5"
+                        aria-label={`Delete ${p.name}`}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </DropdownMenuItem>
+                  ))
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={!input.trim()}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    if (!input.trim()) return;
+                    setSavePromptName(input.slice(0, 60));
+                    setSavePromptOpen(true);
+                  }}
+                  className="cursor-pointer"
+                >
+                  <BookmarkPlus size={12} className="mr-2" />
+                  <span className="text-[12px]">Save current prompt…</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Past queries — pulled from /api/ai (AIQuery table). */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11.5px] font-medium border border-border bg-surface hover:bg-surface-2 text-muted hover:text-foreground transition-colors"
+                  disabled={pastQueries.length === 0}
+                >
+                  <History size={11} />
+                  History
+                  {pastQueries.length > 0 && (
+                    <Badge variant="secondary" className="ml-0.5 text-[10px] px-1.5 py-0">
+                      {pastQueries.length}
+                    </Badge>
+                  )}
+                  <ChevronDown size={10} className="opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-80 max-h-80 overflow-y-auto">
+                <DropdownMenuLabel>Recent queries</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {pastQueries.length === 0 ? (
+                  <div className="px-2 py-2 text-[11.5px] text-muted-2">
+                    Your past questions will show up here.
+                  </div>
+                ) : (
+                  // Newest first — `history` came back reversed (oldest-first)
+                  // from the server, so we re-reverse for the picker.
+                  [...pastQueries].reverse().map((q) => (
+                    <DropdownMenuItem
+                      key={q.id}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setInput(q.query);
+                      }}
+                      className="flex flex-col items-start gap-0.5"
+                    >
+                      <span className="text-[12px] line-clamp-2">{q.query}</span>
+                      <span className="text-[10px] text-muted-2">
+                        {new Date(q.createdAt).toLocaleString(undefined, {
+                          month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                        })}
+                      </span>
+                    </DropdownMenuItem>
+                  ))
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <span className="text-[10.5px] text-muted-2 ml-auto">
+              Cmd/Ctrl + Enter to send
+            </span>
+          </div>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -362,6 +519,12 @@ export default function AIPage() {
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  if (!loading && input.trim()) handleSend();
+                }
+              }}
               placeholder="Ask about your team, performance, tasks, SOPs..."
               className="flex-1"
               disabled={loading}
@@ -373,6 +536,62 @@ export default function AIPage() {
           </form>
         </div>
       </Card>
+
+      {/* Save-prompt dialog — captures a custom name so the library entry
+          isn't just the raw prompt text truncated. Submit-on-Enter, Esc
+          cancels (Dialog primitive handles that for us). */}
+      <Dialog open={savePromptOpen} onOpenChange={setSavePromptOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Save prompt</DialogTitle>
+            <DialogDescription>
+              Give this prompt a short name so you can spot it in your library later.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = savePromptName.trim();
+              if (!name || !input.trim()) return;
+              saveAIPrompt(name, input);
+              setSavePromptOpen(false);
+              toastSuccess("Prompt saved");
+            }}
+            className="space-y-2"
+          >
+            <Label htmlFor="save-prompt-name" className="text-[11.5px]">Name</Label>
+            <Input
+              id="save-prompt-name"
+              value={savePromptName}
+              onChange={(e) => setSavePromptName(e.target.value)}
+              autoFocus
+              maxLength={80}
+              placeholder="e.g. Top performers monthly check"
+            />
+            <p className="text-[10.5px] text-muted-2 line-clamp-2">
+              <span className="font-medium">Prompt:</span> {input}
+            </p>
+          </form>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setSavePromptOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={!savePromptName.trim() || !input.trim()}
+              onClick={() => {
+                const name = savePromptName.trim();
+                if (!name || !input.trim()) return;
+                saveAIPrompt(name, input);
+                setSavePromptOpen(false);
+                toastSuccess("Prompt saved");
+              }}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

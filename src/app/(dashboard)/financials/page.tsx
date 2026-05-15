@@ -26,7 +26,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { BookOpen, Plus, BarChart3, Calendar as CalIcon, FileText } from "lucide-react";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { Plus, BarChart3, Calendar as CalIcon, FileText } from "lucide-react";
 
 type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
 
@@ -80,15 +81,13 @@ const ENTRY_STATUS_STYLE: Record<JournalEntry["status"], string> = {
 
 export default function FinancialsPage() {
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <BookOpen size={20} /> Financials
-        </h1>
-        <p className="text-muted text-sm mt-1">
-          Chart of accounts, journal entries, and fiscal calendar.
-        </p>
-      </div>
+    <div className="space-y-3 animate-fade-in">
+      <PageHeader
+        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Financials" }]}
+        kicker="Financials · ledger"
+        title="Financials"
+        subtitle="Chart of accounts, journal entries, fiscal calendar, and exportable reports."
+      />
       <Tabs defaultValue="accounts">
         <TabsList>
           <TabsTrigger value="accounts">Chart of accounts</TabsTrigger>
@@ -96,10 +95,10 @@ export default function FinancialsPage() {
           <TabsTrigger value="reports">Reports</TabsTrigger>
           <TabsTrigger value="calendar">Fiscal calendar</TabsTrigger>
         </TabsList>
-        <TabsContent value="accounts" className="mt-4"><AccountsTab /></TabsContent>
-        <TabsContent value="entries" className="mt-4"><EntriesTab /></TabsContent>
-        <TabsContent value="reports" className="mt-4"><ReportsTab /></TabsContent>
-        <TabsContent value="calendar" className="mt-4"><CalendarTab /></TabsContent>
+        <TabsContent value="accounts" className="mt-3"><AccountsTab /></TabsContent>
+        <TabsContent value="entries" className="mt-3"><EntriesTab /></TabsContent>
+        <TabsContent value="reports" className="mt-3"><ReportsTab /></TabsContent>
+        <TabsContent value="calendar" className="mt-3"><CalendarTab /></TabsContent>
       </Tabs>
     </div>
   );
@@ -170,7 +169,7 @@ function AccountsTab() {
               </thead>
               <tbody>
                 {visible.map((a) => (
-                  <tr key={a.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={a.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5 font-mono text-xs">{a.code}</td>
                     <td className="px-4 py-2.5 font-medium">{a.name}</td>
                     <td className="px-4 py-2.5 text-xs">{TYPE_LABEL[a.type]}</td>
@@ -336,7 +335,7 @@ function EntriesTab() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+              <tr key={r.id} className="border-b border-white/5 hover:bg-surface-2">
                 <td className="px-4 py-2.5 font-mono text-xs">{r.reference}</td>
                 <td className="px-4 py-2.5 truncate max-w-md">{r.description}</td>
                 <td className="px-4 py-2.5 text-xs font-mono">{r.period.label}</td>
@@ -448,7 +447,7 @@ function TrialBalanceView({ data }: { data: { rows: AccountRow[]; totalDebits: n
           </thead>
           <tbody>
             {data.rows.map((r) => (
-              <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+              <tr key={r.id} className="border-b border-white/5 hover:bg-surface-2">
                 <td className="px-4 py-2 font-mono text-xs">{r.code}</td>
                 <td className="px-4 py-2">{r.name}</td>
                 <td className="px-4 py-2 text-xs text-muted">{TYPE_LABEL[r.type]}</td>

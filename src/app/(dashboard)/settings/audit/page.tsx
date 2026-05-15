@@ -179,7 +179,7 @@ export default function AuditPage() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {filtered.map((r) => {
                 const isOpen = expanded === r.id;
                 const hasDiff = r.oldValue || r.newValue || r.ipAddress;

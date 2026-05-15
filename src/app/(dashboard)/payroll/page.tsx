@@ -156,7 +156,7 @@ function PayGroupsTab() {
               </thead>
               <tbody>
                 {rows.map((g) => (
-                  <tr key={g.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={g.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5 font-medium">{g.name}</td>
                     <td className="px-4 py-2.5 text-xs">{FREQUENCY_LABEL[g.frequency]}</td>
                     <td className="px-4 py-2.5 text-xs text-muted">{g.country} · {g.currency}</td>
@@ -314,7 +314,7 @@ function PayRunsTab() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+              <tr key={r.id} className="border-b border-white/5 hover:bg-surface-2">
                 <td className="px-4 py-2.5 text-xs">
                   <Link href={`/payroll/${r.id}`} className="hover:underline">
                     {new Date(r.periodStart).toLocaleDateString()} → {new Date(r.periodEnd).toLocaleDateString()}

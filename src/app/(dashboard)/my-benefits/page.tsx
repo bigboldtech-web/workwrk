@@ -207,7 +207,7 @@ export default function MyBenefitsPage() {
               </thead>
               <tbody>
                 {data.enrollments.map((e) => (
-                  <tr key={e.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={e.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5">
                       <div className="font-medium">{e.benefitPlan.name}</div>
                       <div className="text-[10px] text-muted">{e.benefitPlan.type} · {e.benefitPlan.carrier ?? "—"}</div>
@@ -241,7 +241,7 @@ export default function MyBenefitsPage() {
           {data.dependents.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted">No dependents on file.</div>
           ) : (
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {data.dependents.map((d) => (
                 <li key={d.id} className="p-4 flex items-center justify-between">
                   <div>
@@ -266,7 +266,7 @@ export default function MyBenefitsPage() {
               Marriage, birth, address change, etc. open a window for off-cycle benefit changes. Contact HR to log one.
             </div>
           ) : (
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-border">
               {data.lifeEvents.map((e) => (
                 <li key={e.id} className="p-4 flex items-center justify-between">
                   <div>

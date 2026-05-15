@@ -65,6 +65,67 @@ interface Role {
   level?: string;
 }
 
+// One row inside `bulkPayload.kraEntries` — the bulk "Assign KRAs"
+// action accepts an array of these.
+interface BulkKraEntry {
+  kraId: string;
+  weightage: string;
+}
+
+// Union of fields the bulk-action endpoint accepts. Only the keys
+// relevant to the chosen `bulkAction` are populated at submit time.
+interface BulkPayload {
+  departmentId?: string;
+  managerId?: string;
+  officeId?: string;
+  sopId?: string;
+  sopIds?: string[];
+  dueDate?: string;
+  kraEntries?: BulkKraEntry[];
+  // Set by the "assign_kra" preset action when seeding the dialog.
+  weightage?: number;
+  period?: string;
+  // Set by the "assign_sop" preset action.
+  mandatory?: boolean;
+}
+
+// CSV import shapes. parseCSV keys are normalized lower-case header
+// strings; the API only requires `email` but accepts the rest.
+type ImportRow = Record<string, string>;
+
+interface ImportError {
+  row?: number;
+  email?: string;
+  reason?: string;
+  message?: string;
+  field?: string;
+}
+
+interface ImportResult {
+  // dryRun returns { valid, errors, errorDetails }; real run returns
+  // { imported, skipped, errorDetails }. UI renders whichever pair the
+  // server sent.
+  imported?: number;
+  valid?: number;
+  skipped?: number;
+  errors?: number;
+  errorDetails?: ImportError[];
+  // The API wraps in { data: ... }; we read both shapes.
+  data?: ImportResult;
+}
+
+// Minimal pending-invitation shape the page renders from
+// /api/invitations. Fields beyond these are ignored on this page.
+interface PendingInvitation {
+  id: string;
+  email: string;
+  accepted: boolean;
+  expiresAt: string;
+  createdAt?: string;
+  role?: { title: string } | null;
+  department?: { name: string } | null;
+}
+
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
   if (score >= 70) return "text-[color:var(--accent-strong)]";
@@ -89,8 +150,10 @@ export default function PeopleListView() {
   const [people, setPeople] = useState<Person[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
-  const [kras, setKras] = useState<any[]>([]);
-  const [sops, setSops] = useState<any[]>([]);
+  // Lookups for the bulk-action / KRA assignment UI. Minimal field
+  // shapes — this page only needs id + label per row.
+  const [kras, setKras] = useState<Array<{ id: string; name: string }>>([]);
+  const [sops, setSops] = useState<Array<{ id: string; title: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [deptFilter, setDeptFilter] = useState("all");
@@ -107,7 +170,10 @@ export default function PeopleListView() {
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<string | null>(null);
-  const [bulkPayload, setBulkPayload] = useState<any>({});
+  // Shape of the bulk-action payload depends on which action is
+   // selected (bulkAction). We capture the union of all possible field
+   // sets here; the API only reads what's relevant to the chosen action.
+  const [bulkPayload, setBulkPayload] = useState<BulkPayload>({});
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
 
@@ -136,8 +202,8 @@ export default function PeopleListView() {
   // Bulk import
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
-  const [importPreview, setImportPreview] = useState<any[]>([]);
-  const [importResult, setImportResult] = useState<any>(null);
+  const [importPreview, setImportPreview] = useState<ImportRow[]>([]);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importing, setImporting] = useState(false);
 
   function parseCSV(text: string) {
@@ -146,7 +212,7 @@ export default function PeopleListView() {
     const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
     return lines.slice(1).map((line) => {
       const values = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
-      const row: any = {};
+      const row: ImportRow = {};
       headers.forEach((h, i) => { row[h === "firstname" ? "firstName" : h === "lastname" ? "lastName" : h === "accesslevel" ? "accessLevel" : h] = values[i] || ""; });
       return row;
     });
@@ -232,7 +298,7 @@ export default function PeopleListView() {
   };
 
   // Pending invitations
-  const [pendingInvitations, setPendingInvitations] = useState<any[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([]);
 
   const fetchPendingInvitations = useCallback(async () => {
     try {
@@ -240,7 +306,7 @@ export default function PeopleListView() {
       if (res.ok) {
         const data = await res.json();
         const pending = (Array.isArray(data) ? data : data.data || []).filter(
-          (inv: any) => !inv.accepted && new Date(inv.expiresAt) > new Date()
+          (inv: PendingInvitation) => !inv.accepted && new Date(inv.expiresAt) > new Date()
         );
         setPendingInvitations(pending);
       }
@@ -516,7 +582,7 @@ export default function PeopleListView() {
                           // teammate's accessLevel will match what the
                           // org defined for that role. No more "Marketing
                           // Manager role marked as EMPLOYEE" drift.
-                          const picked = roles.find((r: any) => r.id === v);
+                          const picked = roles.find((r) => r.id === v);
                           if (picked?.level && !formAccessLevel) {
                             setFormAccessLevel(picked.level);
                           }
@@ -544,7 +610,7 @@ export default function PeopleListView() {
                     </SelectContent>
                   </Select>
                   {formRoleId && (() => {
-                    const picked = roles.find((r: any) => r.id === formRoleId);
+                    const picked = roles.find((r) => r.id === formRoleId);
                     if (!picked?.level || !formAccessLevel || picked.level === formAccessLevel) return null;
                     return (
                       <p className="text-[11px] text-amber-400">
@@ -604,13 +670,13 @@ export default function PeopleListView() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input placeholder="Search people..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
         <Select value={deptFilter} onValueChange={setDeptFilter}>
-          <SelectTrigger className="w-[200px]">
+          <SelectTrigger className="w-full sm:w-[200px]">
             <Building2 size={14} className="mr-2 text-muted shrink-0" />
             <SelectValue placeholder="Department" />
           </SelectTrigger>
@@ -620,7 +686,7 @@ export default function PeopleListView() {
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]">
+          <SelectTrigger className="w-full sm:w-[140px]">
             <UserCheck size={14} className="mr-2 text-muted" />
             <SelectValue placeholder="Status" />
           </SelectTrigger>
@@ -790,7 +856,7 @@ export default function PeopleListView() {
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted">Pending Invitations ({pendingInvitations.length})</h3>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {pendingInvitations.map((inv: any) => (
+            {pendingInvitations.map((inv) => (
               <Card key={inv.id} className="border-dashed border-border">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
@@ -930,7 +996,7 @@ export default function PeopleListView() {
                     </div>
                   )}
                   <div className="space-y-2">
-                    {(bulkPayload.kraEntries || []).map((entry: any, idx: number) => (
+                    {(bulkPayload.kraEntries || []).map((entry, idx) => (
                       <div key={idx} className="flex items-center gap-2">
                         <KraPicker
                           kras={kras}
@@ -940,7 +1006,7 @@ export default function PeopleListView() {
                             updated[idx] = { ...updated[idx], kraId: v };
                             setBulkPayload({ ...bulkPayload, kraEntries: updated });
                           }}
-                          excludeIds={(bulkPayload.kraEntries || []).filter((_: any, i: number) => i !== idx).map((e: any) => e.kraId).filter(Boolean)}
+                          excludeIds={(bulkPayload.kraEntries || []).filter((_, i) => i !== idx).map((e) => e.kraId).filter(Boolean)}
                           className="flex-1"
                         />
                         <Input
@@ -953,7 +1019,7 @@ export default function PeopleListView() {
                           }}
                         />
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-400 shrink-0" onClick={() => {
-                          setBulkPayload({ ...bulkPayload, kraEntries: (bulkPayload.kraEntries || []).filter((_: any, i: number) => i !== idx) });
+                          setBulkPayload({ ...bulkPayload, kraEntries: (bulkPayload.kraEntries || []).filter((_, i) => i !== idx) });
                         }}>
                           <Trash2 size={12} />
                         </Button>
@@ -961,7 +1027,7 @@ export default function PeopleListView() {
                     ))}
                   </div>
                   {(bulkPayload.kraEntries || []).length > 0 && (() => {
-                    const total = (bulkPayload.kraEntries || []).reduce((sum: number, e: any) => sum + (parseFloat(e.weightage) || 0), 0);
+                    const total = (bulkPayload.kraEntries || []).reduce((sum: number, e) => sum + (parseFloat(e.weightage) || 0), 0);
                     const isOver = total > 100;
                     const isExact = total === 100;
                     return (
@@ -982,7 +1048,7 @@ export default function PeopleListView() {
                   <Label>SOP</Label>
                   <Select value={bulkPayload.sopId || ""} onValueChange={(v) => setBulkPayload({ ...bulkPayload, sopId: v })}>
                     <SelectTrigger><SelectValue placeholder="Select SOP" /></SelectTrigger>
-                    <SelectContent>{sops.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.title}</SelectItem>)}</SelectContent>
+                    <SelectContent>{sops.map((s) => <SelectItem key={s.id} value={s.id}>{s.title}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2"><Label>Due Date</Label><Input type="date" value={bulkPayload.dueDate || ""} onChange={(e) => setBulkPayload({ ...bulkPayload, dueDate: e.target.value })} /></div>
@@ -1061,10 +1127,10 @@ export default function PeopleListView() {
 
                 {/* Results */}
                 {importResult && (
-                  <div className={`p-3 rounded-lg border ${importResult.errors > 0 ? "border-amber-500/30 bg-amber-500/5" : "border-green-500/30 bg-green-500/5"}`}>
+                  <div className={`p-3 rounded-lg border ${(importResult.errors ?? 0) > 0 ? "border-amber-500/30 bg-amber-500/5" : "border-green-500/30 bg-green-500/5"}`}>
                     <p className="text-sm font-medium">{importResult.imported != null ? `Imported: ${importResult.imported}` : `Valid: ${importResult.valid}`}</p>
-                    {importResult.errors > 0 && <p className="text-xs text-amber-400 mt-1">{importResult.errors} error(s)</p>}
-                    {importResult.errorDetails?.slice(0, 5).map((e: any, i: number) => (
+                    {(importResult.errors ?? 0) > 0 && <p className="text-xs text-amber-400 mt-1">{importResult.errors} error(s)</p>}
+                    {importResult.errorDetails?.slice(0, 5).map((e, i) => (
                       <p key={i} className="text-[10px] text-muted mt-0.5">Row {e.row}: {e.message} ({e.field})</p>
                     ))}
                   </div>

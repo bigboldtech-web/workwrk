@@ -1040,7 +1040,7 @@ export default function SettingsPage() {
               <CardDescription>Timezone, currency, and fiscal year. For company profile (name, logo, mission, values), go to Organization → About.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div className="space-y-2">
                   <Label>Timezone</Label>
                   <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-10 w-full appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]">
@@ -1093,7 +1093,7 @@ export default function SettingsPage() {
 
               <div className="space-y-2">
                 <Label>Performance Score Formula Weights</Label>
-                <div className="grid grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                   {([
                     { key: "kpi", label: "KPI Achievement %" },
                     { key: "manager", label: "Manager Rating %" },
@@ -1290,7 +1290,7 @@ export default function SettingsPage() {
               <CardDescription>Configure password requirements for your team</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Minimum Password Length</Label>
                   <Input
@@ -1482,7 +1482,7 @@ export default function SettingsPage() {
                 <Button>Upgrade Plan</Button>
               </div>
 
-              <div className="mt-6 grid grid-cols-3 gap-4">
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
                   { label: "Users", value: data?.usage.users || 0, limit: limits.users },
                   { label: "SOPs", value: data?.usage.sops || 0, limit: limits.sops },

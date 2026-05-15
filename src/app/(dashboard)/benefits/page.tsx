@@ -160,7 +160,7 @@ function PlansTab() {
               </thead>
               <tbody>
                 {rows.map((p) => (
-                  <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={p.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5 font-medium">{p.name}</td>
                     <td className="px-4 py-2.5 text-xs">{TYPE_LABEL[p.type]}</td>
                     <td className="px-4 py-2.5 text-xs text-muted">{p.carrier ?? "—"}</td>
@@ -318,7 +318,7 @@ function OpenEnrollmentsTab() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={r.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5 font-medium">{r.name}</td>
                     <td className="px-4 py-2.5 text-xs">
                       {new Date(r.startDate).toLocaleDateString()} → {new Date(r.endDate).toLocaleDateString()}

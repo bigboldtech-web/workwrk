@@ -369,7 +369,7 @@ function RequestsTable({
             const days = daysBetween(r.startDate, r.endDate);
             const checkable = r.status === "PENDING";
             return (
-              <tr key={r.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+              <tr key={r.id} className="border-b border-white/5 hover:bg-surface-2">
                 {showApprovalActions && (
                   <td className="px-3 py-2.5">
                     {checkable && (

@@ -1,14 +1,18 @@
 "use client";
 
-// Floating bulk-action bar that appears at the bottom of an approval
-// queue when N rows are selected. Reusable across Expenses / Time Off /
-// Comp / POs / Invoices / Timesheets — each consumer passes the right
-// `entityType` and a refresh callback. Reject prompts for a note.
+// Specialized floating bar for approval queues — Expenses, Time off,
+// Comp decisions, POs, Invoices, Timesheets all share the same
+// approve/reject UX wired to /api/bulk-decide. Reject prompts the
+// user for a note; Approve is one click.
+//
+// This is a thin wrapper around the generic BulkActionsBar; use that
+// directly when you need a different action set (bulk delete, bulk
+// export, bulk close, etc.).
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { CheckCircle2, XCircle, X } from "lucide-react";
+import { CheckCircle2, XCircle } from "lucide-react";
+import { BulkActionsBar, type BulkAction } from "@/components/ui/bulk-actions-bar";
 
 export type BulkEntityType =
   | "expense"
@@ -30,9 +34,9 @@ export function BulkApproveBar({
   onDone: () => void;
 }) {
   const { toast } = useToast();
-  const [busy, setBusy] = useState<"APPROVE" | "REJECT" | null>(null);
-
-  if (selectedIds.length === 0) return null;
+  // Per-decision "doing" label is fed into BulkActionsBar via busyLabel;
+  // we don't need to track separately here.
+  const [, setActiveDecision] = useState<"APPROVE" | "REJECT" | null>(null);
 
   async function decide(decision: "APPROVE" | "REJECT") {
     let note: string | null = null;
@@ -41,7 +45,7 @@ export function BulkApproveBar({
       if (reason === null) return;
       note = reason;
     }
-    setBusy(decision);
+    setActiveDecision(decision);
     try {
       const res = await fetch("/api/bulk-decide", {
         method: "POST",
@@ -76,44 +80,35 @@ export function BulkApproveBar({
       onClear();
       onDone();
     } finally {
-      setBusy(null);
+      setActiveDecision(null);
     }
   }
 
+  const actions: BulkAction[] = [
+    {
+      id: "reject",
+      label: "Reject all",
+      busyLabel: "Rejecting…",
+      icon: <XCircle size={12} />,
+      variant: "outline",
+      className: "text-rose-500",
+      onRun: () => decide("REJECT"),
+    },
+    {
+      id: "approve",
+      label: "Approve all",
+      busyLabel: "Approving…",
+      icon: <CheckCircle2 size={12} />,
+      variant: "default",
+      onRun: () => decide("APPROVE"),
+    },
+  ];
+
   return (
-    <div className="bulk-approve-bar">
-      <span className="bulk-approve-count">
-        {selectedIds.length} selected
-      </span>
-      <button
-        type="button"
-        onClick={onClear}
-        className="bulk-approve-clear"
-        aria-label="Clear selection"
-      >
-        <X size={12} />
-      </button>
-      <div className="bulk-approve-actions">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 text-xs text-red-400"
-          disabled={busy !== null}
-          onClick={() => decide("REJECT")}
-        >
-          <XCircle size={12} className="mr-1" />
-          {busy === "REJECT" ? "Rejecting…" : "Reject all"}
-        </Button>
-        <Button
-          size="sm"
-          className="h-8 text-xs"
-          disabled={busy !== null}
-          onClick={() => decide("APPROVE")}
-        >
-          <CheckCircle2 size={12} className="mr-1" />
-          {busy === "APPROVE" ? "Approving…" : "Approve all"}
-        </Button>
-      </div>
-    </div>
+    <BulkActionsBar
+      selectedIds={selectedIds}
+      onClear={onClear}
+      actions={actions}
+    />
   );
 }

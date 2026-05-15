@@ -192,7 +192,7 @@ export default function PayRunDetailPage() {
               </thead>
               <tbody>
                 {run.payslips.map((p) => (
-                  <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={p.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5">
                       <Link href={`/payroll/payslip/${p.id}`} className="font-medium hover:underline">
                         {p.subject.firstName} {p.subject.lastName}

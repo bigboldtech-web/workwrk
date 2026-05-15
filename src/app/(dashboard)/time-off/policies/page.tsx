@@ -145,7 +145,7 @@ export default function TimeOffPoliciesPage() {
               </thead>
               <tbody>
                 {policies.map((p) => (
-                  <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <tr key={p.id} className="border-b border-white/5 hover:bg-surface-2">
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2">
                         {p.color && <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />}

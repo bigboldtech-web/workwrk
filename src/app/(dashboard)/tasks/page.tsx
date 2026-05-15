@@ -428,7 +428,8 @@ export default function TasksPage() {
 
       {/* ── Week ── */}
       {view === "week" && (
-        <div className="grid grid-cols-7 gap-2">
+        <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
+        <div className="grid grid-cols-7 gap-2 min-w-[760px] sm:min-w-0">
           {weekDates.map((date, i) => {
             const dateStr = formatISODate(date);
             const dayTasks = tasks.filter((t) => {
@@ -522,6 +523,7 @@ export default function TasksPage() {
               </div>
             );
           })}
+        </div>
         </div>
       )}
 
