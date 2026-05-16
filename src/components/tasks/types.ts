@@ -44,6 +44,10 @@ export interface Task {
   kra?: { id: string; name: string } | null;
   labels?: TaskLabelOnTask[];
   _count?: { subTasks: number; comments: number };
+  // Within-day order for the week-view DnD. Null on tasks that have
+  // never been reordered — render those last (using id as the tiebreaker
+  // gives a stable secondary order).
+  dayPosition?: number | null;
 }
 
 export interface TeamMember {

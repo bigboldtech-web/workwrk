@@ -56,6 +56,9 @@ interface OKR {
   quarter?: string;
   ownerId?: string;
   parentId?: string;
+  // Manual reorder position within (org, owner). Nullable on legacy rows
+  // that haven't been touched; sort those last in a deterministic way.
+  position?: number | null;
   keyResults: { id: string; title: string; unit?: string; startValue: number; targetValue: number; currentValue: number; progress: number }[];
   children?: { id: string; title: string; progress: number; level: string }[];
 }
@@ -93,6 +96,11 @@ export default function OKRsPage() {
   const [checkInValues, setCheckInValues] = useState<Record<string, string>>({});
   const [deleteOkr, setDeleteOkr] = useState<OKR | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // DnD state — only one OKR drags at a time. Drops are constrained to
+  // the same level group (Company/Team/Individual) since priority order
+  // only makes sense within a level.
+  const [draggingOkrId, setDraggingOkrId] = useState<string | null>(null);
+  const [dropBeforeOkrId, setDropBeforeOkrId] = useState<string | null>(null);
   const { success: toastSuccess, error: toastError } = useToast();
 
   useEffect(() => {
@@ -177,9 +185,66 @@ export default function OKRsPage() {
     } catch { toastError("Failed"); }
   }
 
-  const companyOkrs = okrs.filter((o) => o.level === "COMPANY");
-  const teamOkrs = okrs.filter((o) => o.level === "TEAM");
-  const individualOkrs = okrs.filter((o) => o.level === "INDIVIDUAL");
+  // Sort within each level by manual position (nulls last), tiebreak by id
+  // for stability on equal positions.
+  const sortByPosition = (list: OKR[]) => [...list].sort((a, b) => {
+    const ap = a.position ?? Number.MAX_SAFE_INTEGER;
+    const bp = b.position ?? Number.MAX_SAFE_INTEGER;
+    if (ap !== bp) return ap - bp;
+    return a.id.localeCompare(b.id);
+  });
+  const companyOkrs = sortByPosition(okrs.filter((o) => o.level === "COMPANY"));
+  const teamOkrs = sortByPosition(okrs.filter((o) => o.level === "TEAM"));
+  const individualOkrs = sortByPosition(okrs.filter((o) => o.level === "INDIVIDUAL"));
+
+  // Within-level reorder. Cross-level drops are rejected silently so we
+  // don't accidentally promote an individual OKR to a company objective.
+  async function handleOkrReorderDrop(targetOkrId: string, targetLevel: string) {
+    const dragId = draggingOkrId;
+    setDraggingOkrId(null);
+    setDropBeforeOkrId(null);
+    if (!dragId) return;
+    const dragged = okrs.find((o) => o.id === dragId);
+    if (!dragged || dragged.level !== targetLevel) return;
+    if (dragged.id === targetOkrId) return;
+
+    const levelList =
+      targetLevel === "COMPANY" ? companyOkrs :
+      targetLevel === "TEAM" ? teamOkrs :
+      individualOkrs;
+    const fromIdx = levelList.findIndex((o) => o.id === dragId);
+    let toIdx = levelList.findIndex((o) => o.id === targetOkrId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    if (toIdx > fromIdx) toIdx -= 1;
+    if (toIdx === fromIdx) return;
+
+    const reordered = [...levelList];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    const items = reordered.map((o, idx) => ({ id: o.id, position: (idx + 1) * 10 }));
+
+    setOkrs((prev) =>
+      prev.map((o) => {
+        const found = items.find((i) => i.id === o.id);
+        return found ? { ...o, position: found.position } : o;
+      }),
+    );
+    try {
+      const res = await fetch("/api/okrs/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error("reorder failed");
+    } catch {
+      toastError("Failed to save new order");
+      // Refetch to restore truth.
+      fetch(`/api/okrs?quarter=${encodeURIComponent(quarter)}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d) setOkrs(Array.isArray(d) ? d : d?.data || []); })
+        .catch(() => {});
+    }
+  }
 
   const avgProgress = okrs.length > 0 ? Math.round(okrs.reduce((s, o) => s + o.progress, 0) / okrs.length) : 0;
 
@@ -256,10 +321,37 @@ export default function OKRsPage() {
                 {group.items.map((okr) => {
                   const isExp = expanded.has(okr.id);
                   const statusStyle = STATUS_COLORS[okr.status] || STATUS_COLORS.ON_TRACK;
+                  const isDragging = draggingOkrId === okr.id;
+                  const showDropLine = dropBeforeOkrId === okr.id && draggingOkrId !== okr.id && draggingOkrId !== null;
                   return (
                     <ContextMenu key={okr.id}>
                       <ContextMenuTrigger asChild>
-                    <Card className="overflow-hidden">
+                    <Card
+                      className={`overflow-hidden ${isDragging ? "opacity-40" : ""} ${showDropLine ? "border-t-2 border-[color:var(--accent-strong)] -mt-px" : ""}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", okr.id);
+                        setDraggingOkrId(okr.id);
+                      }}
+                      onDragEnd={() => { setDraggingOkrId(null); setDropBeforeOkrId(null); }}
+                      onDragOver={(e) => {
+                        if (!draggingOkrId) return;
+                        const dragged = okrs.find((o) => o.id === draggingOkrId);
+                        // Only allow same-level drops — cross-level moves
+                        // would imply a level change, which is editor work.
+                        if (!dragged || dragged.level !== group.level) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        if (dropBeforeOkrId !== okr.id) setDropBeforeOkrId(okr.id);
+                      }}
+                      onDrop={(e) => {
+                        if (!draggingOkrId) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleOkrReorderDrop(okr.id, group.level);
+                      }}
+                    >
                       <div className="p-4 cursor-pointer" onClick={() => toggle(okr.id)}>
                         <div className="flex items-center gap-3">
                           <button className="shrink-0 text-muted">{isExp ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>

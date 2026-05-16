@@ -107,6 +107,12 @@ export default function TasksPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
 
+  // Within-day DnD state. Active in the week view only; cross-day drops
+  // are ignored for v1 (cross-day means a date change which needs a
+  // different request shape than the reorder endpoint).
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [dropBeforeTaskId, setDropBeforeTaskId] = useState<string | null>(null);
+
   // Compute the fetch window per view. Day = 1 day; Week/List = 7 days;
   // Month = full 6-row calendar grid (42 days); Gantt = 28-day window
   // centered on the anchor.
@@ -183,6 +189,64 @@ export default function TasksPage() {
   }, [fromDate, toDate, teamView, isManager, selectedMemberIds]);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
+
+  // Within-day reorder. Drops on a task within the same day reposition
+  // the dragged task immediately before the drop target. Drops in a
+  // different day are ignored (cross-day requires a date PATCH which
+  // the reorder endpoint doesn't do — that's a v2 follow-up).
+  // External tasks (GCAL, MEETING) aren't user-owned so we refuse to
+  // reorder them; the API would reject anyway with a 403.
+  const handleTaskReorderDrop = useCallback(async (targetTaskId: string, targetDateStr: string) => {
+    const dragId = draggingTaskId;
+    setDraggingTaskId(null);
+    setDropBeforeTaskId(null);
+    if (!dragId) return;
+    const dragged = tasks.find((t) => t.id === dragId);
+    if (!dragged) return;
+    if (dragged.externalSource === "GCAL" || dragged.externalSource === "MEETING") return;
+    if (dragged.id === targetTaskId) return;
+    const draggedDay = dragged.date.split("T")[0];
+    if (draggedDay !== targetDateStr) return; // ignore cross-day for v1
+
+    const dayTasks = tasks
+      .filter((t) => t.date.split("T")[0] === targetDateStr)
+      .filter((t) => t.externalSource !== "GCAL" && t.externalSource !== "MEETING")
+      .sort((a, b) => {
+        const ap = a.dayPosition ?? Number.MAX_SAFE_INTEGER;
+        const bp = b.dayPosition ?? Number.MAX_SAFE_INTEGER;
+        if (ap !== bp) return ap - bp;
+        return a.id.localeCompare(b.id);
+      });
+
+    const fromIdx = dayTasks.findIndex((t) => t.id === dragId);
+    let toIdx = dayTasks.findIndex((t) => t.id === targetTaskId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    if (toIdx > fromIdx) toIdx -= 1;
+    if (toIdx === fromIdx) return;
+    const reordered = [...dayTasks];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    const items = reordered.map((t, idx) => ({ id: t.id, dayPosition: (idx + 1) * 10 }));
+
+    // Optimistic — patch local state first so the UI doesn't flicker.
+    setTasks((prev) =>
+      prev.map((t) => {
+        const found = items.find((i) => i.id === t.id);
+        return found ? { ...t, dayPosition: found.dayPosition } : t;
+      }),
+    );
+    try {
+      const res = await fetch("/api/tasks/reorder-day", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error("reorder failed");
+    } catch {
+      toastError("Failed to save new order");
+      fetchTasks();
+    }
+  }, [draggingTaskId, tasks, fetchTasks, toastError]);
 
   useEffect(() => {
     if (!isManager) return;
@@ -434,18 +498,29 @@ export default function TasksPage() {
         <div className="grid grid-cols-7 gap-2 min-w-[760px] sm:min-w-0">
           {weekDates.map((date, i) => {
             const dateStr = formatISODate(date);
-            const dayTasks = tasks.filter((t) => {
-              // Show a task on this day if its date anchor matches OR its
-              // multi-day span covers this day.
-              if (t.date.split("T")[0] === dateStr) return true;
-              if (t.startAt && t.endAt) {
-                const d = startOfDay(date);
-                const s = startOfDay(new Date(t.startAt));
-                const e = startOfDay(new Date(t.endAt));
-                return d >= s && d <= e;
-              }
-              return false;
-            });
+            const dayTasks = tasks
+              .filter((t) => {
+                // Show a task on this day if its date anchor matches OR its
+                // multi-day span covers this day.
+                if (t.date.split("T")[0] === dateStr) return true;
+                if (t.startAt && t.endAt) {
+                  const d = startOfDay(date);
+                  const s = startOfDay(new Date(t.startAt));
+                  const e = startOfDay(new Date(t.endAt));
+                  return d >= s && d <= e;
+                }
+                return false;
+              })
+              .sort((a, b) => {
+                // Within-day order: user-set dayPosition first, then
+                // startAt/date tiebreaker for never-reordered tasks.
+                const ap = a.dayPosition ?? Number.MAX_SAFE_INTEGER;
+                const bp = b.dayPosition ?? Number.MAX_SAFE_INTEGER;
+                if (ap !== bp) return ap - bp;
+                const at = a.startAt ?? a.date;
+                const bt = b.startAt ?? b.date;
+                return at.localeCompare(bt);
+              });
             const dayHours = dayTasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
             const today = isToday(date);
             const isPast = date < new Date() && !today;
@@ -484,11 +559,42 @@ export default function TasksPage() {
                             : source === "MEETING"
                               ? "Meeting — open in Meetings"
                               : undefined;
+                          const isExternal = source === "GCAL" || source === "MEETING";
+                          const draggable = !isExternal;
+                          const isDragging = draggingTaskId === task.id;
+                          const showDropLine = dropBeforeTaskId === task.id && draggingTaskId !== task.id && draggingTaskId !== null;
                           return (
                             <button
                               key={task.id}
                               onClick={() => openEditTask(task)}
-                              className={`w-full text-left rounded-md border p-1.5 transition-colors ${borderBgCls}`}
+                              draggable={draggable}
+                              onDragStart={(e) => {
+                                if (!draggable) return;
+                                e.dataTransfer.effectAllowed = "move";
+                                e.dataTransfer.setData("text/plain", task.id);
+                                setDraggingTaskId(task.id);
+                              }}
+                              onDragEnd={() => {
+                                setDraggingTaskId(null);
+                                setDropBeforeTaskId(null);
+                              }}
+                              onDragOver={(e) => {
+                                if (!draggingTaskId) return;
+                                // Same-day check — don't show a drop line for
+                                // cross-day drags since we won't honor them.
+                                const dragged = tasks.find((t) => t.id === draggingTaskId);
+                                if (!dragged || dragged.date.split("T")[0] !== dateStr) return;
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                if (dropBeforeTaskId !== task.id) setDropBeforeTaskId(task.id);
+                              }}
+                              onDrop={(e) => {
+                                if (!draggingTaskId) return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleTaskReorderDrop(task.id, dateStr);
+                              }}
+                              className={`w-full text-left rounded-md border p-1.5 transition-colors ${borderBgCls} ${isDragging ? "opacity-40" : ""} ${showDropLine ? "border-t-2 border-[color:var(--accent-strong)] -mt-px" : ""}`}
                               title={titleAttr}
                             >
                               <div className="flex items-start gap-1.5">
