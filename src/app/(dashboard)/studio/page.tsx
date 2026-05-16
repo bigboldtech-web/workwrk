@@ -180,6 +180,60 @@ function WorkflowsTab() {
   );
 }
 
+// Pre-built approval-chain shapes. The user can clone one as a starting
+// point instead of building from scratch — each captures a common
+// workplace pattern (1-up manager, dual sign, admin override, etc.).
+const WORKFLOW_TEMPLATES: Array<{
+  id: string;
+  name: string;
+  description: string;
+  steps: WorkflowStep[];
+}> = [
+  {
+    id: "1-up-manager",
+    name: "1-up manager",
+    description: "Simplest case: requester's direct manager approves.",
+    steps: [{ id: "step-1", name: "Manager approval", approverRule: "MANAGER" }],
+  },
+  {
+    id: "manager-then-admin",
+    name: "Manager → org admin",
+    description: "Manager signs off, then finance / org admin double-checks.",
+    steps: [
+      { id: "step-1", name: "Manager approval", approverRule: "MANAGER" },
+      { id: "step-2", name: "Org admin sign-off", approverRule: "ADMIN" },
+    ],
+  },
+  {
+    id: "dual-sign",
+    name: "Dual sign-off",
+    description: "Two different org admins must both approve (segregation of duties).",
+    steps: [
+      { id: "step-1", name: "First admin", approverRule: "ADMIN", requireNote: true },
+      { id: "step-2", name: "Second admin", approverRule: "ADMIN", requireNote: true },
+    ],
+  },
+  {
+    id: "three-tier",
+    name: "Three-tier (manager → director → admin)",
+    description: "For larger orgs: layered review up the chain.",
+    steps: [
+      { id: "step-1", name: "Manager approval", approverRule: "MANAGER" },
+      { id: "step-2", name: "Director review", approverRule: "ROLE" },
+      { id: "step-3", name: "Org admin sign-off", approverRule: "ADMIN" },
+    ],
+  },
+  {
+    id: "hr-plus-manager",
+    name: "HR + manager (sensitive ops)",
+    description: "HR confirms first (comp, leave-of-absence, terminations), then manager.",
+    steps: [
+      { id: "step-1", name: "HR review", approverRule: "ROLE" },
+      { id: "step-2", name: "Manager confirm", approverRule: "MANAGER", requireNote: true },
+    ],
+  },
+];
+
 function CreateWorkflowDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { toast } = useToast();
   const [name, setName] = useState("");
@@ -188,6 +242,15 @@ function CreateWorkflowDialog({ onClose, onCreated }: { onClose: () => void; onC
     { id: "step-1", name: "Manager review", approverRule: "MANAGER" },
   ]);
   const [saving, setSaving] = useState(false);
+
+  function applyTemplate(templateId: string) {
+    const t = WORKFLOW_TEMPLATES.find((x) => x.id === templateId);
+    if (!t) return;
+    // Clone the steps so editing one workflow's draft doesn't mutate the
+    // shared template definition.
+    setSteps(t.steps.map((s, i) => ({ ...s, id: `step-${i + 1}` })));
+    if (!name.trim()) setName(t.name);
+  }
 
   function addStep() {
     setSteps((s) => [...s, { id: `step-${s.length + 1}`, name: "Approval", approverRule: "MANAGER" }]);
@@ -231,6 +294,26 @@ function CreateWorkflowDialog({ onClose, onCreated }: { onClose: () => void; onC
                   {TARGET_TYPES.map((t) => (<SelectItem key={t} value={t}>{t}</SelectItem>))}
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Start from a template</Label>
+              <span className="text-[10px] text-muted-2">applies to the steps below</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {WORKFLOW_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => applyTemplate(t.id)}
+                  title={t.description}
+                  className="text-[10px] rounded-md border border-line px-2 py-1 text-muted hover:text-foreground hover:border-fg/30 transition-colors text-left"
+                >
+                  <span className="font-medium">{t.name}</span>
+                  <span className="text-muted-2 ml-1.5">· {t.steps.length} step{t.steps.length === 1 ? "" : "s"}</span>
+                </button>
+              ))}
             </div>
           </div>
           <div className="space-y-2">

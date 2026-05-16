@@ -7,10 +7,12 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 type StepInput = {
   id: string;
@@ -92,6 +94,17 @@ export async function POST(req: NextRequest) {
         steps: stepsParsed,
       },
     });
+
+    logActivity({
+      type: "workflow_created",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Created workflow "${name}" for ${targetType} (${stepsParsed.length} step${stepsParsed.length === 1 ? "" : "s"})`,
+      targetId: flow.id,
+      targetType: "workflow",
+      metadata: { targetType, stepCount: stepsParsed.length },
+    });
+
     return jsonSuccess(flow, 201);
   } catch (e: unknown) {
     if (typeof e === "object" && e && "code" in e && (e as { code: string }).code === "P2002") {
