@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
+import { zipFiles, zipTextFile } from "@/lib/zip";
 
 function toCsv(headers: string[], rows: Record<string, any>[]): string {
   const escape = (val: any) => {
@@ -135,15 +137,53 @@ export async function GET(req: NextRequest) {
     activity.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))
   );
 
-  // Build a simple combined text file (no ZIP dependency needed for MVP)
-  const sections = Object.entries(csvFiles)
-    .map(([name, content]) => `=== ${name} ===\n${content}`)
-    .join("\n\n");
+  // Manifest first — gives the recipient a top-level inventory + the
+  // export timestamp + the org id so they can join exports across runs.
+  const manifest = {
+    organizationId: orgId,
+    exportedAt: new Date().toISOString(),
+    files: Object.entries(csvFiles).map(([name, content]) => ({
+      name,
+      bytes: new TextEncoder().encode(content).length,
+    })),
+    counts: {
+      people: users.length,
+      departments: departments.length,
+      tasks: tasks.length,
+      sops: sops.length,
+      reviewCycles: reviews.length,
+      meetings: meetings.length,
+      kras: kras.length,
+      activity: activity.length,
+    },
+    notes: "WorkwrK tenant export. Activity is capped at 500 most-recent rows; tasks at 1000.",
+  };
 
-  return new Response(sections, {
+  const archive = zipFiles([
+    zipTextFile("manifest.json", JSON.stringify(manifest, null, 2)),
+    ...Object.entries(csvFiles).map(([name, content]) => zipTextFile(name, content)),
+  ]);
+
+  // Tenant exports are sensitive — record who pulled what + when.
+  const totalRows = users.length + departments.length + tasks.length + sops.length + reviews.length + meetings.length + kras.length + activity.length;
+  logAuditEvent({
+    type: "tenant_export",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Exported tenant data (${totalRows} rows across ${Object.keys(csvFiles).length} files)`,
+    targetType: "organization",
+    metadata: manifest.counts,
+    severity: "warning",
+  });
+
+  const dateStr = new Date().toISOString().split("T")[0];
+  // Use a fresh ArrayBuffer slice so the Response sees a typed BodyInit.
+  const body = new Uint8Array(archive);
+  return new Response(body, {
     headers: {
-      "Content-Type": "text/csv",
-      "Content-Disposition": `attachment; filename="workwrk-export-${new Date().toISOString().split("T")[0]}.csv"`,
+      "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="workwrk-export-${dateStr}.zip"`,
+      "Content-Length": String(archive.length),
     },
   });
 }
