@@ -211,6 +211,12 @@ export default function PlanDetailPage() {
                 {busy === "publish" ? "Publishing…" : "Publish"}
               </Button>
             )}
+            <Link
+              href={`/planning/${plan.id}/variance`}
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-line text-fg hover:bg-card-2/40"
+            >
+              <ArrowDownUp size={11} /> Variance
+            </Link>
             {plan.status !== "ARCHIVED" && (
               <Button
                 size="sm"

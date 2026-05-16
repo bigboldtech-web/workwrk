@@ -93,11 +93,13 @@ export default function FinancialsPage() {
           <TabsTrigger value="accounts">Chart of accounts</TabsTrigger>
           <TabsTrigger value="entries">Journal entries</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
+          <TabsTrigger value="statements">Statements</TabsTrigger>
           <TabsTrigger value="calendar">Fiscal calendar</TabsTrigger>
         </TabsList>
         <TabsContent value="accounts" className="mt-3"><AccountsTab /></TabsContent>
         <TabsContent value="entries" className="mt-3"><EntriesTab /></TabsContent>
         <TabsContent value="reports" className="mt-3"><ReportsTab /></TabsContent>
+        <TabsContent value="statements" className="mt-3"><StatementsTab /></TabsContent>
         <TabsContent value="calendar" className="mt-3"><CalendarTab /></TabsContent>
       </Tabs>
     </div>
@@ -560,6 +562,303 @@ function ReportLines({ rows, total }: { rows: AccountRow[]; total: number }) {
         <span className="font-mono">{fmtMoney(total)}</span>
       </div>
     </>
+  );
+}
+
+// ─── Statements (period-scoped) ────────────────────────────────────
+
+type StatementKind = "pnl" | "bs" | "cf";
+
+interface PeriodRef { id: string; label: string; status?: "OPEN" | "CLOSED" }
+
+interface StatementAccountTotals {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+type StatementResponse =
+  | {
+      period: PeriodRef;
+      kind: "pnl";
+      revenue: StatementAccountTotals[];
+      expense: StatementAccountTotals[];
+      totals: { revenue: number; expense: number; netIncome: number };
+    }
+  | {
+      period: PeriodRef;
+      kind: "bs";
+      assets: StatementAccountTotals[];
+      liabilities: StatementAccountTotals[];
+      equity: StatementAccountTotals[];
+      totals: { assets: number; liabilities: number; equity: number; plug: number };
+    }
+  | {
+      period: PeriodRef;
+      kind: "cf";
+      operating: StatementAccountTotals[];
+      investing: StatementAccountTotals[];
+      financing: StatementAccountTotals[];
+      totals: { operating: number; investing: number; financing: number; netChange: number };
+      note?: string;
+    };
+
+function StatementsTab() {
+  const [years, setYears] = useState<FiscalYear[]>([]);
+  const [periodId, setPeriodId] = useState<string>("");
+  const [kind, setKind] = useState<StatementKind>("pnl");
+  const [data, setData] = useState<StatementResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+
+  // Pull fiscal years once so the period dropdown can group by year.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/fiscal-years");
+        const json = await res.json();
+        if (!mounted) return;
+        const list = Array.isArray(json) ? json : [];
+        setYears(list);
+        // Default to the most recent OPEN period for fast first-paint.
+        const allPeriods = list.flatMap((y: FiscalYear) => y.periods.map((p) => ({ ...p, yearStatus: y.status })));
+        const firstOpen = allPeriods.find((p) => p.status === "OPEN");
+        const first = firstOpen ?? allPeriods[0];
+        if (first) setPeriodId(first.id);
+      } finally {
+        if (mounted) setCalendarLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!periodId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/financials/statements?period=${periodId}&kind=${kind}`);
+      const json = await res.json();
+      // jsonSuccess wraps payloads in { data }; jsonError surfaces { error }.
+      setData(json?.data ?? (json?.error ? null : json));
+    } finally {
+      setLoading(false);
+    }
+  }, [periodId, kind]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-1.5">
+          {([
+            ["pnl", "Income Statement (P&L)"],
+            ["bs", "Balance Sheet"],
+            ["cf", "Cash Flow"],
+          ] as const).map(([k, lbl]) => (
+            <button
+              key={k}
+              onClick={() => setKind(k)}
+              className={`px-2.5 py-1 rounded border text-xs ${
+                kind === k ? "border-fg/30 text-fg" : "border-line text-muted hover:text-fg"
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <Label className="text-xs text-muted">Period</Label>
+          <select
+            className="h-8 text-xs rounded-md border border-line bg-card-2/40 px-2"
+            value={periodId}
+            onChange={(e) => setPeriodId(e.target.value)}
+            disabled={calendarLoading}
+          >
+            {calendarLoading && <option value="">Loading…</option>}
+            {!calendarLoading && years.length === 0 && (
+              <option value="">No fiscal periods yet</option>
+            )}
+            {years.map((y) => (
+              <optgroup key={y.id} label={y.label}>
+                {y.periods.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} {p.status === "CLOSED" ? "· closed" : ""}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {!periodId && !calendarLoading ? (
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-muted">
+            Set up a fiscal year in the Calendar tab first, then come back to generate statements.
+          </CardContent>
+        </Card>
+      ) : loading || calendarLoading ? (
+        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+      ) : !data ? null : data.kind === "pnl" ? (
+        <PnlView data={data} />
+      ) : data.kind === "bs" ? (
+        <BalanceSheetStatementView data={data} />
+      ) : (
+        <CashFlowView data={data} />
+      )}
+    </div>
+  );
+}
+
+function PnlView({ data }: { data: Extract<StatementResponse, { kind: "pnl" }> }) {
+  return (
+    <div className="space-y-3">
+      <Card>
+        <CardContent className="p-4">
+          <div className="text-xs uppercase tracking-wide text-muted mb-1">{data.period.label} · Income Statement</div>
+          <div className="flex items-baseline gap-4 mt-1">
+            <div className="text-2xl font-mono font-semibold">{fmtMoney(data.totals.netIncome)}</div>
+            <div className="text-xs text-muted">Net Income</div>
+            <div className="ml-auto text-xs text-muted">
+              Revenue {fmtMoney(data.totals.revenue)} · Expense {fmtMoney(data.totals.expense)}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wide text-muted mb-2 flex items-center gap-1">
+              <FileText size={12} /> Revenue
+            </div>
+            <ReportLines rows={data.revenue} total={data.totals.revenue} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wide text-muted mb-2 flex items-center gap-1">
+              <FileText size={12} /> Expense
+            </div>
+            <ReportLines rows={data.expense} total={data.totals.expense} />
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function BalanceSheetStatementView({ data }: { data: Extract<StatementResponse, { kind: "bs" }> }) {
+  const plugFlagged = Math.abs(data.totals.plug) > 0.005;
+  return (
+    <div className="space-y-3">
+      <Card>
+        <CardContent className="p-4">
+          <div className="text-xs uppercase tracking-wide text-muted mb-1">{data.period.label} · Balance Sheet (point-in-time)</div>
+          <div className="grid grid-cols-3 gap-3 mt-2 text-sm">
+            <div>
+              <div className="text-[10px] uppercase text-muted">Total Assets</div>
+              <div className="font-mono text-base">{fmtMoney(data.totals.assets)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-muted">Total Liabilities</div>
+              <div className="font-mono text-base">{fmtMoney(data.totals.liabilities)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-muted">Total Equity</div>
+              <div className="font-mono text-base">{fmtMoney(data.totals.equity)}</div>
+            </div>
+          </div>
+          {plugFlagged && (
+            <div className="mt-3 text-[11px] text-amber-400 border border-amber-400/30 rounded px-2 py-1">
+              A = L + E delta: {fmtMoney(data.totals.plug)} — either an out-of-balance ledger, a
+              multi-period roll (v1 limitation: BS shows only the entries posted to this period),
+              or unposted P&L close.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wide text-muted mb-2">Assets</div>
+            <ReportLines rows={data.assets} total={data.totals.assets} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wide text-muted mb-2">Liabilities</div>
+            <ReportLines rows={data.liabilities} total={data.totals.liabilities} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wide text-muted mb-2">Equity</div>
+            <ReportLines rows={data.equity} total={data.totals.equity} />
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function CashFlowView({ data }: { data: Extract<StatementResponse, { kind: "cf" }> }) {
+  const empty =
+    data.operating.length === 0 &&
+    data.investing.length === 0 &&
+    data.financing.length === 0;
+  return (
+    <div className="space-y-3">
+      <Card>
+        <CardContent className="p-4">
+          <div className="text-xs uppercase tracking-wide text-muted mb-1">{data.period.label} · Cash Flow (indirect, v1 shell)</div>
+          <div className="grid grid-cols-4 gap-3 mt-2 text-sm">
+            <div>
+              <div className="text-[10px] uppercase text-muted">Operating</div>
+              <div className="font-mono">{fmtMoney(data.totals.operating)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-muted">Investing</div>
+              <div className="font-mono">{fmtMoney(data.totals.investing)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-muted">Financing</div>
+              <div className="font-mono">{fmtMoney(data.totals.financing)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-muted">Net Change</div>
+              <div className="font-mono">{fmtMoney(data.totals.netChange)}</div>
+            </div>
+          </div>
+          {data.note && (
+            <div className="mt-3 text-[11px] text-muted border border-line rounded px-2 py-1">
+              {data.note}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      {!empty && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card><CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wide text-muted mb-2">Operating activities</div>
+            <ReportLines rows={data.operating} total={data.totals.operating} />
+          </CardContent></Card>
+          <Card><CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wide text-muted mb-2">Investing activities</div>
+            <ReportLines rows={data.investing} total={data.totals.investing} />
+          </CardContent></Card>
+          <Card><CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wide text-muted mb-2">Financing activities</div>
+            <ReportLines rows={data.financing} total={data.totals.financing} />
+          </CardContent></Card>
+        </div>
+      )}
+    </div>
   );
 }
 
