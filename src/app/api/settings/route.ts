@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeEnabledModules } from "@/lib/module-keys";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function GET() {
   try {
@@ -208,6 +209,20 @@ export async function PATCH(req: Request) {
       default:
         return NextResponse.json({ error: "Invalid section" }, { status: 400 });
     }
+
+    // Audit-log every org-settings change. The section name + a list
+    // of changed keys is enough for SOC 2 / compliance review; we
+    // don't store the full body to avoid bloating ActivityLog with
+    // large JSON blobs.
+    logAuditEvent({
+      type: `settings.update.${section}`,
+      actorId: (session.user as any).id,
+      organizationId: orgId,
+      description: `Updated org settings: ${section}`,
+      targetType: "Organization",
+      targetId: orgId,
+      metadata: { section, keys: data && typeof data === "object" ? Object.keys(data) : [] },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

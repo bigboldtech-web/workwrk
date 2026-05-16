@@ -17,6 +17,7 @@ import {
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 
 type LineInput = {
   debitAccountId?: string;
@@ -158,6 +159,23 @@ export async function POST(req: NextRequest) {
       },
     },
     include: { lines: true },
+  });
+  // Financial mutations get an audit-log row at "warning" severity
+  // so SOC 2 review queries surface them above routine activity.
+  logAuditEvent({
+    type: "journal_entry.create",
+    actorId: userId,
+    organizationId: orgId,
+    description: `Created journal entry ${reference}: ${description}`,
+    targetId: entry.id,
+    targetType: "JournalEntry",
+    metadata: {
+      reference,
+      periodId,
+      lineCount: lines.length,
+      totalDebit,
+      totalCredit,
+    },
   });
   return jsonSuccess(entry, 201);
 }

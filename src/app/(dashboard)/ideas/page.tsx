@@ -9,6 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -18,7 +20,7 @@ import {
 import { PageHeader } from "@/components/dashboard/page-header";
 import {
   Lightbulb, Plus, ThumbsUp, MessageSquare, Clock, CheckCircle2, XCircle,
-  Award, Send, ChevronRight, Trash2, MessageCircle, Gavel,
+  Award, Send, ChevronRight, Trash2, MessageCircle, Gavel, GripVertical, ArrowDownUp,
 } from "lucide-react";
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
@@ -76,6 +78,15 @@ export default function IdeasPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("all");
+  // Sort mode is independent of tab. "priority" activates manager-only
+  // drag-to-reorder against the new Idea.position column; "votes" /
+  // "newest" are pure read-only orderings.
+  const [sort, setSort] = useState<"newest" | "votes" | "priority">("newest");
+  // Local drag-state used only when `sort === "priority"`. We mutate a
+  // local copy first for optimistic UX, then POST /api/ideas/reorder
+  // and refetch on success.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropBeforeId, setDropBeforeId] = useState<string | null>(null);
 
   // Submit dialog
   const [showSubmit, setShowSubmit] = useState(false);
@@ -108,6 +119,7 @@ export default function IdeasPage() {
       const params = new URLSearchParams();
       if (tab === "mine") params.set("mine", "true");
       if (tab === "review") params.set("status", "SUBMITTED");
+      params.set("sort", sort);
       // roadmap and all: no filter — show everything
       const res = await fetch(`/api/ideas?${params}`);
       if (res.ok) {
@@ -115,7 +127,40 @@ export default function IdeasPage() {
         setIdeas(Array.isArray(data) ? data : data.data || []);
       }
     } catch {} finally { setLoading(false); }
-  }, [tab]);
+  }, [tab, sort]);
+
+  // Drag-and-drop handler. Active only when sort === "priority". Reorders
+  // the local list optimistically and pushes a batch reorder to the
+  // server with sequential positions (10, 20, 30, …) so future inserts
+  // can slot in between without re-numbering the world.
+  async function handleReorderDrop(targetId: string | null) {
+    const dragId = draggingId;
+    setDraggingId(null);
+    setDropBeforeId(null);
+    if (!dragId || sort !== "priority") return;
+    const fromIdx = ideas.findIndex((i) => i.id === dragId);
+    if (fromIdx < 0) return;
+    let toIdx = targetId === null ? ideas.length : ideas.findIndex((i) => i.id === targetId);
+    if (toIdx < 0) return;
+    if (toIdx > fromIdx) toIdx -= 1;
+    if (toIdx === fromIdx) return;
+    const next = [...ideas];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    setIdeas(next);
+    const items = next.map((i, idx) => ({ id: i.id, position: (idx + 1) * 10 }));
+    try {
+      const res = await fetch("/api/ideas/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error("reorder failed");
+    } catch {
+      toastError("Failed to save new order");
+      fetchIdeas();
+    }
+  }
 
   useEffect(() => { fetchIdeas(); }, [fetchIdeas]);
 
@@ -259,14 +304,29 @@ export default function IdeasPage() {
         ]}
       />
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="all" className="gap-1.5"><Lightbulb size={14} /> All</TabsTrigger>
-          <TabsTrigger value="mine" className="gap-1.5"><Send size={14} /> My Ideas</TabsTrigger>
-          <TabsTrigger value="roadmap" className="gap-1.5"><Award size={14} /> Roadmap</TabsTrigger>
-          {isManager && <TabsTrigger value="review" className="gap-1.5"><Clock size={14} /> Review</TabsTrigger>}
-        </TabsList>
-      </Tabs>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="flex-wrap">
+            <TabsTrigger value="all" className="gap-1.5"><Lightbulb size={14} /> All</TabsTrigger>
+            <TabsTrigger value="mine" className="gap-1.5"><Send size={14} /> My Ideas</TabsTrigger>
+            <TabsTrigger value="roadmap" className="gap-1.5"><Award size={14} /> Roadmap</TabsTrigger>
+            {isManager && <TabsTrigger value="review" className="gap-1.5"><Clock size={14} /> Review</TabsTrigger>}
+          </TabsList>
+        </Tabs>
+        {tab !== "roadmap" && (
+          <div className="flex items-center gap-2">
+            <ArrowDownUp size={12} className="text-muted-2" />
+            <Select value={sort} onValueChange={(v) => setSort(v as "newest" | "votes" | "priority")}>
+              <SelectTrigger className="h-8 w-[160px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest</SelectItem>
+                <SelectItem value="votes">Most votes</SelectItem>
+                {isManager && <SelectItem value="priority">Priority (drag)</SelectItem>}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
 
       {/* Roadmap View */}
       {tab === "roadmap" && !loading && (
@@ -307,22 +367,41 @@ export default function IdeasPage() {
       {/* Ideas List (not shown on roadmap view) */}
       {tab !== "roadmap" && (loading ? (
         <div className="space-y-3">
-          {[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-20 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}
+          {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
         </div>
       ) : ideas.length === 0 ? (
-        <Card>
-          <CardContent className="p-8 text-center">
-            <Lightbulb size={40} className="mx-auto text-muted mb-3" />
-            <p className="font-medium mb-1">No ideas yet</p>
-            <p className="text-sm text-muted mb-4">Be the first to share an idea to improve the company!</p>
-            <Button onClick={() => setShowSubmit(true)} className="gap-1.5"><Plus size={14} /> Submit Idea</Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Lightbulb}
+          title={tab === "mine" ? "You haven't submitted any ideas yet" : "No ideas yet"}
+          description={
+            tab === "mine"
+              ? "Share an idea to improve the company — your teammates can vote and a manager will respond."
+              : "Be the first to share an idea to improve the company."
+          }
+          actionLabel="Submit idea"
+          onAction={() => setShowSubmit(true)}
+        />
       ) : (
-        <div className="space-y-3">
+        <div
+          className="space-y-3"
+          onDragOver={(e) => {
+            // Trailing drop zone — releasing outside a card row in
+            // priority mode means "send to bottom". Only effective
+            // when actively dragging.
+            if (sort === "priority" && draggingId) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            if (sort === "priority") {
+              e.preventDefault();
+              handleReorderDrop(null);
+            }
+          }}
+        >
           {ideas.map((idea) => {
             const hasVoted = idea.votes.some((v) => v.userId === currentUserId);
             const style = STATUS_STYLES[idea.status] || STATUS_STYLES.SUBMITTED;
+            const dragging = draggingId === idea.id;
+            const showDropLine = sort === "priority" && dropBeforeId === idea.id && draggingId !== idea.id;
             const openReview = () => {
               setReviewIdea(idea);
               setReviewStatus("");
@@ -338,11 +417,48 @@ export default function IdeasPage() {
               setRewardValue(idea.rewardValue || "");
             };
             return (
-              <ContextMenu key={idea.id}>
+              <div
+                key={idea.id}
+                // DnD wrapper. Only active in priority sort — in other
+                // sort modes the wrapper still exists but `draggable`
+                // is false so the user can select text normally.
+                draggable={sort === "priority"}
+                onDragStart={(e) => {
+                  if (sort !== "priority") return;
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", idea.id);
+                  setDraggingId(idea.id);
+                }}
+                onDragEnd={() => { setDraggingId(null); setDropBeforeId(null); }}
+                onDragOver={(e) => {
+                  if (sort !== "priority" || !draggingId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dropBeforeId !== idea.id) setDropBeforeId(idea.id);
+                }}
+                onDrop={(e) => {
+                  if (sort !== "priority") return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleReorderDrop(idea.id);
+                }}
+                className={
+                  (dragging ? "opacity-40 " : "") +
+                  (showDropLine ? "border-t-2 border-[color:var(--accent-strong)] -mt-px " : "")
+                }
+              >
+              <ContextMenu>
                 <ContextMenuTrigger asChild>
               <Card className="hover:border-muted-2 transition-colors">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-4">
+                    {sort === "priority" && (
+                      <GripVertical
+                        size={14}
+                        className="text-muted-2 cursor-grab active:cursor-grabbing mt-2 shrink-0"
+                        aria-hidden
+                      />
+                    )}
                     {/* Vote */}
                     <button
                       onClick={() => handleVote(idea.id)}
@@ -516,6 +632,7 @@ export default function IdeasPage() {
                   )}
                 </ContextMenuContent>
               </ContextMenu>
+              </div>
             );
           })}
         </div>

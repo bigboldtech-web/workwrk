@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { hasPermission } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function GET() {
   try {
@@ -109,6 +110,19 @@ export async function POST(req: Request) {
       payload: { email, accessLevel: inviteLevel || "EMPLOYEE" },
     });
 
+    // Audit-log every invitation — adding a user is the most common
+    // security-sensitive admin action and the one customers expect
+    // to see in their access review reports.
+    logAuditEvent({
+      type: "user.invited",
+      actorId: (session.user as any).id,
+      organizationId: orgId,
+      description: `Invited ${email} as ${inviteLevel || "EMPLOYEE"}`,
+      targetId: invitation.id,
+      targetType: "Invitation",
+      metadata: { email, accessLevel: inviteLevel || "EMPLOYEE", departmentId, roleId, officeId },
+    });
+
     return NextResponse.json(invitation, { status: 201 });
   } catch (error) {
     console.error("Invitations POST error:", error);
@@ -150,6 +164,16 @@ export async function DELETE(req: Request) {
     }
 
     await prisma.invitation.delete({ where: { id } });
+
+    logAuditEvent({
+      type: "user.invitation.revoked",
+      actorId: (session.user as any).id,
+      organizationId: orgId,
+      description: `Revoked invitation for ${invitation.email}`,
+      targetId: id,
+      targetType: "Invitation",
+      metadata: { email: invitation.email },
+    });
 
     return NextResponse.json({ message: "Invitation cancelled" });
   } catch (error) {

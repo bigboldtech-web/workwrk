@@ -25,6 +25,8 @@ import {
   ContextMenuSeparator, ContextMenuLabel,
 } from "@/components/ui/context-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -232,13 +234,13 @@ export default function OKRsPage() {
         {/* "All objectives" — the existing organisational view. */}
         <TabsContent value="all" className="mt-4 space-y-4">
       {loading ? (
-        <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-20 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : okrs.length === 0 ? (
-        <Card><CardContent className="p-8 text-center">
-          <Target size={40} className="mx-auto text-muted mb-3" />
-          <p className="font-medium mb-1">No OKRs for {quarter}</p>
-          <p className="text-sm text-muted">Set objectives and key results to align your team.</p>
-        </CardContent></Card>
+        <EmptyState
+          icon={Target}
+          title={`No OKRs for ${quarter}`}
+          description="Set objectives and key results to align your team. Start with one company OKR and cascade from there."
+        />
       ) : (
         <div className="space-y-6">
           {[{ label: "Company Objectives", items: companyOkrs, level: "COMPANY" },
