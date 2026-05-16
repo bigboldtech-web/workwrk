@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -156,7 +157,7 @@ export default function PoliciesPage() {
         </div>
 
         {loading ? (
-          <div className="p-3 space-y-2">{[1,2,3].map((i) => <div key={i} className="h-12 bg-surface-2 rounded animate-pulse" />)}</div>
+          <div className="p-3 space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
         ) : policies.length === 0 ? (
           <div className="p-8 text-center">
             <Shield size={32} className="mx-auto text-muted mb-2" />

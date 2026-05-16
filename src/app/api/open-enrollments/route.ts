@@ -5,10 +5,12 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -55,5 +57,23 @@ export async function POST(req: NextRequest) {
       notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
     },
   });
+
+  // Benefits-enrollment windows are HR/legal-sensitive; warning level
+  // surfaces them above routine activity in compliance pulls.
+  logAuditEvent({
+    type: "open_enrollment.create",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Created open enrollment window: ${name}`,
+    targetId: window.id,
+    targetType: "OpenEnrollment",
+    metadata: {
+      name,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      effectiveDate: effectiveDate.toISOString(),
+    },
+  });
+
   return jsonSuccess(window, 201);
 }

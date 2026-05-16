@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 /**
  * Acknowledge a must-ack announcement.
@@ -37,11 +38,28 @@ export async function POST(
   const fwd = req.headers.get("x-forwarded-for") ?? "";
   const ip = fwd.split(",")[0]?.trim() || req.headers.get("x-real-ip") || null;
 
-  await prisma.announcementAcknowledgment.upsert({
+  const result = await prisma.announcementAcknowledgment.upsert({
     where: { announcementId_userId: { announcementId, userId } },
     create: { announcementId, userId, ipAddress: ip },
     update: {}, // never overwrite the original ack timestamp
   });
+
+  // First-time acks (and only first-time — upsert no-ops on dupe so
+  // we'd double-log otherwise) get an audit-log entry for compliance
+  // pulls. Detect new vs existing by whether acknowledgedAt is within
+  // the last 5 seconds of "now".
+  const isNewAck = Date.now() - new Date(result.acknowledgedAt).getTime() < 5000;
+  if (isNewAck) {
+    logActivity({
+      type: "announcement.acknowledge",
+      actorId: userId,
+      organizationId: orgId,
+      description: `Acknowledged announcement`,
+      targetId: announcementId,
+      targetType: "Announcement",
+      ipAddress: ip,
+    });
+  }
 
   return jsonSuccess({ acknowledged: true });
 }
