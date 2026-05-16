@@ -13,7 +13,7 @@ import {
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
-import { logActivity } from "@/lib/activity";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -59,19 +59,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const existing = await prisma.identityProvider.findUnique({
+    where: { organizationId_type: { organizationId: orgId, type: type as never } },
+  });
+
   const provider = await prisma.identityProvider.upsert({
     where: { organizationId_type: { organizationId: orgId, type: type as never } },
     update: data,
     create: { organizationId: orgId, type: type as never, ...data },
   });
 
-  logActivity({
-    type: "idp_updated",
+  const wasEnabled = existing?.enabled === true;
+  const isEnabled = provider.enabled === true;
+  const enablementChanged = wasEnabled !== isEnabled;
+
+  logAuditEvent({
+    type: existing ? "idp_updated" : "idp_created",
     actorId: (session.user as { id: string }).id,
     organizationId: orgId,
-    description: `Updated ${type} identity provider`,
+    description: existing
+      ? `Updated ${type} identity provider${enablementChanged ? ` (${isEnabled ? "enabled" : "disabled"})` : ""}`
+      : `Created ${type} identity provider${isEnabled ? " (enabled)" : ""}`,
     targetId: provider.id,
     targetType: "identity_provider",
+    metadata: { type, enabled: isEnabled, jitProvision: provider.jitProvision, issuer: provider.issuer },
+    severity: enablementChanged || isEnabled ? "critical" : "warning",
   });
 
   return jsonSuccess(provider);

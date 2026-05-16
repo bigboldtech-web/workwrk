@@ -13,7 +13,7 @@ import {
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
-import { logActivity } from "@/lib/activity";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function PATCH(
   req: NextRequest,
@@ -46,13 +46,15 @@ export async function PATCH(
   const updated = await prisma.scimToken.update({ where: { id }, data });
 
   if (data.revokedAt) {
-    logActivity({
+    logAuditEvent({
       type: "scim_token_revoked",
       actorId: getUserId(session),
       organizationId: orgId,
-      description: `Revoked SCIM token "${updated.name}"`,
+      description: `Revoked SCIM token "${updated.name}" (prefix ${updated.tokenPrefix})`,
       targetId: id,
       targetType: "scim_token",
+      metadata: { name: updated.name, tokenPrefix: updated.tokenPrefix },
+      severity: "critical",
     });
   }
 
@@ -84,5 +86,17 @@ export async function DELETE(
   if (!token) return jsonError("Token not found", 404);
 
   await prisma.scimToken.delete({ where: { id } });
+
+  logAuditEvent({
+    type: "scim_token_deleted",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Deleted SCIM token "${token.name}" (prefix ${token.tokenPrefix})`,
+    targetId: id,
+    targetType: "scim_token",
+    metadata: { name: token.name, tokenPrefix: token.tokenPrefix, hadBeenRevoked: !!token.revokedAt },
+    severity: "critical",
+  });
+
   return jsonSuccess({ deleted: true });
 }

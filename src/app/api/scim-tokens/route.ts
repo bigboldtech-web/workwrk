@@ -13,7 +13,7 @@ import {
   isOrgAdmin,
 } from "@/lib/api-helpers";
 import { generateScimTokenRaw } from "@/lib/scim-auth";
-import { logActivity } from "@/lib/activity";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -75,13 +75,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  logActivity({
+  logAuditEvent({
     type: "scim_token_created",
     actorId: userId,
     organizationId: orgId,
-    description: `Minted SCIM token "${name}"`,
+    description: `Minted SCIM token "${name}" (prefix ${created.tokenPrefix})${expiresAt ? ` expiring ${expiresAt.toISOString().slice(0, 10)}` : " (no expiry)"}`,
     targetId: created.id,
     targetType: "scim_token",
+    metadata: { name, tokenPrefix: created.tokenPrefix, expiresAt: expiresAt?.toISOString() ?? null },
+    severity: "critical",
   });
 
   // The raw token appears here exactly once. Client must capture it.

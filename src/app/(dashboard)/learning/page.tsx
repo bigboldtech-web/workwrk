@@ -23,12 +23,14 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   GraduationCap,
   Plus,
   CheckCircle2,
-  Star,
   Clock,
+  BookOpen,
 } from "lucide-react";
 
 type Course = {
@@ -110,14 +112,20 @@ function MyCoursesTab() {
     load();
   }
 
-  if (loading) return <div className="text-center py-8 text-sm text-muted">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+      </div>
+    );
+  }
   if (rows.length === 0) {
     return (
-      <Card>
-        <CardContent className="p-10 text-center text-sm text-muted">
-          No courses enrolled yet. Browse the <strong>Catalog</strong> tab to find one.
-        </CardContent>
-      </Card>
+      <EmptyState
+        icon={GraduationCap}
+        title="No courses enrolled yet"
+        description="Browse the Catalog tab to find a course and enroll yourself — manager-assigned courses will show up here automatically."
+      />
     );
   }
 
@@ -231,9 +239,15 @@ function CatalogTab() {
         />
       </div>
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+        </div>
       ) : courses.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted">No courses yet.</CardContent></Card>
+        <EmptyState
+          icon={BookOpen}
+          title={search ? "No matching courses" : "No courses yet"}
+          description={search ? "Try a different search term." : "Once your team publishes courses, they'll appear here for self-enrollment."}
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {courses.map((c) => (
@@ -314,9 +328,15 @@ function ManageTab() {
         </Button>
       </div>
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : courses.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted">No courses yet.</CardContent></Card>
+        <EmptyState
+          icon={BookOpen}
+          title="No courses yet"
+          description="Create a course to enroll your team — set it as mandatory and it'll surface in every employee's Inbox until completed."
+          actionLabel="New course"
+          onAction={() => setCreating(true)}
+        />
       ) : (
         <Card>
           <CardContent className="p-0">

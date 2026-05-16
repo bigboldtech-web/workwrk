@@ -9,6 +9,7 @@ import {
   jsonSuccess,
 } from "@/lib/api-helpers";
 import { generateApiKey } from "@/lib/api-auth";
+import { logAuditEvent } from "@/lib/activity";
 import type { ApiKeyScope } from "@/generated/prisma";
 
 /**
@@ -98,6 +99,17 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  logAuditEvent({
+    type: "api_key_created",
+    actorId: userId,
+    organizationId: orgId,
+    description: `Minted API key "${row.name}" (prefix ${row.prefix}) with scopes [${row.scopes.join(", ")}]`,
+    targetId: row.id,
+    targetType: "api_key",
+    metadata: { name: row.name, prefix: row.prefix, scopes: row.scopes },
+    severity: row.scopes.includes("ADMIN") ? "critical" : "warning",
+  });
+
   return jsonSuccess({
     ...row,
     // Plaintext is shown EXACTLY ONCE. Client should display and
@@ -121,7 +133,7 @@ export async function DELETE(req: NextRequest) {
   const orgId = getOrgId(session);
   const key = await prisma.apiKey.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, revokedAt: true },
+    select: { id: true, name: true, prefix: true, scopes: true, revokedAt: true },
   });
   if (!key) return jsonError("Key not found", 404);
   if (key.revokedAt) return jsonError("Key already revoked");
@@ -130,5 +142,17 @@ export async function DELETE(req: NextRequest) {
     where: { id },
     data: { revokedAt: new Date() },
   });
+
+  logAuditEvent({
+    type: "api_key_revoked",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Revoked API key "${key.name}" (prefix ${key.prefix})`,
+    targetId: id,
+    targetType: "api_key",
+    metadata: { name: key.name, prefix: key.prefix, scopes: key.scopes },
+    severity: "critical",
+  });
+
   return jsonSuccess({ revoked: true });
 }

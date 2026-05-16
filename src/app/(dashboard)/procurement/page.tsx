@@ -5,6 +5,7 @@
 // state-transition buttons. Detail pages are v2.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +30,9 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
-import { ShoppingCart, Plus, Building2, FileText } from "lucide-react";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ShoppingCart, Plus, Building2, FileText, Inbox, Receipt } from "lucide-react";
 
 type Vendor = {
   id: string;
@@ -93,6 +96,11 @@ function fmt(n: number, currency: string): string {
 }
 
 export default function ProcurementPage() {
+  const params = useSearchParams();
+  const requestedTab = params.get("tab");
+  const initialTab = requestedTab === "vendors" || requestedTab === "invoices" || requestedTab === "pos"
+    ? requestedTab
+    : "pos";
   return (
     <div className="space-y-5">
       <div>
@@ -103,7 +111,7 @@ export default function ProcurementPage() {
           Vendor records, purchase orders, and invoices.
         </p>
       </div>
-      <Tabs defaultValue="pos">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="pos">Purchase orders</TabsTrigger>
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
@@ -150,9 +158,15 @@ function VendorsTab() {
         </Button>
       </div>
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted">No vendors yet.</CardContent></Card>
+        <EmptyState
+          icon={Building2}
+          title="No vendors yet"
+          description="Add a vendor to track POs, invoices, and payment terms in one place."
+          actionLabel="Add vendor"
+          onAction={() => setShowCreate(true)}
+        />
       ) : (
         <Card>
           <CardContent className="p-0">
@@ -334,11 +348,23 @@ function POsTab() {
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted">
-          {tab === "approve" ? "Nothing waiting on you." : "No POs yet."}
-        </CardContent></Card>
+        tab === "approve" ? (
+          <EmptyState
+            icon={Inbox}
+            title="Nothing waiting on you"
+            description="POs needing your approval will appear here. Inbox zero — go ship something."
+          />
+        ) : (
+          <EmptyState
+            icon={FileText}
+            title="No purchase orders yet"
+            description="Create a PO to request goods or services from one of your vendors — it'll route through your approval chain."
+            actionLabel="New PO"
+            onAction={() => setShowCreate(true)}
+          />
+        )
       ) : (
         <Card>
           <CardContent className="p-0">
@@ -606,9 +632,15 @@ function InvoicesTab() {
         </Button>
       </div>
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted">No invoices yet.</CardContent></Card>
+        <EmptyState
+          icon={Receipt}
+          title="No invoices yet"
+          description="Record an invoice against a PO to track what's owed and what's been paid — overdue invoices route to your AP queue automatically."
+          actionLabel="Record invoice"
+          onAction={() => setShowCreate(true)}
+        />
       ) : (
         <Card>
           <CardContent className="p-0">

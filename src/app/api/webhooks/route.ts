@@ -9,6 +9,7 @@ import {
   jsonSuccess,
 } from "@/lib/api-helpers";
 import { generateWebhookSecret } from "@/lib/api-auth";
+import { logAuditEvent } from "@/lib/activity";
 
 /**
  * Webhook subscription management (admin-only).
@@ -101,6 +102,16 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  logAuditEvent({
+    type: "webhook_subscription_created",
+    actorId: userId,
+    organizationId: orgId,
+    description: `Created webhook subscription to ${row.url} for events [${row.events.join(", ")}]`,
+    targetId: row.id,
+    targetType: "webhook_subscription",
+    metadata: { url: row.url, events: row.events, secretPrefix: row.secretPrefix },
+  });
+
   return jsonSuccess({
     ...row,
     secret: plaintext,
@@ -122,10 +133,21 @@ export async function DELETE(req: NextRequest) {
   const orgId = getOrgId(session);
   const sub = await prisma.webhookSubscription.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true },
+    select: { id: true, url: true, events: true, secretPrefix: true },
   });
   if (!sub) return jsonError("Subscription not found", 404);
 
   await prisma.webhookSubscription.delete({ where: { id } });
+
+  logAuditEvent({
+    type: "webhook_subscription_deleted",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Deleted webhook subscription to ${sub.url}`,
+    targetId: id,
+    targetType: "webhook_subscription",
+    metadata: { url: sub.url, events: sub.events, secretPrefix: sub.secretPrefix },
+  });
+
   return jsonSuccess({ deleted: true });
 }

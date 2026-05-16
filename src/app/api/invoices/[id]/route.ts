@@ -14,7 +14,7 @@ import {
   isManager,
   isOrgAdmin,
 } from "@/lib/api-helpers";
-import { logActivity } from "@/lib/activity";
+import { logActivity, logAuditEvent } from "@/lib/activity";
 
 export async function GET(
   _req: NextRequest,
@@ -108,14 +108,29 @@ export async function PATCH(
 
   const updated = await prisma.invoice.update({ where: { id }, data: updateData });
 
-  logActivity({
-    type: action ? `invoice_${action}` : "invoice_updated",
-    actorId: userId,
-    organizationId: orgId,
-    description: `${action ?? "edited"} invoice ${invoice.invoiceNumber}`,
-    targetId: id,
-    targetType: "invoice",
-  });
+  const amt = `${invoice.currency} ${Number(invoice.amount).toFixed(2)}`;
+  const description = `${action ?? "edited"} invoice ${invoice.invoiceNumber} (${amt})${note ? ` — ${note}` : ""}`;
+  if (action === "approve" || action === "reject" || action === "pay") {
+    logAuditEvent({
+      type: `invoice_${action}`,
+      actorId: userId,
+      organizationId: orgId,
+      description,
+      targetId: id,
+      targetType: "invoice",
+      metadata: { invoiceNumber: invoice.invoiceNumber, amount: Number(invoice.amount), currency: invoice.currency },
+      severity: action === "pay" ? "critical" : "warning",
+    });
+  } else {
+    logActivity({
+      type: "invoice_updated",
+      actorId: userId,
+      organizationId: orgId,
+      description,
+      targetId: id,
+      targetType: "invoice",
+    });
+  }
 
   return jsonSuccess({ ...updated, amount: Number(updated.amount) });
 }

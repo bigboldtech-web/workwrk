@@ -33,6 +33,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
+import { SkeletonCard as SharedSkeletonCard, Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { FolderManager } from "@/components/sops/folder-manager";
 
@@ -125,28 +126,7 @@ function folderBreadcrumb(folderId: string | null | undefined, folders: FolderNo
   };
 }
 
-function SkeletonCard() {
-  return (
-    <Card>
-      <CardContent className="p-5 space-y-3">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-surface-2 p-2 h-8 w-8 animate-pulse" />
-            <div className="h-5 w-16 bg-surface-2 rounded animate-pulse" />
-          </div>
-          <div className="h-5 w-10 bg-surface-2 rounded animate-pulse" />
-        </div>
-        <div className="h-4 w-3/4 bg-surface-2 rounded animate-pulse" />
-        <div className="h-3 w-16 bg-surface-2 rounded animate-pulse" />
-        <div className="h-1.5 w-full bg-surface-2 rounded animate-pulse mt-3" />
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
-          <div className="h-3 w-24 bg-surface-2 rounded animate-pulse" />
-          <div className="h-3 w-16 bg-surface-2 rounded animate-pulse" />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+const SkeletonCard = SharedSkeletonCard;
 
 function ExtensionSetupContent({ onClose }: { onClose: () => void }) {
   const [extensionDetected, setExtensionDetected] = useState(false);
@@ -1092,13 +1072,13 @@ export default function SOPsPage() {
           </div>
 
           {loadingArchive ? (
-            <div className="space-y-2">{[1,2,3].map((i) => <div key={i} className="h-14 bg-surface rounded-lg border border-border animate-pulse" />)}</div>
+            <div className="space-y-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
           ) : archivedSops.length === 0 ? (
-            <div className="py-12 text-center">
-              <Archive size={32} className="mx-auto text-muted mb-2" />
-              <p className="text-sm font-medium">No archived SOPs</p>
-              <p className="text-xs text-muted mt-1">Archived SOPs will appear here</p>
-            </div>
+            <EmptyState
+              icon={Archive}
+              title="No archived SOPs"
+              description="Archived SOPs will appear here when you remove them from the active list."
+            />
           ) : (
             <div className="space-y-2">
               {archivedSops.map((sop) => (
@@ -1132,11 +1112,11 @@ export default function SOPsPage() {
       <>
       {/* Stats */}
       {loading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i}><CardContent className="p-4 text-center">
-              <div className="h-8 w-12 bg-surface-2 rounded animate-pulse mx-auto mb-1" />
-              <div className="h-3 w-16 bg-surface-2 rounded animate-pulse mx-auto" />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i}><CardContent className="p-3 text-center">
+              <Skeleton className="h-6 w-10 mx-auto mb-1" />
+              <Skeleton className="h-3 w-16 mx-auto" />
             </CardContent></Card>
           ))}
         </div>

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton, SkeletonCard } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/dashboard/page-header";
 
 function getStatusStyle(status: string) {
@@ -162,11 +163,11 @@ export default function OnboardingPage() {
 
   if (loading) {
     return (
-      <div className="space-y-3 animate-fade-in">
-        <div className="h-8 w-64 bg-surface-2 rounded animate-pulse" />
-        <div className="grid grid-cols-4 gap-4">
+      <div className="space-y-4 animate-fade-in">
+        <Skeleton className="h-8 w-64" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-28 bg-surface rounded-lg border border-border animate-pulse" />
+            <SkeletonCard key={i} />
           ))}
         </div>
       </div>

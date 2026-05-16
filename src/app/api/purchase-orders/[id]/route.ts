@@ -17,7 +17,7 @@ import {
   jsonSuccess,
   isManager,
 } from "@/lib/api-helpers";
-import { logActivity } from "@/lib/activity";
+import { logActivity, logAuditEvent } from "@/lib/activity";
 
 export async function GET(
   _req: NextRequest,
@@ -169,14 +169,28 @@ export async function PATCH(
     data: updateData,
   });
 
-  logActivity({
-    type: `po_${action}`,
-    actorId: userId,
-    organizationId: orgId,
-    description: `${action} on ${po.number}`,
-    targetId: id,
-    targetType: "purchase_order",
-  });
+  const amt = `${po.currency} ${Number(po.amount).toFixed(2)}`;
+  const description = `${action} on ${po.number} (${amt})${note ? ` — ${note}` : ""}`;
+  if (action === "approve" || action === "reject") {
+    logAuditEvent({
+      type: `po_${action}`,
+      actorId: userId,
+      organizationId: orgId,
+      description,
+      targetId: id,
+      targetType: "purchase_order",
+      metadata: { number: po.number, amount: Number(po.amount), currency: po.currency },
+    });
+  } else {
+    logActivity({
+      type: `po_${action}`,
+      actorId: userId,
+      organizationId: orgId,
+      description,
+      targetId: id,
+      targetType: "purchase_order",
+    });
+  }
 
   return jsonSuccess({ ...updated, amount: Number(updated.amount) });
 }

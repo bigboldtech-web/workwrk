@@ -10,6 +10,7 @@
 // for v1 everything is reachable from this page.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,8 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Briefcase,
   Users,
@@ -42,6 +45,7 @@ import {
   Phone,
   ExternalLink,
   ChevronRight,
+  UserPlus,
 } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -141,6 +145,11 @@ function fmtSalary(min: number | null, max: number | null, currency: string): st
 
 export default function RecruitingPage() {
   const { isManager } = useRole();
+  const params = useSearchParams();
+  const requestedTab = params.get("tab");
+  const initialTab = requestedTab === "candidates" || requestedTab === "pipeline" || requestedTab === "interviews" || requestedTab === "jobs"
+    ? requestedTab
+    : "jobs";
   if (!isManager) return null; // layout already guards, but defense-in-depth
   return (
     <div className="space-y-5">
@@ -153,7 +162,7 @@ export default function RecruitingPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="jobs">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="jobs">Jobs</TabsTrigger>
           <TabsTrigger value="candidates">Candidates</TabsTrigger>
@@ -226,9 +235,15 @@ function JobsTab() {
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted">No jobs yet.</CardContent></Card>
+        <EmptyState
+          icon={Briefcase}
+          title="No jobs yet"
+          description="Open a requisition to start tracking candidates against a role — applications flow through your hiring pipeline automatically."
+          actionLabel="New job"
+          onAction={() => setShowCreate(true)}
+        />
       ) : (
         <Card>
           <CardContent className="p-0">
@@ -441,9 +456,15 @@ function CandidatesTab() {
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted">No candidates yet.</CardContent></Card>
+        <EmptyState
+          icon={UserPlus}
+          title="No candidates yet"
+          description="Add candidates to your talent pool. They can be sourced from job applications, referrals, or directly imported."
+          actionLabel="Add candidate"
+          onAction={() => setShowCreate(true)}
+        />
       ) : (
         <Card>
           <CardContent className="p-0">
@@ -763,7 +784,13 @@ function PipelineTab() {
     move(id, stage);
   }
 
-  if (loading) return <div className="text-sm text-muted text-center py-8">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        {[1, 2, 3, 4, 5, 6].map((i) => <SkeletonCard key={i} />)}
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -975,11 +1002,17 @@ function InterviewsTab() {
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading…</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : rows.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted">
-          {scope === "mine" ? "No interviews assigned to you." : "No interviews."}
-        </CardContent></Card>
+        <EmptyState
+          icon={GitBranch}
+          title={scope === "mine" ? "No interviews assigned to you" : "No interviews scheduled"}
+          description={scope === "mine"
+            ? "When a candidate's interview is assigned to you, it'll appear here with their resume, the role, and a quick scorecard."
+            : "Schedule an interview with a candidate to start tracking the conversation and the hiring decision."}
+          actionLabel="Schedule"
+          onAction={() => setScheduling(true)}
+        />
       ) : (
         <Card>
           <CardContent className="p-0">
