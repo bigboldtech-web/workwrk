@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/dashboard/page-header";
-import { Plus, BarChart3, Calendar as CalIcon, FileText } from "lucide-react";
+import { Plus, BarChart3, Calendar as CalIcon, FileText, Lock, Unlock } from "lucide-react";
 
 type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
 
@@ -570,6 +570,7 @@ function CalendarTab() {
   const [years, setYears] = useState<FiscalYear[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [busyPeriodId, setBusyPeriodId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -581,6 +582,36 @@ function CalendarTab() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Close / reopen a single accounting period. The server enforces
+  // the "can't close while DRAFT entries exist" rule; we surface the
+  // failure as a toast and refetch so the UI stays consistent with
+  // whatever state the server is in.
+  const togglePeriod = useCallback(async (id: string, currentStatus: "OPEN" | "CLOSED") => {
+    if (busyPeriodId) return;
+    const action = currentStatus === "OPEN" ? "close" : "reopen";
+    const confirmed = currentStatus === "OPEN"
+      ? confirm("Close this period? No new journal entries can be posted to it until reopened.")
+      : confirm("Reopen this period? Reopening shows up in the audit log as a warning event.");
+    if (!confirmed) return;
+    setBusyPeriodId(id);
+    try {
+      const res = await fetch(`/api/accounting-periods/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ type: "error", title: err?.error || "Failed to update period" });
+        return;
+      }
+      toast({ type: "success", title: action === "close" ? "Period closed" : "Period reopened" });
+      load();
+    } finally {
+      setBusyPeriodId(null);
+    }
+  }, [busyPeriodId, toast, load]);
 
   return (
     <>
@@ -617,17 +648,29 @@ function CalendarTab() {
                   </Badge>
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-1.5">
-                  {y.periods.map((p) => (
-                    <div
-                      key={p.id}
-                      className={`text-xs px-2 py-1.5 rounded border text-center ${
-                        p.status === "OPEN" ? "border-line text-fg" : "border-line text-muted bg-card-2/40"
-                      }`}
-                    >
-                      {p.label}
-                      <div className="text-[10px] opacity-60 mt-0.5">{p.status}</div>
-                    </div>
-                  ))}
+                  {y.periods.map((p) => {
+                    const busy = busyPeriodId === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => togglePeriod(p.id, p.status)}
+                        disabled={busy}
+                        title={p.status === "OPEN" ? "Close period" : "Reopen period"}
+                        className={`group text-xs px-2 py-1.5 rounded border text-center transition-colors ${
+                          p.status === "OPEN"
+                            ? "border-line text-fg hover:border-[color:var(--accent-strong)]"
+                            : "border-line text-muted bg-card-2/40 hover:border-amber-400"
+                        } ${busy ? "opacity-50 cursor-wait" : "cursor-pointer"}`}
+                      >
+                        {p.label}
+                        <div className="text-[10px] opacity-60 mt-0.5 flex items-center justify-center gap-1">
+                          {p.status === "OPEN" ? <Unlock size={9} /> : <Lock size={9} />}
+                          {p.status}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>

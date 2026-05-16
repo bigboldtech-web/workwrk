@@ -5,10 +5,12 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 
 const VALID_TYPES = new Set(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]);
 
@@ -83,6 +85,17 @@ export async function POST(req: NextRequest) {
         currency,
         description: typeof body.description === "string" ? body.description.trim() || null : null,
       },
+    });
+    // Audit-log chart-of-accounts changes at warning severity — they're
+    // structurally load-bearing for every downstream financial report.
+    logAuditEvent({
+      type: "gl_account.create",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Created GL account ${code} — ${name}`,
+      targetId: account.id,
+      targetType: "GlAccount",
+      metadata: { code, name, type, currency, parentId },
     });
     return jsonSuccess(account, 201);
   } catch (e: unknown) {

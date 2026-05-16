@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/context-menu";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
+import { Skeleton, SkeletonRow } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import { DayView } from "@/components/tasks/view-day";
@@ -463,7 +465,7 @@ export default function TasksPage() {
                 </div>
                 <div className="space-y-1">
                   {loading
-                    ? <div className="h-8 bg-surface-2 rounded animate-pulse" />
+                    ? <Skeleton className="h-8 w-full" />
                     : dayTasks.length === 0
                       ? <p className="text-[10px] text-muted-2 text-center py-4">No tasks</p>
                       : dayTasks.map((task) => {
@@ -541,13 +543,15 @@ export default function TasksPage() {
       {view === "list" && (
         <div className="space-y-4">
           {loading ? (
-            <Card><CardContent className="p-4"><div className="h-24 bg-surface-2 rounded animate-pulse" /></CardContent></Card>
+            <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonRow key={i} />)}</div>
           ) : tasks.length === 0 ? (
-            <Card><CardContent className="p-8 text-center">
-              <Calendar size={32} className="mx-auto text-muted mb-2" />
-              <p className="text-sm text-muted">No tasks this week.</p>
-              <Button variant="outline" size="sm" className="mt-3 gap-1" onClick={() => openNewTask()}><Plus size={14} /> Add task</Button>
-            </CardContent></Card>
+            <EmptyState
+              icon={Calendar}
+              title="No tasks this week"
+              description="Schedule the work that drives your KRAs. Tasks roll into the right KPI automatically."
+              actionLabel="Add task"
+              onAction={() => openNewTask()}
+            />
           ) : (
             Array.from(groupByDate(tasks).entries()).sort(([a], [b]) => a.localeCompare(b)).map(([dateStr, dayTasks]) => {
               const d = new Date(dateStr);

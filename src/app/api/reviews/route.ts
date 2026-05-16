@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -64,6 +65,16 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  logActivity({
+    type: "review_cycle.create",
+    actorId: getUserId(session),
+    organizationId: getOrgId(session),
+    description: `Created review cycle: ${cycle.name}`,
+    targetId: cycle.id,
+    targetType: "ReviewCycle",
+    metadata: { name, type, startDate, endDate },
+  });
+
   return jsonSuccess(cycle, 201);
 }
 
@@ -90,6 +101,22 @@ export async function PATCH(req: NextRequest) {
       ...(startDate !== undefined && { startDate: new Date(startDate) }),
       ...(endDate !== undefined && { endDate: new Date(endDate) }),
       ...(status !== undefined && { status }),
+    },
+  });
+
+  // Audit-log review-cycle mutations — status transitions in
+  // particular (DRAFT → OPEN → CLOSED) are HR-compliance signals.
+  logActivity({
+    type: "review_cycle.update",
+    actorId: getUserId(session),
+    organizationId: getOrgId(session),
+    description: `Updated review cycle: ${cycle.name}`,
+    targetId: cycle.id,
+    targetType: "ReviewCycle",
+    metadata: {
+      ...(name !== undefined && { name }),
+      ...(type !== undefined && { type }),
+      ...(status !== undefined && { status, previousStatus: existing.status }),
     },
   });
 

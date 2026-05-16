@@ -20,6 +20,7 @@ import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KraPicker } from "@/components/ui/kra-picker";
 import { KraCategoryPicker } from "@/components/kra-category-picker";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton, SkeletonCard } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -944,7 +945,7 @@ export default function KraKpiPage() {
         <TabsContent value="overview" className="space-y-4 mt-4">
           {loadingRecords ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[1,2,3,4].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-16 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}
+              {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
             </div>
           ) : overviewRecords.length === 0 ? (
             <Card>
@@ -1125,7 +1126,7 @@ export default function KraKpiPage() {
               : kras;
 
             if (loadingKras) {
-              return <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-12 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>;
+              return <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>;
             }
             if (kras.length === 0) {
               return (

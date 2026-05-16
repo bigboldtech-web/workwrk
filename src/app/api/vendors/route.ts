@@ -3,9 +3,11 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/lib/activity";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isManager,
@@ -76,5 +78,19 @@ export async function POST(req: NextRequest) {
       paymentTermsDays,
     },
   });
+
+  // Audit-log vendor creation — procurement events feed downstream
+  // PO + invoice approvals, so this is the right place to anchor the
+  // trail for "where did this vendor come from."
+  logActivity({
+    type: "vendor.create",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Created vendor: ${vendor.name}`,
+    targetId: vendor.id,
+    targetType: "Vendor",
+    metadata: { name: vendor.name, email: vendor.email, paymentTermsDays },
+  });
+
   return jsonSuccess(vendor, 201);
 }
