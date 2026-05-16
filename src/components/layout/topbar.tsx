@@ -207,10 +207,12 @@ export function Topbar() {
     setUnreadCount(0);
   }, []);
 
-  // Snooze a notification for ~24h. Optimistically remove from the
-  // local panel so the badge updates immediately; the PATCH writes
-  // `snoozedUntil` and the GET will hide it on next poll.
-  const handleSnoozeNotification = useCallback((id: string) => {
+  // Snooze a notification. Hours selectable via modifier keys on the
+  // bell button: plain = 1 day, Shift = 1 week, Alt/Option = 1 hour.
+  // Optimistically remove from the local panel so the badge updates
+  // immediately; the PATCH writes `snoozedUntil` and the GET will
+  // hide it on next poll.
+  const handleSnoozeNotification = useCallback((id: string, hours: number) => {
     setNotifications((prev) => {
       const target = prev.find((n) => n.id === id);
       if (target && !target.read) {
@@ -218,7 +220,7 @@ export function Topbar() {
       }
       return prev.filter((n) => n.id !== id);
     });
-    const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
     fetch("/api/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -440,11 +442,12 @@ export function Topbar() {
                         type="button"
                         data-dismiss-notif
                         className="flex-shrink-0 rounded p-0.5 text-muted-2 hover:text-foreground hover:bg-surface-2 transition-colors"
-                        aria-label="Snooze for 1 day"
-                        title="Snooze for 1 day"
+                        aria-label="Snooze (click 1d · shift+click 1w · alt+click 1h)"
+                        title="Snooze: click = 1 day · shift+click = 1 week · alt+click = 1 hour"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleSnoozeNotification(notif.id);
+                          const hours = e.shiftKey ? 24 * 7 : e.altKey ? 1 : 24;
+                          handleSnoozeNotification(notif.id, hours);
                         }}
                       >
                         <ClockIcon size={11} />

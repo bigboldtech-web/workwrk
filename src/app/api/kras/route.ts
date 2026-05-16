@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -85,6 +86,18 @@ export async function POST(req: NextRequest) {
       roleId,
       organizationId: getOrgId(session),
     },
+  });
+
+  // KRAs anchor performance / KPI tracking — every creation should
+  // show up in the org's history of "how did we measure people."
+  logActivity({
+    type: "kra.create",
+    actorId: getUserId(session),
+    organizationId: getOrgId(session),
+    description: `Created KRA: ${kra.name}`,
+    targetId: kra.id,
+    targetType: "KRA",
+    metadata: { name, category, roleId },
   });
 
   return jsonSuccess(kra, 201);

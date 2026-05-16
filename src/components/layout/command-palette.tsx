@@ -240,8 +240,58 @@ export function CommandPalette() {
     if (!open) {
       setQuery("");
       setHits([]);
+      setSummary(null);
     }
   }, [open]);
+
+  // ── AI summarization over the search hits ──────────────────────────
+  // Fires only when the query is at least 4 chars AND there are real
+  // hits, so we don't burn AI quota on noise. The fetch is debounced
+  // separately (longer than the search) and aborted if the user keeps
+  // typing.
+  const [summary, setSummary] = useState<{ text: string; href: string | null } | null>(null);
+  const summaryAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 4 || hits.length === 0) {
+      if (summaryAbortRef.current) summaryAbortRef.current.abort();
+      setSummary(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      if (summaryAbortRef.current) summaryAbortRef.current.abort();
+      const ctl = new AbortController();
+      summaryAbortRef.current = ctl;
+      try {
+        const r = await fetch("/api/ai/cmdk-summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: ctl.signal,
+          body: JSON.stringify({
+            query: trimmed,
+            // Cap the payload — the route caps at 24 anyway but trim
+            // here to save bytes on slow connections.
+            hits: hits.slice(0, 12).map((h) => ({
+              title: h.title,
+              subtitle: h.subtitle,
+              type: h.type,
+              href: h.href,
+            })),
+          }),
+        });
+        if (!r.ok) return;
+        const d = await r.json();
+        const payload = d?.data ?? d;
+        setSummary({
+          text: payload?.summary || "",
+          href: payload?.suggestedHref || null,
+        });
+      } catch {
+        // Aborted or AI offline — silent. The raw hits below cover us.
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [query, hits]);
 
   if (!open) {
     return null;
@@ -266,6 +316,23 @@ export function CommandPalette() {
             <Command.Empty className="cmd-palette-empty">
               {searching ? "Searching…" : "No matches."}
             </Command.Empty>
+
+            {summary && summary.text && (
+              <Command.Group heading="AI summary" className="cmd-palette-group">
+                <Command.Item
+                  value={`ai-summary ${summary.text}`}
+                  onSelect={() => summary.href && onSelect(summary.href)}
+                  className="cmd-palette-item"
+                  // Disable selection when there's no href so Enter
+                  // doesn't navigate to a dead destination.
+                  disabled={!summary.href}
+                >
+                  <Bot size={14} />
+                  <span className="cmd-palette-label">{summary.text}</span>
+                  {summary.href && <span className="cmd-palette-hint">↵ open</span>}
+                </Command.Item>
+              </Command.Group>
+            )}
 
             {hits.length > 0 && (
               <Command.Group heading="Search results" className="cmd-palette-group">

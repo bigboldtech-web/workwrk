@@ -12,6 +12,7 @@ import {
   CheckCircle, Clock, BarChart3, TrendingDown,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
@@ -59,13 +60,13 @@ export default function SOPCompliancePage() {
   if (loading) {
     return (
       <div className="space-y-3 animate-fade-in">
-        <div className="h-8 w-64 bg-surface-2 rounded animate-pulse" />
+        <Skeleton className="h-8 w-64" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Card key={i}><CardContent className="p-4"><div className="h-16 bg-surface-2 rounded animate-pulse" /></CardContent></Card>
+            <Skeleton key={i} className="h-24 w-full" />
           ))}
         </div>
-        <div className="h-64 bg-surface-2 rounded-lg animate-pulse" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }

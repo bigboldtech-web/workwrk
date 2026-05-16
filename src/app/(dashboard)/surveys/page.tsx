@@ -26,6 +26,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useRole } from "@/hooks/use-role";
 
 type QuestionType = "rating" | "nps" | "text" | "single_choice" | "multi_choice" | "yes_no";
@@ -341,13 +343,13 @@ export default function SurveysPage() {
       />
 
       {loading ? (
-        <div className="space-y-3">{[1,2].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-16 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>
+        <div className="space-y-3">{[1, 2].map((i) => <SkeletonCard key={i} />)}</div>
       ) : surveys.length === 0 ? (
-        <Card><CardContent className="p-8 text-center">
-          <ClipboardCheck size={40} className="mx-auto text-muted mb-3" />
-          <p className="font-medium mb-1">No surveys yet</p>
-          <p className="text-sm text-muted">Create pulse surveys to measure team engagement.</p>
-        </CardContent></Card>
+        <EmptyState
+          icon={ClipboardCheck}
+          title="No surveys yet"
+          description="Create pulse surveys to measure team engagement and surface issues before they grow."
+        />
       ) : (
         <div className="space-y-3">
           {surveys.map((survey) => {
