@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorRetry } from "@/components/ui/error-retry";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -77,6 +78,7 @@ export default function IdeasPage() {
 
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState("all");
   // Sort mode is independent of tab. "priority" activates manager-only
   // drag-to-reorder against the new Idea.position column; "votes" /
@@ -115,6 +117,7 @@ export default function IdeasPage() {
 
   const fetchIdeas = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const params = new URLSearchParams();
       if (tab === "mine") params.set("mine", "true");
@@ -122,11 +125,14 @@ export default function IdeasPage() {
       params.set("sort", sort);
       // roadmap and all: no filter — show everything
       const res = await fetch(`/api/ideas?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setIdeas(Array.isArray(data) ? data : data.data || []);
-      }
-    } catch {} finally { setLoading(false); }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setIdeas(Array.isArray(data) ? data : data.data || []);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, [tab, sort]);
 
   // Drag-and-drop handler. Active only when sort === "priority". Reorders
@@ -369,6 +375,13 @@ export default function IdeasPage() {
         <div className="space-y-3">
           {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
         </div>
+      ) : loadError ? (
+        <ErrorRetry
+          title="Couldn't load ideas"
+          description="The ideas board didn't respond. Try again in a moment."
+          onRetry={fetchIdeas}
+          retrying={loading}
+        />
       ) : ideas.length === 0 ? (
         <EmptyState
           icon={Lightbulb}

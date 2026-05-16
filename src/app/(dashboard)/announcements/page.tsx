@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRole } from "@/hooks/use-role";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorRetry } from "@/components/ui/error-retry";
 
 const TYPES = [
   { value: "INFO", label: "Information", icon: Megaphone },
@@ -78,6 +79,7 @@ export default function AnnouncementsPage() {
   const { isManager } = useRole();
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, mustAcknowledge: false, expiresAt: "" });
   // Audience + scheduling are separate state slices so the form object
@@ -126,19 +128,24 @@ export default function AnnouncementsPage() {
     });
   }, [showCreate, lookupsLoaded, isManager]);
 
-  useEffect(() => {
-    fetch("/api/announcements", { cache: "no-store" })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((d) => {
-        const items = d?.data || d || [];
-        setAnnouncements(Array.isArray(items) ? items : []);
-      })
-      .catch((err) => console.error("Failed to fetch announcements:", err))
-      .finally(() => setLoading(false));
+  const loadAnnouncements = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const r = await fetch("/api/announcements", { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const items = d?.data || d || [];
+      setAnnouncements(Array.isArray(items) ? items : []);
+    } catch (err) {
+      console.error("Failed to fetch announcements:", err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { void loadAnnouncements(); }, [loadAnnouncements]);
 
   async function handleAcknowledge(id: string) {
     // Optimistic — flip the local row immediately so the button doesn't
@@ -254,6 +261,13 @@ export default function AnnouncementsPage() {
 
       {loading ? (
         <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
+      ) : loadError ? (
+        <ErrorRetry
+          title="Couldn't load announcements"
+          description="The announcements stream didn't respond. Try again in a moment."
+          onRetry={loadAnnouncements}
+          retrying={loading}
+        />
       ) : announcements.length === 0 ? (
         <EmptyState
           icon={Megaphone}
