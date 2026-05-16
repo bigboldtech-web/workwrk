@@ -57,6 +57,17 @@ export async function POST(req: NextRequest) {
     const template = await prisma.onboardingTemplate.create({
       data: { name, description, steps: steps || [], durationDays: durationDays || 30, roleId, departmentId, organizationId: orgId },
     });
+
+    logActivity({
+      type: "onboarding_template_created",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Created onboarding template "${template.name}" (${template.durationDays}d)`,
+      targetId: template.id,
+      targetType: "onboarding_template",
+      metadata: { stepCount: Array.isArray(steps) ? steps.length : 0, durationDays: template.durationDays },
+    });
+
     return jsonSuccess(template, 201);
   }
 

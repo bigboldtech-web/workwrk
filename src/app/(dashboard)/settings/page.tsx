@@ -26,6 +26,57 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/components/ui/toast";
 import { PrivacyControls } from "@/components/settings/privacy-controls";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { useAutosave } from "@/hooks/use-autosave";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+
+/**
+ * Top-level helper that pairs a Save Changes button with debounced
+ * background autosave for one settings section. Hooks must be called
+ * at component scope, so we extract the per-section binding here
+ * rather than inside the SaveButton (which is redefined every render
+ * by the SettingsPage closure).
+ *
+ * The explicit Save button still calls `save(section, snapshot, false)`
+ * for users who want immediate feedback; autosave fires
+ * `save(section, snapshot, true)` ~1.5s after the last edit.
+ */
+function AutoSaveSection<T>({
+  section,
+  snapshot,
+  save,
+  saving,
+  saveSuccess,
+}: {
+  section: string;
+  snapshot: T;
+  save: (section: string, data: T, silent: boolean) => Promise<void>;
+  saving: string | null;
+  saveSuccess: string | null;
+}) {
+  const autosave = useAutosave<T>({
+    snapshot,
+    enabled: true,
+    save: (s) => save(section, s, true),
+  });
+  return (
+    <div className="flex items-center gap-3">
+      <AutosaveIndicator status={autosave.status} lastSavedAt={autosave.lastSavedAt} />
+      <Button
+        onClick={() => save(section, snapshot, false)}
+        disabled={saving === section}
+        className="gap-2"
+      >
+        {saving === section ? (
+          <><Loader2 size={14} className="animate-spin" /> Saving...</>
+        ) : saveSuccess === section ? (
+          <><Check size={14} /> Saved!</>
+        ) : (
+          "Save Changes"
+        )}
+      </Button>
+    </div>
+  );
+}
 
 interface SettingsData {
   organization: {
@@ -750,9 +801,11 @@ export default function SettingsPage() {
     }
   }
 
-  async function saveSection(section: string, sectionData: any) {
-    setSaving(section);
-    setSaveSuccess(null);
+  async function saveSection(section: string, sectionData: any, silent: boolean = false) {
+    if (!silent) {
+      setSaving(section);
+      setSaveSuccess(null);
+    }
     try {
       const res = await fetch("/api/settings", {
         method: "PATCH",
@@ -760,17 +813,23 @@ export default function SettingsPage() {
         body: JSON.stringify({ section, data: sectionData }),
       });
       if (res.ok) {
-        setSaveSuccess(section);
-        setTimeout(() => setSaveSuccess(null), 2000);
-        toastSuccess("Settings saved");
+        if (!silent) {
+          setSaveSuccess(section);
+          setTimeout(() => setSaveSuccess(null), 2000);
+          toastSuccess("Settings saved");
+        }
       } else {
-        toastError("Failed to save settings");
+        if (!silent) toastError("Failed to save settings");
+        throw new Error("settings save failed");
       }
     } catch (err) {
-      console.error("Failed to save:", err);
-      toastError("Failed to save settings");
+      if (!silent) {
+        console.error("Failed to save:", err);
+        toastError("Failed to save settings");
+      }
+      throw err;
     } finally {
-      setSaving(null);
+      if (!silent) setSaving(null);
     }
   }
 
@@ -1072,7 +1131,13 @@ export default function SettingsPage() {
                   </select>
                 </div>
               </div>
-              <SaveButton section="general" data={{ timezone, currency, fiscalYearStart }} />
+              <AutoSaveSection
+                section="general"
+                snapshot={{ timezone, currency, fiscalYearStart }}
+                save={saveSection}
+                saving={saving}
+                saveSuccess={saveSuccess}
+              />
             </CardContent>
           </Card>
 
@@ -1158,10 +1223,16 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <SaveButton section="general" data={{
-                name: orgName, domain: orgDomain, timezone, currency, fiscalYearStart,
-                reviewFrequency, scoreWeights, scoringBands,
-              }} />
+              <AutoSaveSection
+                section="general"
+                snapshot={{
+                  name: orgName, domain: orgDomain, timezone, currency, fiscalYearStart,
+                  reviewFrequency, scoreWeights, scoringBands,
+                }}
+                save={saveSection}
+                saving={saving}
+                saveSuccess={saveSuccess}
+              />
             </CardContent>
           </Card>
         </TabsContent>
@@ -1187,7 +1258,13 @@ export default function SettingsPage() {
                 </div>
               ))}
               <div className="pt-2">
-                <SaveButton section="modules" data={{ enabledModules }} />
+                <AutoSaveSection
+                  section="modules"
+                  snapshot={{ enabledModules }}
+                  save={saveSection}
+                  saving={saving}
+                  saveSuccess={saveSuccess}
+                />
               </div>
             </CardContent>
           </Card>
@@ -1325,7 +1402,13 @@ export default function SettingsPage() {
                 ))}
               </div>
 
-              <SaveButton section="security" data={security} />
+              <AutoSaveSection
+                section="security"
+                snapshot={security}
+                save={saveSection}
+                saving={saving}
+                saveSuccess={saveSuccess}
+              />
             </CardContent>
           </Card>
         </TabsContent>
@@ -1374,7 +1457,13 @@ export default function SettingsPage() {
               </div>
 
               <div className="pt-2">
-                <SaveButton section="notifications" data={notifPrefs} />
+                <AutoSaveSection
+                  section="notifications"
+                  snapshot={notifPrefs}
+                  save={saveSection}
+                  saving={saving}
+                  saveSuccess={saveSuccess}
+                />
               </div>
             </CardContent>
           </Card>

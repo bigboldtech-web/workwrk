@@ -36,6 +36,14 @@ const providers = [
         throw new Error("Invalid credentials");
       }
 
+      // Block sign-in for users whose org has been soft-deleted. The
+      // org admin scheduled the destruction; sign-ins during the
+      // grace window would just create new audit clutter for data
+      // that's about to disappear.
+      if (user.organization.status === "CANCELLED") {
+        throw new Error("This organization has been scheduled for deletion. Contact your administrator if this was a mistake.");
+      }
+
       return {
         id: user.id,
         email: user.email,
@@ -84,9 +92,12 @@ export const authOptions: NextAuthOptions = {
       if (!email) return false;
       const existing = await prisma.user.findFirst({
         where: { email, deletedAt: null },
-        select: { id: true },
+        select: { id: true, organization: { select: { status: true } } },
       });
-      return !!existing;
+      if (!existing) return false;
+      // Mirror the credentials path: refuse sign-in for a soft-deleted org.
+      if (existing.organization.status === "CANCELLED") return false;
+      return true;
     },
 
     async jwt({ token, user, account, trigger }) {
