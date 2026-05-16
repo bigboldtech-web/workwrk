@@ -6,7 +6,30 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { Check, X, CheckSquare, Square, Loader2, Filter, DollarSign, ShoppingCart, Receipt, CalendarOff, Clock } from "lucide-react";
+import { Check, X, CheckSquare, Square, Loader2, Filter, DollarSign, ShoppingCart, Receipt, CalendarOff, Clock, Sparkles } from "lucide-react";
+
+interface AiSuggestion {
+  id: string;
+  action: "approve" | "hold" | "reassign" | "do" | "review";
+  rationale: string;
+  confidence: number;
+}
+
+const AI_ACTION_COLOR: Record<AiSuggestion["action"], string> = {
+  approve: "text-green-400 border-green-400/30 bg-green-400/10",
+  hold: "text-amber-400 border-amber-400/30 bg-amber-400/10",
+  reassign: "text-blue-400 border-blue-400/30 bg-blue-400/10",
+  do: "text-[color:var(--accent-strong)] border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.06)]",
+  review: "text-muted border-white/20 bg-surface-2",
+};
+
+const AI_ACTION_LABEL: Record<AiSuggestion["action"], string> = {
+  approve: "AI: approve",
+  hold: "AI: hold",
+  reassign: "AI: reassign",
+  do: "AI: do",
+  review: "AI: review",
+};
 
 export type ApprovalKind = "expense" | "po" | "invoice" | "time_off" | "timesheet";
 
@@ -132,6 +155,59 @@ export function InboxApprovalQueue({ items }: Props) {
   const [bulkActioning, setBulkActioning] = useState(false);
   const [, startTransition] = useTransition();
 
+  // AI triage state. Suggestions live alongside the queue, indexed by
+  // item id (which encodes kind:id so per-stream items don't collide).
+  const [aiSuggestions, setAiSuggestions] = useState<Map<string, AiSuggestion>>(new Map());
+  const [aiLoading, setAiLoading] = useState(false);
+
+  async function runAiTriage() {
+    if (filteredItems.length === 0) return;
+    setAiLoading(true);
+    try {
+      const res = await fetch("/api/ai/inbox-suggestion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: filteredItems.slice(0, 20).map((it) => ({
+            id: `${it.kind}:${it.id}`,
+            type: it.kind,
+            title: it.title,
+            context: it.subtitle,
+            link: it.link,
+          })),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toastError(json?.error ?? "AI triage unavailable");
+        return;
+      }
+      const data = json?.data ?? json;
+      const next = new Map<string, AiSuggestion>();
+      for (const s of (data?.suggestions ?? []) as AiSuggestion[]) {
+        next.set(s.id, s);
+      }
+      setAiSuggestions(next);
+    } catch {
+      toastError("Couldn't reach the AI service");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  function selectAiRecommended(action: AiSuggestion["action"]) {
+    const ids = new Set<string>();
+    for (const it of filteredItems) {
+      const sug = aiSuggestions.get(`${it.kind}:${it.id}`);
+      if (sug?.action === action) ids.add(it.id);
+    }
+    if (ids.size === 0) {
+      toastError(`No items match AI action "${action}".`);
+      return;
+    }
+    setSelectedIds(ids);
+  }
+
   const allKinds = useMemo(() => {
     const s = new Set<ApprovalKind>();
     for (const it of items) s.add(it.kind);
@@ -226,6 +302,24 @@ export function InboxApprovalQueue({ items }: Props) {
           <CheckSquare size={16} /> Approval queue
           <span className="text-xs text-muted font-normal">({items.length})</span>
           <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+            <button
+              onClick={runAiTriage}
+              disabled={aiLoading || filteredItems.length === 0}
+              className="text-[10px] inline-flex items-center gap-1 rounded-full border border-[rgba(212,255,46,0.3)] px-2 py-0.5 text-[color:var(--accent-strong)] bg-[rgba(212,255,46,0.06)] hover:bg-[rgba(212,255,46,0.12)] disabled:opacity-50 transition-colors"
+              title="Ask AI to suggest an action per row"
+            >
+              {aiLoading ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />}
+              {aiSuggestions.size > 0 ? "Re-run AI triage" : "Suggest with AI"}
+            </button>
+            {aiSuggestions.size > 0 && (
+              <button
+                onClick={() => selectAiRecommended("approve")}
+                className="text-[10px] rounded-full border border-green-400/30 px-2 py-0.5 text-green-400 bg-green-400/10 hover:bg-green-400/20 transition-colors"
+                title="Select all rows the AI suggested approving"
+              >
+                Select AI approves
+              </button>
+            )}
             <Filter size={11} className="text-muted-2" />
             {allKinds.map((kind) => {
               const meta = KIND_META[kind];
@@ -317,6 +411,7 @@ export function InboxApprovalQueue({ items }: Props) {
             const meta = KIND_META[item.kind];
             const Icon = meta.icon;
             const selected = selectedIds.has(item.id);
+            const sug = aiSuggestions.get(`${item.kind}:${item.id}`);
             return (
               <li key={`${item.kind}:${item.id}`} className={`flex items-start gap-2 py-2 px-2 -mx-2 rounded transition-colors ${selected ? "bg-[rgba(212,255,46,0.06)]" : "hover:bg-surface-2"}`}>
                 <button
@@ -333,8 +428,19 @@ export function InboxApprovalQueue({ items }: Props) {
                 <Link href={item.link} className="flex-1 min-w-0 group">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium truncate group-hover:underline">{item.title}</span>
+                    {sug && (
+                      <span
+                        className={`text-[9px] uppercase tracking-wide inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 ${AI_ACTION_COLOR[sug.action]}`}
+                        title={`AI ${(sug.confidence * 100).toFixed(0)}% confidence — ${sug.rationale}`}
+                      >
+                        <Sparkles size={8} />
+                        {AI_ACTION_LABEL[sug.action]}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-muted truncate">{item.subtitle}</p>
+                  <p className="text-xs text-muted truncate">
+                    {sug ? sug.rationale : item.subtitle}
+                  </p>
                 </Link>
                 <span className={`text-[10px] uppercase tracking-wide inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 ${meta.color} border-current/30 bg-current/5 shrink-0`}>
                   <Icon size={9} />

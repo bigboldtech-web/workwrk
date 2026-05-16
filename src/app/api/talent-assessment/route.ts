@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -130,6 +131,16 @@ export async function POST(req: NextRequest) {
     where: { userId_period_organizationId: { userId, period, organizationId: orgId } },
     create: { userId, period, performance, potential, boxPosition, action, notes, assessedBy, organizationId: orgId },
     update: { performance, potential, boxPosition, action, notes, assessedBy },
+  });
+
+  logActivity({
+    type: "talent_assessment_upserted",
+    actorId: assessedBy,
+    organizationId: orgId,
+    description: `Placed person in ${boxPosition} for ${period}${action ? ` (action: ${action})` : ""}`,
+    targetId: assessment.id,
+    targetType: "talent_assessment",
+    metadata: { userId, period, performance, potential, boxPosition, action: action || null },
   });
 
   return jsonSuccess(assessment);

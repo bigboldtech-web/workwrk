@@ -12,11 +12,13 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
 import { getPayrollProvider } from "@/lib/payroll/provider";
+import { logActivity, logAuditEvent } from "@/lib/activity";
 
 export async function GET(
   _req: NextRequest,
@@ -105,6 +107,23 @@ export async function PATCH(
       where: { id },
       data: { status: "POSTED", postedAt: result.postedAt },
     });
+
+    // Posting a pay run releases funds — the highest-stakes financial
+    // action in the system. Always critical.
+    logAuditEvent({
+      type: "pay_run_posted",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Posted pay run (totals: ${updated.totalGross ? `gross ${Number(updated.totalGross).toFixed(2)}` : "n/a"})`,
+      targetId: id,
+      targetType: "pay_run",
+      metadata: {
+        totalGross: updated.totalGross ? Number(updated.totalGross) : null,
+        totalNet: updated.totalNet ? Number(updated.totalNet) : null,
+      },
+      severity: "critical",
+    });
+
     return jsonSuccess(updated);
   }
 
@@ -117,6 +136,17 @@ export async function PATCH(
       where: { id },
       data: { status: "CANCELLED", notes: reason || null },
     });
+
+    logActivity({
+      type: "pay_run_cancelled",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Cancelled pay run${reason ? ` — ${reason}` : ""}`,
+      targetId: id,
+      targetType: "pay_run",
+      metadata: { reason: reason || null },
+    });
+
     return jsonSuccess(updated);
   }
 

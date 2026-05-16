@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { logActivity, logAuditEvent } from "@/lib/activity";
 
 // GET: List tools — admins see all, employees see only shared with them
 export async function GET() {
@@ -61,6 +62,30 @@ export async function POST(req: NextRequest) {
       organizationId: orgId,
     },
   });
+
+  // Tools with shared credentials are a security surface — admins
+  // need to be able to trace who added what and when.
+  const hasCredentials = credentials !== undefined && credentials !== null;
+  if (hasCredentials) {
+    logAuditEvent({
+      type: "tool_created",
+      actorId: userId,
+      organizationId: orgId,
+      description: `Added tool "${tool.name}" with shared credentials`,
+      targetId: tool.id,
+      targetType: "tool",
+      metadata: { url: tool.url ?? null, category: tool.category ?? null, hasCredentials: true },
+    });
+  } else {
+    logActivity({
+      type: "tool_created",
+      actorId: userId,
+      organizationId: orgId,
+      description: `Added tool "${tool.name}"`,
+      targetId: tool.id,
+      targetType: "tool",
+    });
+  }
 
   return jsonSuccess(tool, 201);
 }

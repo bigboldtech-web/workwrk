@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
 import { getTeamUserIds } from "@/lib/team";
+import { logActivity } from "@/lib/activity";
 import crypto from "crypto";
 
 // GET: List process runs
@@ -88,6 +89,16 @@ export async function POST(req: NextRequest) {
     include: {
       sop: { select: { id: true, title: true } },
     },
+  });
+
+  logActivity({
+    type: "process_run_started",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Started "${run.title}" (from SOP "${run.sop.title}")`,
+    targetId: run.id,
+    targetType: "process_run",
+    metadata: { sopId, assigneeId: assigneeId || null },
   });
 
   return jsonSuccess({
@@ -178,6 +189,14 @@ export async function PATCH(req: NextRequest) {
     await prisma.processRun.update({
       where: { id },
       data: { status: "CANCELLED" },
+    });
+    logActivity({
+      type: "process_run_cancelled",
+      actorId: userId,
+      organizationId: orgId,
+      description: `Cancelled "${run.title}"`,
+      targetId: id,
+      targetType: "process_run",
     });
     return jsonSuccess({ status: "CANCELLED" });
   }
