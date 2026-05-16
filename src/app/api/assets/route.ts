@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -108,6 +109,18 @@ export async function POST(req: NextRequest) {
       },
     });
   }
+
+  // Asset registry mutations feed into IT-compliance reviews; log
+  // assignment-at-creation as a separate metadata field for filtering.
+  logActivity({
+    type: "asset.create",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Registered asset: ${asset.name}${asset.serialNumber ? ` (S/N ${asset.serialNumber})` : ""}`,
+    targetId: asset.id,
+    targetType: "Asset",
+    metadata: { type: asset.type, condition: asset.condition, assignedToId: assignedToId || null },
+  });
 
   return jsonSuccess(asset, 201);
 }

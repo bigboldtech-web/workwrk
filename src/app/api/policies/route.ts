@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -84,6 +85,19 @@ export async function POST(req: NextRequest) {
       });
     }
   }
+
+  // Policies are compliance documents — every publication is a
+  // signal we want preserved at warning severity for SOC 2 / legal
+  // review pulls.
+  logAuditEvent({
+    type: `policy.${finalStatus === "PUBLISHED" ? "publish" : "draft"}`,
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `${finalStatus === "PUBLISHED" ? "Published" : "Drafted"} policy: ${policy.title}`,
+    targetId: policy.id,
+    targetType: "Policy",
+    metadata: { title: policy.title, category, requiresAck: policy.requiresAck, status: finalStatus },
+  });
 
   return jsonSuccess(policy, 201);
 }

@@ -26,6 +26,8 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const TYPES = [
   { value: "INFO", label: "Information", icon: Megaphone },
@@ -251,13 +253,15 @@ export default function AnnouncementsPage() {
       />
 
       {loading ? (
-        <div className="space-y-3">{[1,2,3].map((i) => <Card key={i}><CardContent className="p-4"><div className="h-16 bg-surface-2 rounded animate-pulse" /></CardContent></Card>)}</div>
+        <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonCard key={i} />)}</div>
       ) : announcements.length === 0 ? (
-        <Card><CardContent className="p-8 text-center">
-          <Megaphone size={40} className="mx-auto text-muted mb-3" />
-          <p className="font-medium mb-1">{t("noAnnouncements")}</p>
-          <p className="text-sm text-muted">{t("noAnnouncementsHint")}</p>
-        </CardContent></Card>
+        <EmptyState
+          icon={Megaphone}
+          title={t("noAnnouncements")}
+          description={t("noAnnouncementsHint")}
+          actionLabel={isManager ? t("newAnnouncement") : undefined}
+          onAction={isManager ? () => setShowCreate(true) : undefined}
+        />
       ) : (
         <div className="space-y-3">
           {announcements.map((a) => {
