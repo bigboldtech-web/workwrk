@@ -9,10 +9,12 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -91,6 +93,19 @@ export async function POST(req: NextRequest) {
       },
       include: { periods: true },
     });
+
+    // Fiscal years gate every financial statement + journal posting —
+    // creating one is admin-rare and forensically important.
+    logAuditEvent({
+      type: "fiscal_year_created",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Created fiscal year "${label}" (${startDate.toISOString().slice(0, 10)} → ${endDate.toISOString().slice(0, 10)}, ${periods.length} periods)`,
+      targetId: year.id,
+      targetType: "fiscal_year",
+      metadata: { label, startDate: startDate.toISOString(), endDate: endDate.toISOString(), periodCount: periods.length },
+    });
+
     return jsonSuccess(year, 201);
   } catch (e: unknown) {
     if (typeof e === "object" && e && "code" in e && (e as { code: string }).code === "P2002") {

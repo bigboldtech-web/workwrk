@@ -5,10 +5,12 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -71,6 +73,19 @@ export async function POST(req: NextRequest) {
         notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
       },
     });
+
+    // Pay runs disburse money — log as critical for forensic audit.
+    logAuditEvent({
+      type: "pay_run_created",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Created pay run for ${periodStart.toISOString().slice(0, 10)} → ${periodEnd.toISOString().slice(0, 10)} (pay date ${payDate.toISOString().slice(0, 10)})`,
+      targetId: run.id,
+      targetType: "pay_run",
+      metadata: { payGroupId, periodStart: periodStart.toISOString(), periodEnd: periodEnd.toISOString(), payDate: payDate.toISOString() },
+      severity: "critical",
+    });
+
     return jsonSuccess(run, 201);
   } catch (e: unknown) {
     if (typeof e === "object" && e && "code" in e && (e as { code: string }).code === "P2002") {

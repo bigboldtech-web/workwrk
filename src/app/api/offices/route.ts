@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -39,6 +40,15 @@ export async function POST(req: NextRequest) {
       isHeadquarters: isHeadquarters === true,
       organizationId: orgId,
     },
+  });
+
+  logActivity({
+    type: "office_created",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Added office "${office.name}"${office.isHeadquarters ? " (HQ)" : ""}`,
+    targetId: office.id,
+    targetType: "office",
   });
 
   return jsonSuccess(office, 201);
@@ -86,6 +96,15 @@ export async function DELETE(req: NextRequest) {
   if (existing._count.members > 0) return jsonError("Cannot delete office with assigned members");
 
   await prisma.office.delete({ where: { id } });
+
+  logActivity({
+    type: "office_deleted",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Deleted office "${existing.name}"`,
+    targetId: id,
+    targetType: "office",
+  });
 
   return jsonSuccess({ message: "Office deleted" });
 }

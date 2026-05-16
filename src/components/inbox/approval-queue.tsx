@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -87,12 +87,47 @@ function decisionCall(item: ApprovalItem, decision: "APPROVE" | "REJECT"): { url
   };
 }
 
+const FILTER_STORAGE_KEY = "inbox.approvalQueue.filters.v1";
+
+function readSavedFilters(): Set<ApprovalKind> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((k): k is ApprovalKind => typeof k === "string" && k in KIND_META));
+  } catch {
+    return new Set();
+  }
+}
+
 export function InboxApprovalQueue({ items }: Props) {
   const router = useRouter();
   const { success: toastSuccess, error: toastError } = useToast();
 
   // Active filter chips. Empty set = "show all" (default).
+  // Saved-filters: persist the user's last filter choice in localStorage
+  // so the queue opens to the same triage scope across visits. We hydrate
+  // post-mount (not in the initial useState arg) to avoid an SSR/CSR
+  // markup mismatch.
   const [activeFilters, setActiveFilters] = useState<Set<ApprovalKind>>(new Set());
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const restored = readSavedFilters();
+    if (restored.size > 0) setActiveFilters(restored);
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(Array.from(activeFilters)));
+    } catch {
+      // Quota / private mode — non-fatal.
+    }
+  }, [activeFilters, hydrated]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkActioning, setBulkActioning] = useState(false);
   const [, startTransition] = useTransition();

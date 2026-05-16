@@ -7,11 +7,13 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isManager,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -103,6 +105,16 @@ export async function POST(req: NextRequest) {
           data: { organizationId: orgId, departmentId: null, period, plannedHeadcount, plannedBudget, budgetCurrency, notes },
         });
       })();
+
+  logActivity({
+    type: "headcount_plan_upserted",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Set headcount plan${departmentId ? " for department" : " (org-wide)"} for ${period}: ${plannedHeadcount} headcount${plannedBudget !== null ? `, ${budgetCurrency} ${plannedBudget.toFixed(0)}` : ""}`,
+    targetId: upserted.id,
+    targetType: "headcount_plan",
+    metadata: { period, departmentId, plannedHeadcount, plannedBudget, budgetCurrency },
+  });
 
   return jsonSuccess({
     ...upserted,
