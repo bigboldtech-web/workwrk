@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard } from "lucide-react";
+import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import {
   DropdownMenu,
@@ -18,6 +18,7 @@ import { getInitials } from "@/lib/utils";
 import { useTranslations } from "next-intl";
 import { LanguageSwitcher } from "./language-switcher";
 import { CurrencySwitcher } from "./currency-switcher";
+import { OrgSwitcher } from "./org-switcher";
 import { ActivePunchPill } from "./active-punch-pill";
 import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
 import { ShortcutsOverlay, useShortcutsOverlay } from "./shortcuts-overlay";
@@ -206,6 +207,25 @@ export function Topbar() {
     setUnreadCount(0);
   }, []);
 
+  // Snooze a notification for ~24h. Optimistically remove from the
+  // local panel so the badge updates immediately; the PATCH writes
+  // `snoozedUntil` and the GET will hide it on next poll.
+  const handleSnoozeNotification = useCallback((id: string) => {
+    setNotifications((prev) => {
+      const target = prev.find((n) => n.id === id);
+      if (target && !target.read) {
+        setUnreadCount((u) => Math.max(0, u - 1));
+      }
+      return prev.filter((n) => n.id !== id);
+    });
+    const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, snoozeUntil: until }),
+    }).catch(() => {});
+  }, []);
+
   // Delete a single notification optimistically. Used by the small X
   // button on each row — lets users sweep already-seen items one by
   // one without leaving the dropdown.
@@ -346,6 +366,7 @@ export function Topbar() {
           Quick add
         </Link>
 
+        <OrgSwitcher />
         <LanguageSwitcher />
         <CurrencySwitcher />
 
@@ -418,7 +439,20 @@ export function Topbar() {
                       <button
                         type="button"
                         data-dismiss-notif
-                        className="ml-1 flex-shrink-0 rounded p-0.5 text-muted-2 hover:text-foreground hover:bg-surface-2 transition-colors"
+                        className="flex-shrink-0 rounded p-0.5 text-muted-2 hover:text-foreground hover:bg-surface-2 transition-colors"
+                        aria-label="Snooze for 1 day"
+                        title="Snooze for 1 day"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSnoozeNotification(notif.id);
+                        }}
+                      >
+                        <ClockIcon size={11} />
+                      </button>
+                      <button
+                        type="button"
+                        data-dismiss-notif
+                        className="ml-0.5 flex-shrink-0 rounded p-0.5 text-muted-2 hover:text-foreground hover:bg-surface-2 transition-colors"
                         aria-label="Dismiss notification"
                         onClick={(e) => {
                           e.stopPropagation();

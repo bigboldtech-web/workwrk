@@ -29,6 +29,10 @@
     {
       "path": "/api/cron/okr-reminders",
       "schedule": "0 9 * * 1-5"
+    },
+    {
+      "path": "/api/cron/announcements-publish",
+      "schedule": "*/5 * * * *"
     }
   ],
   "functions": {
@@ -66,6 +70,9 @@
       "maxDuration": 60
     },
     "src/app/api/cron/surveys-rotate/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/announcements-publish/route.ts": {
       "maxDuration": 60
     }
   }

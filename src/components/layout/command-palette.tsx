@@ -6,7 +6,7 @@
 // search (people / SOPs / tasks by name) lands in v2 once we have a
 // unified search endpoint.
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import { useRole } from "@/hooks/use-role";
@@ -17,8 +17,41 @@ import {
   GraduationCap, Heart, Lightbulb, Crosshair, Grid3x3, ClipboardCheck,
   MessageSquareHeart, Shield, Package, Activity, Wrench, Link2, Bot,
   Settings, FileText, Plus, UserPlus, Search, Receipt, DollarSign, CalendarOff, Clock, Briefcase, ShoppingCart,
-  Pin, History,
+  Pin, History, User as UserIcon, Hash,
 } from "lucide-react";
+
+/**
+ * Shape returned by `/api/search` — flat array of typed hits with a
+ * canonical `href` per kind. The palette renders each as a Command.Item.
+ */
+type SearchHit = {
+  type: string;
+  id: string;
+  title: string;
+  subtitle?: string;
+  href: string;
+};
+
+// Icon per result kind. New kinds fall through to Hash for visual
+// consistency; nothing breaks if /api/search returns a new type.
+const HIT_ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  person: UserIcon,
+  task: CalendarDays,
+  sop: BookOpen,
+  department: Building2,
+  meeting: MessageSquare,
+  okr: Crosshair,
+  idea: Lightbulb,
+  expense: Receipt,
+  vendor: ShoppingCart,
+  po: ShoppingCart,
+  job: Briefcase,
+  candidate: UserPlus,
+  policy: Shield,
+  announcement: Megaphone,
+  glAccount: DollarSign,
+  plan: BarChart3,
+};
 
 type CommandItem = {
   id: string;
@@ -163,6 +196,53 @@ export function CommandPalette() {
     [router],
   );
 
+  // ── Live entity search ──────────────────────────────────────────────
+  // Drives the "Search results" group in the palette. Debounced so a
+  // fast typist doesn't N+1 the search endpoint; aborts in-flight
+  // requests when a newer keystroke supersedes them so stale results
+  // never overwrite fresh ones.
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setHits([]);
+      setSearching(false);
+      if (abortRef.current) abortRef.current.abort();
+      return;
+    }
+    const timer = setTimeout(async () => {
+      if (abortRef.current) abortRef.current.abort();
+      const ctl = new AbortController();
+      abortRef.current = ctl;
+      setSearching(true);
+      try {
+        const r = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`, {
+          signal: ctl.signal,
+          cache: "no-store",
+        });
+        if (!r.ok) return;
+        const d = await r.json();
+        const list: SearchHit[] = Array.isArray(d) ? d : d?.data || [];
+        setHits(list);
+      } catch {
+        // Aborted or network error — fail quiet; the user is typing again.
+      } finally {
+        setSearching(false);
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [query]);
+  // Reset query whenever the palette closes so the next open lands clean.
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      setHits([]);
+    }
+  }, [open]);
+
   if (!open) {
     return null;
   }
@@ -174,14 +254,41 @@ export function CommandPalette() {
           <div className="cmd-palette-input-row">
             <Search size={14} className="cmd-palette-input-icon" aria-hidden />
             <Command.Input
-              placeholder="Jump to a page or run an action…"
+              placeholder="Search anything — people, tasks, SOPs, OKRs, expenses…"
               className="cmd-palette-input"
               autoFocus
+              value={query}
+              onValueChange={setQuery}
             />
             <kbd className="cmd-palette-kbd">esc</kbd>
           </div>
           <Command.List className="cmd-palette-list">
-            <Command.Empty className="cmd-palette-empty">No matches.</Command.Empty>
+            <Command.Empty className="cmd-palette-empty">
+              {searching ? "Searching…" : "No matches."}
+            </Command.Empty>
+
+            {hits.length > 0 && (
+              <Command.Group heading="Search results" className="cmd-palette-group">
+                {hits.map((h) => {
+                  const Icon = HIT_ICONS[h.type] ?? Hash;
+                  return (
+                    <Command.Item
+                      key={`hit-${h.type}-${h.id}`}
+                      // Include the title so cmdk's substring matcher keeps
+                      // ranking correctly even as the user keeps typing past
+                      // the server response.
+                      value={`hit ${h.title} ${h.subtitle ?? ""} ${h.type}`}
+                      onSelect={() => onSelect(h.href)}
+                      className="cmd-palette-item"
+                    >
+                      <Icon size={14} />
+                      <span className="cmd-palette-label">{h.title}</span>
+                      {h.subtitle && <span className="cmd-palette-hint">{h.subtitle}</span>}
+                    </Command.Item>
+                  );
+                })}
+              </Command.Group>
+            )}
 
             {pinnedItems.length > 0 && (
               <Command.Group heading="Pinned" className="cmd-palette-group">

@@ -8,20 +8,31 @@ export async function GET() {
 
   const userId = getUserId(session);
 
+  const now = new Date();
+  // Snooze filter: a notification is "visible" when it isn't snoozed
+  // or its snooze window has elapsed. Applies to listings + counts
+  // alike so the badge stays in sync with the panel.
+  const visibleFilter = {
+    OR: [
+      { snoozedUntil: null },
+      { snoozedUntil: { lte: now } },
+    ],
+  };
+
   // Run all three queries in parallel. `unreadByType` powers the sidebar
   // section badges (Kudos / Surveys / SOPs / etc.); the shape is
   // `{ KUDOS: 3, SURVEY: 1, ... }` so consumers can look up by type
   // without another round trip.
   const [notifications, unreadCount, unreadByTypeRows] = await Promise.all([
     prisma.notification.findMany({
-      where: { userId },
+      where: { userId, ...visibleFilter },
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
-    prisma.notification.count({ where: { userId, read: false } }),
+    prisma.notification.count({ where: { userId, read: false, ...visibleFilter } }),
     prisma.notification.groupBy({
       by: ["type"],
-      where: { userId, read: false },
+      where: { userId, read: false, ...visibleFilter },
       _count: { _all: true },
     }),
   ]);
@@ -65,6 +76,36 @@ export async function PATCH(req: NextRequest) {
       data: { read: true },
     });
     return jsonSuccess({ message: "Marked as read" });
+  }
+
+  // Snooze — defer a notification until `snoozeUntil` (ISO timestamp).
+  // Pass `snoozeUntil: null` to clear the snooze immediately. Scope is
+  // always the caller's own rows; bulk via `ids` is supported.
+  if (Object.prototype.hasOwnProperty.call(body, "snoozeUntil")) {
+    const raw = body.snoozeUntil;
+    let value: Date | null;
+    if (raw === null || raw === "") {
+      value = null;
+    } else {
+      const parsed = new Date(raw);
+      if (isNaN(parsed.getTime())) return jsonError("Invalid snoozeUntil");
+      value = parsed;
+    }
+    if (typeof body.id === "string" && body.id) {
+      const r = await prisma.notification.updateMany({
+        where: { id: body.id, userId },
+        data: { snoozedUntil: value },
+      });
+      return jsonSuccess({ snoozed: r.count, until: value });
+    }
+    if (Array.isArray(body.ids) && body.ids.length > 0) {
+      const r = await prisma.notification.updateMany({
+        where: { id: { in: body.ids as string[] }, userId },
+        data: { snoozedUntil: value },
+      });
+      return jsonSuccess({ snoozed: r.count, until: value });
+    }
+    return jsonError("Provide id or ids to snooze");
   }
 
   return jsonError("Invalid request");

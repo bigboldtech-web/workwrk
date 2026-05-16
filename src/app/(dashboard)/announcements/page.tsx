@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import {
   Megaphone, Plus, Pin, PinOff, Trash2, AlertTriangle, PartyPopper, FileText, Calendar, Copy,
-  Clock, Globe, Building2, Users as UsersIcon,
+  Clock, Globe, Building2, Users as UsersIcon, CheckCircle2, ShieldCheck,
 } from "lucide-react";
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
@@ -77,7 +77,7 @@ export default function AnnouncementsPage() {
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
+  const [form, setForm] = useState({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, mustAcknowledge: false, expiresAt: "" });
   // Audience + scheduling are separate state slices so the form object
   // can stay a flat string-keyed bag (re-used by API).
   const [audienceMode, setAudienceMode] = useState<AudienceMode>("ALL");
@@ -98,7 +98,7 @@ export default function AnnouncementsPage() {
   const tCommon = useTranslations("common");
 
   function resetForm() {
-    setForm({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, expiresAt: "" });
+    setForm({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, mustAcknowledge: false, expiresAt: "" });
     setAudienceMode("ALL");
     setAudienceDepts([]);
     setAudienceOffices([]);
@@ -137,6 +137,24 @@ export default function AnnouncementsPage() {
       .catch((err) => console.error("Failed to fetch announcements:", err))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleAcknowledge(id: string) {
+    // Optimistic — flip the local row immediately so the button doesn't
+    // wobble. On failure, refetch to reconcile with server state.
+    setAnnouncements((prev) => prev.map((x) => (x.id === id ? { ...x, ackedByMe: true, ackedAt: new Date().toISOString() } : x)));
+    try {
+      const res = await fetch(`/api/announcements/${id}/acknowledge`, { method: "POST" });
+      if (!res.ok) throw new Error("ack failed");
+      toastSuccess("Acknowledged");
+    } catch {
+      toastError("Failed to acknowledge");
+      const refresh = await fetch("/api/announcements", { cache: "no-store" });
+      if (refresh.ok) {
+        const d = await refresh.json();
+        setAnnouncements(Array.isArray(d) ? d : d?.data || []);
+      }
+    }
+  }
 
   async function handleTogglePin(a: any) {
     try {
@@ -273,12 +291,31 @@ export default function AnnouncementsPage() {
                               Scheduled · {publishedAt!.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                             </Badge>
                           )}
+                          {a.mustAcknowledge && (
+                            <Badge variant="outline" className="text-[10px] gap-1 text-[color:var(--accent-strong)] border-[color:var(--accent-strong)]">
+                              <ShieldCheck size={9} />
+                              {a.ackedByMe ? "Acknowledged" : "Acknowledgement required"}
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted whitespace-pre-wrap">{a.content}</p>
-                        <p className="text-[10px] text-muted-2 mt-2">
-                          {new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                          {a.expiresAt && ` · Expires ${new Date(a.expiresAt).toLocaleDateString()}`}
-                        </p>
+                        <div className="flex items-center justify-between mt-2 gap-3">
+                          <p className="text-[10px] text-muted-2">
+                            {new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                            {a.expiresAt && ` · Expires ${new Date(a.expiresAt).toLocaleDateString()}`}
+                          </p>
+                          {a.mustAcknowledge && !a.ackedByMe && !isScheduled && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => handleAcknowledge(a.id)}>
+                              <CheckCircle2 size={12} /> I acknowledge
+                            </Button>
+                          )}
+                          {a.mustAcknowledge && a.ackedByMe && (
+                            <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-2">
+                              <CheckCircle2 size={11} className="text-emerald-500" />
+                              You acknowledged {a.ackedAt ? `· ${new Date(a.ackedAt).toLocaleDateString()}` : ""}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -351,10 +388,16 @@ export default function AnnouncementsPage() {
                   onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
                 />
               </div>
-              <div className="flex items-end pb-2">
+              <div className="flex flex-col items-start gap-2 pb-2">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={form.pinned} onChange={(e) => setForm({ ...form, pinned: e.target.checked })} className="rounded" />
                   <span className="text-sm">Pin announcement</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer" title="Recipients must explicitly acknowledge this announcement">
+                  <input type="checkbox" checked={form.mustAcknowledge} onChange={(e) => setForm({ ...form, mustAcknowledge: e.target.checked })} className="rounded" />
+                  <span className="text-sm inline-flex items-center gap-1.5">
+                    <ShieldCheck size={12} className="text-[color:var(--accent-strong)]" /> Require acknowledgement
+                  </span>
                 </label>
               </div>
             </div>

@@ -12,94 +12,95 @@ datasource db {
 // ==========================================
 
 model Organization {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   name      String
-  slug      String   @unique
+  slug      String    @unique
   logo      String?
   domain    String?
-  plan      Plan     @default(STARTER)
+  plan      Plan      @default(STARTER)
   status    OrgStatus @default(ACTIVE)
-  settings  Json     @default("{}")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  settings  Json      @default("{}")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  users        User[]
-  departments  Department[]
-  roles        Role[]
-  kras         KRA[]
-  kpis         KPI[]
-  tasks        Task[]
-  sops         SOP[]
-  reviewCycles ReviewCycle[]
-  meetings     Meeting[]
-  aiQueries    AIQuery[]
-  invitations  Invitation[]
-  onboardingTemplates OnboardingTemplate[]
-  trainingCourses     TrainingCourse[]
-  integrations        Integration[]
-  subscription        Subscription?
-  apiKeys             ApiKey[]
-  webhookSubscriptions WebhookSubscription[]
-  webhookDeliveries   WebhookDelivery[]
-  employeeOfMonths    EmployeeOfMonth[]
-  ideas               Idea[]
-  offices             Office[]
-  sopCategories       SOPCategory[]
-  kraCategories       KraCategory[]
-  announcements       Announcement[]
-  policies            Policy[]
-  okrs                OKR[]
-  pulseSurveys        PulseSurvey[]
-  tools               Tool[]
-  assets              Asset[]
-  candorSessions      CandorSession[]
-  taskLabels          TaskLabel[]
-  sopFolders          SOPFolder[]
-  secrets             OrgSecret[]
-  tags                Tag[]
-  tagAssignments      TagAssignment[]
-  expenses            Expense[]
+  users                 User[]
+  departments           Department[]
+  roles                 Role[]
+  kras                  KRA[]
+  kpis                  KPI[]
+  tasks                 Task[]
+  sops                  SOP[]
+  reviewCycles          ReviewCycle[]
+  meetings              Meeting[]
+  aiQueries             AIQuery[]
+  invitations           Invitation[]
+  onboardingTemplates   OnboardingTemplate[]
+  trainingCourses       TrainingCourse[]
+  integrations          Integration[]
+  subscription          Subscription?
+  apiKeys               ApiKey[]
+  webhookSubscriptions  WebhookSubscription[]
+  webhookDeliveries     WebhookDelivery[]
+  employeeOfMonths      EmployeeOfMonth[]
+  ideas                 Idea[]
+  offices               Office[]
+  sopCategories         SOPCategory[]
+  kraCategories         KraCategory[]
+  announcements         Announcement[]
+  policies              Policy[]
+  okrs                  OKR[]
+  pulseSurveys          PulseSurvey[]
+  tools                 Tool[]
+  assets                Asset[]
+  candorSessions        CandorSession[]
+  taskLabels            TaskLabel[]
+  sopFolders            SOPFolder[]
+  secrets               OrgSecret[]
+  tags                  Tag[]
+  tagAssignments        TagAssignment[]
+  expenses              Expense[]
   compensationCycles    CompensationCycle[]
   compensationDecisions CompensationDecision[]
-  timeOffPolicies     TimeOffPolicy[]
-  timeOffRequests     TimeOffRequest[]
-  timesheets          Timesheet[]
-  timeEntries         TimeEntry[]
-  jobs                Job[]
-  candidates          Candidate[]
-  applications        Application[]
-  identityProviders   IdentityProvider[]
-  scimTokens          ScimToken[]
-  vendors             Vendor[]
-  purchaseOrders      PurchaseOrder[]
-  invoices            Invoice[]
-  headcountPlans      HeadcountPlan[]
-  interviews          Interview[]
-  payGroups           PayGroup[]
-  payRuns             PayRun[]
-  earningCodes        EarningCode[]
-  deductionCodes      DeductionCode[]
-  payslips            Payslip[]
-  benefitPlans        BenefitPlan[]
-  openEnrollments     OpenEnrollment[]
-  enrollments         BenefitEnrollment[]
-  dependents          Dependent[]
-  lifeEvents          LifeEvent[]
-  glAccounts          GlAccount[]
-  fiscalYears         FiscalYear[]
-  accountingPeriods   AccountingPeriod[]
-  journalEntries      JournalEntry[]
-  costCenters         CostCenter[]
-  salaryBands         SalaryBand[]
-  plans               BudgetPlan[]
-  planScenarios       PlanScenario[]
-  planLines           PlanLine[]
-  planDrivers         PlanDriver[]
-  workflows           Workflow[]
-  workflowRuns        WorkflowRun[]
-  customFields        CustomFieldDefinition[]
-  customFieldValues   CustomFieldValue[]
-  overtimePolicies    OvertimePolicy[]
+  timeOffPolicies       TimeOffPolicy[]
+  timeOffRequests       TimeOffRequest[]
+  timesheets            Timesheet[]
+  timeEntries           TimeEntry[]
+  jobs                  Job[]
+  candidates            Candidate[]
+  applications          Application[]
+  identityProviders     IdentityProvider[]
+  scimTokens            ScimToken[]
+  vendors               Vendor[]
+  purchaseOrders        PurchaseOrder[]
+  invoices              Invoice[]
+  headcountPlans        HeadcountPlan[]
+  interviews            Interview[]
+  payGroups             PayGroup[]
+  payRuns               PayRun[]
+  earningCodes          EarningCode[]
+  deductionCodes        DeductionCode[]
+  payslips              Payslip[]
+  benefitPlans          BenefitPlan[]
+  openEnrollments       OpenEnrollment[]
+  enrollments           BenefitEnrollment[]
+  dependents            Dependent[]
+  lifeEvents            LifeEvent[]
+  glAccounts            GlAccount[]
+  fiscalYears           FiscalYear[]
+  accountingPeriods     AccountingPeriod[]
+  journalEntries        JournalEntry[]
+  costCenters           CostCenter[]
+  salaryBands           SalaryBand[]
+  plans                 BudgetPlan[]
+  planScenarios         PlanScenario[]
+  planLines             PlanLine[]
+  planDrivers           PlanDriver[]
+  workflows             Workflow[]
+  workflowRuns          WorkflowRun[]
+  customFields          CustomFieldDefinition[]
+  customFieldValues     CustomFieldValue[]
+  overtimePolicies      OvertimePolicy[]
+  memberships           OrganizationMembership[] @relation("OrgMembershipOrg")
 
   @@index([slug])
 }
@@ -129,51 +130,51 @@ enum Plan {
 /// `stripeCustomerId = null` (no Stripe), and stamp `redeemedById`
 /// so refunds can be traced.
 model AppsumoCode {
-  id             String      @id @default(cuid())
+  id            String    @id @default(cuid())
   /// The redemption string the customer pastes in. Unique per code.
-  code           String      @unique
+  code          String    @unique
   /// Plan tier this code grants. We map AppSumo "Tier 1/2/3" to our
   /// internal Plan enum values via the redemption handler.
-  tier           Int         /// 1, 2, 3 — matches AppSumo Tier numbering
-  plan           Plan        /// Plan to apply on redemption (e.g. SCALE)
-  seats          Int         /// User cap (null-equivalent for unlimited tiers; we use a large int)
+  tier          Int /// 1, 2, 3 — matches AppSumo Tier numbering
+  plan          Plan /// Plan to apply on redemption (e.g. SCALE)
+  seats         Int /// User cap (null-equivalent for unlimited tiers; we use a large int)
   /// Once redeemed, the code is locked. Refunds flip `refunded=true`
   /// without deleting the row so the AppSumo merchant dashboard
   /// reconciliation stays auditable.
-  redeemedById   String?
-  redeemedByOrg  String?
-  redeemedAt     DateTime?
-  refundedAt     DateTime?
-  notes          String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  redeemedById  String?
+  redeemedByOrg String?
+  redeemedAt    DateTime?
+  refundedAt    DateTime?
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([redeemedByOrg])
   @@index([redeemedAt])
 }
 
 model Subscription {
-  id                 String             @id @default(cuid())
-  organizationId     String             @unique
-  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   // Canonical state
-  plan               Plan
-  status             SubscriptionStatus @default(TRIALING)
-  billingMode        BillingMode        @default(PER_USER)
-  seats              Int                @default(0)
+  plan        Plan
+  status      SubscriptionStatus @default(TRIALING)
+  billingMode BillingMode        @default(PER_USER)
+  seats       Int                @default(0)
 
   // Stripe (null on self-hosted / trial / manual invoicing)
-  stripeCustomerId       String?        @unique
-  stripeSubscriptionId   String?        @unique
+  stripeCustomerId       String?   @unique
+  stripeSubscriptionId   String?   @unique
   stripePriceId          String?
   stripeCurrentPeriodEnd DateTime?
 
-  trialEndsAt        DateTime?
-  canceledAt         DateTime?
+  trialEndsAt DateTime?
+  canceledAt  DateTime?
 
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
 }
@@ -187,8 +188,8 @@ enum SubscriptionStatus {
 }
 
 enum BillingMode {
-  PER_USER    // $4/user/month style
-  FLAT_TIER   // $50/100/300 per-band flat
+  PER_USER // $4/user/month style
+  FLAT_TIER // $50/100/300 per-band flat
 }
 
 enum OrgStatus {
@@ -199,21 +200,21 @@ enum OrgStatus {
 }
 
 model User {
-  id             String    @id @default(cuid())
-  email          String
-  passwordHash   String
-  firstName      String
-  lastName       String
-  avatar         String?
-  phone          String?
-  dateOfBirth    DateTime?
-  officeId       String?
-  office         Office?      @relation(fields: [officeId], references: [id])
-  status         UserStatus @default(ACTIVE)
-  joinDate       DateTime  @default(now())
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  id           String     @id @default(cuid())
+  email        String
+  passwordHash String
+  firstName    String
+  lastName     String
+  avatar       String?
+  phone        String?
+  dateOfBirth  DateTime?
+  officeId     String?
+  office       Office?    @relation(fields: [officeId], references: [id])
+  status       UserStatus @default(ACTIVE)
+  joinDate     DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -224,86 +225,111 @@ model User {
   accessLevel    AccessLevel  @default(EMPLOYEE)
 
   // Email verification — signup sets verifyToken; user confirms via /verify-email.
-  emailVerifiedAt  DateTime?
-  verifyToken      String?  @unique
-  verifyExpiresAt  DateTime?
+  emailVerifiedAt DateTime?
+  verifyToken     String?   @unique
+  verifyExpiresAt DateTime?
 
   // MFA — TOTP (Google Authenticator / Authy / 1Password).
   // Secret stored base32-encoded, only persisted when enrolment completes.
-  mfaEnabled       Boolean  @default(false)
-  mfaSecret        String?
-  mfaBackupCodes   String[] @default([])   // bcrypt-hashed one-time codes
+  mfaEnabled     Boolean  @default(false)
+  mfaSecret      String?
+  mfaBackupCodes String[] @default([]) // bcrypt-hashed one-time codes
 
-  managerId      String?
-  manager        User?    @relation("ManagerReports", fields: [managerId], references: [id])
-  directReports  User[]   @relation("ManagerReports")
+  managerId     String?
+  manager       User?   @relation("ManagerReports", fields: [managerId], references: [id])
+  directReports User[]  @relation("ManagerReports")
 
-  skills         UserSkill[]
-  certifications Certification[]
-  kraAssignments KRAAssignment[]
-  kpiRecords     KPIRecord[]
-  tasks          Task[]   @relation("TaskAssignee")
-  tasksEscalated Task[]   @relation("TaskEscalatedTo")
-  sopComplianceRecords SOPCompliance[]
-  sopAssignments       SOPAssignment[]
-  reviewsAsSubject   Review[]       @relation("ReviewSubject")
-  reviewsAsReviewer  Review[]       @relation("ReviewReviewer")
-  feedbackGiven      PeerFeedback[] @relation("FeedbackGiver")
-  feedbackReceived   PeerFeedback[] @relation("FeedbackReceiver")
-  meetingAttendances MeetingAttendee[]
-  actionItems        ActionItem[]
-  checkIns           CheckIn[]
-  aiQueries          AIQuery[]
-  notifications      Notification[]
-  consentRecords     ConsentRecord[]
-  headOfDepartments  Department[] @relation("DepartmentHead")
-  onboardingInstances OnboardingInstance[]
-  buddyForOnboarding  OnboardingInstance[] @relation("OnboardingBuddy")
-  courseEnrollments   CourseEnrollment[]
-  externalData        ExternalData[]
-  activityLogs        ActivityLog[]
-  performanceScores   PerformanceScore[]
-  kudosGiven          Kudos[] @relation("KudosGiver")
-  kudosReceived       Kudos[] @relation("KudosReceiver")
-  kudosReactions      KudosReaction[] @relation("KudosReactionUser")
-  employeeOfMonthWins EmployeeOfMonth[]
-  ideasSubmitted      Idea[] @relation("IdeaSubmitter")
-  ideasReviewed       Idea[] @relation("IdeaReviewer")
-  ideaVotes           IdeaVote[]
-  ideaComments        IdeaComment[]
-  assignedAssets      Asset[]  @relation("AssetAssignee")
-  apiKeysCreated      ApiKey[] @relation("ApiKeyCreator")
-  webhooksCreated     WebhookSubscription[] @relation("WebhookCreator")
-  taskComments        TaskComment[] @relation("TaskCommentAuthor")
-  calendarSubscriptions CalendarSubscription[] @relation("CalendarSubscriptionUser")
-  sopFolderAccess     SOPFolderAccess[] @relation("SOPFolderAccessUser")
-  expensesReported    Expense[] @relation("ExpenseReporter")
-  expensesApproved    Expense[] @relation("ExpenseApprover")
-  compDecisionsAsSubject  CompensationDecision[] @relation("CompDecisionSubject")
-  compDecisionsProposed   CompensationDecision[] @relation("CompDecisionProposer")
-  timeOffRequested        TimeOffRequest[] @relation("TimeOffSubject")
-  timeOffApproved         TimeOffRequest[] @relation("TimeOffApprover")
-  timesheetsAsSubject     Timesheet[] @relation("TimesheetSubject")
-  timesheetsApproved      Timesheet[] @relation("TimesheetApprover")
-  timeEntriesAsSubject    TimeEntry[] @relation("TimeEntrySubject")
-  jobsAsHiringManager     Job[] @relation("JobHiringManager")
-  applicationsAsRecruiter Application[] @relation("ApplicationRecruiter")
-  candidateRecord         Candidate[] @relation("CandidateHiredUser")
-  purchaseOrdersRequested PurchaseOrder[] @relation("POrequester")
-  purchaseOrdersApproved  PurchaseOrder[] @relation("POapprover")
-  invoicesApproved        Invoice[] @relation("InvoiceApprover")
-  interviewsAsInterviewer Interview[] @relation("InterviewInterviewer")
-  payslips                Payslip[] @relation("PayslipSubject")
-  benefitEnrollments      BenefitEnrollment[] @relation("BenefitEnrollmentSubject")
-  dependents              Dependent[] @relation("DependentOwner")
-  lifeEvents              LifeEvent[] @relation("LifeEventSubject")
-  journalEntriesPosted    JournalEntry[] @relation("JournalEntryPostedBy")
-  journalEntriesApproved  JournalEntry[] @relation("JournalEntryApprovedBy")
+  skills                  UserSkill[]
+  certifications          Certification[]
+  kraAssignments          KRAAssignment[]
+  kpiRecords              KPIRecord[]
+  tasks                   Task[]                       @relation("TaskAssignee")
+  tasksEscalated          Task[]                       @relation("TaskEscalatedTo")
+  sopComplianceRecords    SOPCompliance[]
+  sopAssignments          SOPAssignment[]
+  reviewsAsSubject        Review[]                     @relation("ReviewSubject")
+  reviewsAsReviewer       Review[]                     @relation("ReviewReviewer")
+  feedbackGiven           PeerFeedback[]               @relation("FeedbackGiver")
+  feedbackReceived        PeerFeedback[]               @relation("FeedbackReceiver")
+  meetingAttendances      MeetingAttendee[]
+  actionItems             ActionItem[]
+  checkIns                CheckIn[]
+  aiQueries               AIQuery[]
+  notifications           Notification[]
+  consentRecords          ConsentRecord[]
+  headOfDepartments       Department[]                 @relation("DepartmentHead")
+  onboardingInstances     OnboardingInstance[]
+  buddyForOnboarding      OnboardingInstance[]         @relation("OnboardingBuddy")
+  courseEnrollments       CourseEnrollment[]
+  externalData            ExternalData[]
+  activityLogs            ActivityLog[]
+  performanceScores       PerformanceScore[]
+  kudosGiven              Kudos[]                      @relation("KudosGiver")
+  kudosReceived           Kudos[]                      @relation("KudosReceiver")
+  kudosReactions          KudosReaction[]              @relation("KudosReactionUser")
+  employeeOfMonthWins     EmployeeOfMonth[]
+  ideasSubmitted          Idea[]                       @relation("IdeaSubmitter")
+  ideasReviewed           Idea[]                       @relation("IdeaReviewer")
+  ideaVotes               IdeaVote[]
+  ideaComments            IdeaComment[]
+  assignedAssets          Asset[]                      @relation("AssetAssignee")
+  apiKeysCreated          ApiKey[]                     @relation("ApiKeyCreator")
+  webhooksCreated         WebhookSubscription[]        @relation("WebhookCreator")
+  taskComments            TaskComment[]                @relation("TaskCommentAuthor")
+  calendarSubscriptions   CalendarSubscription[]       @relation("CalendarSubscriptionUser")
+  sopFolderAccess         SOPFolderAccess[]            @relation("SOPFolderAccessUser")
+  expensesReported        Expense[]                    @relation("ExpenseReporter")
+  expensesApproved        Expense[]                    @relation("ExpenseApprover")
+  compDecisionsAsSubject  CompensationDecision[]       @relation("CompDecisionSubject")
+  compDecisionsProposed   CompensationDecision[]       @relation("CompDecisionProposer")
+  timeOffRequested        TimeOffRequest[]             @relation("TimeOffSubject")
+  timeOffApproved         TimeOffRequest[]             @relation("TimeOffApprover")
+  timesheetsAsSubject     Timesheet[]                  @relation("TimesheetSubject")
+  timesheetsApproved      Timesheet[]                  @relation("TimesheetApprover")
+  timeEntriesAsSubject    TimeEntry[]                  @relation("TimeEntrySubject")
+  jobsAsHiringManager     Job[]                        @relation("JobHiringManager")
+  applicationsAsRecruiter Application[]                @relation("ApplicationRecruiter")
+  candidateRecord         Candidate[]                  @relation("CandidateHiredUser")
+  purchaseOrdersRequested PurchaseOrder[]              @relation("POrequester")
+  purchaseOrdersApproved  PurchaseOrder[]              @relation("POapprover")
+  invoicesApproved        Invoice[]                    @relation("InvoiceApprover")
+  interviewsAsInterviewer Interview[]                  @relation("InterviewInterviewer")
+  payslips                Payslip[]                    @relation("PayslipSubject")
+  benefitEnrollments      BenefitEnrollment[]          @relation("BenefitEnrollmentSubject")
+  dependents              Dependent[]                  @relation("DependentOwner")
+  lifeEvents              LifeEvent[]                  @relation("LifeEventSubject")
+  journalEntriesPosted    JournalEntry[]               @relation("JournalEntryPostedBy")
+  journalEntriesApproved  JournalEntry[]               @relation("JournalEntryApprovedBy")
+  announcementAcks        AnnouncementAcknowledgment[] @relation("AnnouncementAckUser")
+  organizationMemberships OrganizationMembership[]     @relation("OrgMembershipUser")
 
   @@unique([email, organizationId])
   @@index([organizationId])
   @@index([departmentId])
   @@index([managerId])
+}
+
+/// One row per (user, organization) that the user can act inside. Today
+/// every user has exactly one membership matching `User.organizationId`
+/// (backfilled by the migration). The model exists so the org-switcher
+/// flow has somewhere to grow: invite a user into a second org, add a
+/// row here, and the topbar dropdown surfaces it. `isPrimary` marks
+/// which one matches the user's User.organizationId — the rest are
+/// secondary memberships the user can switch into.
+model OrganizationMembership {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation("OrgMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation("OrgMembershipOrg", fields: [organizationId], references: [id], onDelete: Cascade)
+  role           AccessLevel  @default(EMPLOYEE)
+  isPrimary      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
 }
 
 enum UserStatus {
@@ -329,19 +355,19 @@ enum AccessLevel {
 }
 
 model Invitation {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   email          String
-  accessLevel    AccessLevel @default(EMPLOYEE)
-  token          String   @unique
+  accessLevel    AccessLevel  @default(EMPLOYEE)
+  token          String       @unique
   expiresAt      DateTime
-  accepted       Boolean  @default(false)
+  accepted       Boolean      @default(false)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   departmentId   String?
   roleId         String?
   managerId      String?
   officeId       String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([token])
   @@index([organizationId])
@@ -364,24 +390,24 @@ model PasswordResetToken {
 // ==========================================
 
 model Department {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  color           String?
-  parentId        String?
-  parent          Department?  @relation("SubDepartments", fields: [parentId], references: [id])
-  subDepartments  Department[] @relation("SubDepartments")
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  headId          String?
-  head            User?        @relation("DepartmentHead", fields: [headId], references: [id])
-  members         User[]       @relation("DepartmentMembers")
-  roles           Role[]
-  goals           DepartmentGoal[]
-  jobs            Job[]
-  headcountPlans  HeadcountPlan[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String           @id @default(cuid())
+  name           String
+  description    String?
+  color          String?
+  parentId       String?
+  parent         Department?      @relation("SubDepartments", fields: [parentId], references: [id])
+  subDepartments Department[]     @relation("SubDepartments")
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  headId         String?
+  head           User?            @relation("DepartmentHead", fields: [headId], references: [id])
+  members        User[]           @relation("DepartmentMembers")
+  roles          Role[]
+  goals          DepartmentGoal[]
+  jobs           Job[]
+  headcountPlans HeadcountPlan[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@unique([name, organizationId])
   @@index([organizationId])
@@ -410,18 +436,18 @@ enum GoalStatus {
 }
 
 model Role {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   title          String
   description    String?
-  level          AccessLevel @default(EMPLOYEE)
+  level          AccessLevel  @default(EMPLOYEE)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   departmentId   String?
   department     Department?  @relation(fields: [departmentId], references: [id])
   users          User[]
   kraTemplates   KRA[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@unique([title, organizationId])
   @@index([organizationId])
@@ -432,12 +458,12 @@ model Role {
 // ==========================================
 
 model UserSkill {
-  id            String @id @default(cuid())
+  id            String   @id @default(cuid())
   name          String
-  selfRating    Int    @default(0)
+  selfRating    Int      @default(0)
   managerRating Int?
   userId        String
-  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -461,35 +487,35 @@ model Certification {
 // ==========================================
 
 model KRA {
-  id             String   @id @default(cuid())
+  id             String          @id @default(cuid())
   name           String
   description    String?
   category       String?
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   roleId         String?
-  role           Role?    @relation(fields: [roleId], references: [id])
+  role           Role?           @relation(fields: [roleId], references: [id])
   assignments    KRAAssignment[]
   kpis           KPI[]
   tasks          Task[]
   sops           SOP[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@index([organizationId])
 }
 
 model KRAAssignment {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kraId      String
-  kra        KRA      @relation(fields: [kraId], references: [id], onDelete: Cascade)
-  weightage  Float    @default(0)
-  period     String   @default("ongoing")
-  status     KRAStatus @default(ACTIVE)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kraId     String
+  kra       KRA       @relation(fields: [kraId], references: [id], onDelete: Cascade)
+  weightage Float     @default(0)
+  period    String    @default("ongoing")
+  status    KRAStatus @default(ACTIVE)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@unique([userId, kraId])
   @@index([userId])
@@ -503,22 +529,22 @@ enum KRAStatus {
 }
 
 model KPI {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   name           String
   description    String?
-  type           KPIType  @default(QUANTITATIVE)
+  type           KPIType      @default(QUANTITATIVE)
   unit           String?
-  frequency      Frequency @default(MONTHLY)
+  frequency      Frequency    @default(MONTHLY)
   targetValue    Float?
   targetLabel    String?
-  lowerIsBetter  Boolean  @default(false)
+  lowerIsBetter  Boolean      @default(false)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   kraId          String?
-  kra            KRA?     @relation(fields: [kraId], references: [id])
+  kra            KRA?         @relation(fields: [kraId], references: [id])
   records        KPIRecord[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([organizationId])
   @@index([kraId])
@@ -538,21 +564,21 @@ enum Frequency {
 }
 
 model KPIRecord {
-  id          String   @id @default(cuid())
-  kpiId       String
-  kpi         KPI      @relation(fields: [kpiId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  period      String
-  targetValue Float
-  actualValue Float?
-  score       Float?
-  notes       String?
+  id           String          @id @default(cuid())
+  kpiId        String
+  kpi          KPI             @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period       String
+  targetValue  Float
+  actualValue  Float?
+  score        Float?
+  notes        String?
   managerNotes String?
-  evidence    String?
-  status      KPIRecordStatus @default(PENDING)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  evidence     String?
+  status       KPIRecordStatus @default(PENDING)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
   @@unique([kpiId, userId, period])
   @@index([userId])
@@ -571,9 +597,9 @@ enum KPIRecordStatus {
 // ==========================================
 
 model Task {
-  id               String     @id @default(cuid())
-  title            String
-  description      String?
+  id          String  @id @default(cuid())
+  title       String
+  description String?
 
   // ── Scheduling ──
   // `date` is the legacy day-level anchor (kept for backwards compat).
@@ -596,42 +622,49 @@ model Task {
   // One level deep only — validated at API layer. Sub-tasks roll up
   // into the parent's Gantt bar and complete the parent when all children
   // are done.
-  parentTaskId     String?
-  parent           Task?      @relation("TaskSubTasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  subTasks         Task[]     @relation("TaskSubTasks")
+  parentTaskId String?
+  parent       Task?   @relation("TaskSubTasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subTasks     Task[]  @relation("TaskSubTasks")
 
   // ── External calendar sync ──
   // `externalId` + `externalSource` form the idempotency key for
   // two-way sync. Null on Workwrk-native tasks.
-  externalId       String?
-  externalSource   String?
-  syncedAt         DateTime?
+  externalId     String?
+  externalSource String?
+  syncedAt       DateTime?
 
   // ── SLA + escalation ──
   // If set, task is considered overdue `slaHours` after `date`.
   // Null = no SLA enforcement. Used by the escalation cron.
-  slaHours         Int?
-  priority         TaskPriority @default(NORMAL)
-  escalatedAt      DateTime?
-  escalatedToId    String?
-  escalatedTo      User?      @relation("TaskEscalatedTo", fields: [escalatedToId], references: [id])
+  slaHours      Int?
+  priority      TaskPriority @default(NORMAL)
+  escalatedAt   DateTime?
+  escalatedToId String?
+  escalatedTo   User?        @relation("TaskEscalatedTo", fields: [escalatedToId], references: [id])
   // Source = how this task was spawned.
-  source           TaskSource @default(MANUAL)
-  sourceRef        String?    // opaque ID of the source (e.g. sopId, reviewId)
+  source        TaskSource   @default(MANUAL)
+  sourceRef     String? // opaque ID of the source (e.g. sopId, reviewId)
 
-  organizationId   String
-  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assigneeId       String
-  assignee         User       @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  kraId            String?
-  kra              KRA?       @relation(fields: [kraId], references: [id])
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assigneeId     String
+  assignee       User         @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  kraId          String?
+  kra            KRA?         @relation(fields: [kraId], references: [id])
 
-  comments         TaskComment[]
-  labels           TaskLabelOnTask[]
-  timeEntries      TimeEntry[]
+  comments    TaskComment[]
+  labels      TaskLabelOnTask[]
+  timeEntries TimeEntry[]
 
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  // Manual within-day sort for the week-view day column. NULL means
+  // "unranked, fall back to scheduling order" — we deliberately keep
+  // this nullable so we never have to backfill millions of historical
+  // rows. The week view sorts: COALESCE(dayPosition, big-number), then
+  // startAt, then createdAt.
+  dayPosition Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId])
   @@index([assigneeId])
@@ -641,71 +674,72 @@ model Task {
   @@index([parentTaskId])
   @@index([externalSource, externalId])
   @@index([organizationId, assigneeId, startAt])
+  @@index([assigneeId, date, dayPosition])
 }
 
 model TaskComment {
-  id         String   @id @default(cuid())
-  taskId     String
-  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  authorId   String
-  author     User     @relation("TaskCommentAuthor", fields: [authorId], references: [id])
-  body       String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation("TaskCommentAuthor", fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([taskId])
   @@index([authorId])
 }
 
 model TaskLabel {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
-  color          String   @default("#d4ff2e")
-  createdAt      DateTime @default(now())
+  color          String       @default("#d4ff2e")
+  createdAt      DateTime     @default(now())
 
-  tasks          TaskLabelOnTask[]
+  tasks TaskLabelOnTask[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
 }
 
 model TaskLabelOnTask {
-  taskId   String
-  task     Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  labelId  String
-  label    TaskLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  taskId  String
+  task    Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  labelId String
+  label   TaskLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
 
   @@id([taskId, labelId])
   @@index([labelId])
 }
 
 model CalendarSubscription {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation("CalendarSubscriptionUser", fields: [userId], references: [id], onDelete: Cascade)
-  provider        String   // "GOOGLE" | "ICS_EXPORT"
+  id                 String    @id @default(cuid())
+  userId             String
+  user               User      @relation("CalendarSubscriptionUser", fields: [userId], references: [id], onDelete: Cascade)
+  provider           String // "GOOGLE" | "ICS_EXPORT"
   // Foreign calendar identifier (Google calendar ID, etc.). Null for
   // ICS_EXPORT subscriptions — those use a per-user signed feed token.
   externalCalendarId String?
   // Whether the user opted in to sharing event titles with their
   // manager. When false, events come through as generic "Busy" pills.
-  shareTitles     Boolean  @default(false)
+  shareTitles        Boolean   @default(false)
   // OAuth credentials for providers that need them. Encrypted at rest
   // is future work; for now, only accessible via this model.
-  accessToken     String?
-  refreshToken    String?
-  expiresAt       DateTime?
+  accessToken        String?
+  refreshToken       String?
+  expiresAt          DateTime?
   // Google's incremental sync token — lets us pull deltas only.
-  syncToken       String?
-  lastSyncAt      DateTime?
+  syncToken          String?
+  lastSyncAt         DateTime?
   // "IN" = pull events into Workwrk, "OUT" = push Workwrk tasks to the
   // provider, "BOTH" = two-way. ICS_EXPORT is always OUT.
-  direction       String   @default("BOTH")
-  enabled         Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  direction          String    @default("BOTH")
+  enabled            Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@unique([userId, provider, externalCalendarId])
   @@index([userId])
@@ -763,12 +797,12 @@ model KraCategory {
 }
 
 model SOPCategory {
-  id             String          @id @default(cuid())
+  id             String           @id @default(cuid())
   name           String
   organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   subcategories  SOPSubcategory[]
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime         @default(now())
 
   @@unique([name, organizationId])
   @@index([organizationId])
@@ -786,7 +820,7 @@ model SOPSubcategory {
 }
 
 model SOP {
-  id             String    @id @default(cuid())
+  id             String          @id @default(cuid())
   title          String
   description    String?
   // Legacy taxonomy — kept for backwards compatibility and safe rollback
@@ -795,30 +829,30 @@ model SOP {
   // the columns in a later migration.
   category       String?
   subcategory    String?
-  sopType        SOPType   @default(WRITTEN)
+  sopType        SOPType         @default(WRITTEN)
   kraId          String?
-  kra            KRA?     @relation(fields: [kraId], references: [id])
+  kra            KRA?            @relation(fields: [kraId], references: [id])
   // Folder is now the single primary taxonomy. NULL = unfoldered (visible
   // to everyone in the org). Non-null = visibility scoped by the folder's
   // access list, inherited from ancestors when not set explicitly.
   folderId       String?
-  folder         SOPFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  folder         SOPFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
   // Cross-cutting tags. Free-form, multi-value, no access control —
   // useful for things that don't map to folder structure (e.g.
   // "Compliance", "Q2-2026", "Onboarding").
-  tags           String[]  @default([])
+  tags           String[]        @default([])
   content        Json
-  version        Int       @default(1)
-  status         SOPStatus @default(DRAFT)
-  shareToken     String?   @unique
+  version        Int             @default(1)
+  status         SOPStatus       @default(DRAFT)
+  shareToken     String?         @unique
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   compliance     SOPCompliance[]
   versions       SOPVersion[]
   assignments    SOPAssignment[]
   processRuns    ProcessRun[]
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   publishedAt    DateTime?
 
   @@index([organizationId])
@@ -843,7 +877,7 @@ model OrgSecret {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  provider       String       // "anthropic" today; future: "openai", "bedrock"
+  provider       String // "anthropic" today; future: "openai", "bedrock"
   // The decoded structure stored as { ciphertext, iv, tag, version }.
   encryptedKey   Json
   // Last 4 chars of the plaintext key, for the Settings UI to show
@@ -870,20 +904,20 @@ model OrgSecret {
 /// explicit access list, it inherits the parent's. Admins see every
 /// folder regardless of assignment.
 model SOPFolder {
-  id             String    @id @default(cuid())
+  id             String            @id @default(cuid())
   name           String
   color          String?
   icon           String?
   description    String?
   parentId       String?
-  parent         SOPFolder?  @relation("SOPFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children       SOPFolder[] @relation("SOPFolderTree")
+  parent         SOPFolder?        @relation("SOPFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       SOPFolder[]       @relation("SOPFolderTree")
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sops           SOP[]
   access         SOPFolderAccess[]
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   // Sibling folders (same parent + same org) must have unique names.
   // Postgres treats NULLs as distinct in unique constraints, so the
@@ -897,11 +931,11 @@ model SOPFolder {
 /// Join table: which users can see and contribute to a given folder.
 /// Admins aren't in here — they see all folders implicitly.
 model SOPFolderAccess {
-  folderId   String
-  folder     SOPFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User      @relation("SOPFolderAccessUser", fields: [userId], references: [id], onDelete: Cascade)
-  grantedAt  DateTime  @default(now())
+  folderId  String
+  folder    SOPFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation("SOPFolderAccessUser", fields: [userId], references: [id], onDelete: Cascade)
+  grantedAt DateTime  @default(now())
 
   @@id([folderId, userId])
   @@index([userId])
@@ -915,22 +949,22 @@ enum SOPType {
 
 // Process Run — tracks a single execution of a checklist SOP
 model ProcessRun {
-  id             String          @id @default(cuid())
+  id             String           @id @default(cuid())
   sopId          String
-  sop            SOP             @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  sop            SOP              @relation(fields: [sopId], references: [id], onDelete: Cascade)
   title          String
   assigneeId     String?
   status         ProcessRunStatus @default(ACTIVE)
-  progress       Int             @default(0)
+  progress       Int              @default(0)
   dueDate        DateTime?
-  shareToken     String?         @unique
-  completedSteps Json            @default("[]")  // Array of completed step IDs
-  stepData       Json            @default("{}")   // {stepId: {completedAt, completedBy, notes, inputValues}}
+  shareToken     String?          @unique
+  completedSteps Json             @default("[]") // Array of completed step IDs
+  stepData       Json             @default("{}") // {stepId: {completedAt, completedBy, notes, inputValues}}
   organizationId String
-  startedAt      DateTime        @default(now())
+  startedAt      DateTime         @default(now())
   completedAt    DateTime?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@index([sopId])
   @@index([assigneeId])
@@ -955,41 +989,41 @@ enum SOPStatus {
 }
 
 model SOPCompliance {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   sopId          String
-  sop            SOP      @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  sop            SOP       @relation(fields: [sopId], references: [id], onDelete: Cascade)
   userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   period         String
   stepsTotal     Int
-  stepsCompleted Int      @default(0)
+  stepsCompleted Int       @default(0)
   score          Float?
   notes          String?
   completedAt    DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([sopId])
   @@index([userId])
 }
 
 model SOPAssignment {
-  id             String            @id @default(cuid())
+  id             String              @id @default(cuid())
   sopId          String
-  sop            SOP               @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  sop            SOP                 @relation(fields: [sopId], references: [id], onDelete: Cascade)
   userId         String
-  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   status         SOPAssignmentStatus @default(ASSIGNED)
-  mandatory      Boolean           @default(true)
+  mandatory      Boolean             @default(true)
   dueDate        DateTime?
-  progress       Json?             // {completedSteps: [0, 2, 5], quizScore: 80}
-  stepsTotal     Int               @default(0)
-  stepsCompleted Int               @default(0)
+  progress       Json? // {completedSteps: [0, 2, 5], quizScore: 80}
+  stepsTotal     Int                 @default(0)
+  stepsCompleted Int                 @default(0)
   score          Float?
   completedAt    DateTime?
   assignedBy     String?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   @@unique([sopId, userId])
   @@index([sopId])
@@ -1009,17 +1043,17 @@ enum SOPAssignmentStatus {
 // ==========================================
 
 model ReviewCycle {
-  id             String      @id @default(cuid())
+  id             String       @id @default(cuid())
   name           String
   type           ReviewType
   startDate      DateTime
   endDate        DateTime
-  status         CycleStatus @default(DRAFT)
+  status         CycleStatus  @default(DRAFT)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   reviews        Review[]
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([organizationId])
 }
@@ -1041,13 +1075,13 @@ enum CycleStatus {
 }
 
 model Review {
-  id              String      @id @default(cuid())
+  id              String         @id @default(cuid())
   cycleId         String
-  cycle           ReviewCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  cycle           ReviewCycle    @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   subjectId       String
-  subject         User        @relation("ReviewSubject", fields: [subjectId], references: [id])
+  subject         User           @relation("ReviewSubject", fields: [subjectId], references: [id])
   reviewerId      String
-  reviewer        User        @relation("ReviewReviewer", fields: [reviewerId], references: [id])
+  reviewer        User           @relation("ReviewReviewer", fields: [reviewerId], references: [id])
   kpiScore        Float?
   managerRating   Float?
   overallScore    Float?
@@ -1056,24 +1090,24 @@ model Review {
   managerComments String?
   selfAssessment  String?
   outcome         ReviewOutcome?
-  status          ReviewStatus @default(PENDING)
+  status          ReviewStatus   @default(PENDING)
   submittedAt     DateTime?
 
   // Structured self-assessment data
-  selfRatings     Json?       // {kraRatings: [{kraId, kraName, rating, achievements}], reflection: {wentWell, couldImprove, goals}}
+  selfRatings        Json? // {kraRatings: [{kraId, kraName, rating, achievements}], reflection: {wentWell, couldImprove, goals}}
   // Structured manager review data
-  managerAssessment Json?     // {kraRatings: [{kraId, kraName, rating, comments}], behavioral: {quality, reliability, collaboration, initiative, growth}, overallComments, recommendation}
+  managerAssessment  Json? // {kraRatings: [{kraId, kraName, rating, comments}], behavioral: {quality, reliability, collaboration, initiative, growth}, overallComments, recommendation}
   // Auto-calculated metrics
   sopComplianceScore Float?
-  peerRating      Float?
-  compositeScore  Float?
+  peerRating         Float?
+  compositeScore     Float?
   // Calibration
-  calibratedScore Float?
-  calibrationNotes String?
+  calibratedScore    Float?
+  calibrationNotes   String?
 
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  peerFeedback    PeerFeedback[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  peerFeedback PeerFeedback[]
 
   @@unique([cycleId, subjectId, reviewerId])
   @@index([subjectId])
@@ -1099,21 +1133,21 @@ enum ReviewStatus {
 }
 
 model PeerFeedback {
-  id         String   @id @default(cuid())
-  reviewId   String
-  review     Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
-  giverId    String
-  giver      User     @relation("FeedbackGiver", fields: [giverId], references: [id])
-  receiverId String
-  receiver   User     @relation("FeedbackReceiver", fields: [receiverId], references: [id])
-  rating     Float?
-  comments   String?
-  strengths  String?
-  improvements String?
+  id                  String   @id @default(cuid())
+  reviewId            String
+  review              Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  giverId             String
+  giver               User     @relation("FeedbackGiver", fields: [giverId], references: [id])
+  receiverId          String
+  receiver            User     @relation("FeedbackReceiver", fields: [receiverId], references: [id])
+  rating              Float?
+  comments            String?
+  strengths           String?
+  improvements        String?
   collaborationRating Float?
-  anonymous  Boolean  @default(true)
-  status     String   @default("PENDING") // PENDING, SUBMITTED
-  createdAt  DateTime @default(now())
+  anonymous           Boolean  @default(true)
+  status              String   @default("PENDING") // PENDING, SUBMITTED
+  createdAt           DateTime @default(now())
 }
 
 // ==========================================
@@ -1121,20 +1155,20 @@ model PeerFeedback {
 // ==========================================
 
 model Meeting {
-  id             String      @id @default(cuid())
+  id             String            @id @default(cuid())
   title          String
   type           MeetingType
   scheduledAt    DateTime
-  duration       Int         @default(30)
+  duration       Int               @default(30)
   agenda         String?
   notes          String?
   decisions      String?
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   attendees      MeetingAttendee[]
   actionItems    ActionItem[]
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   @@index([organizationId])
   @@index([scheduledAt])
@@ -1170,29 +1204,29 @@ enum ActionItemStatus {
 }
 
 model ActionItem {
-  id          String     @id @default(cuid())
+  id          String           @id @default(cuid())
   title       String
   meetingId   String
-  meeting     Meeting    @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meeting     Meeting          @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   assigneeId  String
-  assignee    User       @relation(fields: [assigneeId], references: [id])
+  assignee    User             @relation(fields: [assigneeId], references: [id])
   deadline    DateTime?
   status      ActionItemStatus @default(NOT_STARTED)
   completedAt DateTime?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 }
 
 model CheckIn {
-  id         String    @id @default(cuid())
+  id         String   @id @default(cuid())
   userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  date       DateTime  @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       DateTime @default(now())
   mood       Int?
   wentWell   String?
   challenges String?
   tomorrow   String?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([userId])
   @@index([date])
@@ -1203,14 +1237,14 @@ model CheckIn {
 // ==========================================
 
 model AIQuery {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   query          String
   response       String?
   userId         String
-  user           User     @relation(fields: [userId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([organizationId])
   @@index([userId])
@@ -1227,11 +1261,16 @@ model Notification {
   type      String
   read      Boolean  @default(false)
   link      String?
+  // Snoozed-until — if set and in the future, the bell + inbox
+  // suppress this row. Reads via `(snoozedUntil IS NULL OR
+  // snoozedUntil <= now())`. Clearing snooze = set NULL.
+  snoozedUntil DateTime?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+  @@index([userId, snoozedUntil])
 }
 
 // ==========================================
@@ -1239,37 +1278,37 @@ model Notification {
 // ==========================================
 
 model OnboardingTemplate {
-  id             String   @id @default(cuid())
+  id             String               @id @default(cuid())
   name           String
   description    String?
   roleId         String?
   departmentId   String?
-  steps          Json     @default("[]")
-  durationDays   Int      @default(30)
+  steps          Json                 @default("[]")
+  durationDays   Int                  @default(30)
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   instances      OnboardingInstance[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   @@index([organizationId])
 }
 
 model OnboardingInstance {
-  id             String   @id @default(cuid())
-  templateId     String
-  template       OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  buddyId        String?
-  buddy          User?    @relation("OnboardingBuddy", fields: [buddyId], references: [id])
-  startDate      DateTime @default(now())
-  targetDate     DateTime?
-  completedAt    DateTime?
-  progress       Json     @default("[]")
-  status         OnboardingStatus @default(IN_PROGRESS)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id          String             @id @default(cuid())
+  templateId  String
+  template    OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  buddyId     String?
+  buddy       User?              @relation("OnboardingBuddy", fields: [buddyId], references: [id])
+  startDate   DateTime           @default(now())
+  targetDate  DateTime?
+  completedAt DateTime?
+  progress    Json               @default("[]")
+  status      OnboardingStatus   @default(IN_PROGRESS)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
 
   @@index([userId])
 }
@@ -1282,34 +1321,34 @@ enum OnboardingStatus {
 }
 
 model TrainingCourse {
-  id             String   @id @default(cuid())
+  id             String             @id @default(cuid())
   title          String
   description    String?
   category       String?
-  content        Json     @default("{}")
+  content        Json               @default("{}")
   duration       Int?
-  mandatory      Boolean  @default(false)
+  mandatory      Boolean            @default(false)
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   enrollments    CourseEnrollment[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   @@index([organizationId])
 }
 
 model CourseEnrollment {
-  id          String   @id @default(cuid())
+  id          String         @id @default(cuid())
   courseId    String
   course      TrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  progress    Int      @default(0)
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  progress    Int            @default(0)
   score       Float?
   completedAt DateTime?
-  startedAt   DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  startedAt   DateTime       @default(now())
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   @@unique([courseId, userId])
   @@index([userId])
@@ -1321,10 +1360,10 @@ model CourseEnrollment {
 
 model Integration {
   id             String            @id @default(cuid())
-  name           String            // e.g. "GreytHR", "BambooHR", "Zoho People", "Keka"
+  name           String // e.g. "GreytHR", "BambooHR", "Zoho People", "Keka"
   type           IntegrationType
   status         IntegrationStatus @default(INACTIVE)
-  config         Json              @default("{}")  // API keys, endpoints, mapping config
+  config         Json              @default("{}") // API keys, endpoints, mapping config
   lastSyncAt     DateTime?
   syncFrequency  String?           @default("daily") // daily, hourly, manual
   organizationId String
@@ -1345,6 +1384,8 @@ enum IntegrationType {
   MICROSOFT_365
   JIRA
   CUSTOM_WEBHOOK
+  QUICKBOOKS
+  XERO
 }
 
 enum IntegrationStatus {
@@ -1355,14 +1396,14 @@ enum IntegrationStatus {
 }
 
 model IntegrationSync {
-  id            String    @id @default(cuid())
+  id            String      @id @default(cuid())
   integrationId String
   integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
-  type          String    // "attendance", "compensation", "employees"
-  status        String    @default("pending") // pending, success, failed
-  recordssynced Int       @default(0)
+  type          String // "attendance", "compensation", "employees"
+  status        String      @default("pending") // pending, success, failed
+  recordssynced Int         @default(0)
   errors        Json?
-  startedAt     DateTime  @default(now())
+  startedAt     DateTime    @default(now())
   completedAt   DateTime?
 
   @@index([integrationId])
@@ -1373,10 +1414,10 @@ model ExternalData {
   id             String   @id @default(cuid())
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  source         String   // "greythr", "bamboohr", etc.
-  dataType       String   // "attendance_summary", "compensation", "leave_summary"
-  period         String   // "2026-03", "2026-Q1"
-  data           Json     // flexible data structure from external system
+  source         String // "greythr", "bamboohr", etc.
+  dataType       String // "attendance_summary", "compensation", "leave_summary"
+  period         String // "2026-03", "2026-Q1"
+  data           Json // flexible data structure from external system
   organizationId String
   importedAt     DateTime @default(now())
 
@@ -1390,16 +1431,16 @@ model ExternalData {
 // ==========================================
 
 model WebhookLog {
-  id             String      @id @default(cuid())
-  integrationId  String
-  integration    Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
-  direction      String      @default("outgoing") // "incoming" | "outgoing"
-  event          String?     // e.g. "task_completed", "review_done", "test"
-  payload        Json        @default("{}")
-  status         String      @default("received") // received, processed, failed, sent
-  error          String?
-  responseCode   Int?
-  createdAt      DateTime    @default(now())
+  id            String      @id @default(cuid())
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  direction     String      @default("outgoing") // "incoming" | "outgoing"
+  event         String? // e.g. "task_completed", "review_done", "test"
+  payload       Json        @default("{}")
+  status        String      @default("received") // received, processed, failed, sent
+  error         String?
+  responseCode  Int?
+  createdAt     DateTime    @default(now())
 
   @@index([integrationId])
   @@index([createdAt])
@@ -1456,9 +1497,9 @@ model PerformanceScore {
   id             String   @id @default(cuid())
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  period         String   // "2026-03", "2026-Q1", etc.
-  score          Float    // Composite score 0-100
-  breakdown      Json     // {kpiScore, managerRating, peerRating, selfRating, sopCompliance, weights}
+  period         String // "2026-03", "2026-Q1", etc.
+  score          Float // Composite score 0-100
+  breakdown      Json // {kpiScore, managerRating, peerRating, selfRating, sopCompliance, weights}
   calculatedAt   DateTime @default(now())
   organizationId String
   createdAt      DateTime @default(now())
@@ -1475,15 +1516,15 @@ model PerformanceScore {
 // ==========================================
 
 model Kudos {
-  id             String   @id @default(cuid())
+  id             String          @id @default(cuid())
   message        String
-  companyValue   String?  // e.g. "Customer First", "Ownership", "Teamwork"
+  companyValue   String? // e.g. "Customer First", "Ownership", "Teamwork"
   giverId        String
-  giver          User     @relation("KudosGiver", fields: [giverId], references: [id], onDelete: Cascade)
+  giver          User            @relation("KudosGiver", fields: [giverId], references: [id], onDelete: Cascade)
   receiverId     String
-  receiver       User     @relation("KudosReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  receiver       User            @relation("KudosReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
   organizationId String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime        @default(now())
   reactions      KudosReaction[]
 
   @@index([organizationId])
@@ -1512,18 +1553,18 @@ model KudosReaction {
 
 model ActivityLog {
   id             String   @id @default(cuid())
-  type           String   // task_completed, review_submitted, kra_assigned, sop_completed, meeting_created, person_added, checkin_submitted, etc.
+  type           String // task_completed, review_submitted, kra_assigned, sop_completed, meeting_created, person_added, checkin_submitted, etc.
   actorId        String
   actor          User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  targetId       String?  // ID of the affected entity
-  targetType     String?  // "task", "review", "sop", "meeting", "user", etc.
+  targetId       String? // ID of the affected entity
+  targetType     String? // "task", "review", "sop", "meeting", "user", etc.
   description    String
   metadata       Json?
   ipAddress      String?
   userAgent      String?
   oldValue       Json?
   newValue       Json?
-  severity       String   @default("info")  // info, warning, critical
+  severity       String   @default("info") // info, warning, critical
   organizationId String
   createdAt      DateTime @default(now())
 
@@ -1539,19 +1580,19 @@ model ActivityLog {
 // ==========================================
 
 model Office {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   name           String
   address        String?
   city           String?
   state          String?
   country        String?
   timezone       String?
-  isHeadquarters Boolean  @default(false)
+  isHeadquarters Boolean      @default(false)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members        User[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([organizationId])
 }
@@ -1561,17 +1602,17 @@ model Office {
 // ==========================================
 
 model EmployeeOfMonth {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   period         String
   score          Float
   breakdown      Json?
-  method         String   @default("auto")
+  method         String       @default("auto")
   overriddenBy   String?
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@unique([period, organizationId])
   @@index([organizationId])
@@ -1583,30 +1624,35 @@ model EmployeeOfMonth {
 // ==========================================
 
 model Idea {
-  id             String     @id @default(cuid())
+  id             String        @id @default(cuid())
   title          String
   description    String
   category       String?
-  status         IdeaStatus @default(SUBMITTED)
+  status         IdeaStatus    @default(SUBMITTED)
   submitterId    String
-  submitter      User       @relation("IdeaSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
+  submitter      User          @relation("IdeaSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
   reviewerId     String?
-  reviewer       User?      @relation("IdeaReviewer", fields: [reviewerId], references: [id])
+  reviewer       User?         @relation("IdeaReviewer", fields: [reviewerId], references: [id])
   reviewNotes    String?
   rewardType     String?
   rewardValue    String?
   rewardedAt     DateTime?
+  // Manual sort within (organizationId, status). Lower = higher in
+  // the priority list. The reorder API writes a batch of positions
+  // in a single transaction so the list is consistent at rest.
+  position       Int           @default(0)
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   votes          IdeaVote[]
   comments       IdeaComment[]
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@index([organizationId])
   @@index([submitterId])
   @@index([status])
   @@index([createdAt])
+  @@index([organizationId, status, position])
 }
 
 enum IdeaStatus {
@@ -1647,24 +1693,35 @@ model IdeaComment {
 // ==========================================
 
 model Announcement {
-  id             String               @id @default(cuid())
-  title          String
-  content        String
-  type           String               @default("INFO")   // INFO, WARNING, CELEBRATION, POLICY, EVENT
-  priority       String               @default("NORMAL")  // LOW, NORMAL, HIGH, URGENT
-  pinned         Boolean              @default(false)
-  publishedAt    DateTime?
-  expiresAt      DateTime?
-  targetAudience Json?
-  authorId       String
-  organizationId String
-  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  dismissals     AnnouncementDismissal[]
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  id                  String                       @id @default(cuid())
+  title               String
+  content             String
+  type                String                       @default("INFO") // INFO, WARNING, CELEBRATION, POLICY, EVENT
+  priority            String                       @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  pinned              Boolean                      @default(false)
+  // When true, the feed surfaces a banner until every targeted user
+  // posts an Acknowledgment row. Admins see a "who hasn't acked" list.
+  mustAcknowledge     Boolean                      @default(false)
+  publishedAt         DateTime?
+  // Set by the scheduled-publish cron the first time a deferred post
+  // crosses its publishedAt boundary. Null means the notify/email
+  // blast has not yet fired. The cron uses (publishedAt <= now AND
+  // notificationsSentAt IS NULL) as its work-queue filter.
+  notificationsSentAt DateTime?
+  expiresAt           DateTime?
+  targetAudience      Json?
+  authorId            String
+  organizationId      String
+  organization        Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dismissals          AnnouncementDismissal[]
+  acknowledgments     AnnouncementAcknowledgment[]
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
 
   @@index([organizationId])
   @@index([publishedAt])
+  // Cron-queue index: surfaces pending scheduled posts cheaply.
+  @@index([publishedAt, notificationsSentAt])
 }
 
 model AnnouncementDismissal {
@@ -1678,36 +1735,54 @@ model AnnouncementDismissal {
   @@index([userId])
 }
 
+/// Records that a user has explicitly acknowledged a must-acknowledge
+/// announcement. Mirrors PolicyAcknowledgment — same shape, different
+/// source. Unique (announcementId, userId) so a user cannot
+/// double-ack a single post.
+model AnnouncementAcknowledgment {
+  id             String       @id @default(cuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation("AnnouncementAckUser", fields: [userId], references: [id])
+  acknowledgedAt DateTime     @default(now())
+  ipAddress      String?
+
+  @@unique([announcementId, userId])
+  @@index([userId])
+  @@index([announcementId])
+}
+
 // ==========================================
 // COMPANY POLICIES & BYLAWS
 // ==========================================
 
 model Policy {
-  id              String              @id @default(cuid())
+  id              String                 @id @default(cuid())
   title           String
   content         String
-  category        String?             // "HR", "Security", "Compliance", "Operations", "Code of Conduct", "Leave", "Expense"
-  version         Int                 @default(1)
-  status          String              @default("DRAFT")  // DRAFT, PUBLISHED, ARCHIVED
-  requiresAck     Boolean             @default(true)     // Requires employee acknowledgment
+  category        String? // "HR", "Security", "Compliance", "Operations", "Code of Conduct", "Leave", "Expense"
+  version         Int                    @default(1)
+  status          String                 @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  requiresAck     Boolean                @default(true) // Requires employee acknowledgment
   effectiveDate   DateTime?
   organizationId  String
-  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   acknowledgments PolicyAcknowledgment[]
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
 
   @@index([organizationId])
   @@index([status])
 }
 
 model PolicyAcknowledgment {
-  id        String   @id @default(cuid())
-  policyId  String
-  policy    Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  userId    String
+  id             String   @id @default(cuid())
+  policyId       String
+  policy         Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  userId         String
   acknowledgedAt DateTime @default(now())
-  ipAddress String?
+  ipAddress      String?
 
   @@unique([policyId, userId])
   @@index([userId])
@@ -1722,22 +1797,26 @@ model OKR {
   id             String       @id @default(cuid())
   title          String
   description    String?
-  level          String       @default("INDIVIDUAL")  // COMPANY, TEAM, INDIVIDUAL
-  status         String       @default("ON_TRACK")    // ON_TRACK, AT_RISK, BEHIND, COMPLETED
-  progress       Int          @default(0)             // 0-100
+  level          String       @default("INDIVIDUAL") // COMPANY, TEAM, INDIVIDUAL
+  status         String       @default("ON_TRACK") // ON_TRACK, AT_RISK, BEHIND, COMPLETED
+  progress       Int          @default(0) // 0-100
   startDate      DateTime?
   endDate        DateTime?
-  quarter        String?      // "Q2 2026"
+  quarter        String? // "Q2 2026"
   // Check-in rhythm. Drives the reminder cron + the "stale" badge on
   // the personal hero. Defaults to weekly because that's what most
   // teams settle on.
-  checkInCadence String       @default("WEEKLY")     // WEEKLY, BIWEEKLY, MONTHLY
+  checkInCadence String       @default("WEEKLY") // WEEKLY, BIWEEKLY, MONTHLY
   ownerId        String?
   departmentId   String?
   parentId       String?
   parent         OKR?         @relation("OKRChildren", fields: [parentId], references: [id])
   children       OKR[]        @relation("OKRChildren")
   keyResults     KeyResult[]
+  // Manual sort within (organizationId, ownerId, quarter). Lower =
+  // higher on the owner's OKR list. Defaults to 0 so legacy rows
+  // appear at the top until explicitly reordered.
+  position       Int          @default(0)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
@@ -1748,25 +1827,26 @@ model OKR {
   @@index([parentId])
   @@index([level])
   @@index([quarter])
+  @@index([organizationId, ownerId, position])
 }
 
 model KeyResult {
-  id          String      @id @default(cuid())
-  title       String
-  unit        String?     // %, count, $, etc.
-  startValue  Float       @default(0)
-  targetValue Float
-  currentValue Float      @default(0)
-  progress    Int         @default(0)  // 0-100 auto-calculated
+  id             String      @id @default(cuid())
+  title          String
+  unit           String? // %, count, $, etc.
+  startValue     Float       @default(0)
+  targetValue    Float
+  currentValue   Float       @default(0)
+  progress       Int         @default(0) // 0-100 auto-calculated
   // When we last fired a "you haven't checked in lately" reminder for
   // this KR. Used to avoid spamming the owner — see scripts/api
   // /api/cron/okr-reminders.
   lastReminderAt DateTime?
-  okrId       String
-  okr         OKR         @relation(fields: [okrId], references: [id], onDelete: Cascade)
-  checkIns    KRCheckIn[]
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  okrId          String
+  okr            OKR         @relation(fields: [okrId], references: [id], onDelete: Cascade)
+  checkIns       KRCheckIn[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   @@index([okrId])
 }
@@ -1790,11 +1870,11 @@ model KRCheckIn {
 model TalentAssessment {
   id             String   @id @default(cuid())
   userId         String
-  period         String   // "Q2 2026"
-  performance    Int      // 1-3 (Low, Medium, High)
-  potential       Int      // 1-3 (Low, Medium, High)
-  boxPosition    String   // "1-1", "1-2", etc.
-  action         String?  // "Promote", "Develop", "Retain", "Coach", "PIP", "Exit"
+  period         String // "Q2 2026"
+  performance    Int // 1-3 (Low, Medium, High)
+  potential      Int // 1-3 (Low, Medium, High)
+  boxPosition    String // "1-1", "1-2", etc.
+  action         String? // "Promote", "Develop", "Retain", "Coach", "PIP", "Exit"
   notes          String?
   assessedBy     String
   organizationId String
@@ -1811,25 +1891,25 @@ model TalentAssessment {
 // ==========================================
 
 model PulseSurvey {
-  id             String          @id @default(cuid())
+  id             String           @id @default(cuid())
   title          String
-  questions      Json            // [{id, text, type: "rating"|"text"|"nps"}]
-  status         String          @default("DRAFT")  // DRAFT, ACTIVE, CLOSED
-  frequency      String?         // WEEKLY, MONTHLY, QUARTERLY
-  audienceType   String          @default("ALL")    // ALL, OFFICES, DEPARTMENTS, USERS
-  officeIds      String[]        @default([])
-  departmentIds  String[]        @default([])
-  userIds        String[]        @default([])
+  questions      Json // [{id, text, type: "rating"|"text"|"nps"}]
+  status         String           @default("DRAFT") // DRAFT, ACTIVE, CLOSED
+  frequency      String? // WEEKLY, MONTHLY, QUARTERLY
+  audienceType   String           @default("ALL") // ALL, OFFICES, DEPARTMENTS, USERS
+  officeIds      String[]         @default([])
+  departmentIds  String[]         @default([])
+  userIds        String[]         @default([])
   // When true, responses are visible to managers in aggregate only — no
   // respondent name, no individual attribution. Default true to preserve
   // existing survey trust assumptions. Managers can opt a survey into
   // attributed mode at create time when the context calls for it (e.g.
   // post-review pulse tied to a 1:1 follow-up).
-  anonymous      Boolean         @default(true)
+  anonymous      Boolean          @default(true)
   organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses      SurveyResponse[]
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime         @default(now())
   closedAt       DateTime?
   // Hard deadline for collecting responses. When set, the rotate cron
   // auto-closes the survey at this time and — if `frequency` is set —
@@ -1842,8 +1922,8 @@ model PulseSurvey {
   // recent prior cycle. Null for one-off surveys and for the first
   // cycle of any recurrence.
   parentSurveyId String?
-  parent         PulseSurvey?    @relation("PulseSurveyRecurrence", fields: [parentSurveyId], references: [id], onDelete: SetNull)
-  children       PulseSurvey[]   @relation("PulseSurveyRecurrence")
+  parent         PulseSurvey?     @relation("PulseSurveyRecurrence", fields: [parentSurveyId], references: [id], onDelete: SetNull)
+  children       PulseSurvey[]    @relation("PulseSurveyRecurrence")
 
   @@index([organizationId])
   @@index([status])
@@ -1856,7 +1936,7 @@ model SurveyResponse {
   surveyId  String
   survey    PulseSurvey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
   userId    String
-  answers   Json        // [{questionId, value}]
+  answers   Json // [{questionId, value}]
   createdAt DateTime    @default(now())
 
   @@unique([surveyId, userId])
@@ -1871,10 +1951,10 @@ model MeetingTemplate {
   id             String   @id @default(cuid())
   name           String
   description    String?
-  type           String   @default("ONE_ON_ONE")  // ONE_ON_ONE, TEAM_STANDUP, QUARTERLY_REVIEW
-  agendaItems    Json     // [{title, description, timeMinutes, type: "discussion"|"action"|"review"}]
+  type           String   @default("ONE_ON_ONE") // ONE_ON_ONE, TEAM_STANDUP, QUARTERLY_REVIEW
+  agendaItems    Json // [{title, description, timeMinutes, type: "discussion"|"action"|"review"}]
   isDefault      Boolean  @default(false)
-  organizationId String?  // null = system template
+  organizationId String? // null = system template
   createdAt      DateTime @default(now())
 
   @@index([organizationId])
@@ -1889,9 +1969,9 @@ model Tool {
   name           String
   description    String?
   url            String?
-  icon           String?      // emoji or URL
-  category       String?      // "Communication", "Design", "Development", "Finance", "HR", "Marketing", "Sales", "Other"
-  credentials    Json?        // { username, password, apiKey, notes } — encrypted at rest
+  icon           String? // emoji or URL
+  category       String? // "Communication", "Design", "Development", "Finance", "HR", "Marketing", "Sales", "Other"
+  credentials    Json? // { username, password, apiKey, notes } — encrypted at rest
   addedBy        String
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -1903,12 +1983,12 @@ model Tool {
 }
 
 model ToolShare {
-  id        String   @id @default(cuid())
-  toolId    String
-  tool      Tool     @relation(fields: [toolId], references: [id], onDelete: Cascade)
-  userId    String
-  sharedBy  String
-  sharedAt  DateTime @default(now())
+  id       String   @id @default(cuid())
+  toolId   String
+  tool     Tool     @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  userId   String
+  sharedBy String
+  sharedAt DateTime @default(now())
 
   @@unique([toolId, userId])
   @@index([userId])
@@ -1916,7 +1996,7 @@ model ToolShare {
 }
 
 model Asset {
-  id             String       @id @default(cuid())
+  id             String         @id @default(cuid())
   name           String
   type           AssetType
   brand          String?
@@ -1930,16 +2010,16 @@ model Asset {
   status         AssetStatus    @default(AVAILABLE)
   notes          String?
 
-  assignedToId   String?
-  assignedTo     User?        @relation("AssetAssignee", fields: [assignedToId], references: [id])
-  assignedAt     DateTime?
-  returnedAt     DateTime?
+  assignedToId String?
+  assignedTo   User?     @relation("AssetAssignee", fields: [assignedToId], references: [id])
+  assignedAt   DateTime?
+  returnedAt   DateTime?
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId])
   @@index([assignedToId])
@@ -1988,8 +2068,8 @@ model CandorSession {
   id             String           @id @default(cuid())
   title          String
   description    String?
-  status         String           @default("DRAFT")  // DRAFT, ACTIVE, CLOSED
-  prompts        Json             @default("[]")      // Array of { id, text, type: "text"|"rating"|"start_stop_continue" }
+  status         String           @default("DRAFT") // DRAFT, ACTIVE, CLOSED
+  prompts        Json             @default("[]") // Array of { id, text, type: "text"|"rating"|"start_stop_continue" }
   departmentId   String?
   createdBy      String
   organizationId String
@@ -2008,7 +2088,7 @@ model CandorResponse {
   id        String        @id @default(cuid())
   sessionId String
   session   CandorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  answers   Json          @default("[]")  // Array of { promptId, value }
+  answers   Json          @default("[]") // Array of { promptId, value }
   createdAt DateTime      @default(now())
 
   @@index([sessionId])
@@ -2022,31 +2102,31 @@ model CandorResponse {
 /// of consent including timestamp, method, scope, and text version.
 /// Never delete records — retain per legal retention policy.
 model ConsentRecord {
-  id               String    @id @default(cuid())
-  userId           String?   // null for pre-auth visitors
-  user             User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  sessionId        String?   // anonymous cookie identifier
-  organizationId   String?   // when consent tied to a tenant
+  id             String  @id @default(cuid())
+  userId         String? // null for pre-auth visitors
+  user           User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  sessionId      String? // anonymous cookie identifier
+  organizationId String? // when consent tied to a tenant
 
   // Consent scope
-  necessary        Boolean   @default(true)   // always true, but logged for record
-  preferences      Boolean   @default(false)
-  analytics        Boolean   @default(false)
-  marketing        Boolean   @default(false)
-  doNotSell        Boolean   @default(false)  // CCPA/CPRA opt-out flag
+  necessary   Boolean @default(true) // always true, but logged for record
+  preferences Boolean @default(false)
+  analytics   Boolean @default(false)
+  marketing   Boolean @default(false)
+  doNotSell   Boolean @default(false) // CCPA/CPRA opt-out flag
 
   // Legal basis / region at time of consent
-  region           String?   // e.g. "EU", "UK", "US-CA", "BR", "IN", "ROW"
-  country          String?   // ISO 3166-1 alpha-2
-  policyVersion    String    // ties to versioned policy text
-  method           String    // "banner", "settings", "api", "withdrawn"
+  region        String? // e.g. "EU", "UK", "US-CA", "BR", "IN", "ROW"
+  country       String? // ISO 3166-1 alpha-2
+  policyVersion String // ties to versioned policy text
+  method        String // "banner", "settings", "api", "withdrawn"
 
   // Evidence
-  ipAddress        String?
-  userAgent        String?
+  ipAddress String?
+  userAgent String?
 
-  withdrawnAt      DateTime?
-  createdAt        DateTime  @default(now())
+  withdrawnAt DateTime?
+  createdAt   DateTime  @default(now())
 
   @@index([userId])
   @@index([sessionId])
@@ -2059,32 +2139,32 @@ model ConsentRecord {
 // ==========================================
 
 model ApiKey {
-  id             String    @id @default(cuid())
+  id                 String        @id @default(cuid())
   // Display name chosen by the admin — e.g. "Production · Backend"
-  name           String
+  name               String
   // First 8 chars of the plaintext key, used for display + lookup hint.
   // Full key is only shown once at creation time.
-  prefix         String
+  prefix             String
   // SHA-256 hash of the plaintext key. We never store the raw key.
-  hashedKey      String    @unique
+  hashedKey          String        @unique
   // Scopes granted to this key. READ = GET endpoints only.
   // WRITE adds create/update. ADMIN is full control including key mgmt.
-  scopes         ApiKeyScope[] @default([READ])
+  scopes             ApiKeyScope[] @default([READ])
   // Windowed limits (requests / minute, day). Enforced in middleware.
-  rateLimitPerMinute Int    @default(120)
-  rateLimitPerDay    Int    @default(50000)
+  rateLimitPerMinute Int           @default(120)
+  rateLimitPerDay    Int           @default(50000)
   // Usage telemetry
-  lastUsedAt     DateTime?
-  lastUsedIp     String?
-  requestCount   Int       @default(0)
-  revokedAt      DateTime?
+  lastUsedAt         DateTime?
+  lastUsedIp         String?
+  requestCount       Int           @default(0)
+  revokedAt          DateTime?
   // Ownership
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdById    String
-  createdBy      User      @relation("ApiKeyCreator", fields: [createdById], references: [id])
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  organizationId     String
+  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById        String
+  createdBy          User          @relation("ApiKeyCreator", fields: [createdById], references: [id])
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   rateLimitBuckets ApiKeyRateBucket[]
 
@@ -2102,13 +2182,13 @@ enum ApiKeyScope {
 /// Rolling-window rate limiter bucket. One row per (apiKey, windowKey).
 /// windowKey is a compact epoch-minute or epoch-day string.
 model ApiKeyRateBucket {
-  id         String  @id @default(cuid())
+  id         String     @id @default(cuid())
   apiKeyId   String
-  apiKey     ApiKey  @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  apiKey     ApiKey     @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
   windowKind RateWindow
   windowKey  String
-  count      Int     @default(0)
-  updatedAt  DateTime @updatedAt
+  count      Int        @default(0)
+  updatedAt  DateTime   @updatedAt
 
   @@unique([apiKeyId, windowKind, windowKey])
   @@index([apiKeyId])
@@ -2122,26 +2202,26 @@ enum RateWindow {
 /// Customer-registered webhook endpoint. Workwrk POSTs events to `url`
 /// with an HMAC-SHA256 signature in X-Workwrk-Signature.
 model WebhookSubscription {
-  id             String    @id @default(cuid())
+  id             String            @id @default(cuid())
   url            String
   // Event types this subscription is interested in (e.g. "kudos.created",
   // "review.completed"). Wildcard "*" subscribes to everything.
   events         String[]
   // HMAC secret — generated at creation, shown once, hashed in storage.
   secretHash     String
-  secretPrefix   String    // First 8 chars for identification (shown in UI).
-  status         WebhookStatus @default(ACTIVE)
+  secretPrefix   String // First 8 chars for identification (shown in UI).
+  status         WebhookStatus     @default(ACTIVE)
   // Rolling failure counter — deliveries auto-pause after too many 5xx.
-  failureCount   Int       @default(0)
+  failureCount   Int               @default(0)
   lastSuccessAt  DateTime?
   lastFailureAt  DateTime?
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdById    String
-  createdBy      User      @relation("WebhookCreator", fields: [createdById], references: [id])
+  createdBy      User              @relation("WebhookCreator", fields: [createdById], references: [id])
   deliveries     WebhookDelivery[]
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   @@index([organizationId])
   @@index([status])
@@ -2155,21 +2235,21 @@ enum WebhookStatus {
 
 /// Audit log + retry queue for individual webhook attempts.
 model WebhookDelivery {
-  id             String    @id @default(cuid())
+  id             String              @id @default(cuid())
   subscriptionId String
   subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   event          String
   payload        Json
-  status         DeliveryStatus @default(PENDING)
+  status         DeliveryStatus      @default(PENDING)
   httpStatus     Int?
   responseBody   String?
-  attemptCount   Int       @default(0)
+  attemptCount   Int                 @default(0)
   nextAttemptAt  DateTime?
   deliveredAt    DateTime?
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   @@index([subscriptionId])
   @@index([organizationId])
@@ -2200,20 +2280,20 @@ enum DeliveryStatus {
 // Cleanup of orphans is handled by a periodic cron, not the DB.
 
 model Tag {
-  id             String         @id @default(cuid())
-  name           String
-  type           TagType        @default(CUSTOM)
-  color          String?        // hex, optional UX
-  description    String?
-  archived       Boolean        @default(false)
+  id          String  @id @default(cuid())
+  name        String
+  type        TagType @default(CUSTOM)
+  color       String? // hex, optional UX
+  description String?
+  archived    Boolean @default(false)
 
   organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  assignments    TagAssignment[]
+  assignments TagAssignment[]
 
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organizationId, type, name])
   @@index([organizationId])
@@ -2222,19 +2302,19 @@ model Tag {
 }
 
 model TagAssignment {
-  id             String         @id @default(cuid())
-  tagId          String
-  tag            Tag            @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  id    String @id @default(cuid())
+  tagId String
+  tag   Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
-  entityType     TagEntityType
-  entityId       String
+  entityType TagEntityType
+  entityId   String
 
   organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  assignedById   String?        // User.id — null on system-applied tags
+  assignedById String? // User.id — null on system-applied tags
 
-  createdAt      DateTime       @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([tagId, entityType, entityId])
   @@index([entityType, entityId])
@@ -2292,35 +2372,35 @@ enum TagEntityType {
 // is wrong for money — at Fortune-500 volume the rounding bites.
 
 model Expense {
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  reporterId     String
-  reporter       User          @relation("ExpenseReporter", fields: [reporterId], references: [id])
+  reporterId String
+  reporter   User   @relation("ExpenseReporter", fields: [reporterId], references: [id])
 
-  description    String        // short headline visible in lists
-  notes          String?       // longer context, only on detail
-  category       ExpenseCategory
+  description String // short headline visible in lists
+  notes       String? // longer context, only on detail
+  category    ExpenseCategory
 
-  amount         Decimal       @db.Decimal(12, 2)
-  currency       String        @default("USD") // ISO 4217
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("USD") // ISO 4217
 
-  expenseDate    DateTime
-  receiptUrl     String?       // S3 URL after upload
+  expenseDate DateTime
+  receiptUrl  String? // S3 URL after upload
 
-  status         ExpenseStatus @default(DRAFT)
-  submittedAt    DateTime?
+  status      ExpenseStatus @default(DRAFT)
+  submittedAt DateTime?
 
-  approverId     String?
-  approver       User?         @relation("ExpenseApprover", fields: [approverId], references: [id])
-  decisionAt     DateTime?
-  decisionNote   String?       // why approved / rejected
+  approverId   String?
+  approver     User?     @relation("ExpenseApprover", fields: [approverId], references: [id])
+  decisionAt   DateTime?
+  decisionNote String? // why approved / rejected
 
-  reimbursedAt   DateTime?     // future: link to a Payment row when payroll lands
+  reimbursedAt DateTime? // future: link to a Payment row when payroll lands
 
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, expenseDate])
@@ -2363,62 +2443,62 @@ enum ExpenseStatus {
 // everything.
 
 model CompensationCycle {
-  id                String         @id @default(cuid())
-  organizationId    String
-  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  name              String
-  description       String?
-  status            CompCycleStatus @default(DRAFT)
-  startDate         DateTime
-  endDate           DateTime
+  name        String
+  description String?
+  status      CompCycleStatus @default(DRAFT)
+  startDate   DateTime
+  endDate     DateTime
 
   // Optional org-wide budget guidance for managers — e.g. "stay under
   // 5% across the team." Stored as percent, signed Decimal(5,2).
-  budgetPct         Decimal?       @db.Decimal(5, 2)
-  reportingCurrency String         @default("USD")
+  budgetPct         Decimal? @db.Decimal(5, 2)
+  reportingCurrency String   @default("USD")
 
-  closedAt          DateTime?
-  decisions         CompensationDecision[]
+  closedAt  DateTime?
+  decisions CompensationDecision[]
 
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, startDate])
 }
 
 model CompensationDecision {
-  id              String              @id @default(cuid())
-  organizationId  String
-  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  cycleId         String
-  cycle           CompensationCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  cycleId String
+  cycle   CompensationCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
 
-  subjectId       String
-  subject         User                @relation("CompDecisionSubject", fields: [subjectId], references: [id])
-  proposedById    String?
-  proposedBy      User?               @relation("CompDecisionProposer", fields: [proposedById], references: [id])
+  subjectId    String
+  subject      User    @relation("CompDecisionSubject", fields: [subjectId], references: [id])
+  proposedById String?
+  proposedBy   User?   @relation("CompDecisionProposer", fields: [proposedById], references: [id])
 
-  currentSalary   Decimal?            @db.Decimal(12, 2)
-  proposedSalary  Decimal?            @db.Decimal(12, 2)
-  currency        String              @default("USD")
+  currentSalary  Decimal? @db.Decimal(12, 2)
+  proposedSalary Decimal? @db.Decimal(12, 2)
+  currency       String   @default("USD")
   // Signed so we can encode pay cuts (rare but legal). Two decimals
   // avoids float surprises — 5.50% vs 5.499999%.
-  changePct       Decimal?            @db.Decimal(6, 2)
-  bonusAmount     Decimal?            @db.Decimal(12, 2)
-  reasoning       String?
+  changePct      Decimal? @db.Decimal(6, 2)
+  bonusAmount    Decimal? @db.Decimal(12, 2)
+  reasoning      String?
 
-  status          CompDecisionStatus  @default(DRAFT)
-  decisionNote    String?
+  status       CompDecisionStatus @default(DRAFT)
+  decisionNote String?
   // Audit fields without relations — HR ops can swap who finalized
   // without rewiring rows. The id should resolve via User lookup.
-  decidedById     String?
-  decidedAt       DateTime?
+  decidedById  String?
+  decidedAt    DateTime?
 
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([cycleId, subjectId])
   @@index([organizationId, status])
@@ -2454,34 +2534,34 @@ enum CompDecisionStatus {
 // and different permission rules.
 
 model TimeOffPolicy {
-  id               String         @id @default(cuid())
-  organizationId   String
-  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  name             String
-  type             TimeOffType    @default(PTO)
-  color            String?
-  description      String?
+  name        String
+  type        TimeOffType @default(PTO)
+  color       String?
+  description String?
 
-  annualHours      Decimal        @db.Decimal(8, 2)
-  carryoverHours   Decimal        @default(0) @db.Decimal(8, 2)
-  requiresApproval Boolean        @default(true)
-  archived         Boolean        @default(false)
+  annualHours      Decimal @db.Decimal(8, 2)
+  carryoverHours   Decimal @default(0) @db.Decimal(8, 2)
+  requiresApproval Boolean @default(true)
+  archived         Boolean @default(false)
 
   // Accrual config (Phase 2 v2). UPFRONT grants annualHours on
   // anniversary; ACCRUE drips hours each period. accrualRate is
   // computed from annualHours when null, otherwise overrides
   // (lets jurisdictions with hour-based laws use a fixed rate).
-  accrualMode      AccrualMode    @default(UPFRONT)
-  accrualFrequency AccrualFrequency @default(MONTHLY)
-  accrualRate      Decimal?       @db.Decimal(8, 4)
-  waitingPeriodDays Int           @default(0)
-  maxBalanceHours  Decimal?       @db.Decimal(8, 2)
+  accrualMode       AccrualMode      @default(UPFRONT)
+  accrualFrequency  AccrualFrequency @default(MONTHLY)
+  accrualRate       Decimal?         @db.Decimal(8, 4)
+  waitingPeriodDays Int              @default(0)
+  maxBalanceHours   Decimal?         @db.Decimal(8, 2)
 
-  requests         TimeOffRequest[]
+  requests TimeOffRequest[]
 
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -2489,31 +2569,31 @@ model TimeOffPolicy {
 }
 
 model TimeOffRequest {
-  id               String         @id @default(cuid())
-  organizationId   String
-  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  userId           String
-  user             User           @relation("TimeOffSubject", fields: [userId], references: [id])
+  userId String
+  user   User   @relation("TimeOffSubject", fields: [userId], references: [id])
 
-  policyId         String
-  policy           TimeOffPolicy  @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  policyId String
+  policy   TimeOffPolicy @relation(fields: [policyId], references: [id], onDelete: Restrict)
 
-  startDate        DateTime
-  endDate          DateTime
+  startDate DateTime
+  endDate   DateTime
   // Explicit so partial-day requests (e.g. 4-hour afternoon doctor
   // visit) work — we don't infer days × 8 server-side.
-  hours            Decimal        @db.Decimal(6, 2)
-  reason           String?
+  hours     Decimal  @db.Decimal(6, 2)
+  reason    String?
 
-  status           TimeOffStatus  @default(PENDING)
-  approverId       String?
-  approver         User?          @relation("TimeOffApprover", fields: [approverId], references: [id])
-  decisionAt       DateTime?
-  decisionNote     String?
+  status       TimeOffStatus @default(PENDING)
+  approverId   String?
+  approver     User?         @relation("TimeOffApprover", fields: [approverId], references: [id])
+  decisionAt   DateTime?
+  decisionNote String?
 
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId, status])
   @@index([userId, status])
@@ -2556,29 +2636,29 @@ enum TimeOffStatus {
 // preclude them but UX is v2/v3.
 
 model Timesheet {
-  id              String          @id @default(cuid())
-  organizationId  String
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  userId          String
-  user            User            @relation("TimesheetSubject", fields: [userId], references: [id])
+  userId String
+  user   User   @relation("TimesheetSubject", fields: [userId], references: [id])
 
   // Week anchor — Monday 00:00 UTC of the week. Single canonical
   // representation; the UI handles display in user's locale.
-  weekStartDate   DateTime
+  weekStartDate DateTime
 
-  status          TimesheetStatus @default(DRAFT)
-  submittedAt     DateTime?
+  status      TimesheetStatus @default(DRAFT)
+  submittedAt DateTime?
 
-  approverId      String?
-  approver        User?           @relation("TimesheetApprover", fields: [approverId], references: [id])
-  decisionAt      DateTime?
-  decisionNote    String?
+  approverId   String?
+  approver     User?     @relation("TimesheetApprover", fields: [approverId], references: [id])
+  decisionAt   DateTime?
+  decisionNote String?
 
-  entries         TimeEntry[]
+  entries TimeEntry[]
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([userId, weekStartDate])
   @@index([organizationId, status])
@@ -2587,40 +2667,40 @@ model Timesheet {
 }
 
 model TimeEntry {
-  id              String          @id @default(cuid())
-  organizationId  String
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  timesheetId     String
-  timesheet       Timesheet       @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  timesheetId String
+  timesheet   Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
 
   // Denormalized for cheap "is user currently clocked in" lookups
   // without a join. Always equal to timesheet.userId.
-  userId          String
-  user            User            @relation("TimeEntrySubject", fields: [userId], references: [id])
+  userId String
+  user   User   @relation("TimeEntrySubject", fields: [userId], references: [id])
 
   // Day this entry counts toward — 00:00 UTC. An overnight shift may
   // straddle two days; v1 anchors to the day the punch *started*.
-  day             DateTime
+  day DateTime
 
   // Set on save. For active punches, hours is null until clockedOutAt
   // arrives, then computed.
-  hours           Decimal?        @db.Decimal(5, 2)
+  hours Decimal? @db.Decimal(5, 2)
 
-  clockedInAt     DateTime?
-  clockedOutAt    DateTime?
+  clockedInAt  DateTime?
+  clockedOutAt DateTime?
 
-  description     String?
-  source          TimeEntrySource @default(WEB)
+  description String?
+  source      TimeEntrySource @default(WEB)
 
   // Optional link to an existing Task (the "what was I working on").
   // Cost-center / business-unit / project tagging rides on the parent
   // Timesheet via TagAssignment.
-  taskId          String?
-  task            Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId String?
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId, day])
   @@index([userId, day])
@@ -2662,37 +2742,37 @@ enum TimeEntrySource {
 // hired, not at the candidate layer.
 
 model Job {
-  id              String       @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  title           String
-  description     String?
-  status          JobStatus    @default(DRAFT)
-  employmentType  EmploymentType @default(FULL_TIME)
+  title          String
+  description    String?
+  status         JobStatus      @default(DRAFT)
+  employmentType EmploymentType @default(FULL_TIME)
   // Location can be a city, "Remote", or "Hybrid - SF". v2 splits to
   // a structured location relation; for v1 free text is enough.
-  location        String?
+  location       String?
 
   departmentId    String?
-  department      Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  department      Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   hiringManagerId String?
-  hiringManager   User?        @relation("JobHiringManager", fields: [hiringManagerId], references: [id], onDelete: SetNull)
+  hiringManager   User?       @relation("JobHiringManager", fields: [hiringManagerId], references: [id], onDelete: SetNull)
 
   // Optional posted salary range. Two separate Decimals so an "at
   // least" or "at most" range works without a sentinel.
-  salaryMin       Decimal?     @db.Decimal(12, 2)
-  salaryMax       Decimal?     @db.Decimal(12, 2)
-  salaryCurrency  String       @default("USD")
+  salaryMin      Decimal? @db.Decimal(12, 2)
+  salaryMax      Decimal? @db.Decimal(12, 2)
+  salaryCurrency String   @default("USD")
 
-  openings        Int          @default(1)
-  publishedAt     DateTime?
-  closedAt        DateTime?
+  openings    Int       @default(1)
+  publishedAt DateTime?
+  closedAt    DateTime?
 
-  applications    Application[]
+  applications Application[]
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, departmentId])
@@ -2700,27 +2780,27 @@ model Job {
 }
 
 model Candidate {
-  id              String       @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  firstName       String
-  lastName        String
-  email           String
-  phone           String?
-  resumeUrl       String?
-  source          String?      // free text, e.g. "LinkedIn", "Referral - Mary G."
-  notes           String?
+  firstName String
+  lastName  String
+  email     String
+  phone     String?
+  resumeUrl String?
+  source    String? // free text, e.g. "LinkedIn", "Referral - Mary G."
+  notes     String?
 
   // Once a candidate is hired we link them to the User they became.
   // Set by the HIRED transition; null otherwise.
-  hiredUserId     String?
-  hiredUser       User?        @relation("CandidateHiredUser", fields: [hiredUserId], references: [id], onDelete: SetNull)
+  hiredUserId String?
+  hiredUser   User?   @relation("CandidateHiredUser", fields: [hiredUserId], references: [id], onDelete: SetNull)
 
-  applications    Application[]
+  applications Application[]
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -2728,28 +2808,28 @@ model Candidate {
 }
 
 model Application {
-  id              String       @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  jobId           String
-  job             Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  candidateId     String
-  candidate       Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  jobId       String
+  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 
   stage           ApplicationStage @default(APPLIED)
   rejectionReason String?
-  source          String?      // optional, mirrors Candidate.source for per-app variation
+  source          String? // optional, mirrors Candidate.source for per-app variation
 
-  recruiterId     String?
-  recruiter       User?        @relation("ApplicationRecruiter", fields: [recruiterId], references: [id], onDelete: SetNull)
+  recruiterId String?
+  recruiter   User?   @relation("ApplicationRecruiter", fields: [recruiterId], references: [id], onDelete: SetNull)
 
-  notes           String?
+  notes String?
 
-  interviews      Interview[]
+  interviews Interview[]
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([jobId, candidateId])
   @@index([organizationId, stage])
@@ -2796,57 +2876,57 @@ enum ApplicationStage {
 // without enabling reuse.
 
 model IdentityProvider {
-  id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  type            IdpType  @default(SAML)
-  enabled         Boolean  @default(false)
+  type    IdpType @default(SAML)
+  enabled Boolean @default(false)
 
   // SAML fields. OIDC support adds more columns later.
-  issuer          String?  // IdP entity ID
-  ssoUrl          String?  // IdP login endpoint (HTTP-Redirect or HTTP-POST)
-  sloUrl          String?  // logout endpoint
-  certificate     String?  // base64-encoded x509, used to verify assertions
+  issuer      String? // IdP entity ID
+  ssoUrl      String? // IdP login endpoint (HTTP-Redirect or HTTP-POST)
+  sloUrl      String? // logout endpoint
+  certificate String? // base64-encoded x509, used to verify assertions
 
   // Attribute mapping — where to pull email / firstName / lastName /
   // (optional) department / accessLevel from the SAML assertion.
   // Defaults match Okta's standard mapping. Stored as JSON for
   // flexibility on per-tenant tweaks.
-  attributeMap    Json     @default("{\"email\":\"NameID\",\"firstName\":\"firstName\",\"lastName\":\"lastName\"}")
+  attributeMap Json @default("{\"email\":\"NameID\",\"firstName\":\"firstName\",\"lastName\":\"lastName\"}")
 
   // Just-in-time provision: create User on first SAML login if email
   // doesn't exist in the org. Companies running SCIM usually disable
   // this so all account creation is centralized.
-  jitProvision    Boolean  @default(true)
+  jitProvision Boolean @default(true)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organizationId, type])
   @@index([organizationId])
 }
 
 model ScimToken {
-  id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  name            String   // human label, e.g. "Okta production"
+  name        String // human label, e.g. "Okta production"
   // sha-256 of the raw token bytes; the raw token is shown exactly
   // once at creation and never stored. Lookup on auth = hash incoming
   // bearer and find the row.
-  tokenHash       String   @unique
+  tokenHash   String @unique
   // First 8 chars of the raw token, e.g. "wkw_a4b2…", so the UI can
   // disambiguate multiple tokens without exposing the full secret.
-  tokenPrefix     String
+  tokenPrefix String
 
-  createdById     String?  // User.id of the admin who minted it
-  lastUsedAt      DateTime?
-  expiresAt       DateTime?
-  revokedAt       DateTime?
+  createdById String? // User.id of the admin who minted it
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([organizationId, revokedAt])
   @@index([tokenHash])
@@ -2867,61 +2947,61 @@ enum IdpType {
 // finance can roll spend up by region / project / business unit.
 
 model Vendor {
-  id              String          @id @default(cuid())
-  organizationId  String
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  name            String
-  email           String?
-  contactName     String?
-  phone           String?
-  taxId           String?         // EIN / VAT / GSTIN — free text in v1
-  paymentTermsDays Int            @default(30)
-  archived        Boolean         @default(false)
+  name             String
+  email            String?
+  contactName      String?
+  phone            String?
+  taxId            String? // EIN / VAT / GSTIN — free text in v1
+  paymentTermsDays Int     @default(30)
+  archived         Boolean @default(false)
 
-  purchaseOrders  PurchaseOrder[]
-  invoices        Invoice[]
+  purchaseOrders PurchaseOrder[]
+  invoices       Invoice[]
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organizationId, name])
   @@index([organizationId, archived])
 }
 
 model PurchaseOrder {
-  id              String          @id @default(cuid())
-  organizationId  String
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   // Auto-generated, org-scoped sequential. The DB-side default makes
   // it cheap; we increment and fall back to cuid on collision.
-  number          String
+  number String
 
-  vendorId        String
-  vendor          Vendor          @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
 
-  requesterId     String
-  requester       User            @relation("POrequester", fields: [requesterId], references: [id])
-  approverId      String?
-  approver        User?           @relation("POapprover", fields: [approverId], references: [id])
+  requesterId String
+  requester   User    @relation("POrequester", fields: [requesterId], references: [id])
+  approverId  String?
+  approver    User?   @relation("POapprover", fields: [approverId], references: [id])
 
-  description     String
-  amount          Decimal         @db.Decimal(12, 2)
-  currency        String          @default("USD")
+  description String
+  amount      Decimal @db.Decimal(12, 2)
+  currency    String  @default("USD")
 
-  status          PurchaseOrderStatus @default(DRAFT)
+  status               PurchaseOrderStatus @default(DRAFT)
   expectedDeliveryDate DateTime?
-  receivedAt      DateTime?
-  submittedAt     DateTime?
-  decisionAt      DateTime?
-  decisionNote    String?
+  receivedAt           DateTime?
+  submittedAt          DateTime?
+  decisionAt           DateTime?
+  decisionNote         String?
 
-  invoices        Invoice[]
-  notes           String?
+  invoices Invoice[]
+  notes    String?
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
@@ -2931,36 +3011,36 @@ model PurchaseOrder {
 }
 
 model Invoice {
-  id              String          @id @default(cuid())
-  organizationId  String
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  vendorId        String
-  vendor          Vendor          @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
 
   // Optional link to a PO. Some vendors (utilities, subscriptions) bill
   // without a matching PO — we accept that for v1.
   purchaseOrderId String?
-  purchaseOrder   PurchaseOrder?  @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
 
-  invoiceNumber   String          // vendor-supplied identifier
-  amount          Decimal         @db.Decimal(12, 2)
-  currency        String          @default("USD")
+  invoiceNumber String // vendor-supplied identifier
+  amount        Decimal @db.Decimal(12, 2)
+  currency      String  @default("USD")
 
-  issueDate       DateTime
-  dueDate         DateTime
-  status          InvoiceStatus   @default(PENDING)
-  paidAt          DateTime?
-  decisionAt      DateTime?
-  decisionNote    String?
+  issueDate    DateTime
+  dueDate      DateTime
+  status       InvoiceStatus @default(PENDING)
+  paidAt       DateTime?
+  decisionAt   DateTime?
+  decisionNote String?
 
-  approverId      String?
-  approver        User?           @relation("InvoiceApprover", fields: [approverId], references: [id])
+  approverId String?
+  approver   User?   @relation("InvoiceApprover", fields: [approverId], references: [id])
 
-  notes           String?
+  notes String?
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organizationId, vendorId, invoiceNumber])
   @@index([organizationId, status])
@@ -2996,25 +3076,25 @@ enum InvoiceStatus {
 // v2 — add a `scenarioName` column when the time comes.
 
 model HeadcountPlan {
-  id               String        @id @default(cuid())
-  organizationId   String
-  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  departmentId     String?
-  department       Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 
   // Free-form period token. Org picks granularity: "2026", "2026-Q1",
   // "2026-H1", "FY27", etc. Treated opaquely server-side; the UI
   // sorts asciibetically which matches lexical year/quarter ordering.
-  period           String
+  period String
 
   plannedHeadcount Int
-  plannedBudget    Decimal?      @db.Decimal(14, 2)
-  budgetCurrency   String        @default("USD")
+  plannedBudget    Decimal? @db.Decimal(14, 2)
+  budgetCurrency   String   @default("USD")
   notes            String?
 
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organizationId, departmentId, period])
   @@index([organizationId, period])
@@ -3029,32 +3109,32 @@ model HeadcountPlan {
 // score + notes; structured per-competency rubric is v2.
 
 model Interview {
-  id              String          @id @default(cuid())
-  organizationId  String
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  applicationId   String
-  application     Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
-  interviewerId   String
-  interviewer     User            @relation("InterviewInterviewer", fields: [interviewerId], references: [id])
+  interviewerId String
+  interviewer   User   @relation("InterviewInterviewer", fields: [interviewerId], references: [id])
 
   scheduledAt     DateTime
-  durationMinutes Int             @default(30)
-  type            InterviewType   @default(SCREEN)
+  durationMinutes Int           @default(30)
+  type            InterviewType @default(SCREEN)
   // Free-text — meeting URL, room name, or on-site address. Linking
   // to the Meeting model is v2.
   location        String?
 
-  status          InterviewStatus @default(SCHEDULED)
+  status InterviewStatus @default(SCHEDULED)
 
   // Post-interview scorecard. 1-5 numeric; notes free-text. v2
   // expands to per-competency rubric.
-  score           Int?
-  notes           String?
+  score Int?
+  notes String?
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId, status])
   @@index([applicationId, status])
@@ -3090,25 +3170,25 @@ enum InterviewStatus {
 // ==========================================
 
 model PayGroup {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
-  country        String   @default("US")
-  currency       String   @default("USD")
+  country        String       @default("US")
+  currency       String       @default("USD")
   frequency      PayFrequency @default(BIWEEKLY)
   // First-period anchor — every subsequent period start is derived
   // from this date plus N×frequency. Stored explicitly so DST and
   // calendar drift don't compound.
   anchorDate     DateTime
   // Days after period end that paychecks land. Bank cutoff buffer.
-  payOffsetDays  Int      @default(3)
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  payOffsetDays  Int          @default(3)
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  payRuns        PayRun[]
-  payslips       Payslip[]
+  payRuns  PayRun[]
+  payslips Payslip[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -3122,31 +3202,31 @@ enum PayFrequency {
 }
 
 model PayRun {
-  id             String   @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  payGroupId     String
-  payGroup       PayGroup @relation(fields: [payGroupId], references: [id], onDelete: Cascade)
-  periodStart    DateTime
-  periodEnd      DateTime
-  payDate        DateTime
-  status         PayRunStatus @default(DRAFT)
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payGroupId      String
+  payGroup        PayGroup     @relation(fields: [payGroupId], references: [id], onDelete: Cascade)
+  periodStart     DateTime
+  periodEnd       DateTime
+  payDate         DateTime
+  status          PayRunStatus @default(DRAFT)
   // Totals are derived from Payslip rows but cached here so list
   // views don't N+1. Recomputed on transition to CALCULATED.
-  totalGross     Decimal  @default(0) @db.Decimal(14, 2)
-  totalNet       Decimal  @default(0) @db.Decimal(14, 2)
-  totalTax       Decimal  @default(0) @db.Decimal(14, 2)
-  totalDeductions Decimal @default(0) @db.Decimal(14, 2)
+  totalGross      Decimal      @default(0) @db.Decimal(14, 2)
+  totalNet        Decimal      @default(0) @db.Decimal(14, 2)
+  totalTax        Decimal      @default(0) @db.Decimal(14, 2)
+  totalDeductions Decimal      @default(0) @db.Decimal(14, 2)
   // Vendor reference — opaque id from the provider (CheckHQ run id,
   // etc.) so we can reconcile filings.
-  providerRef    String?
-  notes          String?
-  calculatedAt   DateTime?
-  postedAt       DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  providerRef     String?
+  notes           String?
+  calculatedAt    DateTime?
+  postedAt        DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
-  payslips       Payslip[]
+  payslips Payslip[]
 
   @@unique([payGroupId, periodStart])
   @@index([organizationId, status])
@@ -3154,10 +3234,10 @@ model PayRun {
 }
 
 enum PayRunStatus {
-  DRAFT       // open for adjustments
+  DRAFT // open for adjustments
   CALCULATING // provider crunching numbers
-  CALCULATED  // ready for review
-  POSTED      // funds released; immutable
+  CALCULATED // ready for review
+  POSTED // funds released; immutable
   CANCELLED
 }
 
@@ -3165,18 +3245,18 @@ enum PayRunStatus {
 // Each org can extend with custom codes. taxable + W2 box mapping
 // captured here so a payroll run knows how to classify each line.
 model EarningCode {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  code           String   // e.g. "REG", "OT", "BONUS"
+  code           String // e.g. "REG", "OT", "BONUS"
   name           String
-  taxable        Boolean  @default(true)
+  taxable        Boolean      @default(true)
   // GL account hint — final mapping lives in the integration adapter.
   glAccount      String?
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
 
-  payslipLines   PayslipLine[] @relation("PayslipLineEarning")
+  payslipLines PayslipLine[] @relation("PayslipLineEarning")
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -3185,20 +3265,20 @@ model EarningCode {
 // Deductions catalog — pre-tax (401k, medical, HSA) vs post-tax
 // (Roth 401k, garnishment). preTax flag drives tax base calc.
 model DeductionCode {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  code           String   // e.g. "401K", "MED", "DEN"
+  code           String // e.g. "401K", "MED", "DEN"
   name           String
-  preTax         Boolean  @default(false)
+  preTax         Boolean      @default(false)
   // Optional cap per pay period or per year — null means no cap.
-  perPeriodCap   Decimal? @db.Decimal(12, 2)
-  annualCap      Decimal? @db.Decimal(12, 2)
+  perPeriodCap   Decimal?     @db.Decimal(12, 2)
+  annualCap      Decimal?     @db.Decimal(12, 2)
   glAccount      String?
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
 
-  payslipLines   PayslipLine[] @relation("PayslipLineDeduction")
+  payslipLines PayslipLine[] @relation("PayslipLineDeduction")
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -3208,31 +3288,31 @@ model DeductionCode {
 // into the totals on the parent. Stored even after the run is
 // POSTED so the employee can always reprint.
 model Payslip {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   payRunId       String
-  payRun         PayRun   @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  payRun         PayRun       @relation(fields: [payRunId], references: [id], onDelete: Cascade)
   payGroupId     String
-  payGroup       PayGroup @relation(fields: [payGroupId], references: [id], onDelete: Restrict)
+  payGroup       PayGroup     @relation(fields: [payGroupId], references: [id], onDelete: Restrict)
   subjectId      String
-  subject        User     @relation("PayslipSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  subject        User         @relation("PayslipSubject", fields: [subjectId], references: [id], onDelete: Cascade)
   // Cached totals — sum of lines. Recomputed when lines change.
-  gross          Decimal  @default(0) @db.Decimal(12, 2)
-  net            Decimal  @default(0) @db.Decimal(12, 2)
-  tax            Decimal  @default(0) @db.Decimal(12, 2)
-  deductions     Decimal  @default(0) @db.Decimal(12, 2)
-  hoursWorked    Decimal  @default(0) @db.Decimal(8, 2)
+  gross          Decimal      @default(0) @db.Decimal(12, 2)
+  net            Decimal      @default(0) @db.Decimal(12, 2)
+  tax            Decimal      @default(0) @db.Decimal(12, 2)
+  deductions     Decimal      @default(0) @db.Decimal(12, 2)
+  hoursWorked    Decimal      @default(0) @db.Decimal(8, 2)
   // Provider reference (CheckHQ paystub id) — null until posted.
   providerRef    String?
   // Where the paid funds went — stored for the employee record. Last
   // 4 digits only; full account info lives at the provider.
-  payMethod      PayMethod @default(DIRECT_DEPOSIT)
+  payMethod      PayMethod    @default(DIRECT_DEPOSIT)
   bankLast4      String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  lines          PayslipLine[]
+  lines PayslipLine[]
 
   @@unique([payRunId, subjectId])
   @@index([organizationId, subjectId])
@@ -3250,24 +3330,24 @@ enum PayMethod {
 // — exactly one of those three id columns is non-null. Discriminated
 // by `kind` for fast filtering.
 model PayslipLine {
-  id              String   @id @default(cuid())
+  id              String          @id @default(cuid())
   payslipId       String
-  payslip         Payslip  @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+  payslip         Payslip         @relation(fields: [payslipId], references: [id], onDelete: Cascade)
   kind            PayslipLineKind
   // For EARNING lines:
   earningCodeId   String?
-  earningCode     EarningCode? @relation("PayslipLineEarning", fields: [earningCodeId], references: [id], onDelete: Restrict)
-  hours           Decimal? @db.Decimal(8, 2)
-  rate            Decimal? @db.Decimal(10, 4)
+  earningCode     EarningCode?    @relation("PayslipLineEarning", fields: [earningCodeId], references: [id], onDelete: Restrict)
+  hours           Decimal?        @db.Decimal(8, 2)
+  rate            Decimal?        @db.Decimal(10, 4)
   // For DEDUCTION lines:
   deductionCodeId String?
-  deductionCode   DeductionCode? @relation("PayslipLineDeduction", fields: [deductionCodeId], references: [id], onDelete: Restrict)
+  deductionCode   DeductionCode?  @relation("PayslipLineDeduction", fields: [deductionCodeId], references: [id], onDelete: Restrict)
   // For TAX lines: human-readable label only. Provider does the math.
   taxLabel        String?
-  amount          Decimal  @db.Decimal(12, 2)
+  amount          Decimal         @db.Decimal(12, 2)
   // YTD running total at the moment this line was generated. Used
   // for cap enforcement + W-2 reconciliation.
-  ytdAmount       Decimal? @db.Decimal(12, 2)
+  ytdAmount       Decimal?        @db.Decimal(12, 2)
 
   @@index([payslipId])
   @@index([earningCodeId])
@@ -3289,7 +3369,7 @@ enum PayslipLineKind {
 // ==========================================
 
 model BenefitPlan {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   type           BenefitType
@@ -3298,17 +3378,17 @@ model BenefitPlan {
   description    String?
   // Default tier costs per pay period — can be overridden per
   // BenefitTier row for richer plans.
-  employeeCost   Decimal  @default(0) @db.Decimal(10, 2)
-  employerCost   Decimal  @default(0) @db.Decimal(10, 2)
+  employeeCost   Decimal      @default(0) @db.Decimal(10, 2)
+  employerCost   Decimal      @default(0) @db.Decimal(10, 2)
   // Effective window — outside this range the plan can't be elected.
   effectiveFrom  DateTime
   effectiveTo    DateTime?
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  tiers          BenefitTier[]
-  enrollments    BenefitEnrollment[]
+  tiers             BenefitTier[]
+  enrollments       BenefitEnrollment[]
   enrollmentsInOpen OpenEnrollmentPlan[]
 
   @@unique([organizationId, name])
@@ -3331,24 +3411,24 @@ enum BenefitType {
 }
 
 model BenefitTier {
-  id             String   @id @default(cuid())
-  benefitPlanId  String
-  benefitPlan    BenefitPlan @relation(fields: [benefitPlanId], references: [id], onDelete: Cascade)
+  id            String      @id @default(cuid())
+  benefitPlanId String
+  benefitPlan   BenefitPlan @relation(fields: [benefitPlanId], references: [id], onDelete: Cascade)
   // Coverage tier label — "Employee", "Employee + Spouse",
   // "Employee + Children", "Family", or org-custom strings.
-  tier           String
-  employeeCost   Decimal  @db.Decimal(10, 2)
-  employerCost   Decimal  @db.Decimal(10, 2)
+  tier          String
+  employeeCost  Decimal     @db.Decimal(10, 2)
+  employerCost  Decimal     @db.Decimal(10, 2)
 
-  enrollments    BenefitEnrollment[]
+  enrollments BenefitEnrollment[]
 
   @@unique([benefitPlanId, tier])
 }
 
 model OpenEnrollment {
-  id             String   @id @default(cuid())
+  id             String               @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
   // Window during which employees can submit elections.
   startDate      DateTime
@@ -3357,11 +3437,11 @@ model OpenEnrollment {
   effectiveDate  DateTime
   status         OpenEnrollmentStatus @default(DRAFT)
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
-  plans          OpenEnrollmentPlan[]
-  enrollments    BenefitEnrollment[]
+  plans       OpenEnrollmentPlan[]
+  enrollments BenefitEnrollment[]
 
   @@index([organizationId, status])
 }
@@ -3375,11 +3455,11 @@ enum OpenEnrollmentStatus {
 
 // Junction — which plans are offered in a given OE window.
 model OpenEnrollmentPlan {
-  id               String   @id @default(cuid())
+  id               String         @id @default(cuid())
   openEnrollmentId String
   openEnrollment   OpenEnrollment @relation(fields: [openEnrollmentId], references: [id], onDelete: Cascade)
   benefitPlanId    String
-  benefitPlan      BenefitPlan @relation(fields: [benefitPlanId], references: [id], onDelete: Cascade)
+  benefitPlan      BenefitPlan    @relation(fields: [benefitPlanId], references: [id], onDelete: Cascade)
 
   @@unique([openEnrollmentId, benefitPlanId])
 }
@@ -3388,23 +3468,23 @@ model OpenEnrollmentPlan {
 // window that produced it (or the LifeEvent for off-cycle changes).
 // Status moves DRAFT → SUBMITTED → ACTIVE → ENDED.
 model BenefitEnrollment {
-  id               String   @id @default(cuid())
+  id               String           @id @default(cuid())
   organizationId   String
-  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   subjectId        String
-  subject          User     @relation("BenefitEnrollmentSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  subject          User             @relation("BenefitEnrollmentSubject", fields: [subjectId], references: [id], onDelete: Cascade)
   benefitPlanId    String
-  benefitPlan      BenefitPlan @relation(fields: [benefitPlanId], references: [id], onDelete: Restrict)
+  benefitPlan      BenefitPlan      @relation(fields: [benefitPlanId], references: [id], onDelete: Restrict)
   benefitTierId    String?
-  benefitTier      BenefitTier? @relation(fields: [benefitTierId], references: [id], onDelete: Restrict)
+  benefitTier      BenefitTier?     @relation(fields: [benefitTierId], references: [id], onDelete: Restrict)
   openEnrollmentId String?
-  openEnrollment   OpenEnrollment? @relation(fields: [openEnrollmentId], references: [id], onDelete: SetNull)
+  openEnrollment   OpenEnrollment?  @relation(fields: [openEnrollmentId], references: [id], onDelete: SetNull)
   lifeEventId      String?
-  lifeEvent        LifeEvent? @relation(fields: [lifeEventId], references: [id], onDelete: SetNull)
+  lifeEvent        LifeEvent?       @relation(fields: [lifeEventId], references: [id], onDelete: SetNull)
   // Per-pay-period cost snapshot at time of election. Pulling from
   // BenefitTier directly would lose history when tier costs change.
-  employeeCost     Decimal  @db.Decimal(10, 2)
-  employerCost     Decimal  @db.Decimal(10, 2)
+  employeeCost     Decimal          @db.Decimal(10, 2)
+  employerCost     Decimal          @db.Decimal(10, 2)
   effectiveStart   DateTime
   effectiveEnd     DateTime?
   status           EnrollmentStatus @default(DRAFT)
@@ -3413,8 +3493,8 @@ model BenefitEnrollment {
   // adapter has acknowledged the election.
   providerRef      String?
   submittedAt      DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   @@index([organizationId, subjectId])
   @@index([benefitPlanId, status])
@@ -3431,11 +3511,11 @@ enum EnrollmentStatus {
 }
 
 model Dependent {
-  id             String   @id @default(cuid())
+  id             String                @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   ownerId        String
-  owner          User     @relation("DependentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  owner          User                  @relation("DependentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   firstName      String
   lastName       String
   relationship   DependentRelationship
@@ -3444,9 +3524,9 @@ model Dependent {
   ssnLast4       String?
   // Whether this dependent currently appears on any benefit
   // election. Maintained by the adapter when carriers confirm.
-  coveredOnPlan  Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  coveredOnPlan  Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
 
   @@index([organizationId, ownerId])
 }
@@ -3463,22 +3543,22 @@ enum DependentRelationship {
 // the affected employee. The benefits team approves before it
 // becomes actionable.
 model LifeEvent {
-  id             String   @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subjectId      String
-  subject        User     @relation("LifeEventSubject", fields: [subjectId], references: [id], onDelete: Cascade)
-  type           LifeEventType
-  eventDate      DateTime
-  status         LifeEventStatus @default(REPORTED)
+  id                String          @id @default(cuid())
+  organizationId    String
+  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subjectId         String
+  subject           User            @relation("LifeEventSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  type              LifeEventType
+  eventDate         DateTime
+  status            LifeEventStatus @default(REPORTED)
   // 60-day default window — adjustable per type / jurisdiction.
   electionWindowEnd DateTime?
-  notes          String?
-  approvedAt     DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  notes             String?
+  approvedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
-  enrollments    BenefitEnrollment[]
+  enrollments BenefitEnrollment[]
 
   @@index([organizationId, subjectId])
   @@index([status])
@@ -3505,8 +3585,8 @@ enum LifeEventStatus {
 }
 
 enum AccrualMode {
-  UPFRONT     // grant annualHours on hire / anniversary
-  ACCRUE      // drip hours per period
+  UPFRONT // grant annualHours on hire / anniversary
+  ACCRUE // drip hours per period
 }
 
 enum AccrualFrequency {
@@ -3527,27 +3607,27 @@ enum AccrualFrequency {
 // ==========================================
 
 model BudgetPlan {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   fiscalYearId   String
-  fiscalYear     FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  fiscalYear     FiscalYear   @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
   name           String
-  type           PlanType   @default(BUDGET)
-  status         PlanStatus @default(DRAFT)
+  type           PlanType     @default(BUDGET)
+  status         PlanStatus   @default(DRAFT)
   // Plan versions — incrementing each time PUBLISH is hit. Lets the
   // org audit "what did we forecast last quarter?" without locking
   // editing on the active plan.
-  version        Int        @default(1)
-  baselineId     String?    // pointer to the version this was branched from
+  version        Int          @default(1)
+  baselineId     String? // pointer to the version this was branched from
   description    String?
   publishedAt    DateTime?
   archivedAt     DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  scenarios      PlanScenario[]
-  lines          PlanLine[]
+  scenarios PlanScenario[]
+  lines     PlanLine[]
 
   @@unique([organizationId, fiscalYearId, name, version])
   @@index([organizationId, status])
@@ -3555,10 +3635,10 @@ model BudgetPlan {
 }
 
 enum PlanType {
-  BUDGET           // approved annual budget
-  FORECAST         // rolling re-forecast as actuals land
-  STRATEGIC        // 3-5 year outlook
-  WHAT_IF          // scratch scenario, never published
+  BUDGET // approved annual budget
+  FORECAST // rolling re-forecast as actuals land
+  STRATEGIC // 3-5 year outlook
+  WHAT_IF // scratch scenario, never published
 }
 
 enum PlanStatus {
@@ -3572,46 +3652,46 @@ enum PlanStatus {
 // reference a scenario falls under the Plan's default scenario,
 // which the API auto-creates on Plan create.
 model PlanScenario {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   planId         String
-  plan           BudgetPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan           BudgetPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
   name           String
   // Quick-multiply factor applied to "Base" lines when the scenario
   // hasn't been edited line-by-line. Set null for hand-edited
   // scenarios.
-  multiplier     Decimal? @db.Decimal(8, 4)
+  multiplier     Decimal?     @db.Decimal(8, 4)
   notes          String?
-  isDefault      Boolean  @default(false)
-  createdAt      DateTime @default(now())
+  isDefault      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
 
-  lines          PlanLine[]
+  lines PlanLine[]
 
   @@unique([planId, name])
   @@index([planId])
 }
 
 model PlanLine {
-  id             String   @id @default(cuid())
+  id             String           @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   planId         String
-  plan           BudgetPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan           BudgetPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
   scenarioId     String
-  scenario       PlanScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  scenario       PlanScenario     @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
   accountId      String
-  account        GlAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  account        GlAccount        @relation(fields: [accountId], references: [id], onDelete: Restrict)
   costCenterId   String?
-  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  costCenter     CostCenter?      @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
   periodId       String
   period         AccountingPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
-  amount         Decimal  @db.Decimal(14, 2)
+  amount         Decimal          @db.Decimal(14, 2)
   driverId       String?
-  driver         PlanDriver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  driver         PlanDriver?      @relation(fields: [driverId], references: [id], onDelete: SetNull)
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@unique([planId, scenarioId, accountId, costCenterId, periodId])
   @@index([planId, accountId])
@@ -3623,17 +3703,17 @@ model PlanLine {
 // growth: 25% YoY". "Revenue per rep: $250k". The formula is free
 // text for now — Studio v2 will parse + recompute.
 model PlanDriver {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
-  formula        String?  // human-readable for now
-  assumptions    Json     @default("{}")
+  formula        String? // human-readable for now
+  assumptions    Json         @default("{}")
   description    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  lines          PlanLine[]
+  lines PlanLine[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -3653,7 +3733,7 @@ model PlanDriver {
 // ==========================================
 
 model Workflow {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
@@ -3661,36 +3741,36 @@ model Workflow {
   // a specific instance. Same string used in TagEntityType where
   // applicable; free strings allowed for new types.
   targetType     String
-  active         Boolean  @default(true)
+  active         Boolean      @default(true)
   // Steps are stored as an ordered JSON array so admins can
   // rearrange + insert without table juggling. Each step is
   // { id, name, approverRule, slaHours, requireNote }.
-  steps          Json     @default("[]")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  steps          Json         @default("[]")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  runs           WorkflowRun[]
+  runs WorkflowRun[]
 
   @@unique([organizationId, name])
   @@index([organizationId, targetType, active])
 }
 
 model WorkflowRun {
-  id             String   @id @default(cuid())
+  id             String            @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   workflowId     String
-  workflow       Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflow       Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   // Polymorphic record reference — entityType + entityId.
   entityType     String
   entityId       String
   status         WorkflowRunStatus @default(IN_PROGRESS)
-  currentStep    Int      @default(0)
+  currentStep    Int               @default(0)
   // Step-by-step decisions captured as JSON so the audit trail is
   // self-contained. Each entry: { step, decidedBy, decision, note,
   // at }.
-  decisions      Json     @default("[]")
-  startedAt      DateTime @default(now())
+  decisions      Json              @default("[]")
+  startedAt      DateTime          @default(now())
   completedAt    DateTime?
 
   @@index([organizationId, status])
@@ -3705,24 +3785,24 @@ enum WorkflowRunStatus {
 }
 
 model CustomFieldDefinition {
-  id             String   @id @default(cuid())
+  id             String          @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Same polymorphic targetType pattern as Workflow.
   targetType     String
-  key            String   // machine name, e.g. "cost_center_alt"
-  label          String   // display label
+  key            String // machine name, e.g. "cost_center_alt"
+  label          String // display label
   fieldType      CustomFieldType @default(TEXT)
-  required       Boolean  @default(false)
+  required       Boolean         @default(false)
   // Type-specific options stored as JSON: SELECT options, NUMBER
   // min/max, DATE format, etc.
-  options        Json     @default("{}")
-  position       Int      @default(0)
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  options        Json            @default("{}")
+  position       Int             @default(0)
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  values         CustomFieldValue[]
+  values CustomFieldValue[]
 
   @@unique([organizationId, targetType, key])
   @@index([organizationId, targetType])
@@ -3741,9 +3821,9 @@ enum CustomFieldType {
 }
 
 model CustomFieldValue {
-  id             String   @id @default(cuid())
+  id             String                @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   definitionId   String
   definition     CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
   entityType     String
@@ -3752,12 +3832,12 @@ model CustomFieldValue {
   // declared CustomFieldType. Null for "not set".
   valueText      String?
   // Numeric / date variants kept separate for indexable filtering.
-  valueNumber    Decimal? @db.Decimal(20, 6)
+  valueNumber    Decimal?              @db.Decimal(20, 6)
   valueDate      DateTime?
   // For MULTI_SELECT.
   valueJson      Json?
-  updatedAt      DateTime @updatedAt
-  createdAt      DateTime @default(now())
+  updatedAt      DateTime              @updatedAt
+  createdAt      DateTime              @default(now())
 
   @@unique([definitionId, entityType, entityId])
   @@index([entityType, entityId])
@@ -3774,23 +3854,23 @@ model CustomFieldValue {
 // ==========================================
 
 model OvertimePolicy {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
-  jurisdiction   String   // free text: "US-CA", "US-FED", "AU-NSW"
+  jurisdiction   String // free text: "US-CA", "US-FED", "AU-NSW"
   // Daily threshold over which OT kicks in. Null = no daily rule.
-  dailyOtAfter   Decimal? @db.Decimal(4, 2)  // e.g. 8.00
-  dailyDtAfter   Decimal? @db.Decimal(4, 2)  // double-time threshold
+  dailyOtAfter   Decimal?     @db.Decimal(4, 2) // e.g. 8.00
+  dailyDtAfter   Decimal?     @db.Decimal(4, 2) // double-time threshold
   // Weekly threshold over which OT kicks in. Null = no weekly rule.
-  weeklyOtAfter  Decimal? @db.Decimal(5, 2)  // e.g. 40.00
+  weeklyOtAfter  Decimal?     @db.Decimal(5, 2) // e.g. 40.00
   // Optional 7th-consecutive-day rule (CA): first 8h are OT, beyond
   // 8h is DT. Null disables.
-  seventhDayOt   Boolean  @default(false)
-  active         Boolean  @default(true)
+  seventhDayOt   Boolean      @default(false)
+  active         Boolean      @default(true)
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@unique([organizationId, name])
   @@index([organizationId, active])
@@ -3800,7 +3880,7 @@ model OvertimePolicy {
 // (optionally) a level. Used during compensation cycles to flag
 // out-of-band proposals before they're approved.
 model SalaryBand {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Free-text role label and optional level (P3, M2, etc.) so
@@ -3809,16 +3889,16 @@ model SalaryBand {
   role           String
   level          String?
   location       String?
-  currency       String   @default("USD")
-  minAmount      Decimal  @db.Decimal(12, 2)
-  midAmount      Decimal  @db.Decimal(12, 2)
-  maxAmount      Decimal  @db.Decimal(12, 2)
+  currency       String       @default("USD")
+  minAmount      Decimal      @db.Decimal(12, 2)
+  midAmount      Decimal      @db.Decimal(12, 2)
+  maxAmount      Decimal      @db.Decimal(12, 2)
   effectiveFrom  DateTime
   effectiveTo    DateTime?
-  active         Boolean  @default(true)
+  active         Boolean      @default(true)
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@unique([organizationId, role, level, location])
   @@index([organizationId, active])
@@ -3842,28 +3922,28 @@ model SalaryBand {
 // `parentId` lets the org build a hierarchy (e.g. Operating Expenses
 // → Salaries → US Salaries → Engineering Salaries).
 model GlAccount {
-  id             String   @id @default(cuid())
+  id             String        @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Account code — typically a 4-6 digit number (4000-Revenue,
   // 6000-Expense, etc). Unique per org.
   code           String
   name           String
   type           GlAccountType
   parentId       String?
-  parent         GlAccount? @relation("GlAccountParent", fields: [parentId], references: [id], onDelete: SetNull)
-  children       GlAccount[] @relation("GlAccountParent")
+  parent         GlAccount?    @relation("GlAccountParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children       GlAccount[]   @relation("GlAccountParent")
   // Currency the account is denominated in. Multi-currency orgs run
   // separate accounts per currency and consolidate via FX entries.
-  currency       String   @default("USD")
+  currency       String        @default("USD")
   description    String?
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  debitLines     JournalLine[] @relation("JournalLineDebit")
-  creditLines    JournalLine[] @relation("JournalLineCredit")
-  planLines      PlanLine[]
+  debitLines  JournalLine[] @relation("JournalLineDebit")
+  creditLines JournalLine[] @relation("JournalLineCredit")
+  planLines   PlanLine[]
 
   @@unique([organizationId, code])
   @@index([organizationId, type])
@@ -3881,16 +3961,16 @@ enum GlAccountType {
 // Cost centers / business units. Optional dimension on every
 // journal line so reports can filter by department, branch, etc.
 model CostCenter {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   code           String
   name           String
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
 
-  journalLines   JournalLine[]
-  planLines      PlanLine[]
+  journalLines JournalLine[]
+  planLines    PlanLine[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -3900,19 +3980,19 @@ model CostCenter {
 // non-calendar years (Apr-Mar in India) so the start month is
 // configurable.
 model FiscalYear {
-  id             String   @id @default(cuid())
+  id             String           @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Human label — "FY2026", "FY27" — distinct from the date range.
   label          String
   startDate      DateTime
   endDate        DateTime
   status         FiscalYearStatus @default(OPEN)
   closedAt       DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime         @default(now())
 
-  periods        AccountingPeriod[]
-  budgetPlans    BudgetPlan[]
+  periods     AccountingPeriod[]
+  budgetPlans BudgetPlan[]
 
   @@unique([organizationId, label])
   @@index([organizationId, status])
@@ -3927,17 +4007,17 @@ enum FiscalYearStatus {
 // calendar. Posting to a CLOSED period is rejected at the API
 // layer.
 model AccountingPeriod {
-  id             String   @id @default(cuid())
+  id             String                 @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   fiscalYearId   String
-  fiscalYear     FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
-  label          String   // "2026-01", "Jan 2026", etc.
+  fiscalYear     FiscalYear             @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  label          String // "2026-01", "Jan 2026", etc.
   startDate      DateTime
   endDate        DateTime
   status         AccountingPeriodStatus @default(OPEN)
   closedAt       DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime               @default(now())
 
   journalEntries JournalEntry[]
   planLines      PlanLine[]
@@ -3957,9 +4037,9 @@ enum AccountingPeriodStatus {
 // supported. Total debits MUST equal total credits — enforced at
 // the API layer because Prisma can't express the constraint.
 model JournalEntry {
-  id             String   @id @default(cuid())
+  id             String           @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   periodId       String
   period         AccountingPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
   // Sequential per-org reference (JE-000123). Generated server-side.
@@ -3971,21 +4051,21 @@ model JournalEntry {
   description    String
   // Origin of the entry. Auto-posted entries record the upstream
   // entity in `sourceType` + `sourceId` so we can trace lineage.
-  source         JournalSource @default(MANUAL)
+  source         JournalSource    @default(MANUAL)
   sourceType     String?
   sourceId       String?
-  status         JournalStatus @default(DRAFT)
+  status         JournalStatus    @default(DRAFT)
   // Manual entries above an org-defined threshold need a second
   // approver before posting. APPROVED → POSTED is irreversible.
   postedById     String?
-  postedBy       User? @relation("JournalEntryPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
+  postedBy       User?            @relation("JournalEntryPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
   approvedById   String?
-  approvedBy     User? @relation("JournalEntryApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedBy     User?            @relation("JournalEntryApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt     DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
-  lines          JournalLine[]
+  lines JournalLine[]
 
   @@unique([organizationId, reference])
   @@index([organizationId, postedAt])
@@ -3996,22 +4076,22 @@ model JournalEntry {
 enum JournalSource {
   MANUAL
   PAYROLL
-  AP_INVOICE      // bills from vendors (Procurement.Invoice)
-  AR_INVOICE      // customer invoices (future Sales module)
+  AP_INVOICE // bills from vendors (Procurement.Invoice)
+  AR_INVOICE // customer invoices (future Sales module)
   EXPENSE
   PURCHASE_ORDER
-  ADJUSTMENT      // period close adjustments
+  ADJUSTMENT // period close adjustments
   OPENING_BALANCE
   REVERSAL
 }
 
 enum JournalStatus {
   DRAFT
-  PENDING        // submitted, awaiting approval
+  PENDING // submitted, awaiting approval
   APPROVED
-  POSTED         // immutable
-  REVERSED       // a reversal entry exists referencing this one
-  VOIDED         // never posted; cancelled while still in draft/pending
+  POSTED // immutable
+  REVERSED // a reversal entry exists referencing this one
+  VOIDED // never posted; cancelled while still in draft/pending
 }
 
 // One side of a balanced entry. A line is EITHER a debit OR a
@@ -4019,23 +4099,23 @@ enum JournalStatus {
 // non-null. amount is always positive; the side is in the column
 // choice.
 model JournalLine {
-  id             String   @id @default(cuid())
-  entryId        String
-  entry          JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  debitAccountId String?
-  debitAccount   GlAccount? @relation("JournalLineDebit", fields: [debitAccountId], references: [id], onDelete: Restrict)
+  id              String       @id @default(cuid())
+  entryId         String
+  entry           JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  debitAccountId  String?
+  debitAccount    GlAccount?   @relation("JournalLineDebit", fields: [debitAccountId], references: [id], onDelete: Restrict)
   creditAccountId String?
-  creditAccount  GlAccount? @relation("JournalLineCredit", fields: [creditAccountId], references: [id], onDelete: Restrict)
-  amount         Decimal  @db.Decimal(14, 2)
+  creditAccount   GlAccount?   @relation("JournalLineCredit", fields: [creditAccountId], references: [id], onDelete: Restrict)
+  amount          Decimal      @db.Decimal(14, 2)
   // Optional dimensions for reporting.
-  costCenterId   String?
-  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
-  description    String?
+  costCenterId    String?
+  costCenter      CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  description     String?
   // Multi-currency: amount is in the entry's reporting currency;
   // these capture the original transaction currency + rate.
-  txnCurrency    String?
-  txnAmount      Decimal? @db.Decimal(14, 2)
-  txnFxRate      Decimal? @db.Decimal(14, 8)
+  txnCurrency     String?
+  txnAmount       Decimal?     @db.Decimal(14, 2)
+  txnFxRate       Decimal?     @db.Decimal(14, 8)
 
   @@index([entryId])
   @@index([debitAccountId])

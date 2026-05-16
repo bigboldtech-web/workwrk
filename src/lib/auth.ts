@@ -89,7 +89,7 @@ export const authOptions: NextAuthOptions = {
       return !!existing;
     },
 
-    async jwt({ token, user, account }) {
+    async jwt({ token, user, account, trigger }) {
       if (user) {
         token.id = (user as any).id;
         token.accessLevel = (user as any).accessLevel;
@@ -116,6 +116,22 @@ export const authOptions: NextAuthOptions = {
           token.firstName = dbUser.firstName;
           token.lastName = dbUser.lastName;
           token.avatar = dbUser.avatar;
+        }
+      }
+
+      // Session-update path: triggered by the org-switcher calling
+      // `session.update()` after `POST /api/me/switch-org` flips the
+      // user's `organizationId`. We re-fetch so the JWT picks up the
+      // new org immediately rather than waiting for natural refresh.
+      if (trigger === "update" && token.id) {
+        const fresh = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          include: { organization: { select: { name: true } } },
+        });
+        if (fresh) {
+          token.organizationId = fresh.organizationId;
+          token.organizationName = fresh.organization.name;
+          token.accessLevel = fresh.accessLevel;
         }
       }
       return token;

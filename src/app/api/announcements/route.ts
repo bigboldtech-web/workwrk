@@ -3,12 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { processEmailQueue } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
+import { logActivity } from "@/lib/activity";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const orgId = getOrgId(session);
+  const userId = getUserId(session);
 
   try {
     const now = new Date();
@@ -24,7 +26,23 @@ export async function GET() {
       take: 50,
     });
 
-    return NextResponse.json(announcements, {
+    // Decorate each row with the current user's own ack state so the
+    // client doesn't need a second round-trip to render the
+    // "Acknowledge"/"You've acked" affordance. Cheap: one query
+    // scoped to the user, bounded by `take` above.
+    const acks = await prisma.announcementAcknowledgment.findMany({
+      where: { userId, announcementId: { in: announcements.map((a) => a.id) } },
+      select: { announcementId: true, acknowledgedAt: true },
+    });
+    const ackMap = new Map(acks.map((a) => [a.announcementId, a.acknowledgedAt] as const));
+
+    const enriched = announcements.map((a) => ({
+      ...a,
+      ackedByMe: ackMap.has(a.id),
+      ackedAt: ackMap.get(a.id) ?? null,
+    }));
+
+    return NextResponse.json(enriched, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (err: any) {
@@ -42,7 +60,7 @@ export async function POST(req: NextRequest) {
   const orgId = getOrgId(session);
   const userId = getUserId(session);
   const body = await req.json();
-  const { title, content, type, priority, pinned, expiresAt, targetAudience, publishedAt } = body;
+  const { title, content, type, priority, pinned, expiresAt, targetAudience, publishedAt, mustAcknowledge } = body;
 
   if (!title?.trim() || !content?.trim()) return jsonError("Title and content required");
   if (!expiresAt) return jsonError("Expiry date is required");
@@ -74,7 +92,12 @@ export async function POST(req: NextRequest) {
       type: type || "INFO",
       priority: priority || "NORMAL",
       pinned: pinned === true,
+      mustAcknowledge: mustAcknowledge === true,
       publishedAt: publishAt,
+      // Immediate-publish posts fire notifications inline below, so
+      // mark them as already-notified up-front. Scheduled posts stay
+      // NULL until the cron fires.
+      notificationsSentAt: isScheduled ? null : new Date(),
       expiresAt: expiryDate,
       targetAudience: targetAudience || undefined,
       authorId: userId,
@@ -82,10 +105,26 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Scheduled posts skip the immediate notify/email blast — a separate
-  // cron / scheduler (not built here) is expected to fire on the
-  // publishedAt boundary. Documented as a follow-up so this code path
-  // stays predictable: post saved, no notifications yet.
+  // Audit-log every announcement creation — must-ack posts in
+  // particular surface in compliance reviews.
+  await logActivity({
+    type: announcement.mustAcknowledge ? "announcement.create.must_ack" : "announcement.create",
+    actorId: userId,
+    organizationId: orgId,
+    description: `Created announcement: ${announcement.title}`,
+    targetType: "Announcement",
+    targetId: announcement.id,
+    metadata: {
+      priority: announcement.priority,
+      type: announcement.type,
+      mustAcknowledge: announcement.mustAcknowledge,
+      scheduled: isScheduled,
+    },
+  });
+
+  // Scheduled posts skip the immediate notify/email blast — the
+  // `announcements-publish` cron picks them up on the publishedAt
+  // boundary and fires the notification fan-out then.
   if (isScheduled) {
     return jsonSuccess({ ...announcement, scheduled: true }, 201);
   }

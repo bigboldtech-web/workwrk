@@ -18,9 +18,13 @@ export async function GET(req: NextRequest) {
   if (category) where.category = category;
   if (mine === "true") where.submitterId = getUserId(session);
 
+  // `priority` honors the manual drag-reorder position field; `votes`
+  // ranks by aggregate vote count; default falls back to recency.
   const orderBy: any = sort === "votes"
     ? { votes: { _count: "desc" } }
-    : { createdAt: "desc" };
+    : sort === "priority"
+      ? [{ position: "asc" }, { createdAt: "desc" }]
+      : { createdAt: "desc" };
 
   const ideas = await prisma.idea.findMany({
     where,
