@@ -10,8 +10,9 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/dashboard/page-header";
-import { BookOpen, CheckSquare, Star, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText, GraduationCap, Briefcase, PartyPopper } from "lucide-react";
+import { BookOpen, CheckSquare, Star, Crosshair, DollarSign, GraduationCap, Briefcase, PartyPopper } from "lucide-react";
 import { InboxAiAssistPanel, type InboxAiItem } from "@/components/inbox/ai-assist-panel";
+import { InboxApprovalQueue, type ApprovalItem } from "@/components/inbox/approval-queue";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -405,6 +406,48 @@ export default async function InboxPage() {
     })),
   ].slice(0, 20);
 
+  // Approval-queue items. These are the streams the user can decide on
+  // directly (approve/reject); the rest of the inbox (SOPs, tasks, etc.)
+  // stays as its own per-stream section below since those need
+  // navigation, not a bulk decision.
+  const approvalItems: ApprovalItem[] = [
+    ...expensesToApprove.map((e) => ({
+      id: e.id,
+      kind: "expense" as const,
+      title: e.description || "Expense",
+      subtitle: `${e.currency} ${Number(e.amount).toFixed(0)} · ${e.reporter.firstName} ${e.reporter.lastName}`,
+      link: `/expenses/${e.id}`,
+    })),
+    ...posToApprove.map((p) => ({
+      id: p.id,
+      kind: "po" as const,
+      title: `${p.number} — ${p.description}`.slice(0, 80),
+      subtitle: `${p.currency} ${Number(p.amount).toFixed(0)} to ${p.vendor.name} · ${p.requester.firstName} ${p.requester.lastName}`,
+      link: `/procurement?tab=pos#${p.id}`,
+    })),
+    ...invoicesToApprove.map((iv) => ({
+      id: iv.id,
+      kind: "invoice" as const,
+      title: `Invoice ${iv.invoiceNumber} · ${iv.vendor.name}`,
+      subtitle: `${iv.currency} ${Number(iv.amount).toFixed(0)} due ${new Date(iv.dueDate).toLocaleDateString()}`,
+      link: `/procurement?tab=invoices#${iv.id}`,
+    })),
+    ...timeOffToApprove.map((r) => ({
+      id: r.id,
+      kind: "time_off" as const,
+      title: `${r.user.firstName} ${r.user.lastName} · ${r.policy.name}`,
+      subtitle: `${Number(r.hours).toFixed(0)}h · ${new Date(r.startDate).toLocaleDateString()} → ${new Date(r.endDate).toLocaleDateString()}`,
+      link: "/time-off",
+    })),
+    ...timesheetsToApprove.map((t) => ({
+      id: t.id,
+      kind: "timesheet" as const,
+      title: `${t.user.firstName} ${t.user.lastName} · week of ${new Date(t.weekStartDate).toLocaleDateString()}`,
+      subtitle: `${t._count.entries} entries`,
+      link: "/time",
+    })),
+  ];
+
   return (
     <div className="space-y-3 animate-fade-in">
       <PageHeader
@@ -609,163 +652,7 @@ export default async function InboxPage() {
         </Card>
       )}
 
-      {posToApprove.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <ShoppingCart size={16} /> Purchase orders waiting on you
-              <span className="text-xs text-muted font-normal">({posToApprove.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {posToApprove.map((p) => {
-                const amount = Number(p.amount);
-                let amountLabel: string;
-                try {
-                  amountLabel = new Intl.NumberFormat(undefined, { style: "currency", currency: p.currency }).format(amount);
-                } catch {
-                  amountLabel = `${p.currency} ${amount.toFixed(2)}`;
-                }
-                return (
-                  <li key={p.id}>
-                    <Link
-                      href="/procurement"
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="font-mono text-xs text-muted">{p.number}</span>
-                        <span className="text-sm font-medium truncate">{p.vendor.name}</span>
-                        <span className="text-xs text-muted truncate">{p.description}</span>
-                      </div>
-                      <span className="text-xs font-mono flex-shrink-0 ml-3">{amountLabel}</span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
-
-      {invoicesToApprove.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText size={16} /> Invoices waiting on you
-              <span className="text-xs text-muted font-normal">({invoicesToApprove.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {invoicesToApprove.map((inv) => {
-                const amount = Number(inv.amount);
-                const overdue = inv.dueDate < new Date();
-                let amountLabel: string;
-                try {
-                  amountLabel = new Intl.NumberFormat(undefined, { style: "currency", currency: inv.currency }).format(amount);
-                } catch {
-                  amountLabel = `${inv.currency} ${amount.toFixed(2)}`;
-                }
-                return (
-                  <li key={inv.id}>
-                    <Link
-                      href="/procurement"
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="font-mono text-xs text-muted">{inv.invoiceNumber}</span>
-                        <span className="text-sm font-medium truncate">{inv.vendor.name}</span>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
-                        <span className={`text-xs ${overdue ? "text-red-400" : "text-muted"}`}>
-                          due {inv.dueDate.toLocaleDateString()}
-                          {overdue && " · overdue"}
-                        </span>
-                        <span className="text-xs font-mono">{amountLabel}</span>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
-
-      {timesheetsToApprove.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Clock size={16} /> Timesheets waiting on you
-              <span className="text-xs text-muted font-normal">({timesheetsToApprove.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {timesheetsToApprove.map((t) => (
-                <li key={t.id}>
-                  <Link
-                    href="/timesheets"
-                    className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="text-sm font-medium truncate">
-                        {t.user ? `${t.user.firstName} ${t.user.lastName}` : "—"}
-                      </span>
-                      <span className="text-xs text-muted">
-                        Week of {t.weekStartDate.toLocaleDateString()}
-                      </span>
-                    </div>
-                    <span className="text-xs text-muted flex-shrink-0 ml-3">
-                      {t._count.entries} {t._count.entries === 1 ? "entry" : "entries"}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
-
-      {timeOffToApprove.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <CalendarOff size={16} /> Time off waiting on you
-              <span className="text-xs text-muted font-normal">({timeOffToApprove.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {timeOffToApprove.map((r) => {
-                const days = Math.floor((r.endDate.getTime() - r.startDate.getTime()) / DAY_MS) + 1;
-                return (
-                  <li key={r.id}>
-                    <Link
-                      href={`/time-off`}
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="text-sm font-medium truncate">
-                          {r.user ? `${r.user.firstName} ${r.user.lastName}` : "—"}
-                        </span>
-                        <span className="text-xs text-muted truncate">{r.policy.name}</span>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
-                        <span className="text-xs text-muted">
-                          {r.startDate.toLocaleDateString()}{days > 1 ? ` · ${days}d` : ""}
-                        </span>
-                        <span className="text-xs font-mono">{Number(r.hours).toFixed(0)}h</span>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+      {approvalItems.length > 0 && <InboxApprovalQueue items={approvalItems} />}
 
       {compToApprove.length > 0 && (
         <Card>
@@ -805,57 +692,6 @@ export default async function InboxPage() {
         </Card>
       )}
 
-      {expensesToApprove.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Receipt size={16} /> Expenses waiting on you
-              <span className="text-xs text-muted font-normal">({expensesToApprove.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {expensesToApprove.map((e) => {
-                const amount = Number(e.amount);
-                const submittedAgo = e.submittedAt
-                  ? Math.floor((Date.now() - e.submittedAt.getTime()) / DAY_MS)
-                  : null;
-                let amountLabel: string;
-                try {
-                  amountLabel = new Intl.NumberFormat(undefined, { style: "currency", currency: e.currency }).format(amount);
-                } catch {
-                  amountLabel = `${e.currency} ${amount.toFixed(2)}`;
-                }
-                return (
-                  <li key={e.id}>
-                    <Link
-                      href={`/expenses/${e.id}`}
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="text-sm font-medium truncate">{e.description}</span>
-                        <span className="text-xs text-muted truncate">
-                          {e.reporter ? `${e.reporter.firstName} ${e.reporter.lastName}` : ""}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
-                        <span className="text-xs font-mono">{amountLabel}</span>
-                        <span className="text-xs text-muted">
-                          {submittedAgo === null
-                            ? ""
-                            : submittedAgo === 0
-                            ? "today"
-                            : `${submittedAgo}d ago`}
-                        </span>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
 
       {staleOkrs.length > 0 && (
         <Card>
