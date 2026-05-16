@@ -192,5 +192,21 @@ export async function PATCH(
     });
   }
 
+  // Notify the requester on decision (approve / reject). Other state
+  // transitions (submit / send / receive / close) don't need to bug them
+  // — they either initiated the action themselves or the status is
+  // implicit downstream of the prior decision.
+  if ((action === "approve" || action === "reject") && po.requesterId !== userId) {
+    prisma.notification.create({
+      data: {
+        userId: po.requesterId,
+        type: `po_${action}`,
+        title: action === "approve" ? "Purchase order approved" : "Purchase order rejected",
+        message: `${po.number} (${amt}) was ${action === "approve" ? "approved" : "rejected"}${note ? ` — "${note}"` : "."}`,
+        link: `/procurement?tab=pos#${po.id}`,
+      },
+    }).catch((err) => console.error("[PO] Notification failed:", err));
+  }
+
   return jsonSuccess({ ...updated, amount: Number(updated.amount) });
 }

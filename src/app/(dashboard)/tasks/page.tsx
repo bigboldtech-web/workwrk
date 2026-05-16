@@ -190,13 +190,13 @@ export default function TasksPage() {
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
-  // Within-day reorder. Drops on a task within the same day reposition
-  // the dragged task immediately before the drop target. Drops in a
-  // different day are ignored (cross-day requires a date PATCH which
-  // the reorder endpoint doesn't do — that's a v2 follow-up).
-  // External tasks (GCAL, MEETING) aren't user-owned so we refuse to
-  // reorder them; the API would reject anyway with a 403.
-  const handleTaskReorderDrop = useCallback(async (targetTaskId: string, targetDateStr: string) => {
+  // Task DnD drop handler. Two cases:
+  //   1) Same-day drop on a task    → reorder within the day
+  //   2) Cross-day drop on a task   → PATCH date, then reorder the target day
+  //      (this also handles drops on an empty column when targetTaskId is null)
+  // External tasks (GCAL, MEETING) refuse to drag — they're not owned by
+  // the user and the reorder API would 403.
+  const handleTaskReorderDrop = useCallback(async (targetTaskId: string | null, targetDateStr: string) => {
     const dragId = draggingTaskId;
     setDraggingTaskId(null);
     setDropBeforeTaskId(null);
@@ -205,11 +205,58 @@ export default function TasksPage() {
     if (!dragged) return;
     if (dragged.externalSource === "GCAL" || dragged.externalSource === "MEETING") return;
     if (dragged.id === targetTaskId) return;
-    const draggedDay = dragged.date.split("T")[0];
-    if (draggedDay !== targetDateStr) return; // ignore cross-day for v1
 
-    const dayTasks = tasks
-      .filter((t) => t.date.split("T")[0] === targetDateStr)
+    const draggedDay = dragged.date.split("T")[0];
+    const isCrossDay = draggedDay !== targetDateStr;
+
+    // Cross-day: PATCH the date so the task moves to the new column.
+    // Keep startAt/endAt offsets intact by computing the day delta.
+    if (isCrossDay) {
+      const oldDate = new Date(dragged.date);
+      const newDate = new Date(targetDateStr + "T00:00:00");
+      // Preserve the time-of-day from the original anchor.
+      newDate.setHours(oldDate.getHours(), oldDate.getMinutes(), oldDate.getSeconds(), 0);
+      const dayMs = 24 * 60 * 60 * 1000;
+      const deltaMs = Math.round((newDate.getTime() - oldDate.getTime()) / dayMs) * dayMs;
+      const newStartAt = dragged.startAt ? new Date(new Date(dragged.startAt).getTime() + deltaMs).toISOString() : undefined;
+      const newEndAt = dragged.endAt ? new Date(new Date(dragged.endAt).getTime() + deltaMs).toISOString() : undefined;
+
+      // Optimistic — move the task locally before the PATCH lands.
+      setTasks((prev) => prev.map((t) =>
+        t.id === dragId
+          ? { ...t, date: newDate.toISOString(), startAt: newStartAt ?? t.startAt, endAt: newEndAt ?? t.endAt, dayPosition: null }
+          : t,
+      ));
+
+      try {
+        const res = await fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: dragId,
+            date: newDate.toISOString(),
+            ...(newStartAt ? { startAt: newStartAt } : {}),
+            ...(newEndAt ? { endAt: newEndAt } : {}),
+          }),
+        });
+        if (!res.ok) throw new Error("date move failed");
+      } catch {
+        toastError("Couldn't move the task to that day");
+        fetchTasks();
+        return;
+      }
+    }
+
+    // Reorder pass on the target day. We rebuild the target day's list
+    // from local state (which is now optimistic for cross-day) and insert
+    // the dragged task at the right spot.
+    const targetDayList = (isCrossDay
+      ? [
+          ...tasks.filter((t) => t.id !== dragId && t.date.split("T")[0] === targetDateStr),
+          { ...dragged, date: targetDateStr + "T00:00:00.000Z" }, // dragged just joined
+        ]
+      : tasks.filter((t) => t.date.split("T")[0] === targetDateStr)
+    )
       .filter((t) => t.externalSource !== "GCAL" && t.externalSource !== "MEETING")
       .sort((a, b) => {
         const ap = a.dayPosition ?? Number.MAX_SAFE_INTEGER;
@@ -218,17 +265,21 @@ export default function TasksPage() {
         return a.id.localeCompare(b.id);
       });
 
-    const fromIdx = dayTasks.findIndex((t) => t.id === dragId);
-    let toIdx = dayTasks.findIndex((t) => t.id === targetTaskId);
-    if (fromIdx < 0 || toIdx < 0) return;
+    // Drop position. null target = append to end (empty-column drop).
+    let toIdx = targetTaskId === null
+      ? targetDayList.length
+      : targetDayList.findIndex((t) => t.id === targetTaskId);
+    if (toIdx < 0) return;
+    const fromIdx = targetDayList.findIndex((t) => t.id === dragId);
+    if (fromIdx < 0) return;
     if (toIdx > fromIdx) toIdx -= 1;
-    if (toIdx === fromIdx) return;
-    const reordered = [...dayTasks];
+    if (!isCrossDay && toIdx === fromIdx) return;
+
+    const reordered = [...targetDayList];
     const [moved] = reordered.splice(fromIdx, 1);
     reordered.splice(toIdx, 0, moved);
     const items = reordered.map((t, idx) => ({ id: t.id, dayPosition: (idx + 1) * 10 }));
 
-    // Optimistic — patch local state first so the UI doesn't flicker.
     setTasks((prev) =>
       prev.map((t) => {
         const found = items.find((i) => i.id === t.id);
@@ -524,8 +575,33 @@ export default function TasksPage() {
             const dayHours = dayTasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
             const today = isToday(date);
             const isPast = date < new Date() && !today;
+            const isCrossDayDropTarget = (() => {
+              if (!draggingTaskId) return false;
+              const dragged = tasks.find((t) => t.id === draggingTaskId);
+              if (!dragged) return false;
+              if (dragged.externalSource === "GCAL" || dragged.externalSource === "MEETING") return false;
+              return dragged.date.split("T")[0] !== dateStr;
+            })();
             return (
-              <div key={i} className={`min-h-[200px] rounded-lg border p-2 ${today ? "border-[rgba(212,255,46,0.4)] bg-[rgba(212,255,46,0.06)]" : "border-border bg-surface"}`}>
+              <div
+                key={i}
+                className={`min-h-[200px] rounded-lg border p-2 transition-colors ${today ? "border-[rgba(212,255,46,0.4)] bg-[rgba(212,255,46,0.06)]" : "border-border bg-surface"} ${isCrossDayDropTarget ? "ring-2 ring-[color:var(--accent-strong)] ring-offset-1 ring-offset-background" : ""}`}
+                onDragOver={(e) => {
+                  if (!draggingTaskId) return;
+                  const dragged = tasks.find((t) => t.id === draggingTaskId);
+                  if (!dragged) return;
+                  if (dragged.externalSource === "GCAL" || dragged.externalSource === "MEETING") return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(e) => {
+                  if (!draggingTaskId) return;
+                  e.preventDefault();
+                  // Append to the end of this day. Same-day drops on the
+                  // empty area below the last card also land here.
+                  handleTaskReorderDrop(null, dateStr);
+                }}
+              >
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className={`text-[10px] font-medium ${today ? "text-[color:var(--accent-strong)]" : "text-muted"}`}>{DAY_NAMES[i]}</p>
@@ -580,10 +656,11 @@ export default function TasksPage() {
                               }}
                               onDragOver={(e) => {
                                 if (!draggingTaskId) return;
-                                // Same-day check — don't show a drop line for
-                                // cross-day drags since we won't honor them.
                                 const dragged = tasks.find((t) => t.id === draggingTaskId);
-                                if (!dragged || dragged.date.split("T")[0] !== dateStr) return;
+                                // External-source drops are refused at the
+                                // handler too, but cut them off here so the
+                                // drop line never appears.
+                                if (!dragged || dragged.externalSource === "GCAL" || dragged.externalSource === "MEETING") return;
                                 e.preventDefault();
                                 e.dataTransfer.dropEffect = "move";
                                 if (dropBeforeTaskId !== task.id) setDropBeforeTaskId(task.id);

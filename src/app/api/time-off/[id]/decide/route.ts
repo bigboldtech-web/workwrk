@@ -64,5 +64,18 @@ export async function POST(
     targetType: "time_off_request",
   });
 
+  // Notify the requester of the decision. Fire-and-forget — never block
+  // the response on the notification write.
+  const dateRange = `${new Date(r.startDate).toLocaleDateString()} → ${new Date(r.endDate).toLocaleDateString()}`;
+  prisma.notification.create({
+    data: {
+      userId: r.userId,
+      type: `time_off_${decision.toLowerCase()}`,
+      title: decision === "APPROVE" ? "Time off approved" : "Time off declined",
+      message: `Your time-off request for ${dateRange} was ${decision === "APPROVE" ? "approved" : "declined"}${note ? ` — "${note}"` : "."}`,
+      link: "/time-off",
+    },
+  }).catch((err) => console.error("[TimeOff] Notification failed:", err));
+
   return jsonSuccess({ ...updated, hours: Number(updated.hours) });
 }

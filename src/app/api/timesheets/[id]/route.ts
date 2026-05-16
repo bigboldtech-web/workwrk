@@ -12,7 +12,7 @@ import {
   jsonSuccess,
   isManager,
 } from "@/lib/api-helpers";
-import { logActivity } from "@/lib/activity";
+import { logActivity, logAuditEvent } from "@/lib/activity";
 
 export async function GET(
   _req: NextRequest,
@@ -133,14 +133,30 @@ export async function PATCH(
         decisionNote: note,
       },
     });
-    logActivity({
+    // Approve/reject on a timesheet feeds payroll. Bump to warning so the
+    // audit log makes it findable on review.
+    logAuditEvent({
       type: `timesheet_${decision.toLowerCase()}`,
       actorId: userId,
       organizationId: orgId,
-      description: `${decision === "APPROVE" ? "Approved" : "Rejected"} timesheet`,
+      description: `${decision === "APPROVE" ? "Approved" : "Rejected"} timesheet (week of ${new Date(timesheet.weekStartDate).toLocaleDateString()})`,
       targetId: id,
       targetType: "timesheet",
+      metadata: { weekStartDate: timesheet.weekStartDate, ownerId: timesheet.userId },
     });
+
+    // Notify the timesheet owner. Payroll downstream means rejected
+    // hours need to be edited fast — surface in the bell.
+    prisma.notification.create({
+      data: {
+        userId: timesheet.userId,
+        type: `timesheet_${decision.toLowerCase()}`,
+        title: decision === "APPROVE" ? "Timesheet approved" : "Timesheet rejected",
+        message: `Your timesheet for the week of ${new Date(timesheet.weekStartDate).toLocaleDateString()} was ${decision === "APPROVE" ? "approved" : "rejected"}${note ? ` — "${note}"` : "."}`,
+        link: "/time",
+      },
+    }).catch((err) => console.error("[Timesheet] Notification failed:", err));
+
     return jsonSuccess(updated);
   }
 

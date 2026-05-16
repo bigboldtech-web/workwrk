@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { BookOpen, CheckSquare, Star, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText, GraduationCap, Briefcase, PartyPopper } from "lucide-react";
+import { InboxAiAssistPanel, type InboxAiItem } from "@/components/inbox/ai-assist-panel";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -342,6 +343,68 @@ export default async function InboxPage() {
     sopAssignments.filter((a) => isOverdue(a.dueDate)).length +
     tasks.filter((t) => isOverdue(t.endAt ?? t.date)).length;
 
+  // Collapse the 12 streams into a single AI-friendly punch list. Trim
+  // hard so the prompt stays cheap: title + minimal context, no PII
+  // beyond what the inbox already shows on the page.
+  const aiItems: InboxAiItem[] = [
+    ...sopAssignments.slice(0, 5).map((a) => ({
+      id: `sop:${a.id}`,
+      type: "sop",
+      title: a.sop.title,
+      context: `${a.mandatory ? "Mandatory · " : ""}${fmtRelative(a.dueDate)}`,
+      link: `/sops/${a.sopId}`,
+    })),
+    ...tasks.slice(0, 5).map((t) => ({
+      id: `task:${t.id}`,
+      type: "task",
+      title: t.title,
+      context: `${t.priority ?? "NORMAL"} · ${fmtRelative(t.endAt ?? t.date)}`,
+      link: `/tasks?taskId=${t.id}`,
+    })),
+    ...expensesToApprove.slice(0, 5).map((e) => ({
+      id: `expense:${e.id}`,
+      type: "expense",
+      title: e.description || "Expense",
+      context: `${e.currency} ${Number(e.amount).toFixed(0)} from ${e.reporter.firstName} ${e.reporter.lastName}`,
+      link: `/expenses/${e.id}`,
+    })),
+    ...posToApprove.slice(0, 5).map((p) => ({
+      id: `po:${p.id}`,
+      type: "purchase_order",
+      title: `${p.number} — ${p.description}`.slice(0, 80),
+      context: `${p.currency} ${Number(p.amount).toFixed(0)} to ${p.vendor.name} from ${p.requester.firstName} ${p.requester.lastName}`,
+      link: `/procurement?tab=pos#${p.id}`,
+    })),
+    ...invoicesToApprove.slice(0, 5).map((iv) => ({
+      id: `invoice:${iv.id}`,
+      type: "invoice",
+      title: `Invoice ${iv.invoiceNumber} from ${iv.vendor.name}`,
+      context: `${iv.currency} ${Number(iv.amount).toFixed(0)} due ${new Date(iv.dueDate).toLocaleDateString()}`,
+      link: `/procurement?tab=invoices#${iv.id}`,
+    })),
+    ...timeOffToApprove.slice(0, 5).map((r) => ({
+      id: `timeoff:${r.id}`,
+      type: "time_off",
+      title: `${r.user.firstName} ${r.user.lastName} · ${r.policy.name}`,
+      context: `${Number(r.hours).toFixed(0)}h · ${new Date(r.startDate).toLocaleDateString()} → ${new Date(r.endDate).toLocaleDateString()}`,
+      link: "/time-off",
+    })),
+    ...timesheetsToApprove.slice(0, 5).map((t) => ({
+      id: `timesheet:${t.id}`,
+      type: "timesheet",
+      title: `${t.user.firstName} ${t.user.lastName} · week of ${new Date(t.weekStartDate).toLocaleDateString()}`,
+      context: `${t._count.entries} entries`,
+      link: "/time",
+    })),
+    ...reviews.slice(0, 5).map((r) => ({
+      id: `review:${r.id}`,
+      type: "review",
+      title: `Review ${r.subject.firstName} ${r.subject.lastName}`,
+      context: `${r.cycle.name} · due ${r.cycle.endDate ? new Date(r.cycle.endDate).toLocaleDateString() : "—"}`,
+      link: `/reviews/${r.id}`,
+    })),
+  ].slice(0, 20);
+
   return (
     <div className="space-y-3 animate-fade-in">
       <PageHeader
@@ -358,6 +421,8 @@ export default async function InboxPage() {
           ...(overdueCount > 0 ? [{ label: "Overdue", value: overdueCount }] : []),
         ] : undefined}
       />
+
+      {aiItems.length > 0 && <InboxAiAssistPanel items={aiItems} />}
 
       {total === 0 && (
         <Card>

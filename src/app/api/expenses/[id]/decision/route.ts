@@ -85,5 +85,21 @@ export async function POST(
     targetType: "expense",
   });
 
+  // Notify the reporter whenever their expense changes state.
+  const amt = `${existing.currency} ${Number(existing.amount).toFixed(2)}`;
+  const verb =
+    decision === "APPROVE" ? "approved" :
+    decision === "REJECT" ? "rejected" :
+    "reimbursed";
+  prisma.notification.create({
+    data: {
+      userId: existing.reporterId,
+      type: `expense_${decision.toLowerCase()}`,
+      title: `Expense ${verb}`,
+      message: `Your expense "${existing.description}" (${amt}) was ${verb}${note ? ` — "${note}"` : "."}`,
+      link: `/expenses/${id}`,
+    },
+  }).catch((err) => console.error("[Expense] Notification failed:", err));
+
   return jsonSuccess({ ...updated, amount: Number(updated.amount) });
 }

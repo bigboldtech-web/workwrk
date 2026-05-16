@@ -69,6 +69,21 @@ export async function POST(
     targetType: "comp_decision",
   });
 
+  // Notify the proposer (the manager who put up the row). The subject
+  // is deliberately NOT notified — comp disclosure runs on a separate
+  // ceremony, not via the inbox bell.
+  if (existing.proposedById && existing.proposedById !== userId) {
+    prisma.notification.create({
+      data: {
+        userId: existing.proposedById,
+        type: `comp_decision_${decision.toLowerCase()}`,
+        title: decision === "APPROVE" ? "Comp proposal approved" : "Comp proposal rejected",
+        message: `Your compensation proposal was ${decision === "APPROVE" ? "approved" : "rejected"}${note ? ` — "${note}"` : "."}`,
+        link: "/compensation",
+      },
+    }).catch((err) => console.error("[Comp] Notification failed:", err));
+  }
+
   return jsonSuccess({
     ...updated,
     currentSalary: updated.currentSalary === null ? null : Number(updated.currentSalary),
