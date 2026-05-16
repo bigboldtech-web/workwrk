@@ -6,11 +6,13 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isManager,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 export async function GET(
   _req: NextRequest,
@@ -73,6 +75,21 @@ export async function PATCH(
   if (Object.keys(data).length === 0) return jsonError("No changes");
 
   const updated = await prisma.trainingCourse.update({ where: { id }, data });
+
+  // Mandatory-flag flip is the change finance/compliance cares about
+  // most — it changes who *must* complete the course.
+  const flippedMandatory = typeof data.mandatory === "boolean" && data.mandatory !== course.mandatory;
+  logActivity({
+    type: "course_updated",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Updated course "${course.title}"${flippedMandatory ? ` (mandatory: ${data.mandatory ? "on" : "off"})` : ""}`,
+    targetId: id,
+    targetType: "training_course",
+    oldValue: flippedMandatory ? { mandatory: course.mandatory } : undefined,
+    newValue: flippedMandatory ? { mandatory: data.mandatory } : undefined,
+  });
+
   return jsonSuccess(updated);
 }
 
@@ -97,5 +114,15 @@ export async function DELETE(
   }
 
   await prisma.trainingCourse.delete({ where: { id } });
+
+  logActivity({
+    type: "course_deleted",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Deleted course "${course.title}"`,
+    targetId: id,
+    targetType: "training_course",
+  });
+
   return jsonSuccess({ deleted: true });
 }

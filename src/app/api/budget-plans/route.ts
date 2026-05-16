@@ -8,10 +8,12 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 const VALID_TYPES = new Set(["BUDGET", "FORECAST", "STRATEGIC", "WHAT_IF"]);
 
@@ -78,6 +80,17 @@ export async function POST(req: NextRequest) {
       },
       include: { scenarios: true },
     });
+
+    logActivity({
+      type: "budget_plan_created",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Created ${type.toLowerCase()} plan "${name}"`,
+      targetId: plan.id,
+      targetType: "budget_plan",
+      metadata: { type, fiscalYearId },
+    });
+
     return jsonSuccess(plan, 201);
   } catch (e: unknown) {
     if (typeof e === "object" && e && "code" in e && (e as { code: string }).code === "P2002") {

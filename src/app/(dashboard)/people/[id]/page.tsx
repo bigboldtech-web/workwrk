@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
+import { useAutosave } from "@/hooks/use-autosave";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
 import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KudosReactions } from "@/components/kudos/kudos-reactions";
 import { TagPicker } from "@/components/tags/tag-picker";
@@ -521,22 +523,32 @@ export default function UserProfilePage() {
     } catch { toastError("Upload failed"); } finally { setUploadingAvatar(false); }
   };
 
-  const handleSaveEdit = async () => {
-    setSaving(true);
-    try {
+  // Shared profile-edit core. Used by both the explicit "Done" button
+  // and the debounced autosave. `silent=true` suppresses toasts + the
+  // post-save refetch so background saves don't disturb the cursor.
+  const saveProfileCore = useCallback(
+    async (snapshot: {
+      departmentId: string;
+      roleId: string;
+      accessLevel: string;
+      status: string;
+      dob: string;
+      officeId: string;
+      managerId: string;
+    }, silent: boolean) => {
       const body: Record<string, unknown> = {};
-      if (editDepartmentId) body.departmentId = editDepartmentId;
-      if (editRoleId) body.roleId = editRoleId;
+      if (snapshot.departmentId) body.departmentId = snapshot.departmentId;
+      if (snapshot.roleId) body.roleId = snapshot.roleId;
       // Only include accessLevel when it actually changed AND the caller
       // is allowed to change it. The API rejects any accessLevel field
       // from non-admins, even when the value is unchanged.
-      if (isAdmin && editAccessLevel && editAccessLevel !== user?.accessLevel) {
-        body.accessLevel = editAccessLevel;
+      if (isAdmin && snapshot.accessLevel && snapshot.accessLevel !== user?.accessLevel) {
+        body.accessLevel = snapshot.accessLevel;
       }
-      if (editStatus) body.status = editStatus;
-      body.dateOfBirth = editDob ? `${editDob}T12:00:00.000Z` : null;
-      body.officeId = editOfficeId || null;
-      body.managerId = editManagerId || null;
+      if (snapshot.status) body.status = snapshot.status;
+      body.dateOfBirth = snapshot.dob ? `${snapshot.dob}T12:00:00.000Z` : null;
+      body.officeId = snapshot.officeId || null;
+      body.managerId = snapshot.managerId || null;
 
       const res = await fetch(`/api/users/${id}`, {
         method: "PATCH",
@@ -545,16 +557,53 @@ export default function UserProfilePage() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to update");
+        const message = err.error || "Failed to update";
+        if (!silent) toastError(message);
+        throw new Error(message);
       }
-      // Refetch user
-      const updated = await fetch(`/api/users/${id}`).then((r) => r.json());
-      setUser(updated);
+      if (!silent) {
+        const updated = await fetch(`/api/users/${id}`).then((r) => r.json());
+        setUser(updated);
+        toastSuccess("Profile updated successfully");
+      }
+    },
+    [id, isAdmin, user?.accessLevel, toastError, toastSuccess],
+  );
+
+  // Bind autosave to the same form snapshot. Active only while the
+  // dialog is open, with a slightly longer debounce than usual because
+  // SelectItem clicks fire one change each (vs typing into a text field
+  // which the default 1500ms covers well).
+  const profileAutosave = useAutosave({
+    snapshot: {
+      departmentId: editDepartmentId,
+      roleId: editRoleId,
+      accessLevel: editAccessLevel,
+      status: editStatus,
+      dob: editDob,
+      officeId: editOfficeId,
+      managerId: editManagerId,
+    },
+    enabled: showEditDialog && !!user,
+    delay: 1200,
+    save: (s) => saveProfileCore(s, true),
+  });
+
+  const handleSaveEdit = async () => {
+    setSaving(true);
+    try {
+      await saveProfileCore({
+        departmentId: editDepartmentId,
+        roleId: editRoleId,
+        accessLevel: editAccessLevel,
+        status: editStatus,
+        dob: editDob,
+        officeId: editOfficeId,
+        managerId: editManagerId,
+      }, false);
       setShowEditDialog(false);
-      toastSuccess("Profile updated successfully");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to update profile";
-      toastError(message);
+    } catch {
+      // saveProfileCore already toasted on hard failure path.
     } finally {
       setSaving(false);
     }
@@ -754,10 +803,15 @@ export default function UserProfilePage() {
                     </Select>
                   </div>
                 </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setShowEditDialog(false)}>Cancel</Button>
+                <div className="flex items-center justify-end gap-2">
+                  <AutosaveIndicator
+                    status={profileAutosave.status}
+                    lastSavedAt={profileAutosave.lastSavedAt}
+                    className="mr-auto"
+                  />
+                  <Button variant="outline" onClick={() => setShowEditDialog(false)}>Close</Button>
                   <Button onClick={handleSaveEdit} disabled={saving} className="gap-1.5">
-                    <Save size={14} /> {saving ? "Saving..." : "Save Changes"}
+                    <Save size={14} /> {saving ? "Saving..." : "Done"}
                   </Button>
                 </div>
               </DialogContent>

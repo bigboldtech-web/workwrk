@@ -11,10 +11,12 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
+  getUserId,
   jsonError,
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { logActivity, logAuditEvent } from "@/lib/activity";
 
 export async function GET(
   _req: NextRequest,
@@ -89,12 +91,25 @@ export async function PATCH(
   });
   if (!plan) return jsonError("Not found", 404);
 
+  const userId = getUserId(session);
+
   if (action === "publish") {
     if (plan.status === "PUBLISHED") return jsonError("Already published");
     if (plan.status === "ARCHIVED") return jsonError("Cannot publish archived plan");
     const updated = await prisma.budgetPlan.update({
       where: { id },
       data: { status: "PUBLISHED", publishedAt: new Date() },
+    });
+    // Publishing a plan locks in the version that drives variance reports —
+    // warning severity makes it findable.
+    logAuditEvent({
+      type: "budget_plan_published",
+      actorId: userId,
+      organizationId: orgId,
+      description: `Published plan "${plan.name}" (v${plan.version})`,
+      targetId: id,
+      targetType: "budget_plan",
+      metadata: { version: plan.version },
     });
     return jsonSuccess(updated);
   }
@@ -104,6 +119,14 @@ export async function PATCH(
       where: { id },
       data: { status: "ARCHIVED", archivedAt: new Date() },
     });
+    logActivity({
+      type: "budget_plan_archived",
+      actorId: userId,
+      organizationId: orgId,
+      description: `Archived plan "${plan.name}"`,
+      targetId: id,
+      targetType: "budget_plan",
+    });
     return jsonSuccess(updated);
   }
 
@@ -111,6 +134,16 @@ export async function PATCH(
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name) return jsonError("name required");
     const updated = await prisma.budgetPlan.update({ where: { id }, data: { name } });
+    logActivity({
+      type: "budget_plan_renamed",
+      actorId: userId,
+      organizationId: orgId,
+      description: `Renamed plan "${plan.name}" → "${name}"`,
+      targetId: id,
+      targetType: "budget_plan",
+      oldValue: { name: plan.name },
+      newValue: { name },
+    });
     return jsonSuccess(updated);
   }
 
