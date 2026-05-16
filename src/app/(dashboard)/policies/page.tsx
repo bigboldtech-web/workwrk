@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { RichEditor } from "@/components/ui/rich-editor";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useRole } from "@/hooks/use-role";
 import { useSession } from "next-auth/react";
+import { ErrorRetry } from "@/components/ui/error-retry";
 
 const CATEGORIES = ["HR", "Security", "Compliance", "Operations", "Code of Conduct", "Leave Policy", "Expense Policy", "Data Privacy", "Work From Home", "General"];
 
@@ -32,6 +33,7 @@ export default function PoliciesPage() {
   const currentUser = sessionData?.user as any;
   const [policies, setPolicies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [selectedPolicy, setSelectedPolicy] = useState<any>(null);
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const { success: toastSuccess, error: toastError } = useToast();
@@ -42,13 +44,22 @@ export default function PoliciesPage() {
   const [form, setForm] = useState({ title: "", content: "", category: "", requiresAck: true, effectiveDate: "" });
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/policies")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { setPolicies(Array.isArray(d) ? d : d?.data || []); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const loadPolicies = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const r = await fetch("/api/policies");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      setPolicies(Array.isArray(d) ? d : d?.data || []);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { void loadPolicies(); }, [loadPolicies]);
 
   async function handleCreate() {
     if (!form.title.trim() || !form.content.trim()) return;
@@ -158,6 +169,15 @@ export default function PoliciesPage() {
 
         {loading ? (
           <div className="p-3 space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+        ) : loadError ? (
+          <div className="p-3">
+            <ErrorRetry
+              title="Couldn't load policies"
+              description="The policies stream didn't respond. Try again in a moment."
+              onRetry={loadPolicies}
+              retrying={loading}
+            />
+          </div>
         ) : policies.length === 0 ? (
           <div className="p-8 text-center">
             <Shield size={32} className="mx-auto text-muted mb-2" />

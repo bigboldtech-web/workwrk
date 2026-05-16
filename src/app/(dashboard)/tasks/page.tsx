@@ -23,6 +23,7 @@ import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { Skeleton, SkeletonRow } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorRetry } from "@/components/ui/error-retry";
 
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import { DayView } from "@/components/tasks/view-day";
@@ -83,6 +84,7 @@ export default function TasksPage() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [view, setView] = useState<CalendarView>("week");
   const [anchor, setAnchor] = useState(new Date());
 
@@ -156,6 +158,7 @@ export default function TasksPage() {
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const params = new URLSearchParams({
         startDate: formatISODate(fromDate),
@@ -178,6 +181,7 @@ export default function TasksPage() {
         fetch(`/api/tasks?${params}`),
         fetch(`/api/calendar/meetings?${meetingParams}`),
       ]);
+      if (!tRes.ok && !mRes.ok) throw new Error("both task + meeting fetches failed");
       const taskRows: Task[] = tRes.ok
         ? await tRes.json().then((d) => (Array.isArray(d) ? d : d.data || []))
         : [];
@@ -185,7 +189,11 @@ export default function TasksPage() {
         ? await mRes.json().then((d) => (Array.isArray(d) ? d : d.data || []))
         : [];
       setTasks([...taskRows, ...meetingRows.map(meetingToTask)]);
-    } catch {} finally { setLoading(false); }
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, [fromDate, toDate, teamView, isManager, selectedMemberIds]);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
@@ -532,6 +540,15 @@ export default function TasksPage() {
           </TabsList>
         </Tabs>
       </div>
+
+      {loadError && !loading && (
+        <ErrorRetry
+          title="Couldn't load your calendar"
+          description="Tasks + meetings failed to load. Try again — switching views will refetch."
+          onRetry={fetchTasks}
+          retrying={loading}
+        />
+      )}
 
       {/* ── Day ── */}
       {view === "day" && (
