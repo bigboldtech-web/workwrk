@@ -207,12 +207,15 @@ export function Topbar() {
     setUnreadCount(0);
   }, []);
 
-  // Snooze a notification. Hours selectable via modifier keys on the
-  // bell button: plain = 1 day, Shift = 1 week, Alt/Option = 1 hour.
-  // Optimistically remove from the local panel so the badge updates
-  // immediately; the PATCH writes `snoozedUntil` and the GET will
-  // hide it on next poll.
-  const handleSnoozeNotification = useCallback((id: string, hours: number) => {
+  // Which row's snooze picker is currently expanded. Only one open at a
+  // time — clicking the clock on another row replaces it.
+  const [snoozePickerOpenFor, setSnoozePickerOpenFor] = useState<string | null>(null);
+
+  // Snooze a notification. Optimistically remove from the local panel so
+  // the badge updates immediately; the PATCH writes `snoozedUntil` and
+  // the GET will hide it on next poll.
+  const handleSnoozeNotification = useCallback((id: string, untilISO: string) => {
+    setSnoozePickerOpenFor(null);
     setNotifications((prev) => {
       const target = prev.find((n) => n.id === id);
       if (target && !target.read) {
@@ -220,13 +223,33 @@ export function Topbar() {
       }
       return prev.filter((n) => n.id !== id);
     });
-    const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
     fetch("/api/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, snoozeUntil: until }),
+      body: JSON.stringify({ id, snoozeUntil: untilISO }),
     }).catch(() => {});
   }, []);
+
+  // Quick-snooze presets. "Tomorrow morning" lands at 9am local on the
+  // next calendar day so the user wakes up to it; everything else is a
+  // simple offset from now.
+  const snoozePresets = (): { label: string; until: () => string }[] => {
+    const tomorrow9 = () => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      d.setHours(9, 0, 0, 0);
+      return d.toISOString();
+    };
+    const offset = (hours: number) => () =>
+      new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    return [
+      { label: "1 hour", until: offset(1) },
+      { label: "4 hours", until: offset(4) },
+      { label: "Tomorrow 9am", until: tomorrow9 },
+      { label: "1 day", until: offset(24) },
+      { label: "1 week", until: offset(24 * 7) },
+    ];
+  };
 
   // Delete a single notification optimistically. Used by the small X
   // button on each row — lets users sweep already-seen items one by
@@ -375,7 +398,7 @@ export function Topbar() {
         <HelpButton />
 
         {/* Notifications */}
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => { if (!open) setSnoozePickerOpenFor(null); }}>
           <DropdownMenuTrigger asChild>
             <button type="button" className="app-icon-btn" aria-label="Notifications">
               <Bell size={16} />
@@ -441,13 +464,13 @@ export function Topbar() {
                       <button
                         type="button"
                         data-dismiss-notif
-                        className="flex-shrink-0 rounded p-0.5 text-muted-2 hover:text-foreground hover:bg-surface-2 transition-colors"
-                        aria-label="Snooze (click 1d · shift+click 1w · alt+click 1h)"
-                        title="Snooze: click = 1 day · shift+click = 1 week · alt+click = 1 hour"
+                        className={`flex-shrink-0 rounded p-0.5 transition-colors ${snoozePickerOpenFor === notif.id ? "text-foreground bg-surface-2" : "text-muted-2 hover:text-foreground hover:bg-surface-2"}`}
+                        aria-label="Snooze for…"
+                        aria-expanded={snoozePickerOpenFor === notif.id}
+                        title="Snooze for…"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const hours = e.shiftKey ? 24 * 7 : e.altKey ? 1 : 24;
-                          handleSnoozeNotification(notif.id, hours);
+                          setSnoozePickerOpenFor((cur) => (cur === notif.id ? null : notif.id));
                         }}
                       >
                         <ClockIcon size={11} />
@@ -466,6 +489,29 @@ export function Topbar() {
                       </button>
                     </div>
                     <span className="text-xs line-clamp-1 text-muted">{notif.message}</span>
+                    {snoozePickerOpenFor === notif.id && (
+                      <div
+                        data-dismiss-notif
+                        className="flex flex-wrap items-center gap-1 mt-1 pt-1 border-t border-border w-full"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="text-[10px] text-muted-2 mr-1">Snooze for:</span>
+                        {snoozePresets().map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            data-dismiss-notif
+                            className="text-[10px] rounded-md px-1.5 py-0.5 border border-border text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSnoozeNotification(notif.id, preset.until());
+                            }}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </DropdownMenuItem>
                 ))}
               </>

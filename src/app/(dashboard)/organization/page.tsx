@@ -23,6 +23,8 @@ import { useConfirm } from "@/components/ui/dialog-provider";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { useAutosave } from "@/hooks/use-autosave";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
 
 // ============================================
 // Dynamic Org Chart Component
@@ -353,6 +355,35 @@ export default function OrganizationPage() {
   const [editingOfficeId, setEditingOfficeId] = useState<string | null>(null);
   const [officeForm, setOfficeForm] = useState({ name: "", address: "", city: "", state: "", country: "", timezone: "", isHeadquarters: false });
 
+  const saveOfficeCore = useCallback(
+    async (snapshot: typeof officeForm, silent: boolean) => {
+      if (!editingOfficeId || !snapshot.name.trim()) return;
+      const res = await fetch("/api/offices", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingOfficeId, ...snapshot }),
+      });
+      if (!res.ok) {
+        if (!silent) {
+          const err = await res.json().catch(() => ({}));
+          toastError(err.error || "Failed to save office");
+        }
+        throw new Error("save failed");
+      }
+      if (!silent) {
+        toastSuccess("Office updated");
+        fetchData();
+      }
+    },
+    [editingOfficeId, toastError, toastSuccess],
+  );
+
+  const officeAutosave = useAutosave({
+    snapshot: officeForm,
+    enabled: showAddOffice && !!editingOfficeId,
+    save: (s) => saveOfficeCore(s, true),
+  });
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -491,23 +522,44 @@ export default function OrganizationPage() {
     setShowEditDeptDialog(true);
   }
 
-  async function updateDepartment() {
-    if (!editingDept) return;
-    try {
+  // Shared save core for departments — used by both explicit "Save Changes"
+  // and the debounced autosave. `silent=true` suppresses toasts + the
+  // post-save refetch so background saves don't disturb the cursor.
+  const saveDeptCore = useCallback(
+    async (snapshot: typeof deptForm, silent: boolean) => {
+      if (!editingDept || !snapshot.name.trim()) return;
       const res = await fetch(`/api/departments/${editingDept.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(deptForm),
+        body: JSON.stringify(snapshot),
       });
-      if (res.ok) {
-        setShowEditDeptDialog(false);
-        setEditingDept(null);
-        setDeptForm({ name: "", description: "", color: "var(--b-accent-text)" });
-        fetchData();
-        toastSuccess("Department updated");
+      if (!res.ok) {
+        if (!silent) toastError("Failed to update department");
+        throw new Error("save failed");
       }
-    } catch (err) {
-      toastError("Failed to update department");
+      if (!silent) {
+        toastSuccess("Department updated");
+        fetchData();
+      }
+    },
+    [editingDept, toastError, toastSuccess],
+  );
+
+  const deptAutosave = useAutosave({
+    snapshot: deptForm,
+    enabled: showEditDeptDialog && !!editingDept,
+    save: (s) => saveDeptCore(s, true),
+  });
+
+  async function updateDepartment() {
+    if (!editingDept) return;
+    try {
+      await saveDeptCore(deptForm, false);
+      setShowEditDeptDialog(false);
+      setEditingDept(null);
+      setDeptForm({ name: "", description: "", color: "var(--b-accent-text)" });
+    } catch {
+      // saveDeptCore already toasted on failure.
     }
   }
 
@@ -517,23 +569,41 @@ export default function OrganizationPage() {
     setShowEditRoleDialog(true);
   }
 
-  async function updateRole() {
-    if (!editingRole) return;
-    try {
+  const saveRoleCore = useCallback(
+    async (snapshot: typeof roleForm, silent: boolean) => {
+      if (!editingRole || !snapshot.title.trim()) return;
       const res = await fetch(`/api/roles/${editingRole.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(roleForm),
+        body: JSON.stringify(snapshot),
       });
-      if (res.ok) {
-        setShowEditRoleDialog(false);
-        setEditingRole(null);
-        setRoleForm({ title: "", description: "", departmentId: "", level: "EMPLOYEE" });
-        fetchData();
-        toastSuccess("Role updated");
+      if (!res.ok) {
+        if (!silent) toastError("Failed to update role");
+        throw new Error("save failed");
       }
-    } catch (err) {
-      toastError("Failed to update role");
+      if (!silent) {
+        toastSuccess("Role updated");
+        fetchData();
+      }
+    },
+    [editingRole, toastError, toastSuccess],
+  );
+
+  const roleAutosave = useAutosave({
+    snapshot: roleForm,
+    enabled: showEditRoleDialog && !!editingRole,
+    save: (s) => saveRoleCore(s, true),
+  });
+
+  async function updateRole() {
+    if (!editingRole) return;
+    try {
+      await saveRoleCore(roleForm, false);
+      setShowEditRoleDialog(false);
+      setEditingRole(null);
+      setRoleForm({ title: "", description: "", departmentId: "", level: "EMPLOYEE" });
+    } catch {
+      // saveRoleCore already toasted.
     }
   }
 
@@ -1074,29 +1144,39 @@ export default function OrganizationPage() {
                   </label>
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setShowAddOffice(false)}>Cancel</Button>
+                  {editingOfficeId && (
+                    <AutosaveIndicator
+                      status={officeAutosave.status}
+                      lastSavedAt={officeAutosave.lastSavedAt}
+                      className="mr-auto"
+                    />
+                  )}
+                  <Button variant="outline" onClick={() => setShowAddOffice(false)}>{editingOfficeId ? "Close" : "Cancel"}</Button>
                   <Button onClick={async () => {
                     if (!officeForm.name.trim()) return;
-                    const res = editingOfficeId
-                      ? await fetch("/api/offices", {
-                          method: "PATCH", headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ id: editingOfficeId, ...officeForm }),
-                        })
-                      : await fetch("/api/offices", {
-                          method: "POST", headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(officeForm),
-                        });
-                    if (res.ok) {
-                      setShowAddOffice(false);
-                      setEditingOfficeId(null);
-                      setOfficeForm({ name: "", address: "", city: "", state: "", country: "", timezone: "", isHeadquarters: false });
-                      fetchData();
-                      toastSuccess(editingOfficeId ? "Office updated" : "Office added");
+                    if (editingOfficeId) {
+                      try {
+                        await saveOfficeCore(officeForm, false);
+                      } catch {
+                        return;
+                      }
                     } else {
-                      const err = await res.json().catch(() => ({}));
-                      toastError(err.error || "Failed to save office");
+                      const res = await fetch("/api/offices", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(officeForm),
+                      });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        toastError(err.error || "Failed to save office");
+                        return;
+                      }
+                      toastSuccess("Office added");
+                      fetchData();
                     }
-                  }} disabled={!officeForm.name.trim()}>{editingOfficeId ? "Save Changes" : "Add Office"}</Button>
+                    setShowAddOffice(false);
+                    setEditingOfficeId(null);
+                    setOfficeForm({ name: "", address: "", city: "", state: "", country: "", timezone: "", isHeadquarters: false });
+                  }} disabled={!officeForm.name.trim()}>{editingOfficeId ? "Done" : "Add Office"}</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -1197,8 +1277,13 @@ export default function OrganizationPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditDeptDialog(false)}>Cancel</Button>
-            <Button onClick={updateDepartment}>Save Changes</Button>
+            <AutosaveIndicator
+              status={deptAutosave.status}
+              lastSavedAt={deptAutosave.lastSavedAt}
+              className="mr-auto"
+            />
+            <Button variant="outline" onClick={() => setShowEditDeptDialog(false)}>Close</Button>
+            <Button onClick={updateDepartment}>Done</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1231,8 +1316,13 @@ export default function OrganizationPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditRoleDialog(false)}>Cancel</Button>
-            <Button onClick={updateRole}>Save Changes</Button>
+            <AutosaveIndicator
+              status={roleAutosave.status}
+              lastSavedAt={roleAutosave.lastSavedAt}
+              className="mr-auto"
+            />
+            <Button variant="outline" onClick={() => setShowEditRoleDialog(false)}>Close</Button>
+            <Button onClick={updateRole}>Done</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -10,7 +10,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/dashboard/page-header";
-import { BookOpen, CheckSquare, Star, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText, GraduationCap, Briefcase } from "lucide-react";
+import { BookOpen, CheckSquare, Star, Crosshair, Receipt, DollarSign, CalendarOff, Clock, ShoppingCart, FileText, GraduationCap, Briefcase, PartyPopper } from "lucide-react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TASK_HORIZON_DAYS = 7;
@@ -361,9 +361,30 @@ export default async function InboxPage() {
 
       {total === 0 && (
         <Card>
-          <CardContent className="p-10 text-center text-muted text-sm">
-            You're all clear. New items show up here when SOPs are assigned to you,
-            tasks come due, or reviews need your input.
+          <CardContent className="flex flex-col items-center justify-center py-16 px-6 text-center">
+            <div
+              className="h-14 w-14 rounded-2xl flex items-center justify-center mb-4"
+              style={{
+                background: "var(--b-accent-tint)",
+                border: "1px solid var(--b-accent-border)",
+                color: "var(--b-accent-text)",
+              }}
+            >
+              <PartyPopper size={26} />
+            </div>
+            <h3
+              className="mb-1.5 text-foreground"
+              style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}
+            >
+              Inbox zero — nice work.
+            </h3>
+            <p
+              className="max-w-md text-muted"
+              style={{ fontSize: 14, lineHeight: 1.55 }}
+            >
+              New items will land here when SOPs are assigned to you, tasks come due,
+              expenses or POs need your approval, or reviews need your input.
+            </p>
           </CardContent>
         </Card>
       )}
