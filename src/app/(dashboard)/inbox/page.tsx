@@ -572,186 +572,187 @@ export default async function InboxPage() {
       )}
 
       {upcomingInterviews.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Briefcase size={16} /> Interviews this week
-              <span className="text-xs text-muted font-normal">({upcomingInterviews.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {upcomingInterviews.map((iv) => {
-                const when = iv.scheduledAt;
-                return (
-                  <li key={iv.id}>
-                    <Link
-                      href="/recruiting"
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="text-sm font-medium truncate">
-                          {iv.application.candidate.firstName} {iv.application.candidate.lastName}
-                        </span>
-                        <span className="text-xs text-muted truncate">{iv.application.job.title}</span>
-                        <span className="text-[10px] uppercase tracking-wide text-muted">{iv.type}</span>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
-                        <span className="text-xs text-muted">
-                          {when.toLocaleDateString()}
-                          {" · "}
-                          {when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                        <span className="text-xs text-muted font-mono">{iv.durationMinutes}m</span>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
+        <section className="rounded-xl border border-border bg-surface">
+          <header className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-[15px] font-semibold inline-flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] inline-flex items-center justify-center">
+                <Briefcase size={14} />
+              </span>
+              Interviews this week
+            </h2>
+            <span className="text-[11.5px] text-muted-2 tabular-nums">{upcomingInterviews.length}</span>
+          </header>
+          <ul className="divide-y divide-border">
+            {upcomingInterviews.map((iv) => {
+              const when = iv.scheduledAt;
+              return (
+                <li key={iv.id}>
+                  <Link
+                    href="/recruiting"
+                    className="flex items-center justify-between px-5 py-3.5 hover:bg-[color:var(--surface-elevated)] transition-fast"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-[13.5px] font-medium truncate">
+                        {iv.application.candidate.firstName} {iv.application.candidate.lastName}
+                      </span>
+                      <span className="text-[12px] text-muted truncate">{iv.application.job.title}</span>
+                      <span className="text-[10px] uppercase tracking-wide text-muted-2">{iv.type}</span>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                      <span className="text-[12px] text-muted tabular-nums">
+                        {when.toLocaleDateString()} · {when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                      <span className="text-[11.5px] text-muted-2 font-mono">{iv.durationMinutes}m</span>
+                    </div>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       {incompleteMandatoryCourses.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <GraduationCap size={16} /> Mandatory courses to finish
-              <span className="text-xs text-muted font-normal">({incompleteMandatoryCourses.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {incompleteMandatoryCourses.map((e) => (
-                <li key={e.id}>
-                  <Link
-                    href="/learning"
-                    className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="text-sm font-medium truncate">{e.course.title}</span>
-                      {e.course.duration && (
-                        <span className="text-xs text-muted">{e.course.duration} min</span>
-                      )}
-                    </div>
-                    <span className="text-xs font-mono flex-shrink-0 ml-3">{e.progress}%</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <section className="rounded-xl border border-border bg-surface">
+          <header className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-[15px] font-semibold inline-flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-[color:var(--signal-warning-bg)] text-[color:var(--signal-warning-fg)] inline-flex items-center justify-center">
+                <GraduationCap size={14} />
+              </span>
+              Mandatory courses to finish
+            </h2>
+            <span className="text-[11.5px] text-muted-2 tabular-nums">{incompleteMandatoryCourses.length}</span>
+          </header>
+          <ul className="divide-y divide-border">
+            {incompleteMandatoryCourses.map((e) => (
+              <li key={e.id}>
+                <Link
+                  href="/learning"
+                  className="flex items-center justify-between px-5 py-3.5 hover:bg-[color:var(--surface-elevated)] transition-fast"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className="text-[13.5px] font-medium truncate">{e.course.title}</span>
+                    {e.course.duration && (
+                      <span className="text-[11.5px] text-muted-2">{e.course.duration} min</span>
+                    )}
+                  </div>
+                  <span className="text-[12px] font-mono flex-shrink-0 ml-3 tabular-nums">{e.progress}%</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {approvalItems.length > 0 && <InboxApprovalQueue items={approvalItems} />}
 
       {compToApprove.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <DollarSign size={16} /> Comp decisions waiting on you
-              <span className="text-xs text-muted font-normal">({compToApprove.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {compToApprove.map((c) => {
-                const cur = c.currentSalary === null ? null : Number(c.currentSalary);
-                const prop = c.proposedSalary === null ? null : Number(c.proposedSalary);
-                const pct = cur && prop && cur > 0 ? ((prop - cur) / cur) * 100 : null;
-                return (
-                  <li key={c.id}>
-                    <Link
-                      href={`/compensation/${c.cycleId}`}
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="text-sm font-medium truncate">
-                          {c.subject.firstName} {c.subject.lastName}
-                        </span>
-                        <span className="text-xs text-muted truncate">{c.cycle.name}</span>
-                      </div>
-                      <span className="text-xs font-mono flex-shrink-0 ml-3">
-                        {pct === null ? "—" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`}
+        <section className="rounded-xl border border-border bg-surface">
+          <header className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-[15px] font-semibold inline-flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-[color:var(--signal-success-bg)] text-[color:var(--signal-success-fg)] inline-flex items-center justify-center">
+                <DollarSign size={14} />
+              </span>
+              Comp decisions waiting on you
+            </h2>
+            <span className="text-[11.5px] text-muted-2 tabular-nums">{compToApprove.length}</span>
+          </header>
+          <ul className="divide-y divide-border">
+            {compToApprove.map((c) => {
+              const cur = c.currentSalary === null ? null : Number(c.currentSalary);
+              const prop = c.proposedSalary === null ? null : Number(c.proposedSalary);
+              const pct = cur && prop && cur > 0 ? ((prop - cur) / cur) * 100 : null;
+              return (
+                <li key={c.id}>
+                  <Link
+                    href={`/compensation/${c.cycleId}`}
+                    className="flex items-center justify-between px-5 py-3.5 hover:bg-[color:var(--surface-elevated)] transition-fast"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-[13.5px] font-medium truncate">
+                        {c.subject.firstName} {c.subject.lastName}
                       </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
+                      <span className="text-[12px] text-muted truncate">{c.cycle.name}</span>
+                    </div>
+                    <span className={`text-[12px] font-mono flex-shrink-0 ml-3 tabular-nums ${pct !== null && pct > 0 ? "text-[color:var(--signal-success-fg)] font-medium" : pct !== null && pct < 0 ? "text-[color:var(--signal-danger-fg)] font-medium" : "text-muted"}`}>
+                      {pct === null ? "—" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
 
       {staleOkrs.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Crosshair size={16} /> OKRs needing a check-in
-              <span className="text-xs text-muted font-normal">({staleOkrs.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {staleOkrs.map((o) => (
-                <li key={o.id}>
-                  <Link
-                    href={`/okrs/${o.id}`}
-                    className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="text-sm font-medium truncate">{o.title}</span>
-                      <span className="text-xs text-muted font-mono flex-shrink-0">{o.progress}%</span>
-                    </div>
-                    <span className="text-xs flex-shrink-0 ml-3 text-amber-400">
-                      {o.lastDays === null ? "no check-ins yet" : `${o.lastDays} days since last`}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <section className="rounded-xl border border-border bg-surface">
+          <header className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-[15px] font-semibold inline-flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] inline-flex items-center justify-center">
+                <Crosshair size={14} />
+              </span>
+              OKRs needing a check-in
+            </h2>
+            <span className="text-[11.5px] text-muted-2 tabular-nums">{staleOkrs.length}</span>
+          </header>
+          <ul className="divide-y divide-border">
+            {staleOkrs.map((o) => (
+              <li key={o.id}>
+                <Link
+                  href={`/okrs/${o.id}`}
+                  className="flex items-center justify-between px-5 py-3.5 hover:bg-[color:var(--surface-elevated)] transition-fast"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className="text-[13.5px] font-medium truncate">{o.title}</span>
+                    <span className="text-[11.5px] text-muted-2 font-mono tabular-nums flex-shrink-0">{o.progress}%</span>
+                  </div>
+                  <span className="text-[12px] flex-shrink-0 ml-3 text-[color:var(--signal-warning-fg)]">
+                    {o.lastDays === null ? "no check-ins yet" : `${o.lastDays} days since last`}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {reviews.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Star size={16} /> Reviews waiting on you
-              <span className="text-xs text-muted font-normal">({reviews.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {reviews.map((r) => {
-                const subject = `${r.subject.firstName} ${r.subject.lastName}`.trim();
-                return (
-                  <li key={r.id}>
-                    <Link
-                      href={`/reviews/${r.id}`}
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-sm font-medium truncate">
-                          Review for {subject}
-                        </span>
-                        <span className="text-xs text-muted truncate">
-                          {r.cycle.name}
-                        </span>
-                      </div>
-                      <span className={`text-xs flex-shrink-0 ml-3 ${isOverdue(r.cycle.endDate) ? "text-red-400" : "text-muted"}`}>
-                        {fmtRelative(r.cycle.endDate)}
+        <section className="rounded-xl border border-border bg-surface">
+          <header className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-[15px] font-semibold inline-flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-[color:var(--signal-warning-bg)] text-[color:var(--signal-warning-fg)] inline-flex items-center justify-center">
+                <Star size={14} />
+              </span>
+              Reviews waiting on you
+            </h2>
+            <span className="text-[11.5px] text-muted-2 tabular-nums">{reviews.length}</span>
+          </header>
+          <ul className="divide-y divide-border">
+            {reviews.map((r) => {
+              const subject = `${r.subject.firstName} ${r.subject.lastName}`.trim();
+              return (
+                <li key={r.id}>
+                  <Link
+                    href={`/reviews/${r.id}`}
+                    className="flex items-center justify-between px-5 py-3.5 hover:bg-[color:var(--surface-elevated)] transition-fast"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-[13.5px] font-medium truncate">
+                        Review for {subject}
                       </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
+                      <span className="text-[12px] text-muted truncate">{r.cycle.name}</span>
+                    </div>
+                    <span className={`text-[12px] flex-shrink-0 ml-3 tabular-nums ${isOverdue(r.cycle.endDate) ? "text-[color:var(--signal-danger-fg)] font-medium" : "text-muted"}`}>
+                      {fmtRelative(r.cycle.endDate)}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
     </div>
   );
