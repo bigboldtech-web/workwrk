@@ -19,6 +19,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import {
   Lightbulb, Plus, ThumbsUp, MessageSquare, Clock, CheckCircle2, XCircle,
   Award, Send, ChevronRight, Trash2, MessageCircle, Gavel, GripVertical, ArrowDownUp,
@@ -298,41 +299,130 @@ export default function IdeasPage() {
   const submitted = ideas.filter((i) => i.status === "SUBMITTED").length;
   const approved = ideas.filter((i) => ["APPROVED", "IMPLEMENTED", "REWARDED"].includes(i.status)).length;
 
-  return (
-    <div className="space-y-3 animate-fade-in">
-      <PageHeader
-        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Ideas" }]}
-        kicker="Ideas · continuous improvement"
-        title="Ideas board"
-        subtitle={`${ideas.length} ideas · ${submitted} pending · ${approved} approved`}
-        actions={[
-          { label: "Submit idea", onClick: () => setShowSubmit(true), icon: <Lightbulb size={14} /> },
-        ]}
-      />
+  // Filter state for the rail. Only applies in list tabs (all / mine /
+  // review). Roadmap tab uses its own kanban filters via the status
+  // column headers, so we omit the rail there entirely.
+  const [statusFilter, setStatusFilter] = useState<"all" | string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | string>("all");
 
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="flex-wrap">
-            <TabsTrigger value="all" className="gap-1.5"><Lightbulb size={14} /> All</TabsTrigger>
-            <TabsTrigger value="mine" className="gap-1.5"><Send size={14} /> My Ideas</TabsTrigger>
-            <TabsTrigger value="roadmap" className="gap-1.5"><Award size={14} /> Roadmap</TabsTrigger>
-            {isManager && <TabsTrigger value="review" className="gap-1.5"><Clock size={14} /> Review</TabsTrigger>}
-          </TabsList>
-        </Tabs>
-        {tab !== "roadmap" && (
-          <div className="flex items-center gap-2">
-            <ArrowDownUp size={12} className="text-muted-2" />
-            <Select value={sort} onValueChange={(v) => setSort(v as "newest" | "votes" | "priority")}>
-              <SelectTrigger className="h-8 w-[160px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="newest">Newest</SelectItem>
-                <SelectItem value="votes">Most votes</SelectItem>
-                {isManager && <SelectItem value="priority">Priority (drag)</SelectItem>}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+  const statusCounts = {
+    SUBMITTED: ideas.filter((i) => i.status === "SUBMITTED").length,
+    UNDER_REVIEW: ideas.filter((i) => i.status === "UNDER_REVIEW").length,
+    APPROVED: ideas.filter((i) => i.status === "APPROVED").length,
+    REJECTED: ideas.filter((i) => i.status === "REJECTED").length,
+    IMPLEMENTED: ideas.filter((i) => i.status === "IMPLEMENTED").length,
+    REWARDED: ideas.filter((i) => i.status === "REWARDED").length,
+  };
+
+  const categoryCounts = CATEGORIES.reduce<Record<string, number>>((acc, c) => {
+    acc[c] = ideas.filter((i) => i.category === c).length;
+    return acc;
+  }, {});
+
+  const filteredIdeas = ideas.filter((i) => {
+    if (statusFilter !== "all" && i.status !== statusFilter) return false;
+    if (categoryFilter !== "all" && i.category !== categoryFilter) return false;
+    return true;
+  });
+
+  const filtersRail = tab === "roadmap" ? undefined : (
+    <div className="space-y-5">
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Status</Label>
+        <div className="space-y-0.5">
+          {([
+            { value: "all", label: "All", count: ideas.length },
+            ...Object.entries(STATUS_STYLES).map(([k, v]) => ({ value: k, label: v.label, count: statusCounts[k as keyof typeof statusCounts] ?? 0 })),
+          ]).map((s) => (
+            <button
+              key={s.value}
+              onClick={() => setStatusFilter(s.value)}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                statusFilter === s.value
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              <span>{s.label}</span>
+              <span className="tabular-nums text-muted-2">{s.count}</span>
+            </button>
+          ))}
+        </div>
       </div>
+
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Category</Label>
+        <div className="space-y-0.5">
+          <button
+            onClick={() => setCategoryFilter("all")}
+            className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+              categoryFilter === "all"
+                ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+            }`}
+          >
+            <span>All categories</span>
+            <span className="tabular-nums text-muted-2">{ideas.length}</span>
+          </button>
+          {CATEGORIES.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCategoryFilter(c)}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                categoryFilter === c
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              <span>{c}</span>
+              <span className="tabular-nums text-muted-2">{categoryCounts[c] ?? 0}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-border">
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block flex items-center gap-1">
+          <ArrowDownUp size={10} /> Sort
+        </Label>
+        <Select value={sort} onValueChange={(v) => setSort(v as "newest" | "votes" | "priority")}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="newest">Newest</SelectItem>
+            <SelectItem value="votes">Most votes</SelectItem>
+            {isManager && <SelectItem value="priority">Priority (drag)</SelectItem>}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+
+  return (
+    <ListPage
+      header={
+        <>
+          <PageHeader
+            breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Ideas" }]}
+            kicker="Ideas · continuous improvement"
+            title="Ideas board"
+            subtitle={`${ideas.length} ideas · ${submitted} pending · ${approved} approved`}
+            actions={[
+              { label: "Submit idea", onClick: () => setShowSubmit(true), icon: <Lightbulb size={14} /> },
+            ]}
+          />
+
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList className="flex-wrap">
+              <TabsTrigger value="all" className="gap-1.5"><Lightbulb size={14} /> All</TabsTrigger>
+              <TabsTrigger value="mine" className="gap-1.5"><Send size={14} /> My Ideas</TabsTrigger>
+              <TabsTrigger value="roadmap" className="gap-1.5"><Award size={14} /> Roadmap</TabsTrigger>
+              {isManager && <TabsTrigger value="review" className="gap-1.5"><Clock size={14} /> Review</TabsTrigger>}
+            </TabsList>
+          </Tabs>
+        </>
+      }
+      filters={filtersRail}
+    >
 
       {/* Roadmap View */}
       {tab === "roadmap" && !loading && (
@@ -394,6 +484,12 @@ export default function IdeasPage() {
           actionLabel="Submit idea"
           onAction={() => setShowSubmit(true)}
         />
+      ) : filteredIdeas.length === 0 ? (
+        <EmptyState
+          icon={Lightbulb}
+          title="No ideas match these filters"
+          description="Clear status or category filters in the left rail to see more ideas."
+        />
       ) : (
         <div
           className="space-y-3"
@@ -410,7 +506,7 @@ export default function IdeasPage() {
             }
           }}
         >
-          {ideas.map((idea) => {
+          {filteredIdeas.map((idea) => {
             const hasVoted = idea.votes.some((v) => v.userId === currentUserId);
             const style = STATUS_STYLES[idea.status] || STATUS_STYLES.SUBMITTED;
             const dragging = draggingId === idea.id;
@@ -757,6 +853,6 @@ export default function IdeasPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </ListPage>
   );
 }
