@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
@@ -248,42 +249,127 @@ export default function OKRsPage() {
 
   const avgProgress = okrs.length > 0 ? Math.round(okrs.reduce((s, o) => s + o.progress, 0) / okrs.length) : 0;
 
-  return (
-    <div className="space-y-3 animate-fade-in">
-      <PageHeader
-        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "OKRs" }]}
-        kicker="OKRs · cascaded quarterly"
-        title="OKRs"
-        subtitle="Company → team → individual. Progress auto-computed from KPI readings."
-        stats={[
-          { label: "Objectives", value: okrs.length },
-          { label: "Avg progress", value: `${avgProgress}%` },
-        ]}
-      />
-      <div className="flex items-center justify-end gap-2 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Select value={quarter} onValueChange={setQuarter}>
-            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {Array.from({ length: 6 }, (_, i) => {
-                const now = new Date();
-                const currentQ = Math.ceil((now.getMonth() + 1) / 3);
-                const offset = i - 2;
-                const raw = currentQ + offset;
-                const yearShift = Math.floor((raw - 1) / 4);
-                const qn = ((raw - 1) % 4 + 4) % 4 + 1;
-                const y = now.getFullYear() + yearShift;
-                return <SelectItem key={i} value={`Q${qn} ${y}`}>Q{qn} {y}</SelectItem>;
-              })}
-            </SelectContent>
-          </Select>
-          {isManager && (
-            <Button onClick={() => setShowCreate(true)} className="gap-1.5"><Plus size={14} /> New OKR</Button>
-          )}
+  // Controlled tab so we can conditionally render the filter rail
+  // (only the "all" tab benefits from a level/status sidebar).
+  const [okrTab, setOkrTab] = useState<"mine" | "all" | "cascade">("mine");
+
+  // Level + status filter state, applied only in the "All objectives" tab.
+  const [levelFilter, setLevelFilter] = useState<"all" | "COMPANY" | "TEAM" | "INDIVIDUAL">("all");
+  const [okrStatusFilter, setOkrStatusFilter] = useState<"all" | string>("all");
+
+  const okrStatusCounts = {
+    ON_TRACK: okrs.filter((o) => o.status === "ON_TRACK").length,
+    AT_RISK: okrs.filter((o) => o.status === "AT_RISK").length,
+    BEHIND: okrs.filter((o) => o.status === "BEHIND").length,
+    COMPLETED: okrs.filter((o) => o.status === "COMPLETED").length,
+  };
+
+  // Apply filters to the level-grouped lists used in the "all" tab.
+  const visibleCompany = (levelFilter === "all" || levelFilter === "COMPANY")
+    ? companyOkrs.filter((o) => okrStatusFilter === "all" || o.status === okrStatusFilter)
+    : [];
+  const visibleTeam = (levelFilter === "all" || levelFilter === "TEAM")
+    ? teamOkrs.filter((o) => okrStatusFilter === "all" || o.status === okrStatusFilter)
+    : [];
+  const visibleIndividual = (levelFilter === "all" || levelFilter === "INDIVIDUAL")
+    ? individualOkrs.filter((o) => okrStatusFilter === "all" || o.status === okrStatusFilter)
+    : [];
+  const visibleCount = visibleCompany.length + visibleTeam.length + visibleIndividual.length;
+
+  const okrFiltersRail = okrTab !== "all" ? undefined : (
+    <div className="space-y-5">
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Level</Label>
+        <div className="space-y-0.5">
+          {([
+            { value: "all" as const, label: "All levels", count: okrs.length },
+            { value: "COMPANY" as const, label: "Company", count: companyOkrs.length },
+            { value: "TEAM" as const, label: "Team", count: teamOkrs.length },
+            { value: "INDIVIDUAL" as const, label: "Individual", count: individualOkrs.length },
+          ]).map((l) => (
+            <button
+              key={l.value}
+              onClick={() => setLevelFilter(l.value)}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                levelFilter === l.value
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              <span>{l.label}</span>
+              <span className="tabular-nums text-muted-2">{l.count}</span>
+            </button>
+          ))}
         </div>
       </div>
 
-      <Tabs defaultValue="mine" className="w-full">
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Status</Label>
+        <div className="space-y-0.5">
+          {([
+            { value: "all", label: "All statuses", count: okrs.length },
+            { value: "ON_TRACK", label: "On track", count: okrStatusCounts.ON_TRACK },
+            { value: "AT_RISK", label: "At risk", count: okrStatusCounts.AT_RISK },
+            { value: "BEHIND", label: "Behind", count: okrStatusCounts.BEHIND },
+            { value: "COMPLETED", label: "Completed", count: okrStatusCounts.COMPLETED },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              onClick={() => setOkrStatusFilter(s.value)}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                okrStatusFilter === s.value
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              <span>{s.label}</span>
+              <span className="tabular-nums text-muted-2">{s.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <ListPage
+      header={
+        <>
+          <PageHeader
+            breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "OKRs" }]}
+            kicker="OKRs · cascaded quarterly"
+            title="OKRs"
+            subtitle="Company → team → individual. Progress auto-computed from KPI readings."
+            stats={[
+              { label: "Objectives", value: okrs.length },
+              { label: "Avg progress", value: `${avgProgress}%` },
+            ]}
+          />
+          <div className="flex items-center justify-end gap-2 flex-wrap mt-2">
+            <Select value={quarter} onValueChange={setQuarter}>
+              <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: 6 }, (_, i) => {
+                  const now = new Date();
+                  const currentQ = Math.ceil((now.getMonth() + 1) / 3);
+                  const offset = i - 2;
+                  const raw = currentQ + offset;
+                  const yearShift = Math.floor((raw - 1) / 4);
+                  const qn = ((raw - 1) % 4 + 4) % 4 + 1;
+                  const y = now.getFullYear() + yearShift;
+                  return <SelectItem key={i} value={`Q${qn} ${y}`}>Q{qn} {y}</SelectItem>;
+                })}
+              </SelectContent>
+            </Select>
+            {isManager && (
+              <Button onClick={() => setShowCreate(true)} className="gap-1.5"><Plus size={14} /> New OKR</Button>
+            )}
+          </div>
+        </>
+      }
+      filters={okrFiltersRail}
+    >
+      <Tabs value={okrTab} onValueChange={(v) => setOkrTab(v as typeof okrTab)} className="w-full">
         <TabsList>
           <TabsTrigger value="mine" className="gap-2"><User size={13} /> My OKRs</TabsTrigger>
           <TabsTrigger value="all" className="gap-2"><Target size={13} /> All objectives</TabsTrigger>
@@ -306,11 +392,17 @@ export default function OKRsPage() {
           title={`No OKRs for ${quarter}`}
           description="Set objectives and key results to align your team. Start with one company OKR and cascade from there."
         />
+      ) : visibleCount === 0 ? (
+        <EmptyState
+          icon={Target}
+          title="No OKRs match these filters"
+          description="Clear the Level or Status filters in the left rail to see more objectives."
+        />
       ) : (
         <div className="space-y-6">
-          {[{ label: "Company Objectives", items: companyOkrs, level: "COMPANY" },
-            { label: "Team Objectives", items: teamOkrs, level: "TEAM" },
-            { label: "Individual Objectives", items: individualOkrs, level: "INDIVIDUAL" },
+          {[{ label: "Company Objectives", items: visibleCompany, level: "COMPANY" },
+            { label: "Team Objectives", items: visibleTeam, level: "TEAM" },
+            { label: "Individual Objectives", items: visibleIndividual, level: "INDIVIDUAL" },
           ].filter((g) => g.items.length > 0).map((group) => (
             <div key={group.level}>
               <h2 className="text-sm font-medium text-muted mb-3 flex items-center gap-2">
@@ -593,6 +685,6 @@ export default function OKRsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </ListPage>
   );
 }
