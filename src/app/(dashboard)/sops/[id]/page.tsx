@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-builder";
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { RichEditor } from "@/components/ui/rich-editor";
@@ -913,17 +914,17 @@ export default function SOPDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-3 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div className="flex items-center gap-4">
-          <div className="h-8 w-8 bg-surface-2 rounded animate-pulse" />
-          <div className="h-6 w-64 bg-surface-2 rounded animate-pulse" />
+          <Skeleton className="h-8 w-8" />
+          <Skeleton className="h-6 w-64" />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
-            <div className="h-64 bg-surface-2 rounded-lg animate-pulse" />
-            <div className="h-48 bg-surface-2 rounded-lg animate-pulse" />
+            <Skeleton className="h-64 w-full" />
+            <Skeleton className="h-48 w-full" />
           </div>
-          <div className="h-80 bg-surface-2 rounded-lg animate-pulse" />
+          <Skeleton className="h-80 w-full" />
         </div>
       </div>
     );

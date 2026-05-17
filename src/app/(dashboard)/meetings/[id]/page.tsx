@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface ActionItem {
   id: string;
@@ -600,12 +601,12 @@ export default function MeetingDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-3 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <div className="flex items-center gap-4">
-          <div className="h-8 w-8 bg-surface-2 rounded animate-pulse" />
-          <div className="h-6 w-64 bg-surface-2 rounded animate-pulse" />
+          <Skeleton className="h-8 w-8" />
+          <Skeleton className="h-6 w-64" />
         </div>
-        <div className="h-96 bg-surface-2 rounded-lg animate-pulse" />
+        <Skeleton className="h-96 w-full" />
       </div>
     );
   }

@@ -26,6 +26,7 @@ import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { useAutosave } from "@/hooks/use-autosave";
 import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KudosReactions } from "@/components/kudos/kudos-reactions";
 import { TagPicker } from "@/components/tags/tag-picker";
@@ -621,14 +622,14 @@ export default function UserProfilePage() {
 
   if (loading) {
     return (
-      <div className="space-y-3 animate-fade-in">
-        <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
+      <div className="space-y-4 animate-fade-in">
+        <Skeleton className="h-8 w-48" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-28 bg-surface rounded-lg border border-border animate-pulse" />
+            <Skeleton key={i} className="h-28 w-full" />
           ))}
         </div>
-        <div className="h-64 bg-surface rounded-lg border border-border animate-pulse" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
