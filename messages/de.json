@@ -63,7 +63,16 @@
     "financials": "Finanzen",
     "planning": "Planung",
     "admin": "Admin-Konsole",
-    "clock": "Einstempeln"
+    "clock": "Einstempeln",
+    "hub": {
+      "home": "Start",
+      "people": "Personen",
+      "work": "Arbeit",
+      "money": "Finanzen",
+      "talent": "Talent",
+      "culture": "Kultur",
+      "platform": "Plattform"
+    }
   },
   "auth": {
     "signIn": "Anmelden",

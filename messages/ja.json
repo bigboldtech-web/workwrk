@@ -63,7 +63,16 @@
     "financials": "財務",
     "planning": "計画",
     "admin": "管理コンソール",
-    "clock": "打刻"
+    "clock": "打刻",
+    "hub": {
+      "home": "ホーム",
+      "people": "ピープル",
+      "work": "ワーク",
+      "money": "マネー",
+      "talent": "タレント",
+      "culture": "カルチャー",
+      "platform": "プラットフォーム"
+    }
   },
   "auth": {
     "signIn": "ログイン",

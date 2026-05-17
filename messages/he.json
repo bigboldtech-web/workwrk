@@ -63,7 +63,16 @@
     "financials": "פיננסים",
     "planning": "תכנון",
     "admin": "מסוף ניהול",
-    "clock": "החתמת שעון"
+    "clock": "החתמת שעון",
+    "hub": {
+      "home": "בית",
+      "people": "אנשים",
+      "work": "עבודה",
+      "money": "כספים",
+      "talent": "כשרון",
+      "culture": "תרבות",
+      "platform": "פלטפורמה"
+    }
   },
   "auth": {
     "signIn": "התחברות",

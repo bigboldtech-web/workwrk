@@ -85,36 +85,56 @@ type NavItem = {
   hue?: NavHue;
 };
 
-type NavSection = "core" | "people" | "work" | "finance" | "platform";
+// Seven persona-driven hubs. The order here is the render order in
+// the sidebar. Hubs collapse independently; defaults below.
+type NavSection = "home" | "people" | "work" | "money" | "talent" | "culture" | "platform";
 type NavHue = "blue" | "green" | "amber" | "violet" | "pink" | "teal" | "sky" | "rose" | "lime" | "slate";
 
-const SECTION_LABEL: Record<NavSection, string> = {
-  core: "Home",
-  people: "People",
-  work: "Work",
-  finance: "Money",
-  platform: "Platform",
+const SECTION_ORDER: readonly NavSection[] = [
+  "home", "people", "work", "money", "talent", "culture", "platform",
+] as const;
+
+// Hub labels live in messages/<locale>.json under nav.hub.* — see
+// tNav("hub.<section>") at the render site. Keeping the labels
+// translation-driven means new locales pick up automatically.
+
+// One lucide icon per hub — paired with the section label in the
+// collapsible header. Chosen for legibility at small sizes.
+const SECTION_ICON: Record<NavSection, React.ComponentType<{ size?: number; className?: string }>> = {
+  home: LayoutDashboard,
+  people: Users,
+  work: CalendarDays,
+  money: DollarSign,
+  talent: Star,
+  culture: Megaphone,
+  platform: Wrench,
 };
 
-const navigation: NavItem[] = [
-  // Home
-  { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard, section: "core", hue: "blue" },
-  { name: "Inbox", key: "inbox", href: "/inbox", icon: Inbox, section: "core", hue: "violet" },
-  { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone, section: "core", hue: "amber" },
-  { name: "Activity", key: "activity", href: "/activity", icon: Activity, section: "core", hue: "slate" },
-  { name: "AI Assistant", key: "aiAssistant", href: "/ai", icon: Bot, moduleKey: "ai", managerOnly: true, section: "core", hue: "lime" },
+// Persona-aware default expansion. IC sees the three daily-touch hubs
+// open and everything else collapsed; managers gain People + Talent;
+// admins gain Money + Platform. Users can override per-hub and we
+// persist their choice in localStorage.
+function defaultExpandedFor(role: { isAdmin: boolean; isManager: boolean }): Record<NavSection, boolean> {
+  const ic = { home: true, people: false, work: true, money: false, talent: false, culture: true, platform: false };
+  if (role.isAdmin) return { home: true, people: true, work: true, money: true, talent: true, culture: true, platform: true };
+  if (role.isManager) return { ...ic, people: true, talent: true };
+  return ic;
+}
 
-  // People
+const navigation: NavItem[] = [
+  // 🏠 Home — opens by default for every persona. Daily-touch entries
+  // that don't fit anywhere more specific.
+  { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard, section: "home", hue: "blue" },
+  { name: "Inbox", key: "inbox", href: "/inbox", icon: Inbox, section: "home", hue: "violet" },
+  { name: "AI Assistant", key: "aiAssistant", href: "/ai", icon: Bot, moduleKey: "ai", managerOnly: true, section: "home", hue: "lime" },
+
+  // 👥 People — the org's roster + structure. Talent (perf/comp/recruiting)
+  // lives in its own hub since it's a different ceremony.
   { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true, section: "people", hue: "blue" },
   { name: "Organization", key: "organization", href: "/organization", icon: Building2, section: "people", hue: "sky" },
-  { name: "Onboarding", key: "onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true, section: "people", hue: "teal" },
-  { name: "Recruiting", key: "recruiting", href: "/recruiting", icon: Briefcase, managerOnly: true, section: "people", hue: "violet" },
-  { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true, section: "people", hue: "rose" },
-  { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews", section: "people", hue: "amber" },
-  { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true, section: "people", hue: "green" },
-  { name: "Kudos", key: "kudos", href: "/kudos", icon: Heart, section: "people", hue: "pink" },
 
-  // Work
+  // ✅ Work — daily-touch ops + cadence. Everything an IC opens during
+  // a normal workday belongs here.
   { name: "Work Calendar", key: "calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks", section: "work", hue: "blue" },
   { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi", section: "work", hue: "rose" },
   { name: "OKRs", key: "okrs", href: "/okrs", icon: Crosshair, section: "work", hue: "violet" },
@@ -124,28 +144,42 @@ const navigation: NavItem[] = [
   { name: "Time off", key: "timeOff", href: "/time-off", icon: CalendarOff, section: "work", hue: "lime" },
   { name: "Timesheets", key: "timesheets", href: "/timesheets", icon: Clock, section: "work", hue: "blue" },
   { name: "Clock in", key: "clock", href: "/clock", icon: Clock, section: "work", hue: "green" },
-  { name: "Learning", key: "learning", href: "/learning", icon: GraduationCap, section: "work", hue: "violet" },
-  { name: "Ideas", key: "ideas", href: "/ideas", icon: Lightbulb, section: "work", hue: "amber" },
-  { name: "Surveys", key: "surveys", href: "/surveys", icon: ClipboardCheck, section: "work", hue: "teal" },
-  { name: "Candor", key: "candor", href: "/candor", icon: MessageSquareHeart, section: "work", hue: "pink" },
 
-  // Money
-  { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "finance", hue: "amber" },
-  { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "finance", hue: "sky" },
-  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true, comingSoon: true, section: "finance", hue: "green" },
-  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true, comingSoon: true, section: "finance", hue: "pink" },
-  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, comingSoon: true, section: "finance", hue: "rose" },
-  { name: "Financials", key: "financials", href: "/financials", icon: BookText, adminOnly: true, section: "finance", hue: "blue" },
-  { name: "Planning", key: "planning", href: "/planning", icon: Target, adminOnly: true, section: "finance", hue: "violet" },
+  // 💰 Money — anything that moves currency or plans it. Workforce
+  // planning lives here (not Platform) because it's FP&A.
+  { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "money", hue: "amber" },
+  { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "money", hue: "sky" },
+  { name: "Financials", key: "financials", href: "/financials", icon: BookText, adminOnly: true, section: "money", hue: "blue" },
+  { name: "Planning", key: "planning", href: "/planning", icon: Target, adminOnly: true, section: "money", hue: "violet" },
+  { name: "Workforce Planning", key: "workforcePlanning", href: "/workforce-planning", icon: Target, managerOnly: true, section: "money", hue: "violet" },
+  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true, comingSoon: true, section: "money", hue: "green" },
+  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true, comingSoon: true, section: "money", hue: "pink" },
+  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, comingSoon: true, section: "money", hue: "rose" },
 
-  // Platform
-  { name: "Workforce Planning", key: "workforcePlanning", href: "/workforce-planning", icon: Target, managerOnly: true, section: "platform", hue: "violet" },
+  // 🎯 Talent — promotion/comp/hiring/learning ceremonies. Mostly
+  // manager-only; ICs see Reviews + Learning when assigned.
+  { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews", section: "talent", hue: "amber" },
+  { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true, section: "talent", hue: "green" },
+  { name: "Onboarding", key: "onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true, section: "talent", hue: "teal" },
+  { name: "Recruiting", key: "recruiting", href: "/recruiting", icon: Briefcase, managerOnly: true, section: "talent", hue: "violet" },
+  { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true, section: "talent", hue: "rose" },
+  { name: "Learning", key: "learning", href: "/learning", icon: GraduationCap, section: "talent", hue: "violet" },
+
+  // 📣 Culture — broadcast + signal channels. Everyone sees these.
+  { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone, section: "culture", hue: "amber" },
+  { name: "Kudos", key: "kudos", href: "/kudos", icon: Heart, section: "culture", hue: "pink" },
+  { name: "Policies", key: "policies", href: "/policies", icon: Shield, section: "culture", hue: "rose" },
+  { name: "Ideas", key: "ideas", href: "/ideas", icon: Lightbulb, section: "culture", hue: "amber" },
+  { name: "Surveys", key: "surveys", href: "/surveys", icon: ClipboardCheck, section: "culture", hue: "teal" },
+  { name: "Candor", key: "candor", href: "/candor", icon: MessageSquareHeart, section: "culture", hue: "pink" },
+
+  // ⚙️ Platform — admin / configuration / observability surfaces.
+  { name: "Activity", key: "activity", href: "/activity", icon: Activity, section: "platform", hue: "slate" },
   { name: "Analytics", key: "analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true, section: "platform", hue: "blue" },
-  { name: "Policies", key: "policies", href: "/policies", icon: Shield, section: "platform", hue: "rose" },
   { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true, section: "platform", hue: "amber" },
-  { name: "Studio", key: "studio", href: "/studio", icon: Wrench, adminOnly: true, comingSoon: true, section: "platform", hue: "lime" },
   { name: "Tools", key: "tools", href: "/tools", icon: Wrench, managerOnly: true, section: "platform", hue: "slate" },
   { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true, section: "platform", hue: "sky" },
+  { name: "Studio", key: "studio", href: "/studio", icon: Wrench, adminOnly: true, comingSoon: true, section: "platform", hue: "lime" },
   { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette, section: "platform", hue: "pink" },
   { name: "Admin Console", key: "admin", href: "/admin", icon: Shield, superAdminOnly: true, section: "platform", hue: "rose" },
 ];
@@ -485,6 +519,49 @@ export function Sidebar() {
     return subscribeSidebarPrefs(sync);
   }, []);
 
+  // Hub-expanded state. Default is persona-driven (IC sees Home/Work/
+  // Culture open; managers gain People/Talent; admins see everything).
+  // User overrides persist in localStorage and survive across sessions.
+  // We hydrate post-mount so server-rendered markup matches what React
+  // generates client-side before useEffect runs.
+  const HUB_STORAGE_KEY = "sidebar.hubExpanded.v1";
+  const personaDefault = useMemo(
+    () => defaultExpandedFor({ isAdmin: isAdminRole, isManager: isManagerRole }),
+    [isAdminRole, isManagerRole],
+  );
+  const [hubExpanded, setHubExpanded] = useState<Record<NavSection, boolean>>(personaDefault);
+  const [hubHydrated, setHubHydrated] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(HUB_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<Record<NavSection, boolean>>;
+        // Merge stored state over the persona default so a new hub added
+        // in a future release inherits the persona's preference instead
+        // of collapsing silently.
+        setHubExpanded({ ...personaDefault, ...parsed });
+      }
+    } catch {
+      // Quota / private mode / bad JSON — fall back to persona default.
+    }
+    setHubHydrated(true);
+  }, [personaDefault]);
+
+  useEffect(() => {
+    if (!hubHydrated || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(HUB_STORAGE_KEY, JSON.stringify(hubExpanded));
+    } catch {
+      // Best-effort persistence.
+    }
+  }, [hubExpanded, hubHydrated]);
+
+  const toggleHub = useCallback((section: NavSection) => {
+    setHubExpanded((prev) => ({ ...prev, [section]: !prev[section] }));
+  }, []);
+
   // Track route visits in the recent list. Match the pathname back to a
   // nav item by `href` (longest prefix wins so /people/[id] still maps
   // to "people").
@@ -682,14 +759,37 @@ export function Sidebar() {
           </div>
         )}
 
-        {(["core", "people", "work", "finance", "platform"] as const).map((section) => {
+        {SECTION_ORDER.map((section) => {
           const items = visibleNav.filter((i) => i.section === section && filterMatches(i));
           if (items.length === 0) return null;
+          // When the user is filtering or the sidebar is collapsed, force
+          // every hub open so the search hits actually surface and the
+          // collapsed icon-rail doesn't hide everything behind a chevron.
+          const isOpen = collapsed || !!filterLc || hubExpanded[section];
+          const HubIcon = SECTION_ICON[section];
+          const visibleCount = items.length;
           return (
-            <div key={section} className="app-sidebar-section">
+            <div key={section} className={cn("app-sidebar-section", "app-sidebar-hub", !isOpen && "is-collapsed")}>
               {!collapsed && (
-                <div className="app-sidebar-section-label">{SECTION_LABEL[section]}</div>
+                <button
+                  type="button"
+                  onClick={() => toggleHub(section)}
+                  className="app-sidebar-hub-header"
+                  aria-expanded={isOpen}
+                  aria-controls={`hub-${section}`}
+                  title={isOpen ? `Collapse ${tNav(`hub.${section}`)}` : `Expand ${tNav(`hub.${section}`)}`}
+                >
+                  <HubIcon size={12} className="app-sidebar-hub-icon" aria-hidden />
+                  <span className="app-sidebar-section-label">{tNav(`hub.${section}`)}</span>
+                  <span className="app-sidebar-hub-count" aria-hidden>{visibleCount}</span>
+                  <ChevronDown
+                    size={12}
+                    className={cn("app-sidebar-hub-chevron", isOpen && "is-open")}
+                    aria-hidden
+                  />
+                </button>
               )}
+              {isOpen && <div id={`hub-${section}`} className="app-sidebar-hub-body">
               {items.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
@@ -820,6 +920,7 @@ export function Sidebar() {
             </React.Fragment>
           );
         })}
+              </div>}
             </div>
           );
         })}

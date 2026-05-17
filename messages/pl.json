@@ -63,7 +63,16 @@
     "financials": "Finanse",
     "planning": "Planowanie",
     "admin": "Konsola admina",
-    "clock": "Logowanie czasu"
+    "clock": "Logowanie czasu",
+    "hub": {
+      "home": "Start",
+      "people": "Ludzie",
+      "work": "Praca",
+      "money": "Pieniądze",
+      "talent": "Talent",
+      "culture": "Kultura",
+      "platform": "Platforma"
+    }
   },
   "auth": {
     "signIn": "Zaloguj się",

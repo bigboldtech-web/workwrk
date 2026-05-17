@@ -63,7 +63,16 @@
     "financials": "Økonomi",
     "planning": "Planlægning",
     "admin": "Admin-konsol",
-    "clock": "Stempling"
+    "clock": "Stempling",
+    "hub": {
+      "home": "Hjem",
+      "people": "Mennesker",
+      "work": "Arbejde",
+      "money": "Penge",
+      "talent": "Talent",
+      "culture": "Kultur",
+      "platform": "Platform"
+    }
   },
   "auth": {
     "signIn": "Log ind",

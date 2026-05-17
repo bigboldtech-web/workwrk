@@ -360,6 +360,71 @@ html.dark .app-sidebar-link.is-active::before {
   opacity: 0.7;
 }
 
+/* Hub headers — collapsible section toggles introduced in Phase A of
+   the IA revamp. The header is a full-width button so the whole row
+   is the click target, not just the chevron. Hover lifts the label +
+   chevron only — no full-row background flash, which would compete
+   visually with the active nav link inside. */
+.app-sidebar-hub-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 10px 4px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+.app-sidebar-hub-header .app-sidebar-section-label {
+  padding: 0;
+  opacity: 0.7;
+  transition: opacity 0.12s;
+}
+.app-sidebar-hub-header:hover .app-sidebar-section-label,
+.app-sidebar-hub-header:hover .app-sidebar-hub-icon,
+.app-sidebar-hub-header:hover .app-sidebar-hub-chevron {
+  opacity: 1;
+  color: var(--b-t1, #fff);
+}
+.app-sidebar-hub-icon {
+  flex-shrink: 0;
+  opacity: 0.55;
+  transition: opacity 0.12s, color 0.12s;
+}
+.app-sidebar-hub-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--b-t3, #707070);
+  margin-left: auto;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+.app-sidebar-hub-chevron {
+  flex-shrink: 0;
+  opacity: 0.55;
+  transform: rotate(-90deg);
+  transition: transform 0.15s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.12s, color 0.12s;
+}
+.app-sidebar-hub-chevron.is-open {
+  transform: rotate(0deg);
+}
+.app-sidebar-hub-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* No height animation — Radix-style instant collapse keeps the
+     sidebar responsive on slow machines. The chevron rotation
+     conveys the state change visually. */
+}
+/* Collapsed hubs hide their body but keep the header padding consistent
+   so the rhythm of headers down the rail stays steady. */
+.app-sidebar-hub.is-collapsed .app-sidebar-hub-body {
+  display: none;
+}
+
 /* Icon chip — small colored square behind every nav icon. ClickUp
    density: 18px chip + 11px icon. Hue class on the link drives
    the background tint. */

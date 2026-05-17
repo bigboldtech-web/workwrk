@@ -63,7 +63,16 @@
     "financials": "Finanza",
     "planning": "Pianificazione",
     "admin": "Console admin",
-    "clock": "Timbratura"
+    "clock": "Timbratura",
+    "hub": {
+      "home": "Home",
+      "people": "Persone",
+      "work": "Lavoro",
+      "money": "Finanza",
+      "talent": "Talento",
+      "culture": "Cultura",
+      "platform": "Piattaforma"
+    }
   },
   "auth": {
     "signIn": "Accedi",

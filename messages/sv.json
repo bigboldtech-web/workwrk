@@ -63,7 +63,16 @@
     "financials": "Ekonomi",
     "planning": "Planering",
     "admin": "Admin-konsol",
-    "clock": "Stämpla in"
+    "clock": "Stämpla in",
+    "hub": {
+      "home": "Hem",
+      "people": "Människor",
+      "work": "Arbete",
+      "money": "Pengar",
+      "talent": "Talang",
+      "culture": "Kultur",
+      "platform": "Plattform"
+    }
   },
   "auth": {
     "signIn": "Logga in",

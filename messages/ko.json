@@ -63,7 +63,16 @@
     "financials": "재무",
     "planning": "계획",
     "admin": "관리 콘솔",
-    "clock": "출퇴근"
+    "clock": "출퇴근",
+    "hub": {
+      "home": "홈",
+      "people": "구성원",
+      "work": "업무",
+      "money": "재무",
+      "talent": "인재",
+      "culture": "문화",
+      "platform": "플랫폼"
+    }
   },
   "auth": {
     "signIn": "로그인",

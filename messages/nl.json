@@ -63,7 +63,16 @@
     "financials": "Financiën",
     "planning": "Planning",
     "admin": "Admin-console",
-    "clock": "Inklokken"
+    "clock": "Inklokken",
+    "hub": {
+      "home": "Home",
+      "people": "Mensen",
+      "work": "Werk",
+      "money": "Geld",
+      "talent": "Talent",
+      "culture": "Cultuur",
+      "platform": "Platform"
+    }
   },
   "auth": {
     "signIn": "Inloggen",

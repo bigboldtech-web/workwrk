@@ -63,7 +63,16 @@
     "financials": "Finances",
     "planning": "Planification",
     "admin": "Console admin",
-    "clock": "Pointage"
+    "clock": "Pointage",
+    "hub": {
+      "home": "Accueil",
+      "people": "Personnes",
+      "work": "Travail",
+      "money": "Argent",
+      "talent": "Talent",
+      "culture": "Culture",
+      "platform": "Plateforme"
+    }
   },
   "auth": {
     "signIn": "Connexion",

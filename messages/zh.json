@@ -63,7 +63,16 @@
     "financials": "财务",
     "planning": "规划",
     "admin": "管理控制台",
-    "clock": "打卡"
+    "clock": "打卡",
+    "hub": {
+      "home": "首页",
+      "people": "人员",
+      "work": "工作",
+      "money": "财务",
+      "talent": "人才",
+      "culture": "文化",
+      "platform": "平台"
+    }
   },
   "auth": {
     "signIn": "登录",

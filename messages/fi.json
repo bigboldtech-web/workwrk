@@ -63,7 +63,16 @@
     "financials": "Talous",
     "planning": "Suunnittelu",
     "admin": "Admin-konsoli",
-    "clock": "Kellotus"
+    "clock": "Kellotus",
+    "hub": {
+      "home": "Etusivu",
+      "people": "Henkilöt",
+      "work": "Työ",
+      "money": "Talous",
+      "talent": "Lahjakkuus",
+      "culture": "Kulttuuri",
+      "platform": "Alusta"
+    }
   },
   "auth": {
     "signIn": "Kirjaudu sisään",

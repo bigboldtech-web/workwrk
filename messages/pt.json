@@ -63,7 +63,16 @@
     "financials": "Finanças",
     "planning": "Planejamento",
     "admin": "Console admin",
-    "clock": "Ponto"
+    "clock": "Ponto",
+    "hub": {
+      "home": "Início",
+      "people": "Pessoas",
+      "work": "Trabalho",
+      "money": "Dinheiro",
+      "talent": "Talento",
+      "culture": "Cultura",
+      "platform": "Plataforma"
+    }
   },
   "auth": {
     "signIn": "Entrar",

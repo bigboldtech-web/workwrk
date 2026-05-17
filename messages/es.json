@@ -63,7 +63,16 @@
     "financials": "Finanzas",
     "planning": "Planificación",
     "admin": "Consola admin",
-    "clock": "Fichaje"
+    "clock": "Fichaje",
+    "hub": {
+      "home": "Inicio",
+      "people": "Personas",
+      "work": "Trabajo",
+      "money": "Dinero",
+      "talent": "Talento",
+      "culture": "Cultura",
+      "platform": "Plataforma"
+    }
   },
   "auth": {
     "signIn": "Iniciar Sesión",

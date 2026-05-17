@@ -63,7 +63,16 @@
     "financials": "वित्त",
     "planning": "योजना",
     "admin": "एडमिन कंसोल",
-    "clock": "क्लॉक इन"
+    "clock": "क्लॉक इन",
+    "hub": {
+      "home": "होम",
+      "people": "लोग",
+      "work": "कार्य",
+      "money": "धन",
+      "talent": "प्रतिभा",
+      "culture": "संस्कृति",
+      "platform": "प्लेटफ़ॉर्म"
+    }
   },
   "auth": {
     "signIn": "साइन इन",

@@ -63,7 +63,16 @@
     "financials": "Financials",
     "planning": "Planning",
     "admin": "Admin Console",
-    "clock": "Clock in"
+    "clock": "Clock in",
+    "hub": {
+      "home": "Home",
+      "people": "People",
+      "work": "Work",
+      "money": "Money",
+      "talent": "Talent",
+      "culture": "Culture",
+      "platform": "Platform"
+    }
   },
   "auth": {
     "signIn": "Sign In",
