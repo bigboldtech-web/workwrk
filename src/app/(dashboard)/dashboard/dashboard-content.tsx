@@ -116,12 +116,15 @@ function getScoreColor(score: number) {
   return "text-[color:var(--b-score-bad)]";
 }
 
+// G19 — alert styles now resolve via the Phase B signal tokens so
+// alerts read consistently with badges, banners, toasts, and signal
+// pills used elsewhere. One CSS-var swap re-themes everything.
 function getAlertStyle(type: string) {
   switch (type) {
-    case "warning": return "border-l-[#ff9933] bg-[rgba(255,153,51,0.06)]";
-    case "danger": return "border-l-[#ff3d8a] bg-[rgba(255,61,138,0.06)]";
-    case "success": return "border-l-[#d4ff2e] bg-[rgba(212,255,46,0.06)]";
-    default: return "border-l-[#4a9eff] bg-[rgba(74,158,255,0.06)]";
+    case "warning": return "border-l-[color:var(--signal-warning-fg)] bg-[color:var(--signal-warning-bg)]";
+    case "danger":  return "border-l-[color:var(--signal-danger-fg)] bg-[color:var(--signal-danger-bg)]";
+    case "success": return "border-l-[color:var(--signal-success-fg)] bg-[color:var(--signal-success-bg)]";
+    default:        return "border-l-[color:var(--signal-info-fg)] bg-[color:var(--signal-info-bg)]";
   }
 }
 
@@ -531,7 +534,7 @@ export default function DashboardContent() {
                   <Link
                     key={s.id}
                     href="/surveys"
-                    className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border bg-background/60 hover:bg-surface-2 transition-colors"
+                    className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border bg-background/60 hover:bg-[color:var(--surface-elevated)] transition-fast"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium truncate">{s.title}</p>
