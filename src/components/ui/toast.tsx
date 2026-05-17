@@ -36,11 +36,13 @@ const icons: Record<ToastType, typeof CheckCircle> = {
   info: Info,
 };
 
+// Phase G16 — toast colors resolve via the locked signal tokens (B).
+// One CSS-var swap → light + dark + future theme tweaks propagate.
 const styles: Record<ToastType, string> = {
-  success: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300",
-  error: "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300",
-  warning: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300",
-  info: "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300",
+  success: "border-[color:var(--signal-success-border)] bg-[color:var(--signal-success-bg)] text-[color:var(--signal-success-fg)]",
+  error: "border-[color:var(--signal-danger-border)] bg-[color:var(--signal-danger-bg)] text-[color:var(--signal-danger-fg)]",
+  warning: "border-[color:var(--signal-warning-border)] bg-[color:var(--signal-warning-bg)] text-[color:var(--signal-warning-fg)]",
+  info: "border-[color:var(--signal-info-border)] bg-[color:var(--signal-info-bg)] text-[color:var(--signal-info-fg)]",
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -72,26 +74,35 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+      {/* Stacked top-right. Slide-down + fade entrance, soft elevation,
+          consistent radius. Toast width capped so long messages wrap. */}
+      <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm pointer-events-none">
         {toasts.map((t) => {
           const Icon = icons[t.type];
           return (
             <div
               key={t.id}
+              role="status"
               className={cn(
-                "flex items-start gap-3 rounded-xl border px-4 py-3 shadow-[0_12px_30px_-8px_rgba(0,0,0,0.6)] backdrop-blur-md bg-surface animate-in slide-in-from-bottom-2 fade-in duration-200",
+                "pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3.5 backdrop-blur-md",
+                "shadow-[0_10px_30px_-6px_rgba(0,0,0,0.22)] dark:shadow-[0_12px_30px_-8px_rgba(0,0,0,0.6)]",
+                "animate-in slide-in-from-top-2 fade-in duration-200",
                 styles[t.type],
               )}
             >
-              <Icon size={18} className="mt-0.5 shrink-0" />
+              <Icon size={16} className="mt-0.5 shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">{t.title}</p>
+                <p className="text-[13.5px] font-semibold leading-tight">{t.title}</p>
                 {t.description && (
-                  <p className="text-xs mt-0.5 opacity-80">{t.description}</p>
+                  <p className="text-[12.5px] mt-1 opacity-80 leading-snug">{t.description}</p>
                 )}
               </div>
-              <button onClick={() => remove(t.id)} className="shrink-0 opacity-60 hover:opacity-100">
-                <X size={14} />
+              <button
+                onClick={() => remove(t.id)}
+                className="shrink-0 opacity-60 hover:opacity-100 transition-fast -mt-0.5 -mr-1 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5"
+                aria-label="Dismiss"
+              >
+                <X size={13} />
               </button>
             </div>
           );
