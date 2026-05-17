@@ -32,6 +32,7 @@ import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import { SavedViewsPicker } from "@/components/ui/saved-views-picker";
 
 interface Person {
@@ -487,19 +488,80 @@ export default function PeopleListView() {
     window.open("/api/export/people", "_blank");
   };
 
+  // Left filter rail — search + department + status filters move out of
+  // the top toolbar into a vertical sidebar so the main grid claims
+  // full width and chips don't wrap on narrow widths.
+  const filtersRail = (
+    <div className="space-y-5">
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Search</Label>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-2" />
+          <Input
+            placeholder="Name or email…"
+            className="pl-9"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+      </div>
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block flex items-center gap-1">
+          <Building2 size={10} /> Department
+        </Label>
+        <Select value={deptFilter} onValueChange={setDeptFilter}>
+          <SelectTrigger><SelectValue placeholder="All departments" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Departments</SelectItem>
+            {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block flex items-center gap-1">
+          <UserCheck size={10} /> Status
+        </Label>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger><SelectValue placeholder="All statuses" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="ACTIVE">Active</SelectItem>
+            <SelectItem value="PIP">PIP</SelectItem>
+            <SelectItem value="PROBATION">Probation</SelectItem>
+            <SelectItem value="ON_LEAVE">On Leave</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="pt-2 border-t border-border">
+        <SavedViewsPicker<{ search: string; dept: string; status: string }>
+          scope="people"
+          currentState={{ search: searchQuery, dept: deptFilter, status: statusFilter }}
+          onLoad={(state) => {
+            setSearchQuery(state.search);
+            setDeptFilter(state.dept);
+            setStatusFilter(state.status);
+            setPage(1);
+          }}
+        />
+      </div>
+    </div>
+  );
+
   return (
-    <div className="space-y-3 animate-fade-in">
-      <PageHeader
-        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "People" }]}
-        kicker="People · the org graph"
-        title="People"
-        subtitle={`${total} team members across your organization.`}
-        stats={[
-          { label: "Total", value: total },
-          { label: "Departments", value: (departments?.length ?? 0) },
-        ]}
-      />
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+    <ListPage
+      header={
+        <>
+          <PageHeader
+            breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "People" }]}
+            kicker="People · the org graph"
+            title="People"
+            subtitle={`${total} team members across your organization.`}
+            stats={[
+              { label: "Total", value: total },
+              { label: "Departments", value: (departments?.length ?? 0) },
+            ]}
+          />
+          <div className="flex justify-end gap-2 flex-wrap">
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleExport} className="gap-2">
             <Download size={14} /> Export
@@ -667,57 +729,24 @@ export default function PeopleListView() {
             </DialogContent>
           </Dialog>}
         </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <Input placeholder="Search people..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-        </div>
-        <Select value={deptFilter} onValueChange={setDeptFilter}>
-          <SelectTrigger className="w-full sm:w-[200px]">
-            <Building2 size={14} className="mr-2 text-muted shrink-0" />
-            <SelectValue placeholder="Department" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Departments</SelectItem>
-            {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-full sm:w-[140px]">
-            <UserCheck size={14} className="mr-2 text-muted" />
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="ACTIVE">Active</SelectItem>
-            <SelectItem value="PIP">PIP</SelectItem>
-            <SelectItem value="PROBATION">Probation</SelectItem>
-            <SelectItem value="ON_LEAVE">On Leave</SelectItem>
-          </SelectContent>
-        </Select>
-        {filtered.length > 0 && canManagePeople && (
-          <Button variant="ghost" size="sm" onClick={toggleSelectAll} className="text-xs text-muted">
-            {selectedIds.size === filtered.length ? "Deselect All" : "Select All"}
-          </Button>
-        )}
-        <SavedViewsPicker<{ search: string; dept: string; status: string }>
-          scope="people"
-          currentState={{ search: searchQuery, dept: deptFilter, status: statusFilter }}
-          onLoad={(state) => {
-            setSearchQuery(state.search);
-            setDeptFilter(state.dept);
-            setStatusFilter(state.status);
-            setPage(1);
-          }}
-        />
-      </div>
-
+          </div>
+          {/* Select all + saved views — render at the bottom of the
+              action row when there are visible rows. Stays inside the
+              header so it doesn't compete with the filter rail. */}
+          {(filtered.length > 0 && canManagePeople) && (
+            <div className="flex justify-end mt-1">
+              <Button variant="ghost" size="sm" onClick={toggleSelectAll} className="text-xs text-muted">
+                {selectedIds.size === filtered.length ? "Deselect all" : "Select all"}
+              </Button>
+            </div>
+          )}
+        </>
+      }
+      filters={filtersRail}
+    >
       {/* Bulk success toast */}
       {bulkMessage && (
-        <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400">{bulkMessage}</div>
+        <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400 mb-3">{bulkMessage}</div>
       )}
 
       {/* People Grid */}
@@ -1150,6 +1179,6 @@ export default function PeopleListView() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </ListPage>
   );
 }
