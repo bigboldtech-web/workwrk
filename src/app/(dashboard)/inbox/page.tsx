@@ -468,83 +468,76 @@ export default async function InboxPage() {
       {aiItems.length > 0 && <InboxAiAssistPanel items={aiItems} />}
 
       {total === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16 px-6 text-center">
-            <div
-              className="h-14 w-14 rounded-2xl flex items-center justify-center mb-4"
-              style={{
-                background: "var(--b-accent-tint)",
-                border: "1px solid var(--b-accent-border)",
-                color: "var(--b-accent-text)",
-              }}
-            >
-              <PartyPopper size={26} />
-            </div>
-            <h3
-              className="mb-1.5 text-foreground"
-              style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}
-            >
-              Inbox zero — nice work.
-            </h3>
-            <p
-              className="max-w-md text-muted"
-              style={{ fontSize: 14, lineHeight: 1.55 }}
-            >
-              New items will land here when SOPs are assigned to you, tasks come due,
-              expenses or POs need your approval, or reviews need your input.
-            </p>
-          </CardContent>
-        </Card>
+        <div className="flex flex-col items-center justify-center py-20 px-6 rounded-2xl border border-dashed border-border bg-surface">
+          <div
+            className="h-16 w-16 rounded-2xl flex items-center justify-center mb-5"
+            style={{
+              background: "var(--accent-soft)",
+              border: "1px solid var(--accent-soft)",
+              color: "var(--accent-strong)",
+            }}
+          >
+            <PartyPopper size={28} />
+          </div>
+          <h3 className="mb-2 text-foreground text-[18px] font-semibold tracking-tight">
+            Inbox zero — nice work.
+          </h3>
+          <p className="text-center max-w-lg text-muted text-[14px] leading-relaxed">
+            New items land here when SOPs are assigned, tasks come due, expenses or POs
+            need approval, or reviews need your input. Go ship something.
+          </p>
+        </div>
       )}
 
       {sopAssignments.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <BookOpen size={16} /> SOPs assigned to you
-              <span className="text-xs text-muted font-normal">({sopAssignments.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {sopAssignments.map((a) => {
-                const overdue = isOverdue(a.dueDate);
-                return (
-                  <li key={a.id}>
-                    <Link
-                      href={`/sops/${a.sopId}`}
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-sm font-medium truncate">{a.sop.title}</span>
-                        {a.mandatory && (
-                          <span className="text-[10px] uppercase tracking-wide text-orange-400 border border-orange-400/30 rounded px-1.5 py-0.5 flex-shrink-0">
-                            Mandatory
-                          </span>
-                        )}
-                      </div>
-                      <span className={`text-xs flex-shrink-0 ml-3 ${overdue ? "text-red-400" : "text-muted"}`}>
-                        {fmtRelative(a.dueDate)}
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
+        <section className="rounded-xl border border-border bg-surface">
+          <header className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-[15px] font-semibold inline-flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-[color:var(--signal-warning-bg)] text-[color:var(--signal-warning-fg)] inline-flex items-center justify-center">
+                <BookOpen size={14} />
+              </span>
+              SOPs assigned to you
+            </h2>
+            <span className="text-[11.5px] text-muted-2 tabular-nums">{sopAssignments.length}</span>
+          </header>
+          <ul className="divide-y divide-border">
+            {sopAssignments.map((a) => {
+              const overdue = isOverdue(a.dueDate);
+              return (
+                <li key={a.id}>
+                  <Link
+                    href={`/sops/${a.sopId}`}
+                    className="flex items-center justify-between px-5 py-3.5 hover:bg-[color:var(--surface-elevated)] transition-fast"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-[13.5px] font-medium truncate">{a.sop.title}</span>
+                      {a.mandatory && (
+                        <span className="signal signal-warning text-[10px] px-2 py-0.5">Mandatory</span>
+                      )}
+                    </div>
+                    <span className={`text-[12px] flex-shrink-0 ml-3 tabular-nums ${overdue ? "text-[color:var(--signal-danger-fg)] font-medium" : "text-muted"}`}>
+                      {fmtRelative(a.dueDate)}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       {tasks.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <CheckSquare size={16} /> Tasks
-              <span className="text-xs text-muted font-normal">({tasks.length})</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
+        <section className="rounded-xl border border-border bg-surface">
+          <header className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-[15px] font-semibold inline-flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-[color:var(--signal-info-bg)] text-[color:var(--signal-info-fg)] inline-flex items-center justify-center">
+                <CheckSquare size={14} />
+              </span>
+              Tasks
+            </h2>
+            <span className="text-[11.5px] text-muted-2 tabular-nums">{tasks.length}</span>
+          </header>
+          <ul className="divide-y divide-border">
               {tasks.map((t) => {
                 const due = t.endAt ?? t.date;
                 const overdue = isOverdue(due);
@@ -552,7 +545,7 @@ export default async function InboxPage() {
                   <li key={t.id}>
                     <Link
                       href={`/tasks?taskId=${t.id}`}
-                      className="flex items-center justify-between py-3 hover:bg-surface-2 -mx-3 px-3 rounded transition-colors"
+                      className="flex items-center justify-between px-5 py-3.5 hover:bg-[color:var(--surface-elevated)] transition-fast"
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <span className="text-sm font-medium truncate">{t.title}</span>
@@ -567,7 +560,7 @@ export default async function InboxPage() {
                           </span>
                         )}
                       </div>
-                      <span className={`text-xs flex-shrink-0 ml-3 ${overdue ? "text-red-400" : "text-muted"}`}>
+                      <span className={`text-[12px] flex-shrink-0 ml-3 tabular-nums ${overdue ? "text-[color:var(--signal-danger-fg)] font-medium" : "text-muted"}`}>
                         {fmtRelative(due)}
                       </span>
                     </Link>
@@ -575,8 +568,7 @@ export default async function InboxPage() {
                 );
               })}
             </ul>
-          </CardContent>
-        </Card>
+        </section>
       )}
 
       {upcomingInterviews.length > 0 && (
