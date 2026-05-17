@@ -125,9 +125,10 @@ function getAlertStyle(type: string) {
   }
 }
 
-function SkeletonBlock({ className }: { className?: string }) {
-  return <div className={`animate-pulse rounded bg-surface-2 ${className ?? ""}`} />;
-}
+// Shared Skeleton component (G1 — defaults to shimmer). Keeping the
+// local alias so the rest of this file doesn't need to change every
+// callsite.
+import { Skeleton as SkeletonBlock } from "@/components/ui/skeleton";
 
 function EmployeeOfMonthCard() {
   const [eom, setEom] = useState<any>(null);
@@ -191,10 +192,10 @@ export default function DashboardContent() {
 
   if (loading) {
     return (
-      <div className="space-y-3 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <PageHeader kicker="Your workspace · live" title={t("title")} subtitle={t("subtitle")} />
         <AnnouncementsBanner />
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
             <Card key={i}>
               <CardContent className="p-5">
@@ -206,7 +207,7 @@ export default function DashboardContent() {
             </Card>
           ))}
         </div>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
             <Card key={i}>
               <CardContent className="p-5 space-y-3">
@@ -232,7 +233,7 @@ export default function DashboardContent() {
 
   if (error || !data) {
     return (
-      <div className="space-y-3 animate-fade-in">
+      <div className="space-y-4 animate-fade-in">
         <PageHeader kicker="Your workspace · live" title={t("title")} subtitle={t("subtitle")} />
         <ErrorState message={error ?? undefined} onRetry={() => window.location.reload()} />
       </div>
@@ -286,7 +287,7 @@ export default function DashboardContent() {
   ];
 
   return (
-    <div className="space-y-3 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <PageHeader
         kicker="Your workspace · live"
         title="Dashboard"
@@ -327,7 +328,7 @@ export default function DashboardContent() {
           numbers (total people, avg performance, SOP compliance) are
           a manager / exec concern. Employees stay focused on their
           own widgets above. */}
-      {isManager && <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      {isManager && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.title} className="hover:border-muted-2 transition-colors">
             <CardContent className="p-5">
@@ -360,12 +361,12 @@ export default function DashboardContent() {
           Alerts / Recent Activity / KPI Records / Kudos / Pending Surveys.
           All org-wide views, gated to managers and above. Employees
           already saw their personal versions of these widgets above. */}
-      {isManager && <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
+      {isManager && <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
         {/* Top Performers */}
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Top Performers</CardTitle>
+              <CardTitle className="text-[15px]">Top Performers</CardTitle>
               <Badge variant="secondary" className="text-xs">This Month</Badge>
             </div>
           </CardHeader>
@@ -399,7 +400,7 @@ export default function DashboardContent() {
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">KPI Updates</CardTitle>
+              <CardTitle className="text-[15px]">KPI Updates</CardTitle>
               <Link href="/kra-kpi" className="text-xs text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">
                 View all
               </Link>
@@ -440,7 +441,7 @@ export default function DashboardContent() {
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Alerts</CardTitle>
+              <CardTitle className="text-[15px]">Alerts</CardTitle>
               <Badge variant="destructive" className="text-xs">
                 {alerts.filter(a => a.type === "danger" || a.type === "warning").length} Action Required
               </Badge>
@@ -466,7 +467,7 @@ export default function DashboardContent() {
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Recent Activity</CardTitle>
+              <CardTitle className="text-[15px]">Recent Activity</CardTitle>
               <Link href="/activity" className="text-xs text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">
                 View all
               </Link>
@@ -605,7 +606,7 @@ export default function DashboardContent() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Department Performance</CardTitle>
+            <CardTitle className="text-[15px]">Department Performance</CardTitle>
             <Badge variant="secondary" className="text-xs">This Quarter</Badge>
           </div>
         </CardHeader>
