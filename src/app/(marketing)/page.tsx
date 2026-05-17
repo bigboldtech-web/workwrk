@@ -1,4 +1,8 @@
-import { LandingV2 } from "@/components/landing/landing-v2";
+// Phase E revamp — replaces the 14-scene v2 carousel with a static,
+// IA-aligned shape that maps 1:1 to the seven sidebar hubs introduced
+// in Phase A. v2 still lives in the repo at /components/landing/landing-v2.tsx
+// if you want to roll back or A/B.
+import { LandingV3 } from "@/components/landing/landing-v3";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -205,7 +209,7 @@ export default async function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <LandingV2 />
+      <LandingV3 />
     </>
   );
 }
