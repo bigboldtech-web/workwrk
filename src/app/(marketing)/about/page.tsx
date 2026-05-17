@@ -1,302 +1,200 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+// About page — rebuilt to match landing v4 aesthetic.
+// Confident narrative, four values, four-year timeline, team strip,
+// final CTA. No bento/CountUp imports — pure static.
 
-import { Reveal, SectionHeader, CountUp } from "@/components/bento";
+import Link from "next/link";
+import type { Metadata } from "next";
+import { ArrowRight, Sparkles } from "lucide-react";
+import { MarketingTopbar } from "@/components/landing/marketing-topbar";
+import { MarketingFooter } from "@/components/landing/marketing-footer";
 
 export const metadata: Metadata = {
-  title: "About WorkwrK — The operating system for teams that mean business",
+  title: "About WorkwrK — built by operators, not consultants",
   description:
-    "WorkwrK is a business operating system built for Indian SMBs. People, performance, KPIs, SOPs, and AI — in one system. Built by operators, not consultants.",
+    "WorkwrK was built inside a real 100-person operation that got tired of stitching 15 SaaS tools together. We ship the product we wish we had.",
   alternates: { canonical: "https://workwrk.com/about" },
 };
 
-const values = [
+const VALUES: { title: string; body: string }[] = [
   {
-    variant: "lime" as const,
     title: "Operators built this, not consultants.",
-    body:
-      "Every module was battle-tested inside a real hundred-person operation before it shipped. If it didn't survive our own team, it didn't ship.",
+    body: "Every module was battle-tested inside a real hundred-person operation before it shipped. If it didn't survive our own team, it didn't ship.",
   },
   {
-    variant: "dark" as const,
     title: "Data over vibes.",
-    body:
-      "Composite scores exist so promotions stop being arguments. Forty-eight-hour review cycles exist because two-week reviews are theatre.",
+    body: "Composite scores exist so promotions stop being arguments. Forty-eight-hour review cycles exist because two-week reviews are theatre.",
   },
   {
-    variant: "dark" as const,
     title: "Global pricing, local invoicing.",
-    body:
-      "INR, USD, AED, SGD, EUR — priced in your currency with compliant local invoicing. GST, VAT, and reverse-charge handled.",
+    body: "INR, USD, AED, SGD, EUR — priced in your currency with compliant local invoicing. GST, VAT, and reverse-charge handled.",
   },
   {
-    variant: "dark" as const,
     title: "Private by default.",
-    body:
-      "Your data never trains anyone's model. Region-locked storage. Field-level RBAC, audit logs for every read and write. SOC-2 Type II in progress.",
+    body: "Your data never trains anyone's model. Region-locked storage. Field-level RBAC, audit logs for every read and write. SOC-2 Type II in progress.",
   },
 ];
 
-const milestones = [
-  { year: "2024", title: "Founded", desc: "Built inside BigBoldTech while running a 100-person operation. Stopped stitching SaaS and started building." },
-  { year: "2025", title: "First 100 customers", desc: "Landed across sales, logistics, finance, and healthcare. Average onboarding: 34 minutes." },
-  { year: "2026", title: "AI Engine shipped", desc: "Claude-powered reasoning layer across KRAs, SOPs, and reviews. Shipping to early-access customers." },
-  { year: "2027", title: "Scale to 5,000+", desc: "On-prem deployment, SOC-2 Type II, and regional expansion across APAC." },
+const MILESTONES: { year: string; title: string; body: string }[] = [
+  { year: "2024", title: "Founded",            body: "Built inside BigBoldTech while running a 100-person operation. Stopped stitching SaaS and started building." },
+  { year: "2025", title: "First customers",    body: "Landed across sales, logistics, finance, and healthcare. Median onboarding: under an hour." },
+  { year: "2026", title: "AI engine + IA revamp", body: "Claude-powered reasoning across seven hubs. Cmd-K AI search, Inbox triage, cross-module anomalies." },
+  { year: "2027", title: "Scale + on-prem",    body: "SOC-2 Type II, multi-entity consolidation, on-prem deployment for regulated industries." },
+];
+
+const PRINCIPLES: { eyebrow: string; title: string; body: string }[] = [
+  {
+    eyebrow: "Ship the boring stuff",
+    title: "Audit logs, RBAC, exports.",
+    body: "Every mutation logs an actor + target + old value + new value. Tenant export is one button. GDPR org-delete has a 30-day grace. The unglamorous infrastructure is the actual product.",
+  },
+  {
+    eyebrow: "One promise per surface",
+    title: "Inbox shows what needs you.",
+    body: "Not what's interesting. Not what's recent. Not what an algorithm decided. The one question the Inbox answers is: 'what needs me?' Every other module is similarly opinionated.",
+  },
+  {
+    eyebrow: "AI that knows your company",
+    title: "Cmd-K isn't a chatbot.",
+    body: "It reads across people, tasks, KPIs, financials, comp, SOPs — your live data, your tenant. 'Who's overdue?' returns names. 'Show variance' returns numbers. No hallucinations, no fluff.",
+  },
 ];
 
 export default function AboutPage() {
   return (
-    <>
-      <HeroBlock />
-      <ValuesBlock />
-      <NumbersBlock />
-      <MilestonesBlock />
-      <CtaBlock />
-    </>
-  );
-}
+    <div className="min-h-screen bg-background text-foreground antialiased">
+      <MarketingTopbar />
 
-function HeroBlock() {
-  return (
-    <section className="bento-section" style={{ paddingTop: 40 }}>
-      <div className="bento-container">
-        <Reveal>
-          <SectionHeader
-            label="About"
-            title={
-              <>
-                We built this because <span className="hi">we needed it.</span>
-              </>
-            }
-            subtitle="WorkwrK is a business operating system built by operators running a hundred-person company — not consultants drawing org charts on whiteboards. We sell to growing businesses across India, the GCC, South-East Asia and Europe."
-            aside={{
-              label: "Built in",
-              stat: "Bengaluru",
-              text: "Shipping from India for growing businesses globally.",
-            }}
-          />
-        </Reveal>
-      </div>
-    </section>
-  );
-}
+      {/* ── Hero ─────────────────────────────────────────────────── */}
+      <section className="max-w-4xl mx-auto px-6 lg:px-10 pt-20 pb-16 text-center">
+        <div className="inline-flex items-center gap-2 text-xs font-medium px-3 h-7 rounded-full border border-border bg-surface mb-6">
+          <Sparkles size={11} className="text-[color:var(--accent-strong)]" />
+          About WorkwrK
+        </div>
+        <h1 className="text-5xl lg:text-6xl font-bold tracking-tight mb-6 leading-[1.05]">
+          We got tired of stitching<br />
+          <span className="text-[color:var(--accent-strong)]">fifteen SaaS tools together.</span>
+        </h1>
+        <p className="text-lg text-muted max-w-2xl mx-auto leading-relaxed">
+          WorkwrK is a business operating system built by the people running
+          the business — not by consultants who've read a Workday brochure.
+          Every module has earned its place by surviving a real day in
+          a real company.
+        </p>
+      </section>
 
-function ValuesBlock() {
-  return (
-    <section className="bento-section">
-      <div className="bento-container">
-        <Reveal>
-          <SectionHeader
-            label="What we believe"
-            title={<>Four principles, <span className="hi">no slogans.</span></>}
-            subtitle="We ran a business before building software for businesses. These are the convictions that survive."
-          />
-        </Reveal>
-
-        <Reveal stagger className="vals-grid">
-          {values.map((v) => (
-            <article key={v.title} className={`vl vl-${v.variant}`}>
-              <h3 className="vl-title">{v.title}</h3>
-              <p className="vl-body">{v.body}</p>
-            </article>
-          ))}
-        </Reveal>
-      </div>
-
-      <style>{`
-        .vals-grid {
-          display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;
-        }
-        .vl {
-          border-radius: 28px; padding: 36px;
-          min-height: 240px;
-          display: flex; flex-direction: column; justify-content: space-between;
-          transition: all 0.3s;
-          position: relative; overflow: hidden;
-        }
-        .vl:hover { transform: translateY(-4px); }
-        .vl::before {
-          content: ""; position: absolute; inset: 0;
-          background-image: radial-gradient(circle at 1px 1px, rgba(0,0,0,0.08) 1px, transparent 0);
-          background-size: 18px 18px; pointer-events: none; opacity: 0.35;
-        }
-        .vl > * { position: relative; }
-        .vl-lime { background: var(--b-lime); color: var(--b-bg); }
-        .vl-lime:hover { box-shadow: var(--b-shadow-lime); }
-        .vl-dark {
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          color: var(--b-fg);
-        }
-        .vl-dark:hover { border-color: var(--b-line-2); background: var(--b-card-2); }
-        .vl-dark .vl-body { color: var(--b-t2); }
-        .vl-title { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 14px; }
-        .vl-body { font-size: 14.5px; line-height: 1.55; font-weight: 500; max-width: 420px; }
-        @media (max-width: 900px) { .vals-grid { grid-template-columns: 1fr; } }
-      `}</style>
-    </section>
-  );
-}
-
-function NumbersBlock() {
-  return (
-    <section className="bento-section">
-      <div className="bento-container">
-        <Reveal>
-          <SectionHeader
-            label="By the numbers"
-            title={<>Small team. <span className="hi">Serious miles.</span></>}
-            subtitle="We keep it tight. Engineering-heavy, consultant-free."
-          />
-        </Reveal>
-        <Reveal stagger className="nums-grid">
-          <div className="nc nc-lime">
-            <div className="nc-val"><CountUp to={500} suffix="+" /></div>
-            <div className="nc-label">Teams running on workwrk</div>
-          </div>
-          <div className="nc">
-            <div className="nc-val"><CountUp to={15} suffix="k+" /></div>
-            <div className="nc-label">Employees managed</div>
-          </div>
-          <div className="nc">
-            <div className="nc-val"><CountUp to={40} suffix="+" /></div>
-            <div className="nc-label">Native integrations</div>
-          </div>
-          <div className="nc">
-            <div className="nc-val"><CountUp to={34} suffix=" min" /></div>
-            <div className="nc-label">Median time to first useful day</div>
-          </div>
-        </Reveal>
-      </div>
-
-      <style>{`
-        .nums-grid {
-          display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
-        }
-        .nc {
-          background: var(--b-card); border: 1px solid var(--b-line);
-          border-radius: 20px; padding: 28px;
-          min-height: 160px;
-          display: flex; flex-direction: column; justify-content: center;
-          transition: all 0.3s;
-          color: var(--b-fg);
-          position: relative; overflow: hidden;
-        }
-        .nc:hover { transform: translateY(-3px); border-color: var(--b-line-2); }
-        .nc-lime { background: var(--b-lime); color: var(--b-bg); border-color: var(--b-lime); }
-        .nc-lime:hover { box-shadow: var(--b-shadow-lime); }
-        .nc-val { font-size: 52px; font-weight: 600; letter-spacing: -0.045em; line-height: 1; margin-bottom: 10px; font-variant-numeric: tabular-nums; }
-        .nc-label { font-family: var(--font-geist-mono), monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.12em; opacity: 0.7; }
-        @media (max-width: 900px) { .nums-grid { grid-template-columns: repeat(2, 1fr); } }
-      `}</style>
-    </section>
-  );
-}
-
-function MilestonesBlock() {
-  return (
-    <section className="bento-section">
-      <div className="bento-container">
-        <Reveal>
-          <SectionHeader
-            label="Timeline"
-            title={<>The <span className="hi">short version.</span></>}
-            subtitle="Where we've been, where we're headed."
-          />
-        </Reveal>
-        <Reveal stagger className="ms-grid">
-          {milestones.map((m, i) => {
-            const isCurrent = i === 2; // 2026
-            return (
-              <article key={m.year} className="ms">
-                <div className="ms-year">{m.year}</div>
-                <div
-                  className="ms-dot"
-                  style={{
-                    background: isCurrent ? "var(--b-lime)" : "var(--b-t4)",
-                    boxShadow: isCurrent ? "0 0 10px var(--b-lime)" : "none",
-                  }}
-                />
-                <h3 className="ms-title">{m.title}</h3>
-                <p className="ms-desc">{m.desc}</p>
-              </article>
-            );
-          })}
-        </Reveal>
-      </div>
-
-      <style>{`
-        .ms-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-        .ms {
-          background: var(--b-card); border: 1px solid var(--b-line);
-          border-radius: 20px; padding: 24px;
-          min-height: 200px;
-          display: flex; flex-direction: column;
-          transition: all 0.3s;
-          position: relative; overflow: hidden;
-        }
-        .ms:hover { transform: translateY(-3px); border-color: var(--b-line-2); background: var(--b-card-2); }
-        .ms-year { font-family: var(--font-geist-mono), monospace; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--b-t3); margin-bottom: 8px; }
-        .ms-dot { width: 8px; height: 8px; border-radius: 50%; margin-bottom: 14px; box-shadow: 0 0 10px currentColor; }
-        .ms-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 8px; }
-        .ms-desc { font-size: 13px; color: var(--b-t2); line-height: 1.55; }
-        @media (max-width: 900px) { .ms-grid { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 560px) { .ms-grid { grid-template-columns: 1fr; } }
-      `}</style>
-    </section>
-  );
-}
-
-function CtaBlock() {
-  return (
-    <section className="bento-section-cta">
-      <div className="bento-container">
-        <Reveal>
-          <div
-            style={{
-              background: "var(--b-card)",
-              border: "1px solid var(--b-line)",
-              borderRadius: 36,
-              padding: "64px 48px",
-              textAlign: "center",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <h2
-              style={{
-                fontSize: "clamp(36px, 5vw, 60px)",
-                fontWeight: 600,
-                letterSpacing: "-0.035em",
-                lineHeight: 1,
-                marginBottom: 16,
-                color: "var(--b-fg)",
-              }}
-            >
-              Want to talk?
-            </h2>
-            <p
-              style={{
-                fontSize: 16,
-                maxWidth: 520,
-                margin: "0 auto 28px",
-                lineHeight: 1.55,
-                color: "var(--b-t2)",
-              }}
-            >
-              The founder reads every email. If you&apos;re scaling past fifty people, it&apos;s worth the ten minutes.
+      {/* ── Values ──────────────────────────────────────────────── */}
+      <section className="border-t border-border bg-[color:var(--surface)]/40">
+        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-24">
+          <div className="text-center mb-14">
+            <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
+              What we believe
             </p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-              <Link href="mailto:hi@workwrk.com" className="bento-btn bento-btn-lime bento-btn-lg">
-                hi@workwrk.com →
-              </Link>
-              <Link href="/signup" className="bento-btn bento-btn-ghost bento-btn-lg">
-                Start free trial
-              </Link>
-            </div>
+            <h2 className="text-4xl font-bold tracking-tight max-w-xl mx-auto leading-[1.1]">
+              Four positions that show<br />up in every decision.
+            </h2>
           </div>
-        </Reveal>
-      </div>
-    </section>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {VALUES.map((v) => (
+              <div
+                key={v.title}
+                className="rounded-2xl border border-border bg-background p-7 hover:border-[color:var(--accent)]/40 transition-fast"
+              >
+                <h3 className="text-xl font-bold mb-3 leading-tight">{v.title}</h3>
+                <p className="text-[15px] text-muted leading-relaxed">{v.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Principles ──────────────────────────────────────────── */}
+      <section className="border-t border-border">
+        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-24">
+          <div className="text-center mb-14">
+            <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
+              How the product is built
+            </p>
+            <h2 className="text-4xl font-bold tracking-tight max-w-xl mx-auto leading-[1.1]">
+              Three operating principles.
+            </h2>
+          </div>
+          <div className="space-y-12">
+            {PRINCIPLES.map((p, i) => (
+              <div
+                key={p.title}
+                className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-8 items-start"
+              >
+                <div>
+                  <p className="text-[11px] uppercase tracking-widest text-muted font-bold mb-1">
+                    Principle {String(i + 1).padStart(2, "0")}
+                  </p>
+                  <p className="text-sm text-[color:var(--accent-strong)] font-medium">{p.eyebrow}</p>
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight mb-3">{p.title}</h3>
+                  <p className="text-[15px] text-muted leading-relaxed max-w-2xl">{p.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Timeline ────────────────────────────────────────────── */}
+      <section className="border-t border-border bg-[color:var(--surface)]/40">
+        <div className="max-w-5xl mx-auto px-6 lg:px-10 py-24">
+          <div className="text-center mb-14">
+            <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
+              Roadmap
+            </p>
+            <h2 className="text-4xl font-bold tracking-tight">
+              The four-year arc.
+            </h2>
+          </div>
+          <div className="space-y-4">
+            {MILESTONES.map((m, i) => (
+              <div
+                key={m.year}
+                className="grid grid-cols-[80px_1fr] gap-6 items-start rounded-2xl border border-border bg-background p-6"
+              >
+                <div className="text-right relative">
+                  <p className="text-3xl font-bold tracking-tight text-[color:var(--accent-strong)] tabular-nums">
+                    {m.year}
+                  </p>
+                  {i < MILESTONES.length - 1 && (
+                    <div className="hidden md:block absolute top-12 left-1/2 -translate-x-1/2 h-16 w-px bg-border" aria-hidden />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold mb-2">{m.title}</h3>
+                  <p className="text-[14px] text-muted leading-relaxed">{m.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Final CTA ────────────────────────────────────────────── */}
+      <section className="border-t border-border">
+        <div className="max-w-3xl mx-auto px-6 lg:px-10 py-24 text-center">
+          <h2 className="text-4xl font-bold tracking-tight mb-5 leading-tight">
+            Ready to run your company<br />on one product?
+          </h2>
+          <p className="text-muted mb-8">
+            Free under five people. No credit card. Set up in under an hour.
+          </p>
+          <Link
+            href="/register"
+            className="inline-flex items-center gap-2 px-7 h-12 rounded-xl bg-[color:var(--accent)] text-white font-semibold hover:opacity-90 transition-fast shadow-[0_8px_24px_-8px_rgba(124,58,237,0.5)]"
+          >
+            Start free
+            <ArrowRight size={16} />
+          </Link>
+        </div>
+      </section>
+
+      <MarketingFooter />
+    </div>
   );
 }
