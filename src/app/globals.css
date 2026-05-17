@@ -2,31 +2,87 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Light theme (default) — ClickUp-style violet accent on neutral white.
- * Switched away from the early lime (#d4ff2e) palette: violet reads as
- * "modern productivity SaaS" the way ClickUp / Asana / Linear do, and
- * pops on white without the radioactive feel. Old lime utility classes
- * are remapped further down so existing markup keeps working. */
+/* ═══════════════════════════════════════════════════════════════════
+ * Design tokens — Phase B revamp.
+ *
+ * Surface levels:
+ *   --surface             cards, list rows, dialog bodies (the workhorse)
+ *   --surface-elevated    hovered rows, selected state, popovers
+ *   --surface-2           [legacy alias] still used by ~18 components;
+ *                         migrate progressively in Phase D
+ *
+ * Single accent: violet (the brand). No teal/pink/lime/rose as accents.
+ * Hue chips on icons still use the rainbow tokens below — those are
+ * categorical decoration, not semantic state.
+ *
+ * Four signal colors locked: success/warning/danger/info. Use these
+ * for every status indicator (badges, banners, callouts). Don't reach
+ * for raw green-400/amber-500/etc. — wire to the token instead so a
+ * theme tweak is one edit.
+ *
+ * Typography: four sizes only. Anything outside the scale should
+ * justify itself in PR review.
+ *
+ * Motion: --duration-fast (150ms) for UI feedback; --duration-base
+ * (200ms) for transitions that need an emphasis. No 300ms+ anywhere.
+ * ═══════════════════════════════════════════════════════════════════
+ */
+
 :root {
   --color-background: #FFFFFF;
   --color-foreground: #0A0A0A;
   --color-surface: #F7F7F6;
-  --color-surface-2: #EFEFED;
-  --color-surface-3: #E5E5E2;
+  --color-surface-2: #EFEFED;        /* legacy alias — prefer --surface-elevated */
+  --color-surface-3: #E5E5E2;        /* legacy alias — being phased out */
   --color-border: #DADAD7;
   --color-muted: #707070;
   --color-muted-2: #9A9A9A;
   --color-accent: #7c3aed;           /* violet-600 — primary fill */
   --color-accent-light: #8b5cf6;     /* violet-500 — hover */
-  --accent: #7c3aed;                 /* alias used by new components */
-  --accent-strong: #6d28d9;          /* violet-700 — readable accent text on white */
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
   --accent-soft: rgba(124, 58, 237, 0.10);
-  --accent-contrast: #ffffff;        /* foreground on any violet fill */
+  --accent-contrast: #ffffff;
   --accent-glow: 0 4px 14px -4px rgba(124, 58, 237, 0.35);
+
+  /* New: explicit surface + elevated. surface-2 stays as legacy alias. */
+  --surface: #F7F7F6;
+  --surface-elevated: #EFEFED;
+
+  /* Signal colors — use these, not raw tailwind palette */
+  --signal-success-fg: #15803d;      /* green-700 */
+  --signal-success-bg: rgba(34, 197, 94, 0.10);
+  --signal-success-border: rgba(34, 197, 94, 0.30);
+  --signal-warning-fg: #b45309;      /* amber-700 */
+  --signal-warning-bg: rgba(245, 158, 11, 0.10);
+  --signal-warning-border: rgba(245, 158, 11, 0.30);
+  --signal-danger-fg: #b91c1c;       /* red-700 */
+  --signal-danger-bg: rgba(239, 68, 68, 0.10);
+  --signal-danger-border: rgba(239, 68, 68, 0.30);
+  --signal-info-fg: #1d4ed8;         /* blue-700 */
+  --signal-info-bg: rgba(59, 130, 246, 0.10);
+  --signal-info-border: rgba(59, 130, 246, 0.30);
+
+  /* Typography scale — only four sizes are blessed */
+  --text-heading: 18px;              /* page title, card title */
+  --text-body: 14px;                 /* default; form labels, list rows */
+  --text-small: 12px;                /* subtitles, metadata */
+  --text-caption: 10px;              /* tag pills, eyebrow labels */
+  --leading-tight: 1.35;
+  --leading-base: 1.55;
+
+  /* Motion — keep transitions short. Anything > 200ms feels heavy. */
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --ease-out: cubic-bezier(0.2, 0.9, 0.3, 1);
+
+  /* Density */
+  --row-h-comfortable: 44px;
+  --row-h-compact: 32px;
+
   --scrollbar-color: #DADAD7;
 }
 
-/* Dark theme — same violet accent, lifted for contrast on near-black. */
 .dark {
   --color-background: #0a0a0a;
   --color-foreground: #fafafa;
@@ -36,13 +92,32 @@
   --color-border: rgba(255, 255, 255, 0.08);
   --color-muted: #a0a0a0;
   --color-muted-2: #707070;
-  --color-accent: #8b5cf6;           /* violet-500 */
-  --color-accent-light: #a78bfa;     /* violet-400 */
+  --color-accent: #8b5cf6;
+  --color-accent-light: #a78bfa;
   --accent: #8b5cf6;
-  --accent-strong: #c4b5fd;          /* violet-300 — pops on black */
+  --accent-strong: #c4b5fd;
   --accent-soft: rgba(139, 92, 246, 0.16);
   --accent-contrast: #ffffff;
   --accent-glow: 0 6px 18px -6px rgba(139, 92, 246, 0.55);
+
+  --surface: #141414;
+  --surface-elevated: #1a1a1a;
+
+  /* Dark-mode signal colors lift the fg up so contrast against
+     near-black stays AA. Backgrounds stay translucent. */
+  --signal-success-fg: #4ade80;      /* green-400 */
+  --signal-success-bg: rgba(74, 222, 128, 0.12);
+  --signal-success-border: rgba(74, 222, 128, 0.30);
+  --signal-warning-fg: #fbbf24;      /* amber-400 */
+  --signal-warning-bg: rgba(251, 191, 36, 0.12);
+  --signal-warning-border: rgba(251, 191, 36, 0.30);
+  --signal-danger-fg: #f87171;       /* red-400 */
+  --signal-danger-bg: rgba(248, 113, 113, 0.12);
+  --signal-danger-border: rgba(248, 113, 113, 0.30);
+  --signal-info-fg: #60a5fa;         /* blue-400 */
+  --signal-info-bg: rgba(96, 165, 250, 0.12);
+  --signal-info-border: rgba(96, 165, 250, 0.30);
+
   --scrollbar-color: rgba(255, 255, 255, 0.14);
 }
 
@@ -380,3 +455,43 @@ body {
     table-layout: auto;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * Signal utilities — Phase B.
+ *
+ * Drop one of these classes on any element instead of writing the
+ * "border + bg + text" trio by hand. Each pairs with the signal
+ * tokens defined at the top of this file so a future theme tweak
+ * propagates everywhere.
+ *
+ * Usage:
+ *   <span class="signal signal-success">Approved</span>
+ *   <div class="signal signal-warning">Cycle close in 3 days</div>
+ *
+ * The base .signal class supplies the pill geometry; the variant
+ * supplies the color trio. Mix-and-match with size utilities — the
+ * class is opinionated about color, not padding.
+ * ════════════════════════════════════════════════════════════════════ */
+.signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  line-height: 1.4;
+}
+.signal-success { color: var(--signal-success-fg); background: var(--signal-success-bg); border-color: var(--signal-success-border); }
+.signal-warning { color: var(--signal-warning-fg); background: var(--signal-warning-bg); border-color: var(--signal-warning-border); }
+.signal-danger  { color: var(--signal-danger-fg);  background: var(--signal-danger-bg);  border-color: var(--signal-danger-border); }
+.signal-info    { color: var(--signal-info-fg);    background: var(--signal-info-bg);    border-color: var(--signal-info-border); }
+
+/* Standardized motion: any plain .transition class settles in 150ms.
+   Components that opt in get consistent feedback timing without
+   repeating duration/ease values inline. */
+.transition-fast { transition-duration: var(--duration-fast); transition-timing-function: var(--ease-out); }
+.transition-base { transition-duration: var(--duration-base); transition-timing-function: var(--ease-out); }
