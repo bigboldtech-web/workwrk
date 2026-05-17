@@ -33,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import { useRole } from "@/hooks/use-role";
 import { useToast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import {
   Plus,
@@ -155,31 +156,110 @@ export default function ExpensesPage() {
     return { submitted, approved };
   }, [items]);
 
-  return (
-    <div className="space-y-3 animate-fade-in">
-      <PageHeader
-        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Expenses" }]}
-        kicker="Expenses · reimbursements"
-        title="Expenses"
-        subtitle="Submit, approve, and audit reimbursable expenses."
-        stats={items.length > 0 ? [
-          { label: "Submitted", value: totals.submitted },
-          { label: "Approved", value: totals.approved },
-          { label: "Total", value: items.length },
-        ] : undefined}
-      />
-      <div className="flex items-center justify-end gap-2 flex-wrap">
-        <a
-          href={`/api/export/expenses?scope=${tab}`}
-          className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border text-foreground hover:bg-surface-2 transition-colors"
-        >
-          Export CSV
-        </a>
-        <Button onClick={() => setShowCreate(true)} size="sm">
-          <Plus size={14} className="mr-1.5" /> New expense
-        </Button>
+  // Status sub-filter on top of the tab. Lets users narrow the active
+  // tab without jumping tabs. "all" = unfiltered.
+  const [statusFilter, setStatusFilter] = useState<"all" | "SUBMITTED" | "APPROVED" | "REJECTED" | "REIMBURSED">("all");
+  useEffect(() => { setStatusFilter("all"); }, [tab]);
+
+  // Per-status counts for the rail badges. Same source as the table
+  // (no extra fetch).
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { SUBMITTED: 0, APPROVED: 0, REJECTED: 0, REIMBURSED: 0 };
+    for (const it of items) {
+      if (counts[it.status] !== undefined) counts[it.status] += 1;
+    }
+    return counts;
+  }, [items]);
+
+  // Top-5 categories for the breakdown panel.
+  const topCategories = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of items) {
+      map.set(it.category, (map.get(it.category) ?? 0) + 1);
+    }
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [items]);
+
+  const filteredItems = useMemo(
+    () => statusFilter === "all" ? items : items.filter((i) => i.status === statusFilter),
+    [items, statusFilter],
+  );
+
+  // Left filter rail — status sub-filter + top-5 category breakdown.
+  const filtersRail = (
+    <div className="space-y-5">
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Status</Label>
+        <div className="space-y-0.5">
+          {([
+            { value: "all" as const, label: "All", count: items.length },
+            { value: "SUBMITTED" as const, label: "Submitted", count: statusCounts.SUBMITTED, tone: "warning" as const },
+            { value: "APPROVED" as const, label: "Approved", count: statusCounts.APPROVED, tone: "success" as const },
+            { value: "REJECTED" as const, label: "Rejected", count: statusCounts.REJECTED, tone: "danger" as const },
+            { value: "REIMBURSED" as const, label: "Reimbursed", count: statusCounts.REIMBURSED, tone: "info" as const },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              onClick={() => setStatusFilter(s.value)}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                statusFilter === s.value
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              <span>{s.label}</span>
+              <span className="tabular-nums text-muted-2">{s.count}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
+      {topCategories.length > 0 && (
+        <div>
+          <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Top categories</Label>
+          <ul className="space-y-1">
+            {topCategories.map(([cat, n]) => (
+              <li key={cat} className="flex items-center justify-between text-xs px-2.5 py-1.5">
+                <span className="text-muted truncate">{cat}</span>
+                <span className="text-muted-2 tabular-nums ml-2">{n}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <ListPage
+      header={
+        <>
+          <PageHeader
+            breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Expenses" }]}
+            kicker="Expenses · reimbursements"
+            title="Expenses"
+            subtitle="Submit, approve, and audit reimbursable expenses."
+            stats={items.length > 0 ? [
+              { label: "Submitted", value: totals.submitted },
+              { label: "Approved", value: totals.approved },
+              { label: "Total", value: items.length },
+            ] : undefined}
+          />
+          <div className="flex items-center justify-end gap-2 flex-wrap mt-2">
+            <a
+              href={`/api/export/expenses?scope=${tab}`}
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border text-foreground hover:bg-surface transition-fast"
+            >
+              Export CSV
+            </a>
+            <Button onClick={() => setShowCreate(true)} size="sm">
+              <Plus size={14} className="mr-1.5" /> New expense
+            </Button>
+          </div>
+        </>
+      }
+      filters={filtersRail}
+    >
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList>
           <TabsTrigger value="mine">My expenses</TabsTrigger>
@@ -189,7 +269,7 @@ export default function ExpensesPage() {
 
         <TabsContent value={tab} className="mt-3">
           <ExpensesDataTable
-            rows={items}
+            rows={filteredItems}
             loading={loading}
             tab={tab}
             selectedKeys={selectedArray}
@@ -219,7 +299,7 @@ export default function ExpensesPage() {
           onDone={() => load(tab)}
         />
       )}
-    </div>
+    </ListPage>
   );
 }
 
