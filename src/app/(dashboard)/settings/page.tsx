@@ -1236,6 +1236,38 @@ export default function SettingsPage() {
               />
             </CardContent>
           </Card>
+
+          {/* Onboarding aids — sits in General because it's a per-user
+              preference, not an org setting. Lets users replay the
+              welcome tour from G5 if they dismissed it too quickly. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Help & onboarding</CardTitle>
+              <CardDescription>Per-user aids stored in your browser.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                <div>
+                  <span className="text-sm font-medium">First-run welcome tour</span>
+                  <p className="text-xs text-muted">Replays the three-step intro the next time you open the dashboard.</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    try {
+                      window.localStorage.removeItem("workwrk.firstRunWelcome.v1");
+                      toastSuccess("Welcome tour will play next time you open the dashboard.");
+                    } catch {
+                      toastError("Couldn't reset — your browser blocked localStorage.");
+                    }
+                  }}
+                >
+                  Show again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Modules */}
