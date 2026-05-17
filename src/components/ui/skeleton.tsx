@@ -1,12 +1,31 @@
 import { cn } from "@/lib/utils";
 
+/**
+ * Skeleton primitive — Phase G refresh.
+ *
+ * Default treatment is a left-to-right shimmer instead of the flat
+ * pulse. Reads as "we know what's coming" rather than "something
+ * generic is loading" — premium feel for ~10 lines of CSS.
+ *
+ * Pulse stays available as a `<Skeleton variant="pulse" />` for
+ * cases where shimmer is too busy (dense list rows, inline chips).
+ */
+
 interface SkeletonProps {
   className?: string;
+  variant?: "shimmer" | "pulse";
 }
 
-export function Skeleton({ className }: SkeletonProps) {
+export function Skeleton({ className, variant = "shimmer" }: SkeletonProps) {
   return (
-    <div className={cn("animate-pulse rounded-lg bg-surface-2", className)} />
+    <div
+      className={cn(
+        "rounded-lg bg-surface-2 overflow-hidden",
+        variant === "pulse" && "animate-pulse",
+        variant === "shimmer" && "skeleton-shimmer",
+        className,
+      )}
+    />
   );
 }
 

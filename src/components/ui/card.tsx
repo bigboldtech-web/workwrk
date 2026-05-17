@@ -1,12 +1,38 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+/**
+ * Card primitive — Phase G refresh.
+ *
+ * Three visual treatments:
+ *   default       neutral surface, subtle border, gentle hover
+ *   interactive   hover lifts the card 1px with a soft shadow — use on
+ *                 anything clickable (link cards, kanban cards, stat
+ *                 tiles that drill in)
+ *   hero          generous padding + slightly larger radius — use as
+ *                 the top-of-page focal element on Home / Hub pages
+ *
+ * Transition timing uses --duration-fast (150ms) so it matches the
+ * sidebar chevron + every other UI feedback in the system.
+ */
+
+type CardVariant = "default" | "interactive" | "hero";
+
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  variant?: CardVariant;
+}
+
+const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  ({ className, variant = "default", ...props }, ref) => (
     <div
       ref={ref}
+      data-card-variant={variant}
       className={cn(
-        "rounded-xl border border-border bg-surface transition-all duration-300 hover:border-[color:var(--b-line-2)]",
+        "rounded-xl border border-border bg-surface transition-fast",
+        variant === "interactive" &&
+          "cursor-pointer hover:border-[color:var(--accent)]/40 hover:shadow-[0_4px_14px_-6px_rgba(0,0,0,0.12)] hover:-translate-y-px",
+        variant === "hero" && "rounded-2xl",
+        variant === "default" && "hover:border-[color:var(--b-line-2)]",
         className,
       )}
       {...props}

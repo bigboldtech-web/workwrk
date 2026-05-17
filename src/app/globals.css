@@ -495,3 +495,45 @@ body {
    repeating duration/ease values inline. */
 .transition-fast { transition-duration: var(--duration-fast); transition-timing-function: var(--ease-out); }
 .transition-base { transition-duration: var(--duration-base); transition-timing-function: var(--ease-out); }
+
+/* ════════════════════════════════════════════════════════════════════
+ * Skeleton shimmer — Phase G.
+ *
+ * A left-to-right gloss runs over the skeleton surface every ~1.6s.
+ * Position is animated with background-position so we can keep the
+ * existing rounded corners + bg-color and just paint a moving gradient
+ * on top. Far more premium than the plain pulse and costs 30 lines.
+ * ════════════════════════════════════════════════════════════════════ */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -100% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+:root:not(.dark) .skeleton-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.65) 50%,
+    transparent 100%
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════
+ * Card hover — Phase G interactive variant.
+ * Soft shadow + 1px lift on cards that are clickable. Reads as
+ * "yes you can click this" without being shouty.
+ * ════════════════════════════════════════════════════════════════════ */
+[data-card-variant="interactive"]:active {
+  transform: translateY(0);
+  transition-duration: 60ms;
+}
