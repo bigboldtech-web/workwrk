@@ -55,7 +55,15 @@
     "recruiting": "[he] Recruiting",
     "procurement": "[he] Procurement",
     "learning": "[he] Learning",
-    "workforcePlanning": "[he] Workforce Planning"
+    "workforcePlanning": "[he] Workforce Planning",
+    "payroll": "שכר",
+    "benefits": "הטבות",
+    "myBenefits": "ההטבות שלי",
+    "studio": "Studio",
+    "financials": "פיננסים",
+    "planning": "תכנון",
+    "admin": "מסוף ניהול",
+    "clock": "החתמת שעון"
   },
   "auth": {
     "signIn": "התחברות",

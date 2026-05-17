@@ -55,7 +55,15 @@
     "recruiting": "[hi] Recruiting",
     "procurement": "[hi] Procurement",
     "learning": "[hi] Learning",
-    "workforcePlanning": "[hi] Workforce Planning"
+    "workforcePlanning": "[hi] Workforce Planning",
+    "payroll": "वेतन",
+    "benefits": "लाभ",
+    "myBenefits": "मेरे लाभ",
+    "studio": "स्टूडियो",
+    "financials": "वित्त",
+    "planning": "योजना",
+    "admin": "एडमिन कंसोल",
+    "clock": "क्लॉक इन"
   },
   "auth": {
     "signIn": "साइन इन",

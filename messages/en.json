@@ -55,7 +55,15 @@
     "settings": "Settings",
     "signOut": "Sign Out",
     "lightMode": "Light Mode",
-    "darkMode": "Dark Mode"
+    "darkMode": "Dark Mode",
+    "payroll": "Payroll",
+    "benefits": "Benefits",
+    "myBenefits": "My Benefits",
+    "studio": "Studio",
+    "financials": "Financials",
+    "planning": "Planning",
+    "admin": "Admin Console",
+    "clock": "Clock in"
   },
   "auth": {
     "signIn": "Sign In",

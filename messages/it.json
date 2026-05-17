@@ -55,7 +55,15 @@
     "recruiting": "[it] Recruiting",
     "procurement": "[it] Procurement",
     "learning": "[it] Learning",
-    "workforcePlanning": "[it] Workforce Planning"
+    "workforcePlanning": "[it] Workforce Planning",
+    "payroll": "Buste paga",
+    "benefits": "Benefit",
+    "myBenefits": "I miei benefit",
+    "studio": "Studio",
+    "financials": "Finanza",
+    "planning": "Pianificazione",
+    "admin": "Console admin",
+    "clock": "Timbratura"
   },
   "auth": {
     "signIn": "Accedi",

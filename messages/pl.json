@@ -55,7 +55,15 @@
     "recruiting": "[pl] Recruiting",
     "procurement": "[pl] Procurement",
     "learning": "[pl] Learning",
-    "workforcePlanning": "[pl] Workforce Planning"
+    "workforcePlanning": "[pl] Workforce Planning",
+    "payroll": "Lista płac",
+    "benefits": "Benefity",
+    "myBenefits": "Moje benefity",
+    "studio": "Studio",
+    "financials": "Finanse",
+    "planning": "Planowanie",
+    "admin": "Konsola admina",
+    "clock": "Logowanie czasu"
   },
   "auth": {
     "signIn": "Zaloguj się",

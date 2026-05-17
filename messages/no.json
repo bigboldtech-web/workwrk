@@ -55,7 +55,15 @@
     "recruiting": "[no] Recruiting",
     "procurement": "[no] Procurement",
     "learning": "[no] Learning",
-    "workforcePlanning": "[no] Workforce Planning"
+    "workforcePlanning": "[no] Workforce Planning",
+    "payroll": "Lønn",
+    "benefits": "Goder",
+    "myBenefits": "Mine goder",
+    "studio": "Studio",
+    "financials": "Økonomi",
+    "planning": "Planlegging",
+    "admin": "Admin-konsoll",
+    "clock": "Stempling"
   },
   "auth": {
     "signIn": "Logg inn",

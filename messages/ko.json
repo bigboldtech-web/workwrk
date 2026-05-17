@@ -55,7 +55,15 @@
     "recruiting": "[ko] Recruiting",
     "procurement": "[ko] Procurement",
     "learning": "[ko] Learning",
-    "workforcePlanning": "[ko] Workforce Planning"
+    "workforcePlanning": "[ko] Workforce Planning",
+    "payroll": "급여",
+    "benefits": "복리후생",
+    "myBenefits": "내 복리후생",
+    "studio": "Studio",
+    "financials": "재무",
+    "planning": "계획",
+    "admin": "관리 콘솔",
+    "clock": "출퇴근"
   },
   "auth": {
     "signIn": "로그인",

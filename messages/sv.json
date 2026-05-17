@@ -55,7 +55,15 @@
     "recruiting": "[sv] Recruiting",
     "procurement": "[sv] Procurement",
     "learning": "[sv] Learning",
-    "workforcePlanning": "[sv] Workforce Planning"
+    "workforcePlanning": "[sv] Workforce Planning",
+    "payroll": "Lön",
+    "benefits": "Förmåner",
+    "myBenefits": "Mina förmåner",
+    "studio": "Studio",
+    "financials": "Ekonomi",
+    "planning": "Planering",
+    "admin": "Admin-konsol",
+    "clock": "Stämpla in"
   },
   "auth": {
     "signIn": "Logga in",

@@ -55,7 +55,15 @@
     "recruiting": "[da] Recruiting",
     "procurement": "[da] Procurement",
     "learning": "[da] Learning",
-    "workforcePlanning": "[da] Workforce Planning"
+    "workforcePlanning": "[da] Workforce Planning",
+    "payroll": "Løn",
+    "benefits": "Personalegoder",
+    "myBenefits": "Mine goder",
+    "studio": "Studio",
+    "financials": "Økonomi",
+    "planning": "Planlægning",
+    "admin": "Admin-konsol",
+    "clock": "Stempling"
   },
   "auth": {
     "signIn": "Log ind",

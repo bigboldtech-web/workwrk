@@ -55,7 +55,15 @@
     "recruiting": "[ar] Recruiting",
     "procurement": "[ar] Procurement",
     "learning": "[ar] Learning",
-    "workforcePlanning": "[ar] Workforce Planning"
+    "workforcePlanning": "[ar] Workforce Planning",
+    "payroll": "كشوف المرتبات",
+    "benefits": "المزايا",
+    "myBenefits": "مزاياي",
+    "studio": "Studio",
+    "financials": "الشؤون المالية",
+    "planning": "التخطيط",
+    "admin": "وحدة تحكم المسؤول",
+    "clock": "تسجيل الحضور"
   },
   "auth": {
     "signIn": "تسجيل الدخول",

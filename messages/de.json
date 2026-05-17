@@ -55,7 +55,15 @@
     "recruiting": "[de] Recruiting",
     "procurement": "[de] Procurement",
     "learning": "[de] Learning",
-    "workforcePlanning": "[de] Workforce Planning"
+    "workforcePlanning": "[de] Workforce Planning",
+    "payroll": "Gehaltsabrechnung",
+    "benefits": "Leistungen",
+    "myBenefits": "Meine Leistungen",
+    "studio": "Studio",
+    "financials": "Finanzen",
+    "planning": "Planung",
+    "admin": "Admin-Konsole",
+    "clock": "Einstempeln"
   },
   "auth": {
     "signIn": "Anmelden",

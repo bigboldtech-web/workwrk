@@ -55,7 +55,15 @@
     "recruiting": "[fr] Recruiting",
     "procurement": "[fr] Procurement",
     "learning": "[fr] Learning",
-    "workforcePlanning": "[fr] Workforce Planning"
+    "workforcePlanning": "[fr] Workforce Planning",
+    "payroll": "Paie",
+    "benefits": "Avantages",
+    "myBenefits": "Mes Avantages",
+    "studio": "Studio",
+    "financials": "Finances",
+    "planning": "Planification",
+    "admin": "Console admin",
+    "clock": "Pointage"
   },
   "auth": {
     "signIn": "Connexion",

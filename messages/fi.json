@@ -55,7 +55,15 @@
     "recruiting": "[fi] Recruiting",
     "procurement": "[fi] Procurement",
     "learning": "[fi] Learning",
-    "workforcePlanning": "[fi] Workforce Planning"
+    "workforcePlanning": "[fi] Workforce Planning",
+    "payroll": "Palkanlaskenta",
+    "benefits": "Edut",
+    "myBenefits": "Omat edut",
+    "studio": "Studio",
+    "financials": "Talous",
+    "planning": "Suunnittelu",
+    "admin": "Admin-konsoli",
+    "clock": "Kellotus"
   },
   "auth": {
     "signIn": "Kirjaudu sisään",

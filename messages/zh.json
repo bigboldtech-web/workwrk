@@ -55,7 +55,15 @@
     "recruiting": "[zh] Recruiting",
     "procurement": "[zh] Procurement",
     "learning": "[zh] Learning",
-    "workforcePlanning": "[zh] Workforce Planning"
+    "workforcePlanning": "[zh] Workforce Planning",
+    "payroll": "薪资",
+    "benefits": "福利",
+    "myBenefits": "我的福利",
+    "studio": "Studio",
+    "financials": "财务",
+    "planning": "规划",
+    "admin": "管理控制台",
+    "clock": "打卡"
   },
   "auth": {
     "signIn": "登录",

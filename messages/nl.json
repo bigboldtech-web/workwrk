@@ -55,7 +55,15 @@
     "recruiting": "[nl] Recruiting",
     "procurement": "[nl] Procurement",
     "learning": "[nl] Learning",
-    "workforcePlanning": "[nl] Workforce Planning"
+    "workforcePlanning": "[nl] Workforce Planning",
+    "payroll": "Salarisadministratie",
+    "benefits": "Secundair",
+    "myBenefits": "Mijn voordelen",
+    "studio": "Studio",
+    "financials": "Financiën",
+    "planning": "Planning",
+    "admin": "Admin-console",
+    "clock": "Inklokken"
   },
   "auth": {
     "signIn": "Inloggen",
