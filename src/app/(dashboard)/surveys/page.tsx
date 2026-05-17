@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useRole } from "@/hooks/use-role";
@@ -328,20 +329,100 @@ export default function SurveysPage() {
 
   const pending = surveys.filter((s) => s.status === "ACTIVE" && !s.hasResponded).length;
 
-  return (
-    <div className="space-y-3 animate-fade-in">
-      <PageHeader
-        breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Surveys" }]}
-        kicker="Surveys · pulse"
-        title="Pulse surveys"
-        subtitle={`${surveys.length} surveys${pending > 0 ? ` · ${pending} pending` : ""}`}
-        actions={
-          isManager
-            ? [{ label: "New survey", onClick: openCreate, icon: <Plus size={14} /> }]
-            : undefined
-        }
-      />
+  // Filter state for the rail.
+  const [statusFilter, setStatusFilter] = useState<"all" | "ACTIVE" | "DRAFT" | "CLOSED">("all");
+  const [audienceFilter, setAudienceFilter] = useState<"all" | "ALL" | "OFFICES" | "DEPARTMENTS" | "USERS">("all");
 
+  const statusCounts = {
+    ACTIVE: surveys.filter((s) => s.status === "ACTIVE").length,
+    DRAFT: surveys.filter((s) => s.status === "DRAFT").length,
+    CLOSED: surveys.filter((s) => s.status === "CLOSED").length,
+  };
+  const audienceCounts = {
+    ALL: surveys.filter((s) => s.audienceType === "ALL").length,
+    OFFICES: surveys.filter((s) => s.audienceType === "OFFICES").length,
+    DEPARTMENTS: surveys.filter((s) => s.audienceType === "DEPARTMENTS").length,
+    USERS: surveys.filter((s) => s.audienceType === "USERS").length,
+  };
+
+  const filteredSurveys = surveys.filter((s) => {
+    if (statusFilter !== "all" && s.status !== statusFilter) return false;
+    if (audienceFilter !== "all" && s.audienceType !== audienceFilter) return false;
+    return true;
+  });
+
+  const filtersRail = (
+    <div className="space-y-5">
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Status</Label>
+        <div className="space-y-0.5">
+          {([
+            { value: "all" as const, label: "All", count: surveys.length },
+            { value: "ACTIVE" as const, label: "Active", count: statusCounts.ACTIVE },
+            { value: "DRAFT" as const, label: "Draft", count: statusCounts.DRAFT },
+            { value: "CLOSED" as const, label: "Closed", count: statusCounts.CLOSED },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              onClick={() => setStatusFilter(s.value)}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                statusFilter === s.value
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              <span>{s.label}</span>
+              <span className="tabular-nums text-muted-2">{s.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Audience</Label>
+        <div className="space-y-0.5">
+          {([
+            { value: "all" as const, label: "All audiences", count: surveys.length },
+            { value: "ALL" as const, label: "Everyone", count: audienceCounts.ALL },
+            { value: "OFFICES" as const, label: "By office", count: audienceCounts.OFFICES },
+            { value: "DEPARTMENTS" as const, label: "By department", count: audienceCounts.DEPARTMENTS },
+            { value: "USERS" as const, label: "Specific people", count: audienceCounts.USERS },
+          ]).map((a) => (
+            <button
+              key={a.value}
+              onClick={() => setAudienceFilter(a.value)}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                audienceFilter === a.value
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              <span>{a.label}</span>
+              <span className="tabular-nums text-muted-2">{a.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <ListPage
+      header={
+        <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Surveys" }]}
+          kicker="Surveys · pulse"
+          title="Pulse surveys"
+          subtitle={`${surveys.length} surveys${pending > 0 ? ` · ${pending} pending` : ""}`}
+          actions={
+            isManager
+              ? [{ label: "New survey", onClick: openCreate, icon: <Plus size={14} /> }]
+              : undefined
+          }
+        />
+      }
+      filters={filtersRail}
+    >
       {loading ? (
         <div className="space-y-3">{[1, 2].map((i) => <SkeletonCard key={i} />)}</div>
       ) : surveys.length === 0 ? (
@@ -350,9 +431,15 @@ export default function SurveysPage() {
           title="No surveys yet"
           description="Create pulse surveys to measure team engagement and surface issues before they grow."
         />
+      ) : filteredSurveys.length === 0 ? (
+        <EmptyState
+          icon={ClipboardCheck}
+          title="No surveys match these filters"
+          description="Clear filters in the left rail to see all surveys."
+        />
       ) : (
         <div className="space-y-3">
-          {surveys.map((survey) => {
+          {filteredSurveys.map((survey) => {
             const questions = (survey.questions || []) as SurveyQuestion[];
             const size = survey.audienceSize ?? survey.totalUsers;
             const audienceLabel = survey.audienceType === "ALL" ? "Everyone"
@@ -962,7 +1049,7 @@ export default function SurveysPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </ListPage>
   );
 }
 
