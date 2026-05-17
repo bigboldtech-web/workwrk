@@ -25,6 +25,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { useAutosave } from "@/hooks/use-autosave";
 import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // ============================================
 // Dynamic Org Chart Component
@@ -646,11 +647,11 @@ export default function OrganizationPage() {
 
   if (loading) {
     return (
-      <div className="space-y-3 animate-fade-in">
-        <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
-        <div className="grid grid-cols-3 gap-4">
+      <div className="space-y-4 animate-fade-in">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-40 bg-surface rounded-lg border border-border animate-pulse" />
+            <Skeleton key={i} className="h-40 w-full" />
           ))}
         </div>
       </div>

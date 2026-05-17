@@ -16,6 +16,7 @@ import {
   Wrench, Plus, Share2, Eye, EyeOff, ExternalLink, Copy, Trash2, Users, X,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useRole } from "@/hooks/use-role";
 
@@ -166,7 +167,7 @@ export default function ToolsPage() {
         </div>
 
         {loading ? (
-          <div className="p-3 space-y-2">{[1,2,3].map((i) => <div key={i} className="h-14 bg-surface-2 rounded animate-pulse" />)}</div>
+          <div className="p-3 space-y-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
         ) : tools.length === 0 ? (
           <div className="p-8 text-center">
             <Wrench size={32} className="mx-auto text-muted mb-2" />

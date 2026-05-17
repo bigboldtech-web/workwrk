@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   ArrowLeft, Save, Play, Users, Clock, BookOpen, Plus, CheckCircle2,
 } from "lucide-react";
@@ -76,9 +77,9 @@ export default function CourseDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-3 animate-fade-in">
-        <div className="h-8 w-48 bg-surface-2 rounded animate-pulse" />
-        <div className="h-64 bg-surface-2 rounded-lg animate-pulse" />
+      <div className="space-y-4 animate-fade-in">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }

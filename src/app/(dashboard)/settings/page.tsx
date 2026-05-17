@@ -28,6 +28,7 @@ import { PrivacyControls } from "@/components/settings/privacy-controls";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { useAutosave } from "@/hooks/use-autosave";
 import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * Top-level helper that pairs a Save Changes button with debounced
@@ -215,7 +216,7 @@ function AccessControlManager() {
     );
   }
 
-  if (loading) return <div className="h-32 bg-surface-2 rounded animate-pulse" />;
+  if (loading) return <Skeleton className="h-32 w-full" />;
 
   const isProtected = PROTECTED_ADMIN_ROLES.includes(activeLevel);
 
@@ -449,7 +450,7 @@ function TeamMembersList() {
       <div className="border border-border rounded-lg overflow-hidden">
         {loading ? (
           <div className="p-4 space-y-2">
-            {[1,2,3].map((i) => <div key={i} className="h-12 bg-surface-2 rounded animate-pulse" />)}
+            {[1,2,3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
           </div>
         ) : filtered.length === 0 ? (
           <div className="p-8 text-center">

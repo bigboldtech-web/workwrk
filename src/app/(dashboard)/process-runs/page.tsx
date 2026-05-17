@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -214,7 +215,7 @@ export default function ProcessRunsPage() {
           {Array.from({ length: 4 }).map((_, i) => (
             <Card key={i}>
               <CardContent className="p-4">
-                <div className="h-12 bg-surface-2 rounded animate-pulse" />
+                <Skeleton className="h-12 w-full" />
               </CardContent>
             </Card>
           ))}

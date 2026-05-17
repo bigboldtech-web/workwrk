@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { RichEditor } from "@/components/ui/rich-editor";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAutosave } from "@/hooks/use-autosave";
 import { useToast } from "@/components/ui/toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
@@ -99,11 +100,11 @@ export default function BrandGuidePage() {
 
   if (loading) {
     return (
-      <div className="space-y-3 animate-fade-in">
-        <div className="h-8 w-56 bg-surface-2 rounded animate-pulse" />
+      <div className="space-y-4 animate-fade-in">
+        <Skeleton className="h-8 w-56" />
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-48 bg-surface-2 rounded-lg animate-pulse" />
+            <Skeleton key={i} className="h-48 w-full" />
           ))}
         </div>
       </div>
