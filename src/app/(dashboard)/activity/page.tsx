@@ -13,6 +13,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import { useRole } from "@/hooks/use-role";
 
 const ACTIVITY_ICONS: Record<string, any> = {
@@ -93,7 +94,6 @@ export default function ActivityPage() {
   const [teamMembers, setTeamMembers] = useState<Array<{ id: string; firstName: string; lastName: string }>>([]);
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [selectedActorIds, setSelectedActorIds] = useState<string[]>([]);
-  const [showMemberPicker, setShowMemberPicker] = useState(false);
 
   const fetchActivity = useCallback(async () => {
     setLoading(true);
@@ -152,17 +152,96 @@ export default function ActivityPage() {
     );
   }
 
-  return (
-    <div className="space-y-3 animate-fade-in">
-      <PageHeader
-        kicker="Activity · org-wide feed"
-        title="Activity feed"
-        subtitle="Track what's happening across your organization."
-      />
+  // Left filter rail — type chips become a vertical list instead of
+  // a top-of-page chip row. Keeps the main column clean for the
+  // timeline and lets users scan filter options without horizontal
+  // wrapping at narrow widths.
+  const filtersRail = (
+    <div className="space-y-4 text-sm">
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <Filter size={12} className="text-muted" />
+          <span className="text-[10px] uppercase tracking-wide text-muted font-semibold">Activity type</span>
+        </div>
+        <div className="space-y-0.5">
+          {TYPE_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              onClick={() => setTypeFilter(f.value)}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-colors ${
+                typeFilter === f.value
+                  ? "bg-[rgba(124,58,237,0.10)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-surface-2 hover:text-foreground"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {/* Tabs for My / Team */}
+      {/* Team member filter — visible only in team scope */}
+      {scope === "team" && teamMembers.length > 1 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted font-semibold inline-flex items-center gap-1">
+              <Users size={10} /> Actors
+            </span>
+            {selectedActorIds.length > 0 && (
+              <button
+                onClick={() => setSelectedActorIds([])}
+                className="text-[10px] text-[color:var(--accent-strong)] hover:underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="space-y-0.5 max-h-64 overflow-y-auto">
+            {teamMembers.map((m) => {
+              const checked = selectedActorIds.includes(m.id);
+              return (
+                <label
+                  key={m.id}
+                  className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-surface-2 cursor-pointer text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      setSelectedActorIds((prev) =>
+                        checked ? prev.filter((id) => id !== m.id) : [...prev, m.id]
+                      );
+                    }}
+                    className="accent-violet-600"
+                  />
+                  <span className="truncate">
+                    {m.firstName} {m.lastName}
+                    {m.id === currentUserId && <span className="text-muted-2 ml-1">(you)</span>}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <ListPage
+      header={
+        <PageHeader
+          kicker="Activity · org-wide feed"
+          title="Activity feed"
+          subtitle="Track what's happening across your organization."
+        />
+      }
+      filters={filtersRail}
+    >
+      {/* My / Team tabs sit above the timeline since they swap the
+          underlying dataset, orthogonal to the type filters in the rail. */}
       <Tabs value={scope} onValueChange={setScope}>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-3">
           <TabsList>
             <TabsTrigger value="my">My Activity</TabsTrigger>
             {isManager && <TabsTrigger value="team">Team Activity</TabsTrigger>}
@@ -170,96 +249,16 @@ export default function ActivityPage() {
           <Badge variant="secondary" className="text-xs">{pagination.total} events</Badge>
         </div>
 
-        {/* Filter bar */}
-        <div className="flex items-center gap-2 mt-4 flex-wrap">
-          <Filter size={14} className="text-muted" />
-          {TYPE_FILTERS.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setTypeFilter(f.value)}
-              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                typeFilter === f.value
-                  ? "border-violet-500 bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
-                  : "border-border text-muted hover:border-muted-2"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-
-          {/* Team member multi-select (only useful in team scope with ≥2 members) */}
-          {scope === "team" && teamMembers.length > 1 && (
-            <div className="relative ml-auto">
-              <button
-                onClick={() => setShowMemberPicker(!showMemberPicker)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${
-                  selectedActorIds.length > 0
-                    ? "border-violet-500 bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]"
-                    : "border-border text-muted hover:border-muted-2"
-                }`}
-              >
-                <Users size={12} />
-                {selectedActorIds.length === 0
-                  ? `All team (${teamMembers.length})`
-                  : `${selectedActorIds.length} selected`}
-              </button>
-              {showMemberPicker && (
-                <div className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border border-border bg-surface shadow-xl p-2 animate-in fade-in-0 zoom-in-95">
-                  <div className="flex items-center justify-between mb-2 px-1">
-                    <span className="text-[10px] uppercase tracking-wider text-muted">Show activity from</span>
-                    <button
-                      onClick={() => setSelectedActorIds([])}
-                      className="text-[10px] text-[color:var(--accent-strong)] hover:text-[#e2ff6b]"
-                    >
-                      Show all
-                    </button>
-                  </div>
-                  <div className="max-h-64 overflow-y-auto space-y-0.5">
-                    {teamMembers.map((m) => {
-                      const checked = selectedActorIds.includes(m.id);
-                      return (
-                        <label
-                          key={m.id}
-                          className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface-2 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              setSelectedActorIds((prev) =>
-                                checked ? prev.filter((id) => id !== m.id) : [...prev, m.id]
-                              );
-                            }}
-                            className="accent-[#d4ff2e]"
-                          />
-                          <span className="text-sm">
-                            {m.firstName} {m.lastName}
-                            {m.id === currentUserId && <span className="text-[10px] text-muted ml-1">(you)</span>}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <div className="border-t border-border mt-2 pt-2 flex justify-end">
-                    <button onClick={() => setShowMemberPicker(false)} className="text-xs px-3 py-1 rounded-md bg-violet-600 text-[#0a0a0a]">Done</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <TabsContent value="my" className="mt-4">
+        <TabsContent value="my">
           <ActivityTimeline grouped={grouped} loading={loading} />
         </TabsContent>
-        <TabsContent value="team" className="mt-4">
+        <TabsContent value="team">
           <ActivityTimeline grouped={grouped} loading={loading} />
         </TabsContent>
       </Tabs>
 
-      {/* Pagination */}
       {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex items-center justify-center gap-3 mt-4">
           <Button
             variant="outline"
             size="sm"
@@ -281,7 +280,7 @@ export default function ActivityPage() {
           </Button>
         </div>
       )}
-    </div>
+    </ListPage>
   );
 }
 
