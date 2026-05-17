@@ -1,4 +1,7 @@
-import { LandingV2 } from "@/components/landing/landing-v2";
+// Landing v4 — built from scratch (premium aesthetic, hub-aligned, real
+// product mock). v2 has been deleted; if you need to roll back, recover
+// from git history before commit ee0c141 / f704baf range.
+import { LandingV4 } from "@/components/landing/landing-v4";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -205,7 +208,7 @@ export default async function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <LandingV2 />
+      <LandingV4 />
     </>
   );
 }
