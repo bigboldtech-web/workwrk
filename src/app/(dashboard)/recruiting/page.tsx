@@ -36,6 +36,8 @@ import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import {
   Briefcase,
   Users,
@@ -150,19 +152,69 @@ export default function RecruitingPage() {
   const initialTab = requestedTab === "candidates" || requestedTab === "pipeline" || requestedTab === "interviews" || requestedTab === "jobs"
     ? requestedTab
     : "jobs";
+  const [activeTab, setActiveTab] = useState<"jobs" | "candidates" | "pipeline" | "interviews">(initialTab as "jobs" | "candidates" | "pipeline" | "interviews");
   if (!isManager) return null; // layout already guards, but defense-in-depth
-  return (
+
+  // Per-tab quick-action rail. Inner tab components own their own
+  // list state; this rail surfaces navigation + a one-line explainer
+  // of what each tab is for.
+  const filtersRail = (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <Briefcase size={20} /> Recruiting
-        </h1>
-        <p className="text-muted text-sm mt-1">
-          Open requisitions, talent pool, and pipeline movement.
-        </p>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Quick links</Label>
+        <div className="space-y-0.5">
+          {activeTab === "jobs" && (
+            <>
+              <RecRailLink onClick={() => setActiveTab("candidates")} label="Browse candidate pool" />
+              <RecRailLink onClick={() => setActiveTab("pipeline")} label="View pipeline" />
+            </>
+          )}
+          {activeTab === "candidates" && (
+            <>
+              <RecRailLink onClick={() => setActiveTab("jobs")} label="Open requisitions" />
+              <RecRailLink onClick={() => setActiveTab("pipeline")} label="View pipeline" />
+            </>
+          )}
+          {activeTab === "pipeline" && (
+            <>
+              <RecRailLink onClick={() => setActiveTab("interviews")} label="Schedule interviews" />
+              <RecRailLink onClick={() => setActiveTab("candidates")} label="Candidate pool" />
+            </>
+          )}
+          {activeTab === "interviews" && (
+            <>
+              <RecRailLink onClick={() => setActiveTab("pipeline")} label="View pipeline" />
+              <RecRailLink onClick={() => setActiveTab("jobs")} label="Open requisitions" />
+            </>
+          )}
+        </div>
       </div>
 
-      <Tabs defaultValue={initialTab}>
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">About this tab</Label>
+        <p className="text-[12px] text-muted leading-relaxed px-1">
+          {activeTab === "jobs"       && "Requisitions move DRAFT → OPEN → CLOSED/FILLED. Each open job collects applications you can advance through the pipeline."}
+          {activeTab === "candidates" && "The talent pool — every person who's ever applied or been sourced. Application history follows them across jobs."}
+          {activeTab === "pipeline"   && "Kanban-style stages. Drag an application between stages to move it. Stages: New → Screen → Interview → Offer → Hired/Rejected."}
+          {activeTab === "interviews" && "Scheduled and recent interviews. Scorecards land here for the interviewer to complete after each session."}
+        </p>
+      </div>
+    </div>
+  );
+
+  return (
+    <ListPage
+      header={
+        <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Recruiting" }]}
+          kicker="Recruiting · jobs + candidates + pipeline"
+          title="Recruiting"
+          subtitle="Open requisitions, talent pool, and pipeline movement."
+        />
+      }
+      filters={filtersRail}
+    >
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
         <TabsList>
           <TabsTrigger value="jobs">Jobs</TabsTrigger>
           <TabsTrigger value="candidates">Candidates</TabsTrigger>
@@ -182,7 +234,18 @@ export default function RecruitingPage() {
           <InterviewsTab />
         </TabsContent>
       </Tabs>
-    </div>
+    </ListPage>
+  );
+}
+
+function RecRailLink({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left text-xs px-2.5 py-1.5 rounded-md text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground transition-fast"
+    >
+      {label}
+    </button>
   );
 }
 
