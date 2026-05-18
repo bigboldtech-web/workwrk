@@ -31,6 +31,9 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useRole } from "@/hooks/use-role";
 import { SkeletonCard } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
+import Link from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ShoppingCart, Plus, Building2, FileText, Inbox, Receipt } from "lucide-react";
 
@@ -101,17 +104,64 @@ export default function ProcurementPage() {
   const initialTab = requestedTab === "vendors" || requestedTab === "invoices" || requestedTab === "pos"
     ? requestedTab
     : "pos";
-  return (
+  // Controlled so the rail can switch per-tab.
+  const [activeTab, setActiveTab] = useState<"pos" | "invoices" | "vendors">(initialTab as "pos" | "invoices" | "vendors");
+
+  // Per-tab quick-action rail. Inner tab components own their own
+  // filter/scope state; this rail surfaces the navigation shortcuts
+  // and cross-tab links most useful while looking at each surface.
+  const filtersRail = (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <ShoppingCart size={20} /> Procurement
-        </h1>
-        <p className="text-muted text-sm mt-1">
-          Vendor records, purchase orders, and invoices.
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">Quick links</Label>
+        <div className="space-y-0.5">
+          {activeTab === "pos" && (
+            <>
+              <RailLink onClick={() => setActiveTab("invoices")} label="View invoices" />
+              <RailLink onClick={() => setActiveTab("vendors")} label="Manage vendors" />
+              <RailLink href="/inbox" label="My approval queue" />
+            </>
+          )}
+          {activeTab === "invoices" && (
+            <>
+              <RailLink onClick={() => setActiveTab("pos")} label="View purchase orders" />
+              <RailLink onClick={() => setActiveTab("vendors")} label="Manage vendors" />
+              <RailLink href="/api/export/invoices" label="Export CSV" external />
+            </>
+          )}
+          {activeTab === "vendors" && (
+            <>
+              <RailLink onClick={() => setActiveTab("pos")} label="View purchase orders" />
+              <RailLink onClick={() => setActiveTab("invoices")} label="View invoices" />
+            </>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted font-semibold mb-2 block">About this tab</Label>
+        <p className="text-[12px] text-muted leading-relaxed px-1">
+          {activeTab === "pos" && "Purchase orders move DRAFT → SUBMITTED → APPROVED → SENT → RECEIVED → CLOSED. Submit a PO and it routes to your manager's approval queue."}
+          {activeTab === "invoices" && "Invoices link to POs when possible. Duplicate (vendor, invoice#) pairs are refused at the schema — fraud detection out of the box."}
+          {activeTab === "vendors" && "Archived vendors disappear from PO creation but keep historic records. Reactivate any time."}
         </p>
       </div>
-      <Tabs defaultValue={initialTab}>
+    </div>
+  );
+
+  return (
+    <ListPage
+      header={
+        <PageHeader
+          breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Procurement" }]}
+          kicker="Procurement · vendors + POs + invoices"
+          title="Procurement"
+          subtitle="Vendor records, purchase orders, and invoices."
+        />
+      }
+      filters={filtersRail}
+    >
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
         <TabsList>
           <TabsTrigger value="pos">Purchase orders</TabsTrigger>
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
@@ -127,7 +177,21 @@ export default function ProcurementPage() {
           <VendorsTab />
         </TabsContent>
       </Tabs>
-    </div>
+    </ListPage>
+  );
+}
+
+function RailLink({ label, href, onClick, external }: { label: string; href?: string; onClick?: () => void; external?: boolean }) {
+  const className = "w-full text-left text-xs px-2.5 py-1.5 rounded-md text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground transition-fast block";
+  if (href) {
+    return external ? (
+      <a href={href} className={className} target="_blank" rel="noopener noreferrer">{label} ↗</a>
+    ) : (
+      <Link href={href} className={className}>{label}</Link>
+    );
+  }
+  return (
+    <button onClick={onClick} className={className}>{label}</button>
   );
 }
 
