@@ -5,14 +5,15 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Plus, ChevronLeft, ChevronRight, Calendar, List, Clock,
-  CheckCircle2, Circle, Play, Users, AlertCircle, Filter,
-  CalendarDays, CalendarRange, GanttChart, Activity,
+  CheckCircle2, Circle, Play, AlertCircle,
+  CalendarRange, GanttChart, Activity,
   Edit3, Trash2,
 } from "lucide-react";
 import {
@@ -93,8 +94,12 @@ export default function TasksPage() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
-  const [showMemberPicker, setShowMemberPicker] = useState(false);
   const [showWorkload, setShowWorkload] = useState(false);
+
+  // Client-side filters surfaced in the left rail. Apply across every
+  // view mode so switching Day ↔ Week ↔ Gantt keeps the same subset.
+  const [priorityFilter, setPriorityFilter] = useState<Task["priority"] | "all">("all");
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
 
   // Dialogs
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -409,8 +414,50 @@ export default function TasksPage() {
   }
   function goToday() { setAnchor(new Date()); }
 
-  const totalHours = tasks.reduce((s, t) => s + (t.hoursSpent || 0), 0);
-  const completedCount = tasks.filter((t) => t.status === "COMPLETED").length;
+  // Distinct labels in the current fetch window — drives the rail
+  // label chips. Counts are over the *unfiltered* set so toggling a
+  // label off doesn't make its own count drop to zero.
+  const labelOptions = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; color: string; count: number }>();
+    for (const t of tasks) {
+      for (const lol of t.labels ?? []) {
+        const cur = m.get(lol.labelId);
+        if (cur) cur.count += 1;
+        else m.set(lol.labelId, { id: lol.labelId, name: lol.label.name, color: lol.label.color, count: 1 });
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => b.count - a.count);
+  }, [tasks]);
+
+  // Tasks after rail filters. The view components were already
+  // designed to render whatever they're handed, so swapping in the
+  // filtered list keeps Day/Week/Month/List/Gantt all in sync.
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
+      if (labelFilter.length > 0) {
+        const ids = (t.labels ?? []).map((l) => l.labelId);
+        if (!labelFilter.some((id) => ids.includes(id))) return false;
+      }
+      return true;
+    });
+  }, [tasks, priorityFilter, labelFilter]);
+
+  const totalHours = filteredTasks.reduce((s, t) => s + (t.hoursSpent || 0), 0);
+  const completedCount = filteredTasks.filter((t) => t.status === "COMPLETED").length;
+
+  // Quick-glance numbers for the rail. Overdue = scheduled start in the
+  // past and not COMPLETED. Today = anchored on today's date.
+  const now = new Date();
+  const todayKey = formatISODate(now);
+  const overdueCount = filteredTasks.filter((t) => {
+    if (t.status === "COMPLETED") return false;
+    const anchorTs = t.startAt ? new Date(t.startAt).getTime() : new Date(t.date).getTime();
+    return anchorTs < now.getTime() && t.date.split("T")[0] !== todayKey;
+  }).length;
+  const todayCount = filteredTasks.filter((t) => t.date.split("T")[0] === todayKey).length;
+  const inProgressCount = filteredTasks.filter((t) => t.status === "IN_PROGRESS").length;
+  const hasActiveFilters = priorityFilter !== "all" || labelFilter.length > 0;
 
   // Week view grid dates
   const weekDates = useMemo(() => {
@@ -420,92 +467,216 @@ export default function TasksPage() {
     });
   }, [anchor]);
 
-  return (
-    <div className="space-y-3 animate-fade-in">
+  const priorityOptions: Array<{ value: Task["priority"] | "all"; label: string }> = [
+    { value: "all", label: "All" },
+    { value: "URGENT", label: "Urgent" },
+    { value: "HIGH", label: "High" },
+    { value: "NORMAL", label: "Normal" },
+    { value: "LOW", label: "Low" },
+  ];
+
+  const filtersRail = (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-muted">At a glance</span>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={() => { setPriorityFilter("all"); setLabelFilter([]); }}
+              className="text-[10px] text-muted hover:text-foreground transition-fast"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="rounded-md border border-border bg-surface px-2.5 py-1.5">
+            <p className="text-[10px] text-muted">Overdue</p>
+            <p className="text-sm font-semibold tabular-nums text-[color:var(--signal-danger-fg,#ef4444)]">{overdueCount}</p>
+          </div>
+          <div className="rounded-md border border-border bg-surface px-2.5 py-1.5">
+            <p className="text-[10px] text-muted">Today</p>
+            <p className="text-sm font-semibold tabular-nums">{todayCount}</p>
+          </div>
+          <div className="rounded-md border border-border bg-surface px-2.5 py-1.5">
+            <p className="text-[10px] text-muted">In progress</p>
+            <p className="text-sm font-semibold tabular-nums">{inProgressCount}</p>
+          </div>
+          <div className="rounded-md border border-border bg-surface px-2.5 py-1.5">
+            <p className="text-[10px] text-muted">Done</p>
+            <p className="text-sm font-semibold tabular-nums text-[color:var(--accent-strong)]">{completedCount}</p>
+          </div>
+        </div>
+      </div>
+
+      {isManager && (
+        <div className="space-y-1.5">
+          <div className="px-1">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Scope</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => { if (teamView) { setTeamView(false); setSelectedMemberIds([]); setShowWorkload(false); } }}
+              className={`text-xs px-2.5 py-1.5 rounded-md transition-fast ${
+                !teamView
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              My tasks
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (!teamView) setTeamView(true); }}
+              className={`text-xs px-2.5 py-1.5 rounded-md transition-fast ${
+                teamView
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              Team
+            </button>
+          </div>
+          {teamView && (
+            <Button
+              variant={showWorkload ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5 w-full justify-start mt-1"
+              onClick={() => setShowWorkload(!showWorkload)}
+            >
+              <Activity size={12} /> Workload heatmap
+            </Button>
+          )}
+        </div>
+      )}
+
+      {isManager && teamView && teamMembers.length > 1 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Members</span>
+            {selectedMemberIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedMemberIds([])}
+                className="text-[10px] text-muted hover:text-foreground transition-fast"
+              >
+                All
+              </button>
+            )}
+          </div>
+          <div className="max-h-56 overflow-y-auto space-y-0.5 pr-1">
+            {teamMembers.map((m) => {
+              const checked = selectedMemberIds.includes(m.id);
+              return (
+                <label key={m.id} className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-[color:var(--surface-elevated)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => setSelectedMemberIds((prev) =>
+                      checked ? prev.filter((id) => id !== m.id) : [...prev, m.id]
+                    )}
+                    className="accent-[color:var(--accent)]"
+                  />
+                  <span className="text-xs truncate">
+                    {m.firstName} {m.lastName}
+                    {m.id === currentUserId && <span className="text-[10px] text-muted ml-1">(you)</span>}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <div className="px-1">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Priority</span>
+        </div>
+        <div className="space-y-0.5">
+          {priorityOptions.map((opt) => {
+            const active = priorityFilter === opt.value;
+            return (
+              <button
+                key={String(opt.value)}
+                type="button"
+                onClick={() => setPriorityFilter(opt.value)}
+                className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast ${
+                  active
+                    ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                    : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {labelOptions.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Labels</span>
+            {labelFilter.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setLabelFilter([])}
+                className="text-[10px] text-muted hover:text-foreground transition-fast"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {labelOptions.map((l) => {
+              const active = labelFilter.includes(l.id);
+              return (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setLabelFilter((prev) => active ? prev.filter((x) => x !== l.id) : [...prev, l.id])}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] transition-fast"
+                  style={{
+                    backgroundColor: active ? `${l.color}33` : "transparent",
+                    color: active ? l.color : "var(--muted)",
+                    border: `1px solid ${active ? l.color : "var(--border)"}`,
+                  }}
+                  title={`${l.name} (${l.count})`}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: l.color }} />
+                  <span className="truncate max-w-[80px]">{l.name}</span>
+                  <span className="tabular-nums opacity-70">{l.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const headerNode = (
+    <>
       <PageHeader
         breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "Work calendar" }]}
         kicker="Tasks · auto-escalating"
         title="Work calendar"
         subtitle="Plan your day, schedule spans across the week, and see where time is going."
         stats={[
-          { label: "Completed", value: `${completedCount}/${tasks.length}` },
+          { label: "Completed", value: `${completedCount}/${filteredTasks.length}` },
           { label: "Hours this period", value: `${totalHours}h` },
         ]}
       />
-
-      {/* Top controls */}
       <div className="flex items-center justify-end gap-2 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          {isManager && (
-            <>
-              <Button
-                variant={teamView ? "default" : "outline"}
-                size="sm"
-                className="gap-1.5"
-                onClick={() => {
-                  setTeamView(!teamView);
-                  if (teamView) { setSelectedMemberIds([]); setShowWorkload(false); }
-                }}
-              >
-                <Users size={14} /> {teamView ? "Team" : "My tasks"}
-              </Button>
-              {teamView && teamMembers.length > 1 && (
-                <div className="relative">
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowMemberPicker(!showMemberPicker)}>
-                    <Filter size={12} />
-                    {selectedMemberIds.length === 0 ? `All (${teamMembers.length})` : `${selectedMemberIds.length} selected`}
-                  </Button>
-                  {showMemberPicker && (
-                    <div className="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg border border-border bg-surface shadow-xl p-2 animate-in fade-in-0 zoom-in-95">
-                      <div className="flex items-center justify-between mb-2 px-1">
-                        <span className="text-[10px] uppercase tracking-wider text-muted">Team members</span>
-                        <button onClick={() => setSelectedMemberIds([])} className="text-[10px] text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">
-                          Show all
-                        </button>
-                      </div>
-                      <div className="max-h-64 overflow-y-auto space-y-0.5">
-                        {teamMembers.map((m) => {
-                          const checked = selectedMemberIds.includes(m.id);
-                          return (
-                            <label key={m.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => setSelectedMemberIds((prev) =>
-                                  checked ? prev.filter((id) => id !== m.id) : [...prev, m.id]
-                                )}
-                                className="accent-[#a8cc24]"
-                              />
-                              <span className="text-sm">
-                                {m.firstName} {m.lastName}
-                                {m.id === currentUserId && <span className="text-[10px] text-muted ml-1">(you)</span>}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      <div className="border-t border-border mt-2 pt-2 flex justify-end">
-                        <Button size="sm" className="text-xs h-7" onClick={() => setShowMemberPicker(false)}>Done</Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-              {teamView && (
-                <Button
-                  variant={showWorkload ? "default" : "outline"}
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setShowWorkload(!showWorkload)}
-                >
-                  <Activity size={14} /> Workload
-                </Button>
-              )}
-            </>
-          )}
-          <Button onClick={() => openNewTask()} className="gap-1.5"><Plus size={14} /> Add task</Button>
-        </div>
+        <Button onClick={() => openNewTask()} className="gap-1.5"><Plus size={14} /> Add task</Button>
       </div>
+    </>
+  );
+
+  return (
+    <ListPage header={headerNode} filters={filtersRail}>
 
       {/* Optional workload panel */}
       {showWorkload && teamView && (
@@ -554,7 +725,7 @@ export default function TasksPage() {
       {view === "day" && (
         <DayView
           date={anchor}
-          tasks={tasks}
+          tasks={filteredTasks}
           onOpenTask={openEditTask}
           onNewTaskAt={(d, hhmm) => openNewTask(d, hhmm)}
         />
@@ -566,7 +737,7 @@ export default function TasksPage() {
         <div className="grid grid-cols-7 gap-2 min-w-[760px] sm:min-w-0">
           {weekDates.map((date, i) => {
             const dateStr = formatISODate(date);
-            const dayTasks = tasks
+            const dayTasks = filteredTasks
               .filter((t) => {
                 // Show a task on this day if its date anchor matches OR its
                 // multi-day span covers this day.
@@ -733,7 +904,7 @@ export default function TasksPage() {
       {view === "month" && (
         <MonthView
           month={anchor}
-          tasks={tasks}
+          tasks={filteredTasks}
           onOpenTask={openEditTask}
           onPickDay={(d) => { setAnchor(new Date(d)); setView("day"); }}
         />
@@ -744,16 +915,20 @@ export default function TasksPage() {
         <div className="space-y-4">
           {loading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <SkeletonRow key={i} />)}</div>
-          ) : tasks.length === 0 ? (
+          ) : filteredTasks.length === 0 ? (
             <EmptyState
               icon={Calendar}
-              title="No tasks this week"
-              description="Schedule the work that drives your KRAs. Tasks roll into the right KPI automatically."
-              actionLabel="Add task"
-              onAction={() => openNewTask()}
+              title={hasActiveFilters ? "No tasks match these filters" : "No tasks this week"}
+              description={hasActiveFilters
+                ? "Try clearing the priority or label chips in the rail to widen the view."
+                : "Schedule the work that drives your KRAs. Tasks roll into the right KPI automatically."}
+              actionLabel={hasActiveFilters ? "Clear filters" : "Add task"}
+              onAction={hasActiveFilters
+                ? () => { setPriorityFilter("all"); setLabelFilter([]); }
+                : () => openNewTask()}
             />
           ) : (
-            Array.from(groupByDate(tasks).entries()).sort(([a], [b]) => a.localeCompare(b)).map(([dateStr, dayTasks]) => {
+            Array.from(groupByDate(filteredTasks).entries()).sort(([a], [b]) => a.localeCompare(b)).map(([dateStr, dayTasks]) => {
               const d = new Date(dateStr);
               const dayHours = dayTasks.reduce((s, t) => s + (t.hoursSpent || 0), 0);
               const done = dayTasks.filter((t) => t.status === "COMPLETED").length;
@@ -850,7 +1025,7 @@ export default function TasksPage() {
         <GanttView
           from={fromDate}
           to={toDate}
-          tasks={tasks}
+          tasks={filteredTasks}
           onOpenTask={openEditTask}
         />
       )}
@@ -908,7 +1083,7 @@ export default function TasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </ListPage>
   );
 }
 
