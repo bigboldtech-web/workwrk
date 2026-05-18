@@ -35,6 +35,7 @@ import { useRole } from "@/hooks/use-role";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard as SharedSkeletonCard, Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { ListPage } from "@/components/layout/page-shells";
 import { FolderManager } from "@/components/sops/folder-manager";
 
 interface SOPCompliance {
@@ -814,8 +815,146 @@ export default function SOPsPage() {
 
   const publishedSops = sops.filter(s => s.status === "PUBLISHED");
 
-  return (
-    <div className="space-y-3 animate-fade-in">
+  const hasActiveFilters =
+    folderFilter !== "all" || categoryFilter !== "all" || selectedTags.length > 0 || debouncedSearch.length > 0;
+
+  const filtersRail = (
+    <div className="space-y-4">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+        <Input
+          placeholder="Search SOPs..."
+          className="pl-8 h-8 text-xs"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Folders</span>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={() => { setFolderFilter("all"); setCategoryFilter("all"); setSelectedTags([]); setSearchQuery(""); }}
+              className="text-[10px] text-muted hover:text-foreground transition-fast"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <FolderTree
+          folders={folders}
+          totalSops={totalActiveSops}
+          selected={folderFilter}
+          onSelect={setFolderFilter}
+          onDropSop={canManageSOPs ? (folderId, sopId) => handleMoveToFolder(sopId, folderId) : undefined}
+          onCreateChild={canManageSOPs ? handleCreateFolder : undefined}
+          onRename={canManageSOPs ? handleRenameFolder : undefined}
+          onManageAccess={isOrgAdmin ? handleManageAccess : undefined}
+          onDelete={canManageSOPs ? handleDeleteFolder : undefined}
+          canManage={canManageSOPs}
+        />
+      </div>
+
+      {(categoryNodes.length > 0 || uncategorizedCount > 0) && (
+        <div className="space-y-1.5">
+          <div className="px-1">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Categories</span>
+          </div>
+          <div className="space-y-0.5">
+            <button
+              type="button"
+              onClick={() => setCategoryFilter("all")}
+              className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                categoryFilter === "all"
+                  ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                  : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+              }`}
+            >
+              <span>All categories</span>
+              <span className="tabular-nums text-muted-2">{totalActiveSops}</span>
+            </button>
+            {uncategorizedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setCategoryFilter("uncategorized")}
+                className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                  categoryFilter === "uncategorized"
+                    ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                    : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+                }`}
+              >
+                <span>Uncategorized</span>
+                <span className="tabular-nums text-muted-2">{uncategorizedCount}</span>
+              </button>
+            )}
+            {categoryNodes.map((cat) => (
+              <div key={cat.id ?? cat.name}>
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter(cat.name)}
+                  className={`w-full text-left text-xs px-2.5 py-1.5 rounded-md transition-fast flex items-center justify-between ${
+                    categoryFilter === cat.name
+                      ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                      : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+                  }`}
+                >
+                  <span className="truncate">{cat.name}</span>
+                  <span className="tabular-nums text-muted-2">{cat.sopCount ?? 0}</span>
+                </button>
+                {cat.subcategories.map((sub) => {
+                  const value = `${cat.name}::${sub.name}`;
+                  const active = categoryFilter === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setCategoryFilter(value)}
+                      className={`w-full text-left text-[11px] pl-5 pr-2.5 py-1 rounded-md transition-fast flex items-center justify-between ${
+                        active
+                          ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
+                          : "text-muted hover:bg-[color:var(--surface-elevated)] hover:text-foreground"
+                      }`}
+                    >
+                      <span className="truncate"><span className="text-muted-2 mr-1">↳</span>{sub.name}</span>
+                      <span className="tabular-nums text-muted-2">{sub.sopCount ?? 0}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {allTags.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Tags</span>
+            {selectedTags.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedTags([])}
+                className="text-[10px] text-muted hover:text-foreground transition-fast"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <TagChips
+            tags={allTags}
+            selected={selectedTags}
+            onToggle={(t) => setSelectedTags((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])}
+            onClearAll={() => setSelectedTags([])}
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  const headerNode = (
+    <>
       <PageHeader
         breadcrumbs={[{ label: "Home", href: "/dashboard" }, { label: "SOPs" }]}
         kicker="SOPs · written · recorded · flows"
@@ -826,9 +965,7 @@ export default function SOPsPage() {
           { label: "Published", value: publishedSops.length },
         ]}
       />
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div />
-        <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center justify-end flex-wrap gap-2">
           <Link href="/sops/my-sops">
             <Button variant="outline" className="gap-2"><ClipboardList size={16} /> My SOPs</Button>
           </Link>
@@ -1057,9 +1194,15 @@ export default function SOPsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>}
-        </div>
       </div>
+    </>
+  );
 
+  return (
+    <ListPage
+      header={headerNode}
+      filters={showArchive ? undefined : filtersRail}
+    >
       {/* Archive View */}
       {showArchive ? (
         <div className="space-y-3">
@@ -1137,102 +1280,29 @@ export default function SOPsPage() {
         </div>
       )}
 
-      {/* Top filter row — search + category filter + view toggle.
-          The category dropdown replaces the left-sidebar tree;
-          subcategories are surfaced as indented items inside it. */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-            <Input placeholder="Search SOPs..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-          </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[240px]">
-              <Tag size={13} className="text-muted shrink-0" />
-              <SelectValue placeholder="All categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">
-                All SOPs <span className="text-muted ml-1.5">{totalActiveSops}</span>
-              </SelectItem>
-              {uncategorizedCount > 0 && (
-                <SelectItem value="uncategorized">
-                  Uncategorized <span className="text-muted ml-1.5">{uncategorizedCount}</span>
-                </SelectItem>
-              )}
-              {categoryNodes.length > 0 && <div className="my-1 border-t border-border" />}
-              {categoryNodes.map((cat) => (
-                <div key={cat.id ?? cat.name}>
-                  <SelectItem value={cat.name}>
-                    <span className="font-medium">{cat.name}</span>
-                    <span className="text-muted ml-1.5">{cat.sopCount ?? 0}</span>
-                  </SelectItem>
-                  {cat.subcategories.map((sub) => (
-                    <SelectItem key={`${cat.name}::${sub.name}`} value={`${cat.name}::${sub.name}`}>
-                      <span className="text-muted">↳</span>{" "}
-                      <span>{sub.name}</span>
-                      <span className="text-muted ml-1.5">{sub.sopCount ?? 0}</span>
-                    </SelectItem>
-                  ))}
-                </div>
-              ))}
-              {canManageSOPs && (
-                <>
-                  <div className="my-1 border-t border-border" />
-                  <button
-                    type="button"
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      const name = await prompt({ title: "New category", placeholder: "e.g. HR", submitLabel: "Create" });
-                      if (!name) return;
-                      const r = await fetch("/api/sop-categories", {
-                        method: "POST", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ name }),
-                      });
-                      if (r.ok) { toastSuccess("Category created"); fetchCategories(); }
-                      else { const er = await r.json().catch(() => ({})); toastError(er.error || "Failed"); }
-                    }}
-                    className="w-full text-left px-3 py-2 text-[11.5px] text-muted hover:text-foreground hover:bg-surface-2 rounded-md inline-flex items-center gap-1.5"
-                  >
-                    <Plus size={11} /> New category
-                  </button>
-                </>
-              )}
-            </SelectContent>
-          </Select>
-
-          {isOrgAdmin && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => setShowFolderManager(true)}
-              title="Folders are an access-scope mechanism. Most users won't need to touch them."
-            >
-              <Settings2 size={13} /> Access
-            </Button>
-          )}
-
-          <div className="flex items-center gap-1 ml-auto">
-            <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("grid")} title="Grid view">
-              <BarChart3 size={14} className="rotate-90" />
-            </Button>
-            <Button variant={viewMode === "list" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("list")} title="List view">
-              <ClipboardList size={14} />
-            </Button>
-          </div>
-        </div>
-        {allTags.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-muted shrink-0">Tags</span>
-            <TagChips
-              tags={allTags}
-              selected={selectedTags}
-              onToggle={(t) => setSelectedTags((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])}
-              onClearAll={() => setSelectedTags([])}
-            />
-          </div>
+      {/* Slim toolbar — view-mode toggle + admin access. The bulk of
+          filtering lives in the left rail (folders, categories, tags,
+          search) so this row stays out of the way. */}
+      <div className="flex items-center justify-end gap-2">
+        {isOrgAdmin && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setShowFolderManager(true)}
+            title="Folders are an access-scope mechanism. Most users won't need to touch them."
+          >
+            <Settings2 size={13} /> Access
+          </Button>
         )}
+        <div className="flex items-center gap-1">
+          <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("grid")} title="Grid view">
+            <BarChart3 size={14} className="rotate-90" />
+          </Button>
+          <Button variant={viewMode === "list" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("list")} title="List view">
+            <ClipboardList size={14} />
+          </Button>
+        </div>
       </div>
 
       {/* SOP Grid / List. Compliance % isn't shown here — that's a
@@ -1444,7 +1514,7 @@ export default function SOPsPage() {
           onOpenChange={(o) => { setShowFolderManager(o); if (!o) fetchFolders(); }}
         />
       )}
-    </div>
+    </ListPage>
   );
 }
 
