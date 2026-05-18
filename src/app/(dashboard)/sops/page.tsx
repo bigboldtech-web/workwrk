@@ -22,7 +22,9 @@ import {
   Eye, BarChart3, ClipboardList, ShieldCheck,
   PenLine, Video, ListChecks, Download, Archive, RotateCcw, Trash2,
   FolderOpen, FolderInput, Link2, ExternalLink, Tag, Settings2, X,
+  ChevronDown,
 } from "lucide-react";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { FolderTree, type FolderNode } from "@/components/sops/folder-tree";
 import { CategoryTree, type CategoryNode } from "@/components/sops/category-tree";
 import { TagChips, type TagOption } from "@/components/sops/tag-chips";
@@ -858,11 +860,14 @@ export default function SOPsPage() {
       </div>
 
       {(categoryNodes.length > 0 || uncategorizedCount > 0) && (
-        <div className="space-y-1.5">
-          <div className="px-1">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Categories</span>
-          </div>
-          <div className="space-y-0.5">
+        <details className="group">
+          <summary className="flex items-center justify-between px-1 cursor-pointer list-none select-none">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted group-hover:text-foreground">
+              Browse by category
+            </span>
+            <ChevronDown size={12} className="text-muted transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="space-y-0.5 mt-2">
             <button
               type="button"
               onClick={() => setCategoryFilter("all")}
@@ -925,30 +930,7 @@ export default function SOPsPage() {
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {allTags.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Tags</span>
-            {selectedTags.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setSelectedTags([])}
-                className="text-[10px] text-muted hover:text-foreground transition-fast"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <TagChips
-            tags={allTags}
-            selected={selectedTags}
-            onToggle={(t) => setSelectedTags((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])}
-            onClearAll={() => setSelectedTags([])}
-          />
-        </div>
+        </details>
       )}
     </div>
   );
@@ -1280,28 +1262,92 @@ export default function SOPsPage() {
         </div>
       )}
 
-      {/* Slim toolbar — view-mode toggle + admin access. The bulk of
-          filtering lives in the left rail (folders, categories, tags,
-          search) so this row stays out of the way. */}
-      <div className="flex items-center justify-end gap-2">
-        {isOrgAdmin && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => setShowFolderManager(true)}
-            title="Folders are an access-scope mechanism. Most users won't need to touch them."
-          >
-            <Settings2 size={13} /> Access
-          </Button>
-        )}
-        <div className="flex items-center gap-1">
-          <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("grid")} title="Grid view">
-            <BarChart3 size={14} className="rotate-90" />
-          </Button>
-          <Button variant={viewMode === "list" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("list")} title="List view">
-            <ClipboardList size={14} />
-          </Button>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap min-h-[2rem]">
+          {selectedTags.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setSelectedTags((prev) => prev.filter((x) => x !== t))}
+              className="inline-flex items-center gap-1 rounded-full border border-[#d4ff2e] bg-[rgba(212,255,46,0.10)] px-2 py-0.5 text-[11px] text-[#d4ff2e] hover:bg-[rgba(212,255,46,0.18)] transition-colors"
+              title="Remove tag filter"
+            >
+              <span>{t}</span>
+              <X size={10} />
+            </button>
+          ))}
+          {selectedTags.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setSelectedTags([])}
+              className="text-[10px] text-muted hover:text-foreground transition-fast"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {allTags.length > 0 && (
+            <PopoverPrimitive.Root>
+              <PopoverPrimitive.Trigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <Tag size={13} />
+                  Tag
+                  {selectedTags.length > 0 && (
+                    <span className="ml-0.5 inline-flex items-center justify-center rounded-full bg-[color:var(--accent-soft)] px-1.5 text-[10px] font-medium text-[color:var(--accent-strong)] min-w-[16px] h-[16px]">
+                      {selectedTags.length}
+                    </span>
+                  )}
+                  <ChevronDown size={12} className="text-muted" />
+                </Button>
+              </PopoverPrimitive.Trigger>
+              <PopoverPrimitive.Portal>
+                <PopoverPrimitive.Content
+                  align="end"
+                  sideOffset={6}
+                  className="z-50 w-72 rounded-xl border border-border bg-surface p-3 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.35)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted">Filter by tag</span>
+                    {selectedTags.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTags([])}
+                        className="text-[10px] text-muted hover:text-foreground transition-fast"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <TagChips
+                    tags={allTags}
+                    selected={selectedTags}
+                    onToggle={(t) => setSelectedTags((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])}
+                    maxVisible={50}
+                  />
+                </PopoverPrimitive.Content>
+              </PopoverPrimitive.Portal>
+            </PopoverPrimitive.Root>
+          )}
+          {isOrgAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setShowFolderManager(true)}
+              title="Folders are an access-scope mechanism. Most users won't need to touch them."
+            >
+              <Settings2 size={13} /> Access
+            </Button>
+          )}
+          <div className="flex items-center gap-1">
+            <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("grid")} title="Grid view">
+              <BarChart3 size={14} className="rotate-90" />
+            </Button>
+            <Button variant={viewMode === "list" ? "default" : "outline"} size="icon" className="h-8 w-8" onClick={() => setViewMode("list")} title="List view">
+              <ClipboardList size={14} />
+            </Button>
+          </div>
         </div>
       </div>
 

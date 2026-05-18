@@ -845,7 +845,7 @@ export function Sidebar() {
                     <span className="app-sidebar-dot-pip" aria-hidden />
                   )}
                 </Link>
-                {isSopsEntry && !collapsed && (
+                {isSopsEntry && !collapsed && !pathname.startsWith("/sops") && (
                   <button
                     type="button"
                     onClick={toggleSopsExpanded}
@@ -857,7 +857,7 @@ export function Sidebar() {
                   </button>
                 )}
               </div>
-              {isSopsEntry && sopsExpanded && !collapsed && (
+              {isSopsEntry && sopsExpanded && !collapsed && !pathname.startsWith("/sops") && (
                 <div className="app-sidebar-subnav" role="group" aria-label="SOP folders">
                   {sopFoldersLoading && sopFolders === null && (
                     <div className="app-sidebar-subitem is-loading">Loading…</div>
