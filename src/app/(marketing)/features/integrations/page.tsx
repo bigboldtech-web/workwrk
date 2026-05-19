@@ -1,180 +1,79 @@
 import type { Metadata } from "next";
+import { Plug, Zap, Code, Webhook, RefreshCw, Database } from "lucide-react";
+import { FeatureSubPage } from "@/components/marketing/sub-page";
+import { GradientText, Section, Container, Eyebrow, H3 } from "@/components/marketing/primitives";
 
-import {
-  ModuleConnects,
-  ModuleCta,
-  ModuleDeepDive,
-  ModuleFaq,
-  ModuleHero,
-  ModuleReplaces,
-  ModuleStats,
-  IntegrationGridVisual,
-  DashboardVisual,
-} from "@/components/modules";
 export const metadata: Metadata = {
-  title: "Integrations — WorkwrK | Native connectors, Indian stack first",
-  description:
-    "Slack, Gmail, Drive, Linear, Razorpay, Keka, GreytHR, HubSpot, Zendesk. Native connectors for the tools Indian SMBs actually run on.",
+  title: "Integrations — WorkwrK",
+  description: "Slack, Google Workspace, Microsoft 365, Stripe, Razorpay, QuickBooks, Salesforce, HubSpot, GitHub, Linear — and an API for everything else.",
   alternates: { canonical: "https://workwrk.com/features/integrations" },
 };
 
-export default function IntegrationsPage() {
+const INTEGRATIONS = [
+  { name: "Slack",            cat: "Comms" },
+  { name: "Microsoft Teams",  cat: "Comms" },
+  { name: "Google Workspace", cat: "Identity" },
+  { name: "Microsoft 365",    cat: "Identity" },
+  { name: "Okta",             cat: "SSO" },
+  { name: "Azure AD",         cat: "SSO" },
+  { name: "Stripe",           cat: "Money" },
+  { name: "Razorpay",         cat: "Money" },
+  { name: "QuickBooks",       cat: "Money" },
+  { name: "Xero",             cat: "Money" },
+  { name: "HubSpot",          cat: "Growth" },
+  { name: "Salesforce",       cat: "Growth" },
+  { name: "Pipedrive",        cat: "Growth" },
+  { name: "GitHub",           cat: "Engineering" },
+  { name: "Linear",           cat: "Engineering" },
+  { name: "Jira",             cat: "Engineering" },
+  { name: "Notion",           cat: "Docs" },
+  { name: "Confluence",       cat: "Docs" },
+  { name: "Zapier",           cat: "Automation" },
+  { name: "Make",             cat: "Automation" },
+  { name: "Snowflake",        cat: "Warehouse" },
+  { name: "BigQuery",         cat: "Warehouse" },
+];
+
+export default function IntegrationsFeaturePage() {
   return (
-    <>
-      <ModuleHero
-        eyebrow="Integrations · live today + shipping monthly"
-        moduleNumber="11"
-        iconKey="integrations"
-        tone="blue"
-        title={<>We talk to the tools <span className="bl">your team already runs.</span></>}
-        body='Claude AI Engine, Slack webhooks, Google sign-in and Stripe billing are all live today. HubSpot, Razorpay, Keka and GreytHR are in active build with a new connector each release. Public webhooks + REST API for anything we haven’t got to yet — so you are never blocked waiting.'
-        badges={["Claude · live", "Slack · live", "Google SSO · live", "Stripe · live", "Monthly releases"]}
-        visual={
-          <IntegrationGridVisual
-            integrations={[
-              { name: "Claude API", group: "AI Engine · live", color: "#d97757", status: "live" },
-              { name: "Slack Webhooks", group: "Kudos + signal alerts · live", color: "#611f69", status: "live" },
-              { name: "Google OAuth", group: "SSO sign-in · live", color: "#4285f4", status: "live" },
-              { name: "Stripe", group: "Billing + subscriptions · live", color: "#635bff", status: "live" },
-              { name: "HubSpot", group: "Sales KPIs", color: "#ff7a59", status: "soon" },
-              { name: "Razorpay", group: "Revenue + payroll", color: "#2c5fe8", status: "soon" },
-              { name: "Keka", group: "HR payroll sync", color: "#00b8a9", status: "soon" },
-              { name: "GreytHR", group: "HR payroll sync", color: "#ff9933", status: "soon" },
-              { name: "Linear", group: "Engineering tasks", color: "#5e6ad2", status: "soon" },
-            ]}
-          />
-        }
-      />
-
-      <ModuleDeepDive
-        eyebrow="Indian stack first"
-        tone="blue"
-        title={<>Built for the tools <span className="bl">Indian SMBs actually use.</span></>}
-        body={
-          <>
-            <p>
-              Most SaaS integrations treat India as an after-thought. We don&apos;t.
-              Razorpay payments, Keka HR, GreytHR payroll, TallyPrime, ZohoOne,
-              Exotel call logs, Aircall — these are first-class. Built and
-              maintained by our team.
-            </p>
-            <p>
-              Global tools too — Slack, Google, HubSpot, Linear, Zendesk, Claude,
-              Notion, Figma, GitHub, Jira. The ones your team spends their day in.
-            </p>
-          </>
-        }
-        bullets={[
-          "Razorpay · Keka · GreytHR · Tally · Zoho",
-          "Slack · Google · HubSpot · Linear",
-          "Zendesk · Freshdesk · Intercom",
-          "Aircall · Exotel · Salesforce",
-          "GitHub · Jira · Notion · Figma",
-          "Webhooks + REST for the rest",
-        ]}
-        visual={
-          <IntegrationGridVisual
-            integrations={[
-              { name: "TallyPrime", group: "Accounting sync", color: "#ff3d8a", status: "soon" },
-              { name: "ZohoOne", group: "CRM + desk", color: "#c8202f", status: "soon" },
-              { name: "Freshdesk", group: "Support SLAs", color: "#25c16f", status: "soon" },
-              { name: "Exotel", group: "Call KPIs", color: "#e74c3c", status: "soon" },
-              { name: "Aircall", group: "SDR volume", color: "#00b8d9", status: "soon" },
-              { name: "GitHub", group: "Eng velocity", color: "#d4ff2e", status: "soon" },
-              { name: "Jira", group: "Cross-team tasks", color: "#0052cc", status: "soon" },
-              { name: "Notion", group: "SOP import", color: "#ededed", status: "soon" },
-            ]}
-          />
-        }
-      />
-
-      <ModuleDeepDive
-        eyebrow="Build your own"
-        tone="lime"
-        background="carded"
-        title={<>Public API + webhooks <span className="hi">for anything else.</span></>}
-        body={
-          <>
-            <p>
-              If there&apos;s no native connector, webhook events cover 80% of use cases
-              — KPI readings, new kudos, SOP publish, review submitted, task
-              assigned. And a public REST API covers the rest. OAuth 2.0 for
-              third-party apps.
-            </p>
-          </>
-        }
-        bullets={[
-          "40+ webhook events · signed payloads",
-          "REST API · 1M req/day on Growth",
-          "OAuth 2.0 · build your own app",
-          "Official SDKs · Node, Python, Go",
-          "Developer console · org.workwrk.com/dev",
-          "Zapier + Make.com (for light workflows)",
-        ]}
-        visual={
-          <DashboardVisual
-            tiles={[
-              { label: "Endpoints live", stat: "REST", delta: "signed payloads · HMAC-SHA256", tone: "lime" },
-              { label: "SDKs", stat: "3", delta: "Node · Python · Go · published", tone: "blue" },
-              { label: "Custom webhook", stat: "< 2d", delta: "median eng-team integration time", tone: "amber" },
-            ]}
-            footer="Developer docs — docs.workwrk.com/api"
-          />
-        }
-        visualSide="left"
-      />
-
-      <ModuleStats
-        kicker="Integrations by the numbers"
-        title={<>Connected is <span className="hi">the default.</span></>}
-        stats={[
-          { stat: "Monthly", label: "Cadence · a new native connector every release", tone: "blue" },
-          { stat: "7 min", label: "Median time to connect first tool · Slack + Google", tone: "lime" },
-          { stat: "Public", label: "REST + webhooks live today · SDK in Node, Python, Go", tone: "amber" },
-          { stat: "0", label: "Zapier required for the core flow · just available if wanted", tone: "pink" },
-        ]}
-      />
-
-      <ModuleConnects
-        sourceName="Integrations"
-        title={<>Every module <span className="hi">uses the connectors.</span></>}
-        subtitle="Connectors aren't a separate product — they're how every module in the spine gets its live data."
-        entries={[
-          { name: "KPIs", flow: "Readings pulled from HubSpot, Razorpay, Zendesk, Linear — every 15 min.", href: "/features/kpis", iconKey: "kpi" },
-          { name: "People", flow: "Org graph bulk-imports from Google Workspace · payroll sync with Keka.", href: "/features/people", iconKey: "people" },
-          { name: "SOPs", flow: "Import Notion / Drive SOPs in one click · AI classifies each.", href: "/features/sops", iconKey: "sop" },
-          { name: "Reviews", flow: "Slack integration · review reminders + pre-fill notifications.", href: "/features/reviews", iconKey: "reviews" },
-          { name: "Access", flow: "SSO / SAML · Okta, Azure AD, Google SSO · on Scale+.", href: "/features/access", iconKey: "access" },
-          { name: "Analytics", flow: "Snowflake + BigQuery native exports · 15-minute freshness.", href: "/features/analytics", iconKey: "analytics" },
-        ]}
-      />
-
-      <ModuleReplaces
-        title={<>What Integrations <span className="hi">replaces.</span></>}
-        rows={[
-          { old: "Zapier plumbing between 8 tools · monthly bills + failed zaps", nu: "Native connectors — built, tested, maintained by us" },
-          { old: "'Export this CSV, upload to that tool' Monday chores", nu: "Live sync · 15-minute cadence · automated" },
-          { old: "Paying a fractional integrations engineer to maintain it", nu: "Zero maintenance — we ship updates when vendor APIs change" },
-          { old: "Integration tools that assume US-first tech stack", nu: "Razorpay / Keka / GreytHR / Tally native — Indian stack first" },
-        ]}
-      />
-
-      <ModuleFaq
-        title={<>Questions about <span className="hi">connectivity.</span></>}
-        items={[
-          { q: "What if my tool isn't on the list?", a: <p>Webhooks + REST API cover 90% of use cases in a day of work. For deeper, native integrations, we build one every 2–4 weeks — bumped up for Scale+ customers on request.</p> },
-          { q: "How do OAuth disconnections work?", a: <p>If a token expires (user rotates password, revokes access), the integration pauses gracefully — no data loss — and the admin gets a Slack ping to re-auth. Failed pulls are not re-attempted blindly.</p> },
-          { q: "Are webhook payloads signed?", a: <p>Yes. Every payload carries an HMAC-SHA256 signature using your org secret. Docs cover the verification snippet for Node, Python, Go.</p> },
-          { q: "Can integrations write back?", a: <p>Yes, but scoped. Slack posts kudos + digests. Linear creates tasks from KR drift. HubSpot gets KPI reading push-backs. All writes are explicitly opt-in per integration.</p> },
-          { q: "Data residency on third-party APIs?", a: <p>We never relay your data through our servers unless necessary. Most integrations run on your VPC (Scale+) so the data never leaves your boundary.</p> },
-        ]}
-      />
-
-      <ModuleCta
-        tone="blue"
-        title={<>Plug in your <em>stack.</em></>}
-        subtitle="Free trial · Slack + Google take under seven minutes total."
-      />
-    </>
+    <FeatureSubPage
+      hubSlug="money"
+      hue="emerald"
+      eyebrow="Money hub · Integrations"
+      title={<>Connects to <GradientText hue="emerald">everything you run.</GradientText></>}
+      lede="22+ native integrations. Webhook events for every entity. A full REST + GraphQL API. Plus Zapier and Make for the long tail."
+      capabilities={[
+        { icon: Plug,      title: "Native integrations",   body: "Two-way sync with the tools you already pay for. Slack, Google, Microsoft, HubSpot, Stripe, more." },
+        { icon: Webhook,   title: "Webhooks on everything",body: "Every entity emits events on create / update / delete. Subscribe; route; transform; act." },
+        { icon: Code,      title: "REST + GraphQL API",    body: "Same data model the product uses. Type-safe SDKs in TypeScript, Python, Go." },
+        { icon: Zap,       title: "Zapier + Make",         body: "5,000+ apps reachable via the no-code automators. Triggers + actions for every hub." },
+        { icon: RefreshCw, title: "Two-way sync",          body: "Changes flow both ways. People in BambooHR → roles in workwrk. Deals in HubSpot → revenue KPIs." },
+        { icon: Database,  title: "Data warehouse",        body: "Snowflake, BigQuery, Redshift mirroring. Read-only on Growth; bi-directional on Scale." },
+      ]}
+      relatedSlugs={["ai-engine", "analytics", "access"]}
+      faq={[
+        { q: "Can I request a new integration?",        a: "Yes — most-requested ship within the quarter. Customer-funded custom integrations available as a Scale add-on." },
+        { q: "Do I need engineers to set this up?",       a: "No. Most native integrations are click-to-connect. Webhooks and API are for engineers; everything else is no-code." },
+        { q: "How does conflict resolution work?",        a: "Field-level last-write-wins by default; configurable to source-of-truth-wins or merge-on-conflict per integration." },
+      ]}
+      bottomSlot={
+        <Section variant="tint" py="lg">
+          <Container>
+            <div className="max-w-2xl mb-10">
+              <Eyebrow hue="emerald" className="mb-4">The directory</Eyebrow>
+              <H3>22+ native integrations and counting.</H3>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {INTEGRATIONS.map((i) => (
+                <div key={i.name} className="p-4 bg-white border border-slate-200 rounded-xl text-center">
+                  <p className="font-bold text-slate-900 text-sm">{i.name}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-700 mt-1">{i.cat}</p>
+                </div>
+              ))}
+            </div>
+          </Container>
+        </Section>
+      }
+    />
   );
 }

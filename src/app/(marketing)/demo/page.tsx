@@ -1,311 +1,192 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-
-import { Label, Reveal, SectionHeader } from "@/components/bento";
+import { ArrowRight, CheckCircle2, Clock, Users, Mail, Sparkles } from "lucide-react";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H2,
+  H3,
+  Button,
+  CTABand,
+  Quote,
+  GradientText,
+  CheckList,
+  HUES,
+} from "@/components/marketing/primitives";
 
 export const metadata: Metadata = {
-  title: "Book a live demo — WorkwrK | 30-min walkthrough, your data",
+  title: "Book a Demo — WorkwrK",
   description:
-    "Book a 30-minute live walkthrough. No slides. We'll pull your data into a sandbox and show the system running on it.",
+    "Get a 20-minute personalized walkthrough of workwrk. We'll show you the hubs that matter for your industry and team size, and answer every question.",
   alternates: { canonical: "https://workwrk.com/demo" },
 };
-
-const timeslots = [
-  { day: "Tomorrow", slots: ["10:00 AM", "11:30 AM", "2:00 PM", "4:30 PM"] },
-  { day: "Day after", slots: ["9:30 AM", "11:00 AM", "2:30 PM", "5:00 PM"] },
-  { day: "Later this week", slots: ["Multiple slots", "Custom time"] },
-];
-
-const whatYouSee = [
-  { title: "Your org graph", body: "We pull your team from Google Workspace or a CSV upload during the call. You see the graph in five minutes." },
-  { title: "Your KPIs, live", body: "Pick a role — we connect to HubSpot / Razorpay / Linear and show readings before the call ends." },
-  { title: "An AI-drafted KRA", body: "Pick a role. Watch the AI draft KRAs in real-time using your org data + top-performer benchmarks." },
-  { title: "A review cycle preview", body: "See what a 48-hour review cycle looks like — pre-filled with whichever data we connected." },
-  { title: "A Scribe SOP flow", body: "We record a 90-second screen SOP on the call and show it auto-extracted into steps." },
-  { title: "Pricing tailored", body: "Based on your team size + plan preference — not a PDF we send after, a number on the call." },
-];
 
 export default function DemoPage() {
   return (
     <>
-      <section className="bento-section" style={{ paddingTop: 56 }}>
-        <div className="bento-container">
-          <Reveal>
-            <SectionHeader
-              label="Live demo"
-              title={
-                <>
-                  Thirty minutes. <span className="hi">Your data.</span> No slides.
-                </>
-              }
-              subtitle="Most B2B demo calls are 20 minutes of feature slides and 10 minutes of 'let me follow up.' We do the opposite — we plug in your actual data during the call and show the system running on it."
-              aside={{
-                label: "Time commitment",
-                stat: "30 min",
-                text: "No prep required. Bring a CSV of your team or Google Workspace admin access.",
-              }}
-            />
-          </Reveal>
-        </div>
-      </section>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="grid lg:grid-cols-[1.1fr_1fr] gap-12 lg:gap-16 items-start">
+            <div>
+              <Eyebrow hue="fuchsia" className="mb-5">Book a Demo</Eyebrow>
+              <H1>
+                20 minutes. <br />
+                <GradientText hue="fuchsia">Tailored to your team.</GradientText>
+              </H1>
+              <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed">
+                We won&apos;t show you 90 slides. We&apos;ll log into a sandbox
+                modelled on your industry, walk through the hubs that matter
+                to your size, and answer every question you bring.
+              </p>
 
-      <section className="bento-section">
-        <div className="bento-container">
-          <div className="dm-grid">
-            <Reveal>
-              <div className="dm-book">
-                <Label>Book a slot</Label>
-                <h2 className="dm-title">Pick a time that works.</h2>
-                <p className="dm-sub">
-                  All slots are 30 minutes. Held over Google Meet. Indian Standard
-                  Time. We&apos;ll send a calendar invite within ten minutes of
-                  booking.
-                </p>
-
-                <div className="dm-form">
-                  <div className="dm-field">
-                    <label htmlFor="dm-name">Your name</label>
-                    <input id="dm-name" type="text" placeholder="Priya Sharma" />
-                  </div>
-                  <div className="dm-field">
-                    <label htmlFor="dm-email">Work email</label>
-                    <input id="dm-email" type="email" placeholder="priya@company.in" />
-                  </div>
-                  <div className="dm-field">
-                    <label htmlFor="dm-company">Company</label>
-                    <input id="dm-company" type="text" placeholder="ScaleOps" />
-                  </div>
-                  <div className="dm-field-row">
-                    <div className="dm-field">
-                      <label htmlFor="dm-size">Team size</label>
-                      <select id="dm-size" defaultValue="">
-                        <option value="" disabled>Select</option>
-                        <option>1–20</option>
-                        <option>21–50</option>
-                        <option>51–100</option>
-                        <option>101–200</option>
-                        <option>200+</option>
-                      </select>
-                    </div>
-                    <div className="dm-field">
-                      <label htmlFor="dm-role">Your role</label>
-                      <select id="dm-role" defaultValue="">
-                        <option value="" disabled>Select</option>
-                        <option>Founder / CEO</option>
-                        <option>COO / head of ops</option>
-                        <option>Head of People</option>
-                        <option>Head of Sales</option>
-                        <option>Other</option>
-                      </select>
-                    </div>
-                  </div>
-                  <button type="button" className="bento-btn bento-btn-lime bento-btn-lg dm-submit">
-                    Request demo slot →
-                  </button>
-                  <p className="dm-legal">
-                    We&apos;ll never spam or share your email. By submitting you agree
-                    to our{" "}
-                    <Link href="/privacy">privacy policy</Link>.
-                  </p>
-                </div>
+              <div className="mt-9 grid sm:grid-cols-2 gap-4">
+                <DemoFacet hue="violet"  icon={Clock}    title="20 mins" body="No long pitch decks. Real product, real workflows." />
+                <DemoFacet hue="emerald" icon={Users}    title="Your team" body="Bring 1–5 stakeholders. We tailor the walkthrough to each." />
+                <DemoFacet hue="amber"   icon={Sparkles} title="Live sandbox" body="See your industry's templates running on real data." />
+                <DemoFacet hue="sky"     icon={Mail}     title="Follow-up notes" body="You leave with a one-page summary and a sandbox login." />
               </div>
-            </Reveal>
 
-            <Reveal>
-              <div className="dm-slots">
-                <Label>Upcoming openings</Label>
-                <h3 className="dm-slots-title">Typical availability</h3>
-                {timeslots.map((t) => (
-                  <div key={t.day} className="dm-slot-block">
-                    <div className="dm-slot-day">{t.day}</div>
-                    <div className="dm-slot-row">
-                      {t.slots.map((s) => (
-                        <span key={s} className="dm-slot">{s}</span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                <div className="dm-tz">All times Indian Standard Time (UTC +5:30)</div>
+              <div className="mt-9">
+                <p className="text-sm font-bold text-slate-900 mb-3">What we&apos;ll cover</p>
+                <CheckList
+                  hue="emerald"
+                  items={[
+                    "Hubs relevant to your industry (we ask first)",
+                    "Migration path from your current stack",
+                    "Custom KPIs, SOPs, and review cycles",
+                    "Pricing for your specific team size",
+                    "AI features and the underlying data model",
+                  ]}
+                />
               </div>
-            </Reveal>
+            </div>
+
+            <DemoFormCard />
           </div>
-        </div>
-      </section>
+        </Container>
+      </Section>
 
-      <section className="bento-section">
-        <div className="bento-container">
-          <Reveal>
-            <SectionHeader
-              label="What you'll see"
-              title={
-                <>
-                  Six live demos, <span className="hi">not six feature slides.</span>
-                </>
-              }
-              subtitle="On the call we run through each of these using your data. If something doesn't map, we'll stop and talk about it."
-              aside={{
-                label: "Run time",
-                stat: "30 min",
-                text: "Tight by design. We run this call every week.",
-              }}
-            />
-          </Reveal>
-          <Reveal stagger className="dm-sees">
-            {whatYouSee.map((s, i) => (
-              <article key={s.title} className="dm-see">
-                <span className="dm-see-n">0{i + 1}</span>
-                <h3 className="dm-see-title">{s.title}</h3>
-                <p className="dm-see-body">{s.body}</p>
-              </article>
-            ))}
-          </Reveal>
-        </div>
-      </section>
+      <Section py="lg">
+        <Container>
+          <Quote
+            hue="violet"
+            quote="They asked five questions, then ran the demo in our actual industry's template. We knew within 10 minutes this was the right call."
+            author="Mei Tanaka"
+            role="Head of Ops"
+            company="Lattice & Co"
+          />
+        </Container>
+      </Section>
 
-      <style>{`
-        .dm-grid {
-          display: grid;
-          grid-template-columns: 1.3fr 1fr;
-          gap: 14px;
-          align-items: stretch;
-        }
-        .dm-book, .dm-slots {
-          padding: 40px 36px;
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-xl);
-        }
-        .dm-title {
-          font-size: 36px;
-          font-weight: 600;
-          letter-spacing: -0.035em;
-          line-height: 1.05;
-          margin: 14px 0 12px;
-        }
-        .dm-sub {
-          font-size: 15px;
-          color: var(--b-t2);
-          line-height: 1.55;
-          max-width: 52ch;
-          margin: 0 0 28px;
-        }
-        .dm-form { display: flex; flex-direction: column; gap: 16px; }
-        .dm-field { display: flex; flex-direction: column; gap: 6px; }
-        .dm-field label {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 11px;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          color: var(--b-t3);
-        }
-        .dm-field input, .dm-field select {
-          padding: 14px 16px;
-          background: var(--b-card-2);
-          border: 1px solid var(--b-line);
-          border-radius: 12px;
-          color: var(--b-fg);
-          font-family: inherit;
-          font-size: 14.5px;
-          transition: border-color 0.2s, background 0.2s;
-        }
-        .dm-field input:focus, .dm-field select:focus {
-          outline: none;
-          border-color: var(--b-lime);
-          background: var(--b-card-3);
-        }
-        .dm-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .dm-submit {
-          align-self: flex-start;
-          margin-top: 6px;
-          font-size: 16px;
-        }
-        .dm-legal {
-          font-size: 12px;
-          color: var(--b-t3);
-          margin: 0;
-        }
-        .dm-legal a { color: var(--b-lime); text-decoration: none; }
-        .dm-legal a:hover { text-decoration: underline; }
-
-        .dm-slots-title {
-          font-size: 26px;
-          font-weight: 600;
-          letter-spacing: -0.025em;
-          margin: 14px 0 22px;
-        }
-        .dm-slot-block { margin-bottom: 20px; }
-        .dm-slot-day {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 11px;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: var(--b-lime);
-          margin-bottom: 10px;
-        }
-        .dm-slot-row { display: flex; flex-wrap: wrap; gap: 6px; }
-        .dm-slot {
-          padding: 8px 14px;
-          background: var(--b-card-2);
-          border: 1px solid var(--b-line);
-          border-radius: 100px;
-          font-size: 13px;
-          font-family: var(--font-geist-mono), monospace;
-          color: var(--b-off);
-        }
-        .dm-tz {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 11px;
-          color: var(--b-t3);
-          letter-spacing: 0.08em;
-          padding-top: 20px;
-          border-top: 1px solid var(--b-line);
-        }
-
-        .dm-sees {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 12px;
-          margin-top: 32px;
-        }
-        .dm-see {
-          padding: 26px 24px;
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-md);
-          min-height: 180px;
-          transition: all 0.3s;
-        }
-        .dm-see:hover { transform: translateY(-3px); border-color: var(--b-line-2); background: var(--b-card-2); }
-        .dm-see-n {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 11px;
-          color: var(--b-lime);
-          letter-spacing: 0.14em;
-          display: block;
-          margin-bottom: 8px;
-        }
-        .dm-see-title {
-          font-size: 19px; font-weight: 600;
-          letter-spacing: -0.02em; line-height: 1.15;
-          margin: 0 0 10px;
-        }
-        .dm-see-body {
-          font-size: 13.5px;
-          color: var(--b-t2);
-          line-height: 1.55;
-          margin: 0;
-        }
-
-        @media (max-width: 900px) {
-          .dm-grid { grid-template-columns: 1fr; }
-          .dm-sees { grid-template-columns: 1fr 1fr; }
-        }
-        @media (max-width: 560px) {
-          .dm-sees { grid-template-columns: 1fr; }
-          .dm-field-row { grid-template-columns: 1fr; }
-          .dm-book, .dm-slots { padding: 28px 24px; }
-        }
-      `}</style>
+      <CTABand
+        hue="fuchsia"
+        title={<>Prefer to <GradientText hue="emerald">try it yourself</GradientText>?</>}
+        body="Sign up free. No credit card. All 7 hubs unlocked under 5 people."
+        primary={{ label: "Start free instead", href: "/signup" }}
+        secondary={{ label: "Talk to sales",   href: "/contact" }}
+      />
     </>
+  );
+}
+
+function DemoFacet({
+  hue,
+  icon: Icon,
+  title,
+  body,
+}: {
+  hue: keyof typeof HUES;
+  icon: typeof Clock;
+  title: string;
+  body: string;
+}) {
+  const t = HUES[hue];
+  return (
+    <div className="p-5 bg-white border border-slate-200 rounded-2xl">
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${t.bgTint} ${t.text} border ${t.border}`}>
+        <Icon size={17} strokeWidth={2.4} />
+      </div>
+      <p className="mt-3 font-bold text-slate-900 text-sm">{title}</p>
+      <p className="mt-1 text-xs text-slate-600 leading-relaxed">{body}</p>
+    </div>
+  );
+}
+
+function DemoFormCard() {
+  return (
+    <div className="sticky top-24 bg-white rounded-3xl border border-slate-200 shadow-[0_30px_80px_-20px_rgba(15,23,42,0.18)] overflow-hidden">
+      <div className="bg-slate-950 px-8 py-7 text-white">
+        <H3 className="text-white">Book your demo</H3>
+        <p className="mt-2 text-sm text-white/80">We respond within 4 business hours.</p>
+      </div>
+      <form className="p-7 space-y-4" action="#" method="post">
+        <Field label="Full name *" name="name" placeholder="Priya Iyer" required />
+        <Field label="Work email *" name="email" type="email" placeholder="priya@helios.com" required />
+        <Field label="Company *" name="company" placeholder="Helios Labs" required />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Team size" name="size" as="select" options={["1–10", "11–50", "51–200", "201–500", "500+"]} />
+          <Field label="Industry"  name="industry" as="select" options={["Technology", "Healthcare", "Manufacturing", "Logistics", "Services", "Sales", "Real Estate", "Other"]} />
+        </div>
+        <Field label="What do you want to see?" name="notes" as="textarea" placeholder="We're evaluating workwrk for performance reviews + KPIs..." />
+        <button
+          type="submit"
+          className="w-full h-12 mt-2 rounded-xl bg-slate-900 text-white font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition"
+        >
+          Request demo <ArrowRight size={15} />
+        </button>
+        <p className="text-xs text-slate-500 text-center">
+          We&apos;ll never share your details. Read our <Link href="/privacy" className="text-slate-700 underline underline-offset-2">privacy policy</Link>.
+        </p>
+      </form>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  name,
+  type = "text",
+  placeholder,
+  as = "input",
+  options,
+  required,
+}: {
+  label: string;
+  name: string;
+  type?: string;
+  placeholder?: string;
+  as?: "input" | "textarea" | "select";
+  options?: readonly string[];
+  required?: boolean;
+}) {
+  const base =
+    "w-full px-3.5 h-11 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-fuchsia-500 focus:ring-2 focus:ring-fuchsia-100 transition";
+  return (
+    <label className="block">
+      <span className="block text-xs font-bold uppercase tracking-[0.14em] text-slate-700 mb-1.5">{label}</span>
+      {as === "textarea" ? (
+        <textarea
+          name={name}
+          rows={4}
+          placeholder={placeholder}
+          className={`${base} h-auto py-3`}
+        />
+      ) : as === "select" ? (
+        <select name={name} className={base} defaultValue="">
+          <option value="" disabled>Select</option>
+          {options?.map((o) => <option key={o}>{o}</option>)}
+        </select>
+      ) : (
+        <input
+          type={type}
+          name={name}
+          placeholder={placeholder}
+          required={required}
+          className={base}
+        />
+      )}
+    </label>
   );
 }

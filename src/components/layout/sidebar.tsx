@@ -60,6 +60,10 @@ import {
   ShoppingCart,
   Banknote,
   BookText,
+  Sparkles,
+  Wand2,
+  MoreHorizontal,
+  Store,
 } from "lucide-react";
 
 type NavItem = {
@@ -85,103 +89,143 @@ type NavItem = {
   hue?: NavHue;
 };
 
-// Seven persona-driven hubs. The order here is the render order in
-// the sidebar. Hubs collapse independently; defaults below.
-type NavSection = "home" | "people" | "work" | "money" | "talent" | "culture" | "platform";
+// Eight universal rails — monday.com-style. Home + Workspace + Sidekick
+// + Agents + Build + Meetings + Favorites + More. Every authed user
+// sees the same eight rails regardless of role; product gating happens
+// per item via ProductInstallation, not at the rail level.
+//
+// Workspace is the "all your installed boards/modules" rail.
+// Sidekick/Agents/Build/Meetings are single-link rails (no expansion).
+// Favorites + More + Home expand to show their contents.
+type NavSection =
+  | "home"
+  | "workspace"
+  | "sidekick"
+  | "agents"
+  | "build"
+  | "meetings"
+  | "favorites"
+  | "more";
 type NavHue = "blue" | "green" | "amber" | "violet" | "pink" | "teal" | "sky" | "rose" | "lime" | "slate";
 
 const SECTION_ORDER: readonly NavSection[] = [
-  "home", "people", "work", "money", "talent", "culture", "platform",
+  "home",
+  "workspace",
+  "sidekick",
+  "agents",
+  "build",
+  "meetings",
+  "favorites",
+  "more",
 ] as const;
 
-// Hub labels live in messages/<locale>.json under nav.hub.* — see
-// tNav("hub.<section>") at the render site. Keeping the labels
-// translation-driven means new locales pick up automatically.
-
-// One lucide icon per hub — paired with the section label in the
-// collapsible header. Chosen for legibility at small sizes.
-const SECTION_ICON: Record<NavSection, React.ComponentType<{ size?: number; className?: string }>> = {
-  home: LayoutDashboard,
-  people: Users,
-  work: CalendarDays,
-  money: DollarSign,
-  talent: Star,
-  culture: Megaphone,
-  platform: Wrench,
+// Rails that are *single-link* — the rail header itself is a navigation
+// link; there is no expandable body. These render as one row at the top
+// level instead of a collapsible group.
+const SINGLE_LINK_RAILS: Record<NavSection, string | null> = {
+  home: null,
+  workspace: null,
+  sidekick: "/sidekick",
+  agents: "/agents",
+  build: "/build",
+  meetings: "/meetings",
+  favorites: null,
+  more: null,
 };
 
-// Persona-aware default expansion. IC sees the three daily-touch hubs
-// open and everything else collapsed; managers gain People + Talent;
-// admins gain Money + Platform. Users can override per-hub and we
-// persist their choice in localStorage.
+// Hub labels live in messages/<locale>.json under nav.hub.* — see
+// tNav("hub.<section>") at the render site.
+const SECTION_ICON: Record<NavSection, React.ComponentType<{ size?: number; className?: string }>> = {
+  home: LayoutDashboard,
+  workspace: Grid3x3,
+  sidekick: Sparkles,
+  agents: Bot,
+  build: Wand2,
+  meetings: MessageSquare,
+  favorites: Star,
+  more: MoreHorizontal,
+};
+
+// Default expansion. Home + Workspace + Favorites open for everyone
+// (the daily-touch rails). More is collapsed by default; admins
+// get it open since they live in Activity/Analytics/Settings.
 function defaultExpandedFor(role: { isAdmin: boolean; isManager: boolean }): Record<NavSection, boolean> {
-  const ic = { home: true, people: false, work: true, money: false, talent: false, culture: true, platform: false };
-  if (role.isAdmin) return { home: true, people: true, work: true, money: true, talent: true, culture: true, platform: true };
-  if (role.isManager) return { ...ic, people: true, talent: true };
-  return ic;
+  const base: Record<NavSection, boolean> = {
+    home: true,
+    workspace: true,
+    sidekick: true,
+    agents: true,
+    build: true,
+    meetings: true,
+    favorites: true,
+    more: false,
+  };
+  if (role.isAdmin) return { ...base, more: true };
+  return base;
 }
 
 const navigation: NavItem[] = [
-  // 🏠 Home — opens by default for every persona. Daily-touch entries
-  // that don't fit anywhere more specific.
+  // 🏠 Home — daily-touch entries everyone needs.
   { name: "Dashboard", key: "dashboard", href: "/dashboard", icon: LayoutDashboard, section: "home", hue: "blue" },
   { name: "Inbox", key: "inbox", href: "/inbox", icon: Inbox, section: "home", hue: "violet" },
-  { name: "AI Assistant", key: "aiAssistant", href: "/ai", icon: Bot, moduleKey: "ai", managerOnly: true, section: "home", hue: "lime" },
 
-  // 👥 People — the org's roster + structure. Talent (perf/comp/recruiting)
-  // lives in its own hub since it's a different ceremony.
-  { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true, section: "people", hue: "blue" },
-  { name: "Organization", key: "organization", href: "/organization", icon: Building2, section: "people", hue: "sky" },
+  // 🗂 Workspace — every installed product surfaces as a board entry
+  // under this rail. Order matches the catalog `displayOrder`. Persona
+  // gating still applies per item (managerOnly / adminOnly) so an IC
+  // doesn't see Workforce Planning, but the RAIL itself is universal.
+  // ── Cross-functional core (always-on for every org)
+  { name: "Work Calendar", key: "calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks", section: "workspace", hue: "blue" },
+  { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops", section: "workspace", hue: "teal" },
+  { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true, section: "workspace", hue: "sky" },
+  { name: "OKRs", key: "okrs", href: "/okrs", icon: Crosshair, section: "workspace", hue: "violet" },
+  { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi", section: "workspace", hue: "rose" },
+  // ── People suite
+  { name: "People", key: "people", href: "/people", icon: Users, moduleKey: "people", managerOnly: true, section: "workspace", hue: "blue" },
+  { name: "Organization", key: "organization", href: "/organization", icon: Building2, section: "workspace", hue: "sky" },
+  { name: "Time off", key: "timeOff", href: "/time-off", icon: CalendarOff, section: "workspace", hue: "lime" },
+  { name: "Timesheets", key: "timesheets", href: "/timesheets", icon: Clock, section: "workspace", hue: "blue" },
+  { name: "Clock in", key: "clock", href: "/clock", icon: Clock, section: "workspace", hue: "green" },
+  { name: "Onboarding", key: "onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true, section: "workspace", hue: "teal" },
+  { name: "Recruiting", key: "recruiting", href: "/recruiting", icon: Briefcase, managerOnly: true, section: "workspace", hue: "violet" },
+  { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews", section: "workspace", hue: "amber" },
+  { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true, section: "workspace", hue: "green" },
+  { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true, section: "workspace", hue: "rose" },
+  { name: "Learning", key: "learning", href: "/learning", icon: GraduationCap, section: "workspace", hue: "violet" },
+  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true, comingSoon: true, section: "workspace", hue: "green" },
+  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true, comingSoon: true, section: "workspace", hue: "pink" },
+  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, comingSoon: true, section: "workspace", hue: "rose" },
+  // ── Money / finance suite
+  { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "workspace", hue: "amber" },
+  { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "workspace", hue: "sky" },
+  { name: "Financials", key: "financials", href: "/financials", icon: BookText, adminOnly: true, section: "workspace", hue: "blue" },
+  { name: "Planning", key: "planning", href: "/planning", icon: Target, adminOnly: true, section: "workspace", hue: "violet" },
+  { name: "Workforce Planning", key: "workforcePlanning", href: "/workforce-planning", icon: Target, managerOnly: true, section: "workspace", hue: "violet" },
+  // ── Culture suite
+  { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone, section: "workspace", hue: "amber" },
+  { name: "Kudos", key: "kudos", href: "/kudos", icon: Heart, section: "workspace", hue: "pink" },
+  { name: "Policies", key: "policies", href: "/policies", icon: Shield, section: "workspace", hue: "rose" },
+  { name: "Ideas", key: "ideas", href: "/ideas", icon: Lightbulb, section: "workspace", hue: "amber" },
+  { name: "Surveys", key: "surveys", href: "/surveys", icon: ClipboardCheck, section: "workspace", hue: "teal" },
+  { name: "Candor", key: "candor", href: "/candor", icon: MessageSquareHeart, section: "workspace", hue: "pink" },
 
-  // ✅ Work — daily-touch ops + cadence. Everything an IC opens during
-  // a normal workday belongs here.
-  { name: "Work Calendar", key: "calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks", section: "work", hue: "blue" },
-  { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi", section: "work", hue: "rose" },
-  { name: "OKRs", key: "okrs", href: "/okrs", icon: Crosshair, section: "work", hue: "violet" },
-  { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops", section: "work", hue: "teal" },
-  { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true, section: "work", hue: "sky" },
-  { name: "Meetings", key: "meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings", section: "work", hue: "amber" },
-  { name: "Time off", key: "timeOff", href: "/time-off", icon: CalendarOff, section: "work", hue: "lime" },
-  { name: "Timesheets", key: "timesheets", href: "/timesheets", icon: Clock, section: "work", hue: "blue" },
-  { name: "Clock in", key: "clock", href: "/clock", icon: Clock, section: "work", hue: "green" },
+  // The four single-link rails — header IS the link, no body items.
+  // Listed here for type-system completeness; render path treats them
+  // specially via SINGLE_LINK_RAILS.
+  { name: "Sidekick", key: "sidekick", href: "/sidekick", icon: Sparkles, moduleKey: "ai", section: "sidekick", hue: "lime" },
+  { name: "Agents", key: "agentsRail", href: "/agents", icon: Bot, moduleKey: "ai", section: "agents", hue: "violet" },
+  { name: "Build", key: "build", href: "/build", icon: Wand2, moduleKey: "ai", managerOnly: true, section: "build", hue: "pink" },
+  { name: "Meetings", key: "meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings", section: "meetings", hue: "amber" },
 
-  // 💰 Money — anything that moves currency or plans it. Workforce
-  // planning lives here (not Platform) because it's FP&A.
-  { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "money", hue: "amber" },
-  { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "money", hue: "sky" },
-  { name: "Financials", key: "financials", href: "/financials", icon: BookText, adminOnly: true, section: "money", hue: "blue" },
-  { name: "Planning", key: "planning", href: "/planning", icon: Target, adminOnly: true, section: "money", hue: "violet" },
-  { name: "Workforce Planning", key: "workforcePlanning", href: "/workforce-planning", icon: Target, managerOnly: true, section: "money", hue: "violet" },
-  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true, comingSoon: true, section: "money", hue: "green" },
-  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true, comingSoon: true, section: "money", hue: "pink" },
-  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, comingSoon: true, section: "money", hue: "rose" },
-
-  // 🎯 Talent — promotion/comp/hiring/learning ceremonies. Mostly
-  // manager-only; ICs see Reviews + Learning when assigned.
-  { name: "Reviews", key: "reviews", href: "/reviews", icon: Star, moduleKey: "reviews", section: "talent", hue: "amber" },
-  { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true, section: "talent", hue: "green" },
-  { name: "Onboarding", key: "onboarding", href: "/onboarding", icon: GraduationCap, moduleKey: "checkins", managerOnly: true, section: "talent", hue: "teal" },
-  { name: "Recruiting", key: "recruiting", href: "/recruiting", icon: Briefcase, managerOnly: true, section: "talent", hue: "violet" },
-  { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true, section: "talent", hue: "rose" },
-  { name: "Learning", key: "learning", href: "/learning", icon: GraduationCap, section: "talent", hue: "violet" },
-
-  // 📣 Culture — broadcast + signal channels. Everyone sees these.
-  { name: "Announcements", key: "announcements", href: "/announcements", icon: Megaphone, section: "culture", hue: "amber" },
-  { name: "Kudos", key: "kudos", href: "/kudos", icon: Heart, section: "culture", hue: "pink" },
-  { name: "Policies", key: "policies", href: "/policies", icon: Shield, section: "culture", hue: "rose" },
-  { name: "Ideas", key: "ideas", href: "/ideas", icon: Lightbulb, section: "culture", hue: "amber" },
-  { name: "Surveys", key: "surveys", href: "/surveys", icon: ClipboardCheck, section: "culture", hue: "teal" },
-  { name: "Candor", key: "candor", href: "/candor", icon: MessageSquareHeart, section: "culture", hue: "pink" },
-
-  // ⚙️ Platform — admin / configuration / observability surfaces.
-  { name: "Activity", key: "activity", href: "/activity", icon: Activity, section: "platform", hue: "slate" },
-  { name: "Analytics", key: "analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true, section: "platform", hue: "blue" },
-  { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true, section: "platform", hue: "amber" },
-  { name: "Tools", key: "tools", href: "/tools", icon: Wrench, managerOnly: true, section: "platform", hue: "slate" },
-  { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true, section: "platform", hue: "sky" },
-  { name: "Studio", key: "studio", href: "/studio", icon: Wrench, adminOnly: true, comingSoon: true, section: "platform", hue: "lime" },
-  { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette, section: "platform", hue: "pink" },
-  { name: "Admin Console", key: "admin", href: "/admin", icon: Shield, superAdminOnly: true, section: "platform", hue: "rose" },
+  // ⚙️ More — admin / configuration / observability + Product Store.
+  { name: "Product Store", key: "store", href: "/store", icon: Store, section: "more", hue: "violet" },
+  { name: "Activity", key: "activity", href: "/activity", icon: Activity, section: "more", hue: "slate" },
+  { name: "Analytics", key: "analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true, section: "more", hue: "blue" },
+  { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true, section: "more", hue: "amber" },
+  { name: "Tools", key: "tools", href: "/tools", icon: Wrench, managerOnly: true, section: "more", hue: "slate" },
+  { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true, section: "more", hue: "sky" },
+  { name: "Studio", key: "studio", href: "/studio", icon: Wrench, adminOnly: true, comingSoon: true, section: "more", hue: "lime" },
+  { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette, section: "more", hue: "pink" },
+  { name: "Admin Console", key: "admin", href: "/admin", icon: Shield, superAdminOnly: true, section: "more", hue: "rose" },
 ];
 
 const bottomNav = [
@@ -700,68 +744,145 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Main nav — grouped into ClickUp-style sections */}
+      {/* Main nav — 8 universal rails: Home · Workspace · Sidekick ·
+          Agents · Build · Meetings · Favorites · More. The Favorites
+          rail body holds the pinned + recent items (previously rendered
+          inline at the top). */}
       <nav className="app-sidebar-nav">
-        {/* Pinned + Recent — only when not filtering, since the filter
-            view is meant to be a flat result list. */}
-        {!filterLc && pinnedItems.length > 0 && (
-          <div className="app-sidebar-section">
-            {!collapsed && (
-              <div className="app-sidebar-section-label">
-                <Pin size={9} style={{ marginRight: 4, display: "inline" }} aria-hidden />
-                Pinned
-              </div>
-            )}
-            {pinnedItems.map((item) =>
-              renderNavLink({
-                item,
-                pathname,
-                collapsed,
-                tNav,
-                unreadByType,
-                announcementCount,
-                pinned: true,
-                onTogglePin: handleTogglePin,
-                isSopsEntry: false, // Pinned section never expands SOPs
-                sopsExpanded: false,
-                setSopsExpanded,
-                sopFolders: null,
-                sopFoldersLoading: false,
-              }),
-            )}
-          </div>
-        )}
-        {!filterLc && recentItems.length > 0 && (
-          <div className="app-sidebar-section">
-            {!collapsed && (
-              <div className="app-sidebar-section-label">
-                <ClockIcon size={9} style={{ marginRight: 4, display: "inline" }} aria-hidden />
-                Recent
-              </div>
-            )}
-            {recentItems.map((item) =>
-              renderNavLink({
-                item,
-                pathname,
-                collapsed,
-                tNav,
-                unreadByType,
-                announcementCount,
-                pinned: false,
-                onTogglePin: handleTogglePin,
-                isSopsEntry: false,
-                sopsExpanded: false,
-                setSopsExpanded,
-                sopFolders: null,
-                sopFoldersLoading: false,
-              }),
-            )}
-          </div>
-        )}
-
         {SECTION_ORDER.map((section) => {
+          // Favorites rail is special: it has no nav-array entries,
+          // its body comes from pinned + recent lists. Hide it
+          // entirely when both are empty.
+          if (section === "favorites") {
+            if (filterLc) return null;
+            const hasFavs = pinnedItems.length > 0 || recentItems.length > 0;
+            if (!hasFavs) return null;
+            const isOpen = collapsed || hubExpanded[section];
+            const HubIcon = SECTION_ICON[section];
+            return (
+              <div key={section} className={cn("app-sidebar-section", "app-sidebar-hub", !isOpen && "is-collapsed")}>
+                {!collapsed && (
+                  <button
+                    type="button"
+                    onClick={() => toggleHub(section)}
+                    className="app-sidebar-hub-header"
+                    aria-expanded={isOpen}
+                    aria-controls={`hub-${section}`}
+                  >
+                    <HubIcon size={12} className="app-sidebar-hub-icon" aria-hidden />
+                    <span className="app-sidebar-section-label">{tNav(`hub.${section}`)}</span>
+                    <span className="app-sidebar-hub-count" aria-hidden>{pinnedItems.length + recentItems.length}</span>
+                    <ChevronDown size={12} className={cn("app-sidebar-hub-chevron", isOpen && "is-open")} aria-hidden />
+                  </button>
+                )}
+                {isOpen && (
+                  <div id={`hub-${section}`} className="app-sidebar-hub-body">
+                    {pinnedItems.length > 0 && !collapsed && (
+                      <div className="app-sidebar-section-label" style={{ marginTop: 4 }}>
+                        <Pin size={9} style={{ marginRight: 4, display: "inline" }} aria-hidden />
+                        Pinned
+                      </div>
+                    )}
+                    {pinnedItems.map((item) =>
+                      renderNavLink({
+                        item,
+                        pathname,
+                        collapsed,
+                        tNav,
+                        unreadByType,
+                        announcementCount,
+                        pinned: true,
+                        onTogglePin: handleTogglePin,
+                        isSopsEntry: false,
+                        sopsExpanded: false,
+                        setSopsExpanded,
+                        sopFolders: null,
+                        sopFoldersLoading: false,
+                      }),
+                    )}
+                    {recentItems.length > 0 && !collapsed && (
+                      <div className="app-sidebar-section-label" style={{ marginTop: 4 }}>
+                        <ClockIcon size={9} style={{ marginRight: 4, display: "inline" }} aria-hidden />
+                        Recent
+                      </div>
+                    )}
+                    {recentItems.map((item) =>
+                      renderNavLink({
+                        item,
+                        pathname,
+                        collapsed,
+                        tNav,
+                        unreadByType,
+                        announcementCount,
+                        pinned: false,
+                        onTogglePin: handleTogglePin,
+                        isSopsEntry: false,
+                        sopsExpanded: false,
+                        setSopsExpanded,
+                        sopFolders: null,
+                        sopFoldersLoading: false,
+                      }),
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           const items = visibleNav.filter((i) => i.section === section && filterMatches(i));
           if (items.length === 0) return null;
+
+          // Single-link rails (Sidekick / Agents / Build / Meetings).
+          // The rail header IS the link — no collapsible wrapper.
+          const singleLinkHref = SINGLE_LINK_RAILS[section];
+          if (singleLinkHref && items.length === 1) {
+            const item = items[0];
+            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            const HubIcon = SECTION_ICON[section];
+            const itemPinned = pinnedKeys.includes(item.key);
+            return (
+              <div key={section} className="app-sidebar-section app-sidebar-single-rail">
+                <div className="app-sidebar-link-row">
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      "app-sidebar-link",
+                      "app-sidebar-rail-link",
+                      isActive && "is-active",
+                      collapsed && "is-collapsed",
+                      item.hue && `hue-${item.hue}`,
+                    )}
+                    title={collapsed ? tNav(`hub.${section}`) : undefined}
+                  >
+                    <span className="app-sidebar-icon-chip" aria-hidden>
+                      <HubIcon size={14} />
+                    </span>
+                    {!collapsed && (
+                      <>
+                        <span className="app-sidebar-label">{tNav(`hub.${section}`)}</span>
+                        {item.comingSoon && (
+                          <span className="app-sidebar-soon-badge" aria-label="Coming soon">Soon</span>
+                        )}
+                        <button
+                          type="button"
+                          className={cn("app-sidebar-pin", itemPinned && "is-pinned")}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleTogglePin(item.key);
+                          }}
+                          aria-label={itemPinned ? "Unpin" : "Pin"}
+                          title={itemPinned ? "Unpin from top" : "Pin to top"}
+                        >
+                          {itemPinned ? <PinOff size={10} /> : <Pin size={10} />}
+                        </button>
+                      </>
+                    )}
+                  </Link>
+                </div>
+              </div>
+            );
+          }
           // When the user is filtering or the sidebar is collapsed, force
           // every hub open so the search hits actually surface and the
           // collapsed icon-rail doesn't hide everything behind a chevron.

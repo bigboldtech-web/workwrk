@@ -1,335 +1,342 @@
-// Pricing page — built from scratch alongside landing v4. Same visual
-// language: confident large headlines, locked palette, generous spacing,
-// premium tier cards, full comparison matrix, FAQ snippets for procurement.
-
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowRight, Check, Minus, Sparkles } from "lucide-react";
-import { MarketingTopbar } from "@/components/landing/marketing-topbar";
-import { MarketingFooter } from "@/components/landing/marketing-footer";
+import {
+  ArrowRight,
+  Check,
+  Minus,
+  Sparkles,
+  Shield,
+  Zap,
+  Building2,
+} from "lucide-react";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H2,
+  H3,
+  Lede,
+  Button,
+  CTABand,
+  FAQ,
+  GradientText,
+  CheckList,
+  HUES,
+} from "@/components/marketing/primitives";
 
 export const metadata: Metadata = {
   title: "Pricing — WorkwrK",
   description:
-    "Free under five people. Honest above that. Three tiers — Starter, Growth, Enterprise. WorkwrK replaces 15+ tools so the math always works.",
+    "Free under five people. $8/user thereafter. Three tiers — Starter, Growth, Scale. WorkwrK replaces 15+ tools so the math always works.",
   alternates: { canonical: "https://workwrk.com/pricing" },
 };
 
-interface Tier {
-  name: string;
-  price: string;
-  sub: string;
-  description: string;
-  features: readonly string[];
-  cta: string;
-  href: string;
-  highlighted?: boolean;
-}
-
-const TIERS: readonly Tier[] = [
+const TIERS = [
   {
     name: "Starter",
     price: "Free",
     sub: "Up to 5 people · forever",
     description: "For founding teams and pilots. Every core hub. No time limit.",
+    hue: "indigo" as const,
+    icon: Sparkles,
     features: [
-      "Home + People + Work + Culture hubs",
+      "All 7 hubs unlocked",
       "Inbox aggregating 12 streams",
       "Cmd-K AI search across every entity",
-      "Tasks, OKRs, KPIs, SOPs, Process runs",
-      "Announcements, Kudos, Ideas, Surveys",
-      "Email support",
+      "Tasks, OKRs, KPIs, SOPs, processes",
+      "Announcements, kudos, ideas, surveys",
+      "Email support · 24h",
     ],
-    cta: "Start free",
-    href: "/register",
+    cta: { label: "Start free", href: "/signup" },
   },
   {
     name: "Growth",
     price: "$8",
-    sub: "per user / month",
+    priceSuffix: "/user/mo",
+    sub: "14-day trial · no credit card",
     description: "Everything most SMB → mid-market companies actually need.",
+    hue: "fuchsia" as const,
+    icon: Zap,
+    featured: true,
     features: [
       "Everything in Starter",
-      "Money hub: Expenses, Procurement, Financials, Planning",
-      "Talent hub: Reviews, Comp, Onboarding, Recruiting",
+      "Money + Talent + Growth hubs",
       "AI Inbox triage + cross-module signals",
-      "Slack + Google Workspace integrations",
-      "Priority support · response < 4h",
+      "Slack + Google Workspace + Microsoft 365",
+      "Custom KPI weights + composite scores",
+      "Priority support · 4h SLA",
     ],
-    cta: "Start 14-day trial",
-    href: "/register?plan=growth",
-    highlighted: true,
+    cta: { label: "Start 14-day trial", href: "/signup?plan=growth" },
   },
   {
-    name: "Enterprise",
+    name: "Scale",
     price: "Custom",
-    sub: "100+ people",
-    description: "For larger orgs with compliance, security, and customization needs.",
+    sub: "From $29,999 / year",
+    description: "For 250+ seat operators who need controls, SLAs, and a CSM.",
+    hue: "emerald" as const,
+    icon: Building2,
     features: [
       "Everything in Growth",
-      "SAML SSO + SCIM provisioning",
-      "Full audit log (SOC-2 Type II ready)",
-      "Studio: custom workflows + fields",
-      "BYOK / on-prem AI option",
-      "Dedicated CSM + uptime SLA",
+      "Unlimited AI usage",
+      "SSO (SAML) + SCIM provisioning",
+      "Audit log + retention controls",
+      "Custom integrations + API quota",
+      "Dedicated CSM · 1h SLA · 99.95% uptime",
     ],
-    cta: "Talk to sales",
-    href: "/contact",
+    cta: { label: "Talk to sales", href: "/demo" },
   },
 ];
 
-interface MatrixRow {
-  feature: string;
-  starter: boolean | string;
-  growth: boolean | string;
-  enterprise: boolean | string;
-}
-
-const MATRIX: { section: string; rows: readonly MatrixRow[] }[] = [
+const COMPARE_GROUPS = [
   {
-    section: "Core hubs",
+    name: "Core hubs",
     rows: [
-      { feature: "Home (Dashboard + Inbox)",         starter: true, growth: true, enterprise: true },
-      { feature: "People (Profiles + Org chart)",     starter: true, growth: true, enterprise: true },
-      { feature: "Work (Tasks + OKRs + KPIs + SOPs)",  starter: true, growth: true, enterprise: true },
-      { feature: "Culture (Announcements + Kudos)",   starter: true, growth: true, enterprise: true },
-      { feature: "Money (Expenses → Financials)",     starter: false, growth: true, enterprise: true },
-      { feature: "Talent (Reviews + Comp + Hiring)",  starter: false, growth: true, enterprise: true },
+      ["Home (inbox + Cmd-K)", true, true, true],
+      ["People (org + performance)", true, true, true],
+      ["Work (tasks + OKRs + KPIs + SOPs)", true, true, true],
+      ["Culture (kudos + ideas + surveys)", true, true, true],
+      ["Money (spend + procurement + financials)", false, true, true],
+      ["Talent (reviews + comp + onboarding)", false, true, true],
+      ["Growth (pipeline + customers)", false, true, true],
     ],
   },
   {
-    section: "AI",
+    name: "AI & intelligence",
     rows: [
-      { feature: "Cmd-K AI search",                   starter: true, growth: true, enterprise: true },
-      { feature: "AI Inbox triage (per-row)",         starter: false, growth: true, enterprise: true },
-      { feature: "Cross-module anomaly signals",      starter: false, growth: true, enterprise: true },
-      { feature: "BYOK (your Anthropic key)",         starter: false, growth: false, enterprise: true },
+      ["Cmd-K AI search", true, true, true],
+      ["Inbox AI triage", false, true, true],
+      ["Cross-module signals & alerts", false, true, true],
+      ["AI promotion / comp recommendations", false, false, true],
+      ["Unlimited AI usage", false, "Capped", true],
     ],
   },
   {
-    section: "Security + governance",
+    name: "Integrations",
     rows: [
-      { feature: "Google SSO",                        starter: true, growth: true, enterprise: true },
-      { feature: "SAML SSO",                          starter: false, growth: false, enterprise: true },
-      { feature: "SCIM provisioning",                 starter: false, growth: false, enterprise: true },
-      { feature: "Audit log retention",               starter: "30 days", growth: "1 year", enterprise: "Unlimited" },
-      { feature: "GDPR org-delete + grace period",    starter: true, growth: true, enterprise: true },
-      { feature: "Region-locked storage",             starter: false, growth: false, enterprise: true },
+      ["Slack + Google Workspace", false, true, true],
+      ["Microsoft 365 + Teams", false, true, true],
+      ["Zapier / webhook events", false, true, true],
+      ["Custom integrations + API quota", false, false, true],
     ],
   },
   {
-    section: "Platform extensibility",
+    name: "Admin & security",
     rows: [
-      { feature: "Custom fields per entity",          starter: false, growth: "Limited", enterprise: "Unlimited" },
-      { feature: "Custom workflows (Studio)",         starter: false, growth: false, enterprise: true },
-      { feature: "Webhook subscriptions",             starter: false, growth: "5", enterprise: "Unlimited" },
-      { feature: "API rate limit",                    starter: "100/min", growth: "1k/min", enterprise: "Custom" },
+      ["SSO via Google / Microsoft", true, true, true],
+      ["SAML SSO + SCIM provisioning", false, false, true],
+      ["Audit log & retention controls", false, false, true],
+      ["EU / India data residency", false, false, true],
+      ["99.95% uptime SLA", false, false, true],
     ],
   },
   {
-    section: "Support",
+    name: "Support",
     rows: [
-      { feature: "Email support",                     starter: true, growth: true, enterprise: true },
-      { feature: "Priority response (< 4h)",          starter: false, growth: true, enterprise: true },
-      { feature: "Dedicated CSM",                     starter: false, growth: false, enterprise: true },
-      { feature: "SLA (99.9% uptime)",                starter: false, growth: false, enterprise: true },
+      ["Email support · 24h", true, true, true],
+      ["Priority chat · 4h SLA", false, true, true],
+      ["Dedicated CSM · 1h SLA", false, false, true],
     ],
-  },
-];
-
-function Cell({ value }: { value: boolean | string }) {
-  if (value === true)  return <Check size={16} className="text-[color:var(--accent-strong)] mx-auto" />;
-  if (value === false) return <Minus size={16} className="text-muted-2 mx-auto" />;
-  return <span className="text-[12.5px] font-medium text-foreground">{value}</span>;
-}
-
-const FAQ: { q: string; a: string }[] = [
-  {
-    q: "Do I need a credit card to start?",
-    a: "No. Starter is free forever for teams up to 5 people. Growth is $8/user/month after a 14-day trial — credit card collected then, not now.",
-  },
-  {
-    q: "What counts as a 'user'?",
-    a: "Anyone with a sign-in account who is not in INACTIVE status. Removed people don't count. Admins, employees, contractors all count the same.",
-  },
-  {
-    q: "Can I switch tiers mid-month?",
-    a: "Yes. Upgrade is immediate, prorated to the day. Downgrade takes effect at the next billing cycle so you don't lose paid features mid-month.",
-  },
-  {
-    q: "What happens if I exceed Starter's 5 people?",
-    a: "We don't lock you out mid-week. You get a 14-day grace period to upgrade to Growth or remove users.",
-  },
-  {
-    q: "Are there volume discounts?",
-    a: "Yes — Growth tier auto-scales: 50+ users gets 10% off, 200+ gets 20% off. Enterprise pricing is fully custom and typically includes a multi-year discount.",
   },
 ];
 
 export default function PricingPage() {
   return (
-    <div className="min-h-screen bg-background text-foreground antialiased">
-      <MarketingTopbar />
-
-      {/* ── Header ───────────────────────────────────────────────── */}
-      <section className="max-w-5xl mx-auto px-6 lg:px-10 pt-20 pb-14 text-center">
-        <div className="inline-flex items-center gap-2 text-xs font-medium px-3 h-7 rounded-full border border-border bg-surface mb-6">
-          <Sparkles size={11} className="text-[color:var(--accent-strong)]" />
-          Pricing
-        </div>
-        <h1 className="text-5xl lg:text-6xl font-bold tracking-tight leading-[1.05] mb-6">
-          Free under five.<br />
-          <span className="text-[color:var(--accent-strong)]">Honest above that.</span>
-        </h1>
-        <p className="text-lg text-muted max-w-2xl mx-auto leading-relaxed">
-          One product replaces ~15 SaaS subscriptions. At our prices, you
-          save more than you spend by the end of month one.
-        </p>
-      </section>
-
-      {/* ── Tier cards ───────────────────────────────────────────── */}
-      <section className="max-w-6xl mx-auto px-6 lg:px-10 pb-20">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {TIERS.map((tier) => (
-            <div
-              key={tier.name}
-              className={`relative rounded-2xl border p-7 transition-fast ${
-                tier.highlighted
-                  ? "border-[color:var(--accent)] bg-background shadow-[0_30px_60px_-20px_rgba(124,58,237,0.4)] ring-1 ring-[color:var(--accent)]/20"
-                  : "border-border bg-background hover:border-muted-2/60"
-              }`}
-            >
-              {tier.highlighted && (
-                <span
-                  className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-widest font-bold px-3 py-1 rounded-full"
-                  style={{ background: "var(--accent)", color: "var(--accent-contrast)" }}
-                >
-                  Most popular
-                </span>
-              )}
-              <h3 className="text-xl font-bold tracking-tight mb-1.5">{tier.name}</h3>
-              <p className="text-sm text-muted mb-6 leading-snug">{tier.description}</p>
-              <div className="mb-6">
-                <span className="text-5xl font-bold tracking-tight">{tier.price}</span>
-                {tier.price !== "Free" && tier.price !== "Custom" && (
-                  <span className="text-sm text-muted ml-1.5">{tier.sub}</span>
-                )}
-                {(tier.price === "Free" || tier.price === "Custom") && (
-                  <p className="text-sm text-muted mt-1">{tier.sub}</p>
-                )}
-              </div>
-              <Link
-                href={tier.href}
-                className={`block text-center px-4 py-3 rounded-lg font-semibold text-sm mb-7 transition-fast ${
-                  tier.highlighted
-                    ? "bg-[color:var(--accent)] text-white hover:opacity-90 shadow-[0_8px_20px_-8px_rgba(124,58,237,0.5)]"
-                    : "border border-border hover:bg-surface"
-                }`}
-              >
-                {tier.cta}
-              </Link>
-              <ul className="space-y-2.5">
-                {tier.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2.5 text-[13.5px]">
-                    <Check size={14} className="text-[color:var(--accent-strong)] flex-shrink-0 mt-0.5" />
-                    <span className="leading-snug">{f}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Comparison matrix ───────────────────────────────────── */}
-      <section className="border-t border-border bg-[color:var(--surface)]/40">
-        <div className="max-w-5xl mx-auto px-6 lg:px-10 py-24">
-          <div className="text-center mb-12">
-            <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
-              Compare side-by-side
+    <>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="max-w-2xl mx-auto text-center">
+            <Eyebrow hue="emerald" className="mb-5">Pricing</Eyebrow>
+            <H1>
+              Honest pricing. <br />
+              <GradientText hue="emerald">The math always works.</GradientText>
+            </H1>
+            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed">
+              Free forever under five people. $8/user thereafter. No per-module
+              surcharges, no surprise tiers, no quote-only marketing nonsense.
             </p>
-            <h2 className="text-3xl font-bold tracking-tight">
-              Just the things buyers care about.
-            </h2>
           </div>
 
-          <div className="rounded-2xl border border-border bg-background overflow-hidden">
-            <div className="grid grid-cols-[1.5fr_repeat(3,1fr)] gap-2 px-5 py-4 border-b border-border bg-[color:var(--surface-elevated)] sticky top-0 z-10">
-              <div></div>
-              {TIERS.map((tier) => (
-                <div key={tier.name} className="text-center">
-                  <p className="text-[11px] uppercase tracking-widest text-muted font-bold">{tier.name}</p>
-                </div>
-              ))}
-            </div>
-
-            {MATRIX.map((section) => (
-              <div key={section.section}>
-                <div className="px-5 py-3 bg-[color:var(--surface)]/40 border-b border-border">
-                  <p className="text-xs font-bold text-muted uppercase tracking-wider">{section.section}</p>
-                </div>
-                {section.rows.map((row, i) => (
-                  <div
-                    key={row.feature}
-                    className={`grid grid-cols-[1.5fr_repeat(3,1fr)] gap-2 px-5 py-3.5 items-center ${
-                      i < section.rows.length - 1 ? "border-b border-border" : ""
+          <div className="mt-14 grid md:grid-cols-3 gap-5">
+            {TIERS.map((tier) => {
+              const t = HUES[tier.hue];
+              return (
+                <div
+                  key={tier.name}
+                  className={`relative rounded-2xl p-7 bg-white border ${
+                    tier.featured
+                      ? "border-slate-900 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.25)]"
+                      : "border-slate-200"
+                  }`}
+                >
+                  {tier.featured && (
+                    <span className="absolute -top-3 left-7 inline-flex items-center text-[10px] font-bold uppercase tracking-[0.18em] px-2.5 h-6 rounded-full bg-slate-900 text-white">
+                      Most chosen
+                    </span>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center ${t.bgTint} ${t.text}`}
+                    >
+                      <tier.icon size={18} strokeWidth={2.2} />
+                    </span>
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-700">
+                        {tier.name}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">{tier.sub}</p>
+                    </div>
+                  </div>
+                  <p className="mt-5 flex items-baseline gap-1.5">
+                    <span className="text-5xl font-bold text-slate-900 tracking-tight">
+                      {tier.price}
+                    </span>
+                    {tier.priceSuffix && (
+                      <span className="text-sm text-slate-500 font-medium">{tier.priceSuffix}</span>
+                    )}
+                  </p>
+                  <p className="mt-2.5 text-sm text-slate-600 leading-relaxed">{tier.description}</p>
+                  <Link
+                    href={tier.cta.href}
+                    className={`mt-6 inline-flex items-center justify-center gap-1.5 w-full h-11 rounded-full font-semibold text-sm transition-colors ${
+                      tier.featured
+                        ? "bg-slate-900 text-white hover:bg-slate-800"
+                        : "bg-white border border-slate-200 text-slate-900 hover:border-slate-300 hover:bg-slate-50"
                     }`}
                   >
-                    <div className="text-[13px] text-foreground">{row.feature}</div>
-                    <div className="text-center"><Cell value={row.starter} /></div>
-                    <div className="text-center"><Cell value={row.growth} /></div>
-                    <div className="text-center"><Cell value={row.enterprise} /></div>
-                  </div>
-                ))}
-              </div>
-            ))}
+                    {tier.cta.label} <ArrowRight size={14} />
+                  </Link>
+                  <CheckList hue={tier.hue} items={tier.features} className="mt-7" />
+                </div>
+              );
+            })}
           </div>
-        </div>
-      </section>
 
-      {/* ── FAQ ──────────────────────────────────────────────────── */}
-      <section className="max-w-3xl mx-auto px-6 lg:px-10 py-24">
-        <div className="text-center mb-12">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
-            FAQ
+          <p className="mt-10 text-center text-sm text-slate-500">
+            All plans include unlimited storage, 99.9% uptime, daily backups, and email support.
           </p>
-          <h2 className="text-3xl font-bold tracking-tight">
-            About the bill.
-          </h2>
-        </div>
-        <div className="space-y-3">
-          {FAQ.map((item) => (
-            <details key={item.q} className="group rounded-xl border border-border bg-background overflow-hidden">
-              <summary className="cursor-pointer px-5 py-4 flex items-center justify-between hover:bg-[color:var(--surface-elevated)] transition-fast list-none">
-                <span className="text-[15px] font-semibold pr-4">{item.q}</span>
-                <span className="text-muted-2 flex-shrink-0 group-open:rotate-90 transition-fast">›</span>
-              </summary>
-              <div className="px-5 pb-4 text-[14px] text-muted leading-relaxed">{item.a}</div>
-            </details>
-          ))}
-        </div>
-      </section>
+        </Container>
+      </Section>
 
-      {/* ── Final CTA ────────────────────────────────────────────── */}
-      <section className="border-t border-border">
-        <div className="max-w-3xl mx-auto px-6 lg:px-10 py-24 text-center">
-          <h2 className="text-4xl font-bold tracking-tight mb-5">
-            Start free in under a minute.
-          </h2>
-          <p className="text-muted mb-8">
-            No credit card. Cancel any time. Free under five people, forever.
-          </p>
-          <Link
-            href="/register"
-            className="inline-flex items-center gap-2 px-7 h-12 rounded-xl bg-[color:var(--accent)] text-white font-semibold hover:opacity-90 transition-fast shadow-[0_8px_24px_-8px_rgba(124,58,237,0.5)]"
-          >
-            Start free
-            <ArrowRight size={16} />
-          </Link>
-        </div>
-      </section>
+      {/* Comparison table */}
+      <Section variant="tint" py="lg">
+        <Container>
+          <div className="max-w-2xl">
+            <Eyebrow hue="violet" className="mb-4">Compare plans</Eyebrow>
+            <H2>The full plan comparison.</H2>
+            <p className="mt-4 text-slate-600">Every capability, side by side.</p>
+          </div>
 
-      <MarketingFooter />
+          <div className="mt-10 overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead>
+                <tr className="border-b-2 border-slate-200">
+                  <th className="text-left p-4 font-bold text-slate-900 w-2/5">Feature</th>
+                  {TIERS.map((t) => (
+                    <th key={t.name} className="text-center p-4">
+                      <span className={`block text-xs font-bold uppercase tracking-[0.16em] ${HUES[t.hue].text}`}>
+                        {t.name}
+                      </span>
+                      <span className="block text-xs text-slate-500 mt-0.5">{t.price}</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARE_GROUPS.flatMap((group) => [
+                  <tr key={`g-${group.name}`}>
+                    <td colSpan={4} className="pt-8 pb-3 px-4 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                      {group.name}
+                    </td>
+                  </tr>,
+                  ...group.rows.map(([label, ...vals]) => (
+                    <tr key={`${group.name}-${String(label)}`} className="border-b border-slate-100">
+                      <td className="p-4 text-slate-700">{label}</td>
+                      {vals.map((v, i) => (
+                        <td key={i} className="p-4 text-center">
+                          {v === true ? (
+                            <Check size={16} className="inline text-emerald-600" />
+                          ) : v === false ? (
+                            <Minus size={16} className="inline text-slate-300" />
+                          ) : (
+                            <span className="text-xs text-slate-600">{v as string}</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  )),
+                ])}
+              </tbody>
+            </table>
+          </div>
+        </Container>
+      </Section>
+
+      {/* Add-ons */}
+      <Section py="md">
+        <Container>
+          <div className="grid lg:grid-cols-[1fr_2fr] gap-10 items-start">
+            <div>
+              <Eyebrow hue="amber" className="mb-4">Add-ons</Eyebrow>
+              <H3>Optional, when you need them.</H3>
+              <p className="mt-4 text-slate-600 text-sm">
+                Most teams never need these. They&apos;re available a-la-carte
+                for the edge cases — and they never gate the core product.
+              </p>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <AddonCard hue="violet"  title="Implementation help"     price="$3,500 / one-time" body="Two-week white-glove rollout with a workwrk solutions architect."/>
+              <AddonCard hue="emerald" title="Custom integration"      price="$7,500 / connector" body="We build a connector to your internal/legacy system you can't get off."/>
+              <AddonCard hue="sky"     title="On-prem / VPC deployment" price="From $50k / yr"     body="Run workwrk inside your own AWS / GCP. Available on Scale only."/>
+              <AddonCard hue="fuchsia" title="Premium support · 1h"     price="$2,500 / mo"        body="Globally-distributed 24×7 chat with a named pod of three engineers."/>
+            </div>
+          </div>
+        </Container>
+      </Section>
+
+      {/* FAQ */}
+      <FAQ
+        hue="emerald"
+        eyebrow="Pricing FAQ"
+        title="Common pricing questions."
+        items={[
+          { q: "Is the free plan really forever?",            a: "Yes. Up to five people, all 7 hubs unlocked, no time limit. We don't believe in 14-day clocks that pressure you into paying before you've decided. About 40% of our paid customers spent 6+ months on free." },
+          { q: "How does per-user billing work?",              a: "Monthly or annual (annual saves 18%). New seats are pro-rated on the day they're added. Deactivated seats free up immediately and credit to your next invoice. There's no annual-commitment trap." },
+          { q: "Do you charge for guests or read-only users?", a: "No. Guests, contractors with view-only roles, and external auditors are free. We only charge for full members who can create or edit." },
+          { q: "What payment methods do you accept?",          a: "All major cards (Stripe), ACH/SEPA bank transfers on annual, wire transfers for Scale plans, and INR via Razorpay for Indian customers." },
+          { q: "Can I get a discount?",                        a: "Annual billing saves 18%. We have NGO / nonprofit / education discounts (40% off) — email hello@workwrk.com with your details. We don't do 'first 100 customers' or other artificial scarcity." },
+          { q: "What about a free trial of Scale?",            a: "Scale includes a 30-day pilot with implementation help included. Talk to sales to set it up." },
+        ]}
+      />
+
+      <CTABand
+        title={<>Free to start. <GradientText hue="emerald">Honest to grow.</GradientText></>}
+        body="No credit card. No demo gate. No quote-only games. Just sign up."
+        hue="emerald"
+      />
+    </>
+  );
+}
+
+function AddonCard({
+  hue,
+  title,
+  price,
+  body,
+}: {
+  hue: keyof typeof HUES;
+  title: string;
+  price: string;
+  body: string;
+}) {
+  const t = HUES[hue];
+  return (
+    <div className="p-5 bg-white border border-slate-200 rounded-2xl">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-bold text-slate-900 text-sm">{title}</p>
+        <span className={`text-xs font-bold ${t.text}`}>{price}</span>
+      </div>
+      <p className="mt-2 text-xs text-slate-600 leading-relaxed">{body}</p>
     </div>
   );
 }

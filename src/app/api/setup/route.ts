@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { normalizeEnabledModules } from "@/lib/module-keys";
+import { DEFAULT_INSTALLED_SLUGS, DEPARTMENT_RECOMMENDED_PRODUCTS } from "@/lib/products/catalog";
 
 export async function GET() {
   try {
@@ -51,7 +52,14 @@ export async function POST(req: Request) {
       departments,
       customDepartments,
       invites,
+      // Phase B fields — optional, backwards-compat. When present they
+      // drive ProductInstallation upserts; otherwise we fall back to
+      // mapping legacy moduleKey strings → product slugs.
+      departmentRouter,
+      selectedProducts,
     } = body;
+
+    const normalizedModules = normalizeEnabledModules(enabledModules);
 
     // Update organization settings
     await prisma.organization.update({
@@ -64,10 +72,73 @@ export async function POST(req: Request) {
           industry,
           useCase,
           teamSize,
-          enabledModules: normalizeEnabledModules(enabledModules),
+          enabledModules: normalizedModules,
+          ...(departmentRouter ? { departmentRouter } : {}),
         },
       },
     });
+
+    // Provision ProductInstallation rows so the new modular Work OS
+    // surfaces (Product Store, Workspace rail) work for this org. We
+    // compute the install set from three sources, in priority order:
+    //   1. Explicit `selectedProducts` from the new onboarding flow
+    //   2. `departmentRouter` → catalog-recommended products
+    //   3. Legacy `enabledModules` → mapped via legacyModuleKey
+    // We always also include `DEFAULT_INSTALLED_SLUGS` (the CROSS core)
+    // so a new workspace always has Work + SOPs + Goals + Meetings +
+    // Culture on day one.
+    try {
+      const slugsToInstall = new Set<string>(DEFAULT_INSTALLED_SLUGS);
+
+      if (Array.isArray(selectedProducts) && selectedProducts.length > 0) {
+        for (const slug of selectedProducts) {
+          if (typeof slug === "string") slugsToInstall.add(slug);
+        }
+      } else if (departmentRouter && typeof departmentRouter === "string") {
+        const recommended = DEPARTMENT_RECOMMENDED_PRODUCTS[departmentRouter];
+        if (recommended) for (const slug of recommended) slugsToInstall.add(slug);
+      }
+
+      if (normalizedModules.length > 0) {
+        const legacyProducts = await prisma.product.findMany({
+          where: { legacyModuleKey: { in: normalizedModules } },
+          select: { slug: true },
+        });
+        for (const p of legacyProducts) slugsToInstall.add(p.slug);
+      }
+
+      const products = await prisma.product.findMany({
+        where: { slug: { in: Array.from(slugsToInstall) } },
+        select: { id: true, slug: true },
+      });
+
+      for (const product of products) {
+        await prisma.productInstallation.upsert({
+          where: {
+            organizationId_productId: {
+              organizationId: orgId,
+              productId: product.id,
+            },
+          },
+          create: {
+            organizationId: orgId,
+            productId: product.id,
+            installedById: userId,
+            status: "ACTIVE",
+          },
+          update: {
+            status: "ACTIVE",
+            installedById: userId,
+            pausedAt: null,
+            removedAt: null,
+          },
+        });
+      }
+    } catch (e) {
+      // Don't block setup completion if ProductInstallation backfill
+      // fails — the seed script also covers this on next deploy.
+      console.error("[Setup] ProductInstallation provisioning failed:", e);
+    }
 
     // Sync departments: disable unchecked default ones, create custom ones
     const enabledDeptNames = (departments || [])

@@ -1,243 +1,205 @@
-// Features page — rebuilt to match landing v4 + hub IA.
-//
-// Each of the seven sidebar hubs gets its own section: hero tagline,
-// long-form body, and a grid of feature cards with icon + name + blurb.
-// Anchor IDs on each section (#home, #people, ...) so landing v4 can
-// deep-link from its hub cards.
-
-import Link from "next/link";
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
-  ArrowRight, Sparkles,
-  LayoutDashboard, Users, CalendarDays, DollarSign, Star, Megaphone, Wrench,
-  Inbox, Crosshair, Target, BookOpen, Briefcase, Receipt, ShoppingCart,
-  GraduationCap, Heart, Shield, MessageSquareHeart, Lightbulb, ClipboardCheck,
-  Activity, Link2, Palette, Bot, Grid3x3, Building2,
-  type LucideIcon,
+  ArrowRight,
+  Inbox,
+  Users,
+  CheckCircle2,
+  DollarSign,
+  Crosshair,
+  Star,
+  Megaphone,
+  Sparkles,
 } from "lucide-react";
-import { MarketingTopbar } from "@/components/landing/marketing-topbar";
-import { MarketingFooter } from "@/components/landing/marketing-footer";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H2,
+  Button,
+  CTABand,
+  GradientText,
+  HUBS,
+  HUES,
+} from "@/components/marketing/primitives";
 
 export const metadata: Metadata = {
   title: "Features — WorkwrK",
   description:
-    "Seven hubs, one product. Home, People, Work, Money, Talent, Culture, Platform — built around how teams actually work, not how vendors sell.",
+    "Every feature in workwrk, organized by the 7 hubs. People, Work, Money, Talent, Culture, Growth — and Home that ties them all together.",
   alternates: { canonical: "https://workwrk.com/features" },
 };
 
-interface Hub {
-  anchor: string;
-  icon: LucideIcon;
-  name: string;
-  tagline: string;
-  body: string;
-  features: { icon: LucideIcon; name: string; blurb: string }[];
-}
+const HUB_PAGES = {
+  home: {
+    description: "The morning command center. Inbox aggregates 12 streams, Cmd-K AI searches every entity, dashboards summarize where the business stands at a glance.",
+    features: ["Unified Inbox (12 streams)", "Cmd-K AI search", "Live dashboards by role"],
+    subFeatures: [
+      { slug: "ai-engine", title: "AI Engine", body: "Cmd-K search, inbox triage, cross-module signals." },
+      { slug: "analytics", title: "Analytics", body: "Role-aware dashboards and rolling KPI windows." },
+    ],
+  },
+  people: {
+    description: "The org, the roles, the performance signal. A profile is a 360 degree dossier — perf, comp, history, kudos count, all in one row.",
+    features: ["Org chart + roles", "Composite performance scores", "Profile = 360 degree dossier"],
+    subFeatures: [
+      { slug: "people",  title: "People",        body: "Org charts, roles, locations — the source of truth for who's who." },
+      { slug: "reviews", title: "Reviews",       body: "Cycles, manager + 360 + self-assessment, all weighted to a score." },
+      { slug: "access",  title: "Access & roles", body: "Role-based permissions, audit log, scoped sharing." },
+    ],
+  },
+  work: {
+    description: "Where work actually happens — tasks, OKRs, KPIs, SOPs, processes, calendars. The execution layer of the business.",
+    features: ["KPI engine with auto-scoring", "OKR cascade across teams", "SOPs with compliance tracking"],
+    subFeatures: [
+      { slug: "tasks", title: "Tasks", body: "Personal + team + cross-functional. Auto-escalate when overdue." },
+      { slug: "okrs",  title: "OKRs",  body: "Cascade objectives top-down with auto-rollup." },
+      { slug: "kpis",  title: "KPIs",  body: "Track, weight, score. Tie KPI achievement to performance." },
+      { slug: "kras",  title: "KRAs",  body: "Key result areas linked to roles, surfaced in reviews." },
+      { slug: "sops",  title: "SOPs",  body: "Process documents with compliance runs and audit trail." },
+    ],
+  },
+  money: {
+    description: "Spend, vendors, financials, planning. The CFO surface of workwrk — built around the same people and processes.",
+    features: ["Expense approvals", "Vendor + procurement", "Budgets vs. actuals"],
+    subFeatures: [
+      { slug: "integrations", title: "Integrations", body: "Slack, Google, Microsoft, Stripe, Razorpay, QuickBooks." },
+    ],
+  },
+  talent: {
+    description: "Reviews, comp, onboarding, recruiting — the lifecycle of every team member, end to end.",
+    features: ["Review cycles", "Comp bands + raises", "Onboarding journeys"],
+    subFeatures: [
+      { slug: "reviews", title: "Reviews", body: "Quarterly + annual cycles with 360 feedback." },
+    ],
+  },
+  culture: {
+    description: "Kudos, ideas, surveys, announcements. The social layer of work — recognition factors into the performance score.",
+    features: ["Kudos with company values", "Idea boards", "Pulse surveys + eNPS"],
+    subFeatures: [
+      { slug: "kudos", title: "Kudos", body: "Recognition with company values, factored into performance scores." },
+    ],
+  },
+  growth: {
+    description: "Pipeline, deals, customers — revenue alongside the people and operational data.",
+    features: ["Sales pipeline", "Customer 360", "Pipeline-to-people analytics"],
+    subFeatures: [
+      { slug: "analytics", title: "Analytics", body: "Pipeline analytics tied to who closed what." },
+    ],
+  },
+} as const;
 
-const HUBS: readonly Hub[] = [
-  {
-    anchor: "home",
-    icon: LayoutDashboard,
-    name: "Home",
-    tagline: "What needs you, right now.",
-    body: "The front door of WorkwrK. Confident morning greeting, KPIs that matter today, and an Inbox that triages 12 different work-streams into one prioritized list. AI suggests what's safe to bulk-approve so you stop drowning in routine decisions.",
-    features: [
-      { icon: Inbox, name: "Inbox", blurb: "Approvals, tasks, mandatory courses, reviews — one list, AI-triaged, bulk-actionable." },
-      { icon: Sparkles, name: "Cmd-K AI", blurb: "Search every entity, then ask follow-ups in plain English. Cross-module answers from your live data." },
-      { icon: Bot, name: "AI Assistant", blurb: "Anthropic-powered. Knows your data. Refuses to make things up." },
-    ],
-  },
-  {
-    anchor: "people",
-    icon: Users,
-    name: "People",
-    tagline: "The org, the lookups, the structure.",
-    body: "Profiles deeper than HRIS. Departments, roles, offices, reporting lines. Live org chart you can drag to reorg. People directory with search-first UX and per-field filter rail.",
-    features: [
-      { icon: Users, name: "People directory", blurb: "Search-first. Filter by department, role, status, office. Click a person; see everything." },
-      { icon: Building2, name: "Org chart", blurb: "Live, dynamic, drag-to-reorg. Department + role hierarchies always reflect reality." },
-    ],
-  },
-  {
-    anchor: "work",
-    icon: CalendarDays,
-    name: "Work",
-    tagline: "Tasks, OKRs, KPIs, SOPs — every cadence.",
-    body: "Plan the week, score the month, document the process. Day / Week / Month / List / Gantt views over the same tasks. KRAs and KPIs cascade into composite scores. OKRs flow Company → Team → Individual. SOPs become Process Runs you hand off.",
-    features: [
-      { icon: CalendarDays, name: "Tasks", blurb: "Drag between days. Cross-day reorder. Recurring patterns. Subtasks, labels, time spent, SLA escalation." },
-      { icon: Crosshair, name: "OKRs", blurb: "Company → Team → Individual cascade. Progress auto-computes from KR check-ins." },
-      { icon: Target, name: "KRAs + KPIs", blurb: "Per-role scoring. Composite score blends KPIs + reviews + SOP compliance." },
-      { icon: BookOpen, name: "SOPs", blurb: "Versioned playbooks with rollback. Folder ACL. Compliance tracking per version." },
-      { icon: BookOpen, name: "Process Runs", blurb: "Instances of an SOP run by a specific person against a specific record." },
-    ],
-  },
-  {
-    anchor: "money",
-    icon: DollarSign,
-    name: "Money",
-    tagline: "Expenses to full GL — one ledger.",
-    body: "Submit, approve, account. Expenses route through Studio workflows. POs match invoices with duplicate-detection at the schema. Statements (P&L, Balance Sheet, Cash Flow) on demand. Adaptive Planning with variance reports against actuals.",
-    features: [
-      { icon: Receipt, name: "Expenses", blurb: "Submit in seconds, approve in the Inbox queue. Receipts attach. Reimbursement tracked end-to-end." },
-      { icon: ShoppingCart, name: "Procurement", blurb: "Vendors → POs → invoices. Approval chains route via Studio workflows. Auto-numbered + state-machine." },
-      { icon: DollarSign, name: "Financials", blurb: "Chart of accounts, journal entries, period close, P&L / BS / Cash Flow on demand." },
-      { icon: Target, name: "Adaptive Planning", blurb: "Budget plans + scenarios + driver-based forecasts. Variance vs actuals with drill-through." },
-    ],
-  },
-  {
-    anchor: "talent",
-    icon: Star,
-    name: "Talent",
-    tagline: "Reviews, comp, hiring, learning.",
-    body: "The ceremonies that compound. 360° performance cycles with self + manager + peer. Compensation decisions with approval chains. Recruiting pipeline. Talent grid (9-box). Mandatory learning with compliance tracking.",
-    features: [
-      { icon: Star, name: "Reviews", blurb: "Self + manager + peer + upward. Composite scoring. 48-hour cycles supported." },
-      { icon: DollarSign, name: "Compensation", blurb: "Cycles, proposals, approval chains. Subject never sees the proposal pre-decision." },
-      { icon: GraduationCap, name: "Onboarding", blurb: "Per-role templates. New hire's Inbox lights up on day one with the right checklist." },
-      { icon: Briefcase, name: "Recruiting", blurb: "Reqs → candidates → applications → interviews → offers. Full pipeline tracking." },
-      { icon: Grid3x3, name: "Talent Grid", blurb: "9-box (performance × potential). Drives promotion + PIP conversations." },
-      { icon: GraduationCap, name: "Learning", blurb: "Mandatory courses with compliance tracking. Catalog for self-enrollment." },
-    ],
-  },
-  {
-    anchor: "culture",
-    icon: Megaphone,
-    name: "Culture",
-    tagline: "Broadcast, recognize, signal.",
-    body: "The bandwidth between the org and its people. Must-acknowledge announcements with tracking. Kudos that build into recognition scores. Pulse surveys + ideas board + manager candor channels.",
-    features: [
-      { icon: Megaphone, name: "Announcements", blurb: "Scheduled publishing, must-acknowledge tracking, audience targeting, expirations." },
-      { icon: Heart, name: "Kudos", blurb: "Tag colleagues with company values. Auto-counts toward recognition score on profiles." },
-      { icon: Shield, name: "Policies", blurb: "Versioned. Acknowledgement tracking. Periodic re-acknowledge triggers." },
-      { icon: Lightbulb, name: "Ideas", blurb: "Improvement suggestions with voting + manager response pipeline." },
-      { icon: ClipboardCheck, name: "Pulse surveys", blurb: "Weekly rotating prompts. Anonymous or attributed. Trends over time." },
-      { icon: MessageSquareHeart, name: "Candor", blurb: "Async upward feedback. Routed to managers with response tracking." },
-    ],
-  },
-  {
-    anchor: "platform",
-    icon: Wrench,
-    name: "Platform",
-    tagline: "Customize, govern, observe.",
-    body: "The leverage layer. Custom workflows + custom fields per entity. SCIM + SAML SSO. Full audit log with severity tagging. Tools catalog with shared credentials. Cron-driven integrations.",
-    features: [
-      { icon: Wrench, name: "Studio workflows", blurb: "Visual approval-chain builder. Start from templates: 1-up, dual-sign, three-tier, HR-gated." },
-      { icon: Link2, name: "Integrations", blurb: "Slack, Google Calendar, Anthropic BYOK, QuickBooks + Xero (in progress)." },
-      { icon: Palette, name: "Brand guide", blurb: "Per-org logo, accent, type. Brand-aware emails + exports." },
-      { icon: Activity, name: "Audit log", blurb: "Every mutation with actor / target / old / new. SOC-2 ready. Severity-tagged." },
-      { icon: Shield, name: "SCIM + SSO", blurb: "SAML + OIDC. SCIM provisioning. Field-level RBAC matrix." },
-    ],
-  },
-];
+const HUB_ICONS = {
+  home: Inbox,
+  people: Users,
+  work: CheckCircle2,
+  money: DollarSign,
+  talent: Crosshair,
+  culture: Star,
+  growth: Megaphone,
+} as const;
 
 export default function FeaturesPage() {
   return (
-    <div className="min-h-screen bg-background text-foreground antialiased">
-      <MarketingTopbar />
+    <>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="max-w-3xl">
+            <Eyebrow hue="violet" className="mb-5">Features</Eyebrow>
+            <H1>
+              <GradientText hue="violet">Every capability</GradientText>, organized by hub.
+            </H1>
+            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
+              Seven hubs. One data model. Each hub is fully featured on its own — together they replace 15+ tools and operate as a single product.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button href="/signup" variant="secondary" hue="violet" size="lg" rightIcon={<ArrowRight size={15} />}>
+                Try every feature free
+              </Button>
+              <Button href="/demo" variant="outline" size="lg">
+                Get a guided tour
+              </Button>
+            </div>
+          </div>
 
-      {/* ── Hero ─────────────────────────────────────────────────── */}
-      <section className="max-w-4xl mx-auto px-6 lg:px-10 pt-20 pb-16 text-center">
-        <div className="inline-flex items-center gap-2 text-xs font-medium px-3 h-7 rounded-full border border-border bg-surface mb-6">
-          <Sparkles size={11} className="text-[color:var(--accent-strong)]" />
-          Features
-        </div>
-        <h1 className="text-5xl lg:text-6xl font-bold tracking-tight mb-6 leading-[1.05]">
-          Seven hubs.<br />
-          <span className="text-[color:var(--accent-strong)]">One product.</span>
-        </h1>
-        <p className="text-lg text-muted max-w-2xl mx-auto leading-relaxed">
-          WorkwrK's information architecture maps to how teams actually work —
-          not to the org chart of the company that built it. Each hub is a
-          coherent surface; together they replace ~15 SaaS subscriptions.
-        </p>
+          <div className="mt-12 flex flex-wrap gap-2">
+            {HUBS.map((hub) => {
+              const t = HUES[hub.hue];
+              return (
+                <a
+                  key={hub.slug}
+                  href={`#${hub.slug}`}
+                  className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:scale-105 transition`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: t.hex }} />
+                  {hub.name}
+                </a>
+              );
+            })}
+          </div>
+        </Container>
+      </Section>
 
-        {/* Hub jump-nav */}
-        <nav className="mt-10 flex items-center gap-1.5 flex-wrap justify-center">
-          {HUBS.map((h) => (
-            <a
-              key={h.anchor}
-              href={`#${h.anchor}`}
-              className="text-xs font-medium px-3 h-7 inline-flex items-center rounded-full border border-border text-muted hover:text-foreground hover:border-muted-2 transition-fast"
-            >
-              {h.name}
-            </a>
-          ))}
-        </nav>
-      </section>
-
-      {/* ── Hub sections ─────────────────────────────────────────── */}
-      <div className="max-w-6xl mx-auto pb-12">
-        {HUBS.map((hub, hubIndex) => {
-          const HubIcon = hub.icon;
-          return (
-            <section
-              key={hub.name}
-              id={hub.anchor}
-              className={`px-6 lg:px-10 py-20 ${hubIndex > 0 ? "border-t border-border" : ""}`}
-            >
-              {/* Hub header */}
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-10 mb-12">
-                <div>
-                  <div className="flex items-center gap-3 mb-5">
-                    <span
-                      className="h-11 w-11 rounded-xl flex items-center justify-center"
-                      style={{ background: "var(--accent-soft)", color: "var(--accent-strong)" }}
-                    >
-                      <HubIcon size={22} />
-                    </span>
-                    <h2 className="text-3xl font-bold tracking-tight">{hub.name}</h2>
-                  </div>
-                  <p className="text-base font-medium text-foreground leading-snug">{hub.tagline}</p>
-                </div>
-                <div>
-                  <p className="text-[15px] text-muted leading-relaxed">{hub.body}</p>
-                </div>
-              </div>
-
-              {/* Feature cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {hub.features.map((f) => {
-                  const FIcon = f.icon;
-                  return (
-                    <div
-                      key={f.name}
-                      className="rounded-xl border border-border bg-surface/40 p-5 hover:border-[color:var(--accent)]/40 hover:bg-background transition-fast"
-                    >
-                      <div className="flex items-center gap-2.5 mb-2">
-                        <FIcon size={14} className="text-[color:var(--accent-strong)]" />
-                        <h3 className="text-sm font-semibold">{f.name}</h3>
-                      </div>
-                      <p className="text-[13px] text-muted leading-relaxed">{f.blurb}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
-      </div>
-
-      {/* ── Final CTA ────────────────────────────────────────────── */}
-      <section className="border-t border-border">
-        <div className="max-w-3xl mx-auto px-6 lg:px-10 py-24 text-center">
-          <h2 className="text-4xl font-bold tracking-tight mb-5">
-            Try every hub on a real workspace.
-          </h2>
-          <p className="text-muted mb-8">
-            Free under five people. Set up in an hour.
-          </p>
-          <Link
-            href="/register"
-            className="inline-flex items-center gap-2 px-7 h-12 rounded-xl bg-[color:var(--accent)] text-white font-semibold hover:opacity-90 transition-fast shadow-[0_8px_24px_-8px_rgba(124,58,237,0.5)]"
+      {HUBS.map((hub, i) => {
+        const t = HUES[hub.hue];
+        const detail = HUB_PAGES[hub.slug as keyof typeof HUB_PAGES];
+        const Icon = HUB_ICONS[hub.slug as keyof typeof HUB_ICONS];
+        const altRow = i % 2 === 1;
+        return (
+          <section
+            key={hub.slug}
+            id={hub.slug}
+            className={`scroll-mt-20 ${altRow ? "bg-slate-50" : "bg-white"} py-20 lg:py-28`}
           >
-            Start free
-            <ArrowRight size={16} />
-          </Link>
-        </div>
-      </section>
+            <Container>
+              <div className="grid lg:grid-cols-[1.05fr_1.15fr] gap-12 lg:gap-16 items-start">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br ${t.gradVia} text-white shadow-[0_12px_36px_-12px_var(--hub-glow)]`}
+                      style={{ ["--hub-glow" as string]: `${t.hex}88` } as React.CSSProperties}
+                    >
+                      <Icon size={22} strokeWidth={2.4} />
+                    </span>
+                    <Eyebrow hue={hub.hue}>Hub · {String(i + 1).padStart(2, "0")}</Eyebrow>
+                  </div>
+                  <H2 className="mt-5">{hub.name}</H2>
+                  <p className="mt-5 text-slate-600 text-lg leading-relaxed">{detail.description}</p>
+                  <ul className="mt-7 space-y-2">
+                    {detail.features.map((f) => (
+                      <li key={f} className="flex items-start gap-3 text-[15px] text-slate-700">
+                        <span className={`mt-1 w-5 h-5 rounded-full ${t.bgTint} ${t.text} border ${t.border} flex items-center justify-center`}>
+                          <Sparkles size={11} />
+                        </span>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
 
-      <MarketingFooter />
-    </div>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {detail.subFeatures.map((sub) => (
+                    <Link
+                      key={sub.slug}
+                      href={`/features/${sub.slug}`}
+                      className={`group p-5 bg-white border ${t.border} rounded-2xl hover:-translate-y-0.5 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="font-bold text-slate-900 tracking-tight">{sub.title}</p>
+                        <ArrowRight size={14} className={`${t.text} opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition`} />
+                      </div>
+                      <p className="mt-2 text-sm text-slate-600 leading-relaxed">{sub.body}</p>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </Container>
+          </section>
+        );
+      })}
+
+      <CTABand hue="violet" />
+    </>
   );
 }

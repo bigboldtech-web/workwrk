@@ -1,96 +1,47 @@
 import type { Metadata } from "next";
+import { Truck, MapPin, Clock, Users, Route, ShieldCheck } from "lucide-react";
+import { IndustrySubPage } from "@/components/marketing/sub-page";
+import { GradientText } from "@/components/marketing/primitives";
 
-import { IndustryPage } from "@/components/modules";
-import type { IndustryConfig } from "@/components/modules";
 export const metadata: Metadata = {
-  title: "WorkwrK for Logistics — SOPs, compliance, multi-warehouse clarity",
-  description:
-    "Versioned SOPs across warehouses. Nightly compliance checks. Multi-location visibility. Built for Indian logistics and warehousing SMBs.",
+  title: "WorkwrK for Logistics & Fleet",
+  description: "Routes, hubs, drivers, daily SLAs — managed as KPIs. SOPs for hub ops, driver onboarding, fleet KPIs that managers actually use.",
   alternates: { canonical: "https://workwrk.com/industries/logistics" },
 };
 
-const config: IndustryConfig = {
-  eyebrow: "Logistics · Warehousing · Fulfilment",
-  name: "Logistics",
-  tone: "lime",
-  headline: <>Twelve warehouses, <span className="hi">one playbook.</span></>,
-  body: "Every warehouse, every shift, every worker — on the same SOPs. Compliance tracked nightly. Drift flagged before it becomes a stockout or a misrouted shipment. Multi-location visibility without flying team leads across cities.",
-  pains: [
-    { title: "Each warehouse runs its own version of the SOP", body: "Mumbai does it one way, Bengaluru another, Hyderabad a third. The HQ thinks there's one way. There are twelve." },
-    { title: "Compliance checks are ad-hoc audits", body: "Regional manager drops in, spots 3 deviations, writes a report, forgets it by next month. No continuous feedback." },
-    { title: "Shift handovers lose context", body: "Morning shift flags a damaged-goods issue to evening shift by WhatsApp voice note. Night shift never heard. Issue repeats, now with a customer complaint attached." },
-    { title: "Contract driver + permanent staff confusion", body: "Different access, different training, different pay cycles. Manual tracking in a spreadsheet leads to either over-paying or under-communicating." },
-    { title: "Throughput measured, not quality", body: "We track packages moved per hour. We don't track damage rate, picking accuracy, or returns-caused-by-warehouse. Growth happens with hidden cost." },
-    { title: "Safety incidents aggregate slowly", body: "A cut hand here, a forklift near-miss there. By the time HR aggregates, six months have passed and the pattern — same station, same shift — is already a habit." },
-  ],
-  fit: [
-    {
-      eyebrow: "One SOP, many warehouses",
-      tone: "lime",
-      title: <>Same playbook, <span className="hi">every location.</span></>,
-      body: <><p>Write the SOP once. Publish to all warehouses. Version history per warehouse if regional variations exist (different customs for North vs South India, port-vs-road procedures). Compliance tracked per warehouse, per shift.</p></>,
-      bullets: [
-        "Global SOP + per-warehouse overlay",
-        "Tablet mode · offline-tolerant",
-        "Read-receipts per worker · per version",
-        "Picking / packing / dispatch SOPs",
-        "Shift handover structured template",
-        "Damage / returns workflow",
-      ],
-    },
-    {
-      eyebrow: "KPIs beyond throughput",
-      tone: "amber",
-      title: <>Volume <span className="am">and</span> quality.</>,
-      body: <><p>Track picking accuracy, damage rate, returns-caused-by-warehouse, dispatch SLA, inventory shrinkage. Alongside packages-per-hour, not instead of. Get honest warehouse-level scorecards.</p></>,
-      bullets: [
-        "Picking accuracy + damage rate",
-        "Returns-caused-by-warehouse tracked",
-        "Dispatch SLA compliance %",
-        "Inventory shrinkage trend",
-        "Per-station heatmaps",
-        "Multi-warehouse leaderboard",
-      ],
-    },
-    {
-      eyebrow: "Incidents + safety",
-      tone: "pink",
-      title: <>Small signals, <span className="pk">caught early.</span></>,
-      body: <><p>Near-miss reports take 30 seconds on a shop-floor tablet. Incidents cluster on dashboards — same station, same shift, same SOP step? The system flags before it becomes a pattern you can't ignore.</p></>,
-      bullets: [
-        "Near-miss + incident (30s log)",
-        "Cluster detection across warehouses",
-        "5-Why template inline",
-        "Root-cause task with SLA",
-        "Safety trend leaderboard",
-        "Quarterly safety audit export",
-      ],
-    },
-  ],
-  stats: [
-    { stat: "95%", label: "Cross-warehouse SOP compliance · adopted teams", tone: "lime" },
-    { stat: "−28%", label: "Damage rate · in year one of adoption", tone: "pink" },
-    { stat: "12", label: "Warehouses aligned under one spine · reference customer", tone: "amber" },
-    { stat: "2 days", label: "Regional-ops review cycle · down from 10 days", tone: "blue" },
-  ],
-  relevantModules: [
-    { name: "SOPs", href: "/features/sops", flow: "Multi-warehouse versioned SOPs with per-location overlays.", iconKey: "sop" },
-    { name: "People", href: "/features/people", flow: "Permanent + contract + driver roles · multi-warehouse graph.", iconKey: "people" },
-    { name: "KPIs", href: "/features/kpis", flow: "Throughput, accuracy, damage, shrinkage · live per warehouse.", iconKey: "kpi" },
-    { name: "Tasks", href: "/features/tasks", flow: "Incidents auto-spawn investigation with SLA + owner.", iconKey: "tasks" },
-    { name: "Reviews", href: "/features/reviews", flow: "Warehouse-manager review cycles · cross-location calibration.", iconKey: "reviews" },
-    { name: "OKRs", href: "/features/okrs", flow: "Regional OKRs cascaded · weekly read-outs by city.", iconKey: "okr" },
-    { name: "Access", href: "/features/access", flow: "Per-location RBAC · contractor scopes · audit trail.", iconKey: "access" },
-  ],
-  faq: [
-    { q: "Does it work without reliable internet?", a: <p>Yes. Tablet mode caches SOPs, incidents, and read-receipts locally. Syncs when connectivity returns. Designed for warehouses in industrial zones where WiFi can be shaky.</p> },
-    { q: "Can we integrate with our WMS (warehouse management system)?", a: <p>Yes. We integrate with Unicommerce, ClickPost, ShipRocket, and have a REST API for anything else. WMS provides the operational layer; WorkwrK provides the people + process layer on top.</p> },
-    { q: "How do we handle regional variation without diverging?", a: <p>Global SOP is the source of truth. Regional overlays capture legitimate variation (customs docs, regional carrier practices). System detects drift between regions and flags unexpected divergence for review.</p> },
-    { q: "Contract driver performance — can we track that?", a: <p>Yes. Drivers can have their own role type with KPIs tied to on-time delivery, fuel efficiency, customer feedback, and safety compliance. Payroll integration (Keka, GreytHR) handles variable pay.</p> },
-    { q: "Is it audit-ready for customs / GST / DPIIT?", a: <p>Yes. Every read/write is signed and logged. Export of SOP compliance per warehouse per period is one click. For customs broker audits, the SOP trail is particularly clean.</p> },
-  ],
-};
-
 export default function LogisticsIndustryPage() {
-  return <IndustryPage c={config} />;
+  return (
+    <IndustrySubPage
+      hue="amber"
+      eyebrow="Logistics"
+      title={<>Fleet, hubs, routes. <GradientText hue="amber">Operationalized.</GradientText></>}
+      lede="From first-mile to last-mile, run logistics on KPIs and SOPs instead of WhatsApp groups. Per-hub dashboards, driver onboarding flows, SLA-as-a-KPI from minute one."
+      pains={[
+        "Daily SLAs are tracked in a sheet that someone updates at 7pm.",
+        "Driver onboarding takes a week of paperwork and three hand-offs.",
+        "Hub managers don't have their numbers in real time, so they don't act in real time.",
+        "Compliance training expires and nobody knows until an inspector asks.",
+      ]}
+      capabilities={[
+        { icon: Truck,       title: "Fleet + driver profiles",  body: "Every driver is a profile: licenses, training compliance, perf, kudos count, route performance." },
+        { icon: Route,       title: "Route SLA → KPI",          body: "On-time %, exception rate, dwell time — tracked per route, rolled up per hub and region." },
+        { icon: MapPin,      title: "Per-hub dashboards",       body: "Hub manager sees their hub; regional sees their cluster; ops director sees the network." },
+        { icon: Clock,       title: "Shift-aware scheduling",   body: "Shift bidding, swap requests, attendance tied to KPIs. WhatsApp-free coordination." },
+        { icon: ShieldCheck, title: "Compliance training",      body: "License/training expiry tracked. Auto-assigned refreshers. Audit-ready evidence." },
+        { icon: Users,       title: "Driver onboarding",         body: "Forkable onboarding journey: docs, training, mentor pairing, first-week check-ins. Cut ramp from 2 weeks to 3 days." },
+      ]}
+      kpis={["On-time delivery %", "Exception rate", "Dwell time", "Route adherence", "Driver utilization", "Training compliance", "Incident rate", "Cost per stop"]}
+      testimonial={{
+        quote: "Hub managers stopped messaging me at 7pm with their daily numbers. The dashboards do it now.",
+        author: "Karim Al-Saadi",
+        role: "VP Ops",
+        company: "Stratum Logistics",
+      }}
+      faq={[
+        { q: "Do you integrate with TMS / FMS systems?",     a: "Yes — Locus, Shipsy, FarEye on Growth. Custom integrations to internal TMS available on Scale." },
+        { q: "Mobile-friendly for drivers + hub staff?",      a: "PWA on Growth; full native iOS/Android with offline support on Scale." },
+        { q: "What about contractors and gig drivers?",        a: "Free guest accounts. Scoped to their routes only. Don't count toward billing." },
+      ]}
+    />
+  );
 }

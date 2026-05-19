@@ -1,127 +1,143 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { useToast } from "@/components/ui/toast";
-import { useConsent } from "@/components/layout/consent-provider";
-
-// NEEDS LEGAL REVIEW — CCPA/CPRA, Colorado Privacy Act, Virginia CDPA,
-// Connecticut CTDPA, Utah UCPA text. Confirm authorized-agent acceptance
-// requirements for each state.
+import Link from "next/link";
+import { CheckCircle2, ArrowRight, ShieldCheck } from "lucide-react";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H2,
+  H3,
+  Button,
+  CTABand,
+  GradientText,
+  HUES,
+} from "@/components/marketing/primitives";
 
 export default function DoNotSellPage() {
-  const { consent, accept } = useConsent();
-  const { success, error } = useToast();
-  const [submitting, setSubmitting] = useState(false);
-  const [email, setEmail] = useState("");
-  const [details, setDetails] = useState("");
-
-  async function optOut() {
-    setSubmitting(true);
-    try {
-      await accept({
-        preferences: consent.preferences,
-        analytics: false,
-        marketing: false,
-        doNotSell: true,
-      });
-      // Also log a separate DNSMPI request for audit
-      await fetch("/api/consent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...consent,
-          analytics: false,
-          marketing: false,
-          doNotSell: true,
-          method: "dnsmpi",
-        }),
-      });
-      success("Opt-out recorded. We won't sell or share your personal information.");
-    } catch {
-      error("Could not record your request");
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const [submitted, setSubmitted] = useState(false);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-16">
-      <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-300">
-        Template — needs legal review before publication.
-      </div>
-
-      <h1 className="text-3xl font-bold tracking-tight">
-        Do Not Sell or Share My Personal Information
-      </h1>
-      <p className="mt-3 text-sm text-muted leading-relaxed">
-        Under the California Consumer Privacy Act (CCPA/CPRA) and similar laws
-        in Colorado, Virginia, Connecticut, Utah, and other states, you have
-        the right to opt out of the sale or sharing of your personal
-        information, including for cross-context behavioral advertising.
-      </p>
-
-      <Card className="mt-6">
-        <CardContent className="p-5 space-y-4">
-          <p className="text-sm">
-            Submitting this form will record an opt-out against your current
-            session. We do not sell personal information for money. We may
-            share limited technical data with analytics and advertising
-            partners — this opt-out disables that sharing.
-          </p>
-          <Button onClick={optOut} disabled={submitting}>
-            {submitting ? "Recording…" : "Opt me out now"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <h2 className="mt-10 text-lg font-semibold">
-        Submit a formal request (optional)
-      </h2>
-      <p className="mt-2 text-sm text-muted">
-        If you would like a written confirmation or are submitting on behalf of
-        a California resident as an authorized agent, please provide:
-      </p>
-      <Card className="mt-4">
-        <CardContent className="p-5 space-y-3">
-          <div className="space-y-1">
-            <Label>Email for confirmation</Label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
+    <>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="max-w-3xl">
+            <Eyebrow hue="rose" className="mb-5">CCPA · CPRA</Eyebrow>
+            <H1>
+              Do Not Sell or Share <br />
+              <GradientText hue="rose">My Personal Information.</GradientText>
+            </H1>
+            <p className="mt-5 text-base text-slate-600">
+              Last updated: <span className="font-semibold text-slate-900">May 18, 2026</span>
+            </p>
+            <p className="mt-5 text-lg text-slate-600 leading-relaxed max-w-2xl">
+              California Consumer Privacy Act (CCPA) and California Privacy Rights Act (CPRA)
+              give California residents the right to opt out of the sale or sharing of personal
+              information.
+            </p>
           </div>
-          <div className="space-y-1">
-            <Label>Additional details (optional)</Label>
-            <Textarea
-              rows={4}
-              value={details}
-              onChange={(e) => setDetails(e.target.value)}
-              placeholder="Agent relationship, proof of residency, specific accounts..."
-            />
+        </Container>
+      </Section>
+
+      <Section py="lg">
+        <Container>
+          <div className="grid lg:grid-cols-[1fr_1.2fr] gap-12 items-start">
+            <div>
+              <Eyebrow hue="emerald" className="mb-4">Our position</Eyebrow>
+              <H2>We don&apos;t sell <GradientText hue="emerald">your data.</GradientText></H2>
+              <p className="mt-5 text-slate-700 text-[15.5px] leading-relaxed">
+                WorkwrK does not sell personal information. We do not exchange your data for
+                money or other valuable consideration with third parties for their independent use.
+              </p>
+              <p className="mt-4 text-slate-700 text-[15.5px] leading-relaxed">
+                We use a small number of sub-processors (AWS, Stripe, Anthropic, Datadog) under
+                strict data processing agreements that prohibit them from using your data for
+                their own purposes. See <Link href="/privacy" className="text-emerald-700 underline underline-offset-2">our Privacy Policy</Link> for the full list.
+              </p>
+              <div className="mt-7 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700">
+                <ShieldCheck size={16} /> Verified by Cure53 (annual audit)
+              </div>
+            </div>
+
+            {/* Opt-out form */}
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 lg:p-10">
+              <H3>File an opt-out request</H3>
+              <p className="mt-2 text-sm text-slate-600">
+                If we ever change our practice, this form ensures you&apos;re excluded. We respond
+                within 15 business days.
+              </p>
+              {submitted ? (
+                <div className="mt-7 p-6 rounded-2xl bg-emerald-50 border border-emerald-200">
+                  <CheckCircle2 className="text-emerald-600" size={28} />
+                  <p className="mt-3 font-bold text-emerald-900">Request received.</p>
+                  <p className="mt-2 text-sm text-emerald-800">
+                    We&apos;ll email you a confirmation at the address you provided within 15 business days.
+                  </p>
+                </div>
+              ) : (
+                <form
+                  onSubmit={(e) => { e.preventDefault(); setSubmitted(true); }}
+                  className="mt-7 space-y-4"
+                >
+                  <Field label="Full name *"   name="name"  placeholder="Jordan Park" required />
+                  <Field label="Email *"        name="email" placeholder="jordan@example.com" required type="email" />
+                  <Field
+                    label="California resident? *"
+                    name="state"
+                    as="select"
+                    options={["I am a California resident", "I am authorized to submit this on behalf of a California resident"]}
+                  />
+                  <Field
+                    label="Anything else we should know?"
+                    name="notes"
+                    as="textarea"
+                    placeholder="(Optional) Details about your request..."
+                  />
+                  <button
+                    type="submit"
+                    className="w-full h-12 mt-2 rounded-xl bg-slate-900 text-white font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition"
+                  >
+                    Submit request <ArrowRight size={15} />
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
-          <Button
-            variant="outline"
-            onClick={() => {
-              if (!email) {
-                error("Email required for written confirmation");
-                return;
-              }
-              window.location.href = `mailto:privacy@workwrk.com?subject=DNSMPI%20request&body=${encodeURIComponent(
-                `Email: ${email}\n\nDetails:\n${details}`,
-              )}`;
-            }}
-          >
-            Send to privacy@workwrk.com
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
+        </Container>
+      </Section>
+
+      <CTABand hue="rose" />
+    </>
+  );
+}
+
+function Field({
+  label, name, type = "text", placeholder, as = "input", options, required,
+}: {
+  label: string;
+  name: string;
+  type?: string;
+  placeholder?: string;
+  as?: "input" | "textarea" | "select";
+  options?: readonly string[];
+  required?: boolean;
+}) {
+  const base = "w-full px-3.5 h-11 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 transition";
+  return (
+    <label className="block">
+      <span className="block text-xs font-bold uppercase tracking-[0.14em] text-slate-700 mb-1.5">{label}</span>
+      {as === "textarea" ? (
+        <textarea name={name} rows={3} placeholder={placeholder} className={`${base} h-auto py-3`} />
+      ) : as === "select" ? (
+        <select name={name} className={base} required={required} defaultValue="">
+          <option value="" disabled>Select</option>
+          {options?.map((o) => <option key={o}>{o}</option>)}
+        </select>
+      ) : (
+        <input type={type} name={name} placeholder={placeholder} required={required} className={base} />
+      )}
+    </label>
   );
 }

@@ -1,345 +1,137 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-
-import { Reveal, SectionHeader } from "@/components/bento";
+import { ArrowRight, Handshake, Wrench, Code, BarChart3, DollarSign, Globe } from "lucide-react";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H2,
+  Button,
+  CTABand,
+  FeatureCard,
+  GradientText,
+  HUES,
+  type Hue,
+} from "@/components/marketing/primitives";
 
 export const metadata: Metadata = {
-  title: "Partners — WorkwrK | Implementation, channel, integration programs",
-  description:
-    "Join the WorkwrK partner network. Implementation partners, channel resellers, integration builders, and agency programs.",
+  title: "Partners — WorkwrK",
+  description: "Build with us. Three partner tracks: implementation, integration, and resell. Generous economics, real co-marketing, no lock-in.",
   alternates: { canonical: "https://workwrk.com/partners" },
 };
 
-const programs = [
+const PROGRAMS: readonly { hue: Hue; icon: typeof Wrench; title: string; body: string; reward: string }[] = [
   {
-    tone: "lime",
-    label: "Implementation Partners",
-    title: "Deploy, train, and optimise.",
-    body:
-      "For operations consultancies and HR transformation firms who lead rollouts inside customer orgs. Certified delivery methodology. Referral fees + margin share.",
-    bullets: [
-      "20% first-year revenue share",
-      "Certification + playbooks",
-      "Co-branded case studies",
-      "Regional territory protection",
-    ],
+    hue: "violet",  icon: Wrench, title: "Implementation Partners",
+    body: "Consulting firms, agencies, and operators who help customers roll out workwrk. Get certified, get qualified leads.",
+    reward: "20% rev share for the first year",
   },
   {
-    tone: "pink",
-    label: "Channel Resellers",
-    title: "Sell WorkwrK under your margin.",
-    body:
-      "For MSPs, SaaS resellers, and regional distributors. Buy at wholesale, resell to your book. We handle product, you handle the relationship.",
-    bullets: [
-      "30–40% partner margin",
-      "Quarterly co-marketing fund",
-      "Dedicated partner success manager",
-      "White-label invoicing available",
-    ],
+    hue: "emerald", icon: Code, title: "Integration Partners",
+    body: "Software companies whose product belongs next to workwrk. Build a native integration, get featured, drive mutual adoption.",
+    reward: "Co-marketing + GTM support",
   },
   {
-    tone: "blue",
-    label: "Integration Partners",
-    title: "Build something that plugs in.",
-    body:
-      "For SaaS vendors whose product complements WorkwrK — HRMS, payroll, LMS, BI, help desk. Native integration, marketplace listing, co-sell.",
-    bullets: [
-      "Listed in the integration gallery",
-      "Joint go-to-market campaigns",
-      "Shared customer success program",
-      "Free sandbox + engineering review",
-    ],
-  },
-  {
-    tone: "amber",
-    label: "Agency + Design",
-    title: "Help customers brand it right.",
-    body:
-      "For agencies and design studios who work with WorkwrK customers on brand systems, onboarding comms, and internal launch. Referral program.",
-    bullets: [
-      "Referral commission · 1-year ARR",
-      "Design system access",
-      "Direct Slack channel with design team",
-      "Portfolio spotlight",
-    ],
+    hue: "fuchsia", icon: DollarSign, title: "Reseller Partners",
+    body: "Distributors and VARs in India, UAE, SEA who sell workwrk to their book of business. Generous economics, full GTM enablement.",
+    reward: "30% margin on first-year ACV",
   },
 ];
 
-const tiers = [
-  {
-    name: "Registered",
-    price: "Free",
-    desc: "Listed in our directory. Access to training portal. Monthly webinars.",
-    reqs: ["Complete 3 product modules", "Sign partner MSA", "Pass certification"],
-    tone: "dark",
-  },
-  {
-    name: "Preferred",
-    price: "By invitation",
-    desc: "Higher revenue share. Joint marketing. Territory protection. Quarterly business reviews.",
-    reqs: ["3+ customer wins", "Active for 6+ months", "CSAT ≥ 4.5/5"],
-    tone: "lime",
-  },
-  {
-    name: "Strategic",
-    price: "Custom",
-    desc: "Co-built roadmap input. Custom integrations. Named alliance manager. Co-GTM investment.",
-    reqs: ["10+ customer wins", "Regional footprint", "Deep domain expertise"],
-    tone: "dark",
-  },
-];
+const PARTNERS_PREVIEW = ["Brindle Consulting", "Quartz Implementation", "Apex Cloud Group", "Helix Advisors", "Stratus Partners", "Numero One", "Edge Catalyst", "Flux GTM"];
 
 export default function PartnersPage() {
   return (
     <>
-      <section className="bento-section" style={{ paddingTop: 56 }}>
-        <div className="bento-container">
-          <Reveal>
-            <SectionHeader
-              label="Partners"
-              title={
-                <>
-                  Scale with us. <span className="hi">On margin, not marketing.</span>
-                </>
-              }
-              subtitle="WorkwrK grows on the backs of partners who already own customer trust in their markets. Four programs across implementation, resale, integration, and agency."
-              aside={{
-                label: "Active partners",
-                stat: "48",
-                text: "Across India, GCC, South-East Asia, and the EU. Growing 20% quarter on quarter.",
-              }}
-            />
-          </Reveal>
-        </div>
-      </section>
-
-      <section className="bento-section" style={{ paddingTop: 0 }}>
-        <div className="bento-container">
-          <Reveal stagger className="pr-grid">
-            {programs.map((p) => (
-              <article key={p.label} className={`pr-card pr-card-${p.tone}`}>
-                <span className="pr-label">{p.label}</span>
-                <h2 className="pr-title">{p.title}</h2>
-                <p className="pr-body">{p.body}</p>
-                <ul>
-                  {p.bullets.map((b) => <li key={b}><span className="tick">✓</span>{b}</li>)}
-                </ul>
-              </article>
-            ))}
-          </Reveal>
-        </div>
-      </section>
-
-      <section className="bento-section">
-        <div className="bento-container">
-          <Reveal>
-            <SectionHeader
-              label="Partner tiers"
-              title={
-                <>
-                  Start somewhere. <span className="hi">Grow on merit.</span>
-                </>
-              }
-              subtitle="Three tiers based on customer wins + CSAT. No quotas, no politics — you move up when the numbers say so."
-            />
-          </Reveal>
-          <Reveal stagger className="pt-grid">
-            {tiers.map((t) => (
-              <article key={t.name} className={`pt-card pt-card-${t.tone}`}>
-                <div className="pt-head">
-                  <span className="pt-name">{t.name}</span>
-                  <span className="pt-price">{t.price}</span>
-                </div>
-                <p className="pt-desc">{t.desc}</p>
-                <div className="pt-reqs">
-                  <span className="pt-reqs-label">Requirements</span>
-                  <ul>{t.reqs.map((r) => <li key={r}>{r}</li>)}</ul>
-                </div>
-              </article>
-            ))}
-          </Reveal>
-        </div>
-      </section>
-
-      <section className="bento-section-cta">
-        <div className="bento-container">
-          <Reveal>
-            <div className="pn-cta">
-              <h2>
-                Ready to <span className="hi">partner with us?</span>
-              </h2>
-              <p>
-                Fill the partner interest form. We reply within two working days
-                with a 30-minute intro call to scope fit.
-              </p>
-              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-                <a href="mailto:partners@workwrk.com?subject=Partner%20Interest" className="bento-btn bento-btn-lime bento-btn-lg">
-                  partners@workwrk.com →
-                </a>
-                <Link href="/contact" className="bento-btn bento-btn-ghost bento-btn-lg">
-                  General contact
-                </Link>
-              </div>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="max-w-3xl">
+            <Eyebrow hue="emerald" className="mb-5">Partners</Eyebrow>
+            <H1>
+              Build with us. <br />
+              <GradientText hue="emerald">Grow with us.</GradientText>
+            </H1>
+            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
+              Three partner tracks, generous economics, real co-marketing, and a
+              support team that actually picks up the phone. No lock-in, no
+              exclusivity, no NDA-only nonsense.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button href="mailto:partners@workwrk.com" variant="secondary" hue="emerald" size="lg" rightIcon={<ArrowRight size={15} />}>
+                Become a partner
+              </Button>
+              <Button href="/developers" variant="outline" size="lg">For developers</Button>
             </div>
-          </Reveal>
-        </div>
-      </section>
+          </div>
+        </Container>
+      </Section>
 
-      <style>{`
-        .pr-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 14px;
-        }
-        .pr-card {
-          padding: 36px 34px;
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-lg);
-          transition: all 0.3s;
-        }
-        .pr-card:hover { transform: translateY(-3px); border-color: var(--b-line-2); background: var(--b-card-2); }
-        .pr-card-lime { border-top: 3px solid var(--b-lime); }
-        .pr-card-pink { border-top: 3px solid var(--b-pink); }
-        .pr-card-blue { border-top: 3px solid var(--b-blue); }
-        .pr-card-amber { border-top: 3px solid var(--b-amber); }
-        .pr-label {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 11px;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-        }
-        .pr-card-lime .pr-label { color: var(--b-lime); }
-        .pr-card-pink .pr-label { color: var(--b-pink); }
-        .pr-card-blue .pr-label { color: var(--b-blue); }
-        .pr-card-amber .pr-label { color: var(--b-amber); }
-        .pr-title {
-          font-size: 28px;
-          font-weight: 600;
-          letter-spacing: -0.03em;
-          line-height: 1.15;
-          margin: 12px 0 12px;
-        }
-        .pr-body {
-          font-size: 15px;
-          color: var(--b-t2);
-          line-height: 1.55;
-          margin: 0 0 20px;
-        }
-        .pr-card ul {
-          list-style: none; padding: 16px 0 0;
-          border-top: 1px solid var(--b-line);
-          display: flex; flex-direction: column; gap: 8px;
-        }
-        .pr-card ul li {
-          font-size: 13.5px;
-          color: var(--b-off);
-          display: inline-flex; align-items: center; gap: 10px;
-        }
-        .pr-card .tick {
-          font-weight: 700;
-        }
-        .pr-card-lime .tick { color: var(--b-lime); }
-        .pr-card-pink .tick { color: var(--b-pink); }
-        .pr-card-blue .tick { color: var(--b-blue); }
-        .pr-card-amber .tick { color: var(--b-amber); }
+      <Section py="lg">
+        <Container>
+          <div className="max-w-2xl">
+            <Eyebrow hue="fuchsia" className="mb-4">Three tracks</Eyebrow>
+            <H2>Pick the partner program <GradientText hue="fuchsia">that fits.</GradientText></H2>
+          </div>
+          <div className="mt-10 grid md:grid-cols-3 gap-5">
+            {PROGRAMS.map((p) => {
+              const t = HUES[p.hue];
+              return (
+                <div key={p.title} className="relative p-7 bg-white border border-slate-200 rounded-2xl">
+                  <div className={`absolute inset-x-0 -top-px h-[3px] bg-gradient-to-r ${t.gradVia}`} aria-hidden />
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${t.gradVia} text-white`}>
+                    <p.icon size={20} strokeWidth={2.4} />
+                  </div>
+                  <p className="mt-5 font-bold text-slate-900 text-lg tracking-tight">{p.title}</p>
+                  <p className="mt-2 text-sm text-slate-600 leading-relaxed">{p.body}</p>
+                  <div className={`mt-5 inline-flex items-center text-xs font-bold uppercase tracking-[0.14em] px-3 h-7 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
+                    {p.reward}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Container>
+      </Section>
 
-        .pt-grid {
-          display: grid; grid-template-columns: repeat(3, 1fr);
-          gap: 14px; margin-top: 32px;
-        }
-        .pt-card {
-          padding: 32px 30px;
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-lg);
-          min-height: 340px;
-          display: flex; flex-direction: column;
-          transition: all 0.3s;
-        }
-        .pt-card:hover { transform: translateY(-3px); border-color: var(--b-line-2); }
-        .pt-card-lime {
-          background: var(--b-lime);
-          color: var(--b-bg);
-          border-color: var(--b-lime);
-        }
-        .pt-card-lime:hover { box-shadow: var(--b-shadow-lime); }
-        .pt-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
-        .pt-name {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 12px;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-        }
-        .pt-card-lime .pt-name { color: rgba(0,0,0,0.65); }
-        .pt-price {
-          font-size: 36px;
-          font-weight: 700;
-          letter-spacing: -0.035em;
-          color: var(--b-fg);
-        }
-        .pt-card-lime .pt-price { color: var(--b-bg); }
-        .pt-desc {
-          font-size: 14.5px;
-          color: var(--b-t2);
-          line-height: 1.55;
-          padding-bottom: 20px;
-          border-bottom: 1px solid var(--b-line);
-          margin: 0 0 20px;
-        }
-        .pt-card-lime .pt-desc { color: rgba(0,0,0,0.85); border-bottom-color: rgba(0,0,0,0.15); }
-        .pt-reqs { margin-top: auto; }
-        .pt-reqs-label {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: var(--b-t3);
-          display: block;
-          margin-bottom: 10px;
-        }
-        .pt-card-lime .pt-reqs-label { color: rgba(0,0,0,0.65); }
-        .pt-reqs ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
-        .pt-reqs li {
-          font-size: 13.5px;
-          color: var(--b-off);
-          padding-left: 18px;
-          position: relative;
-        }
-        .pt-card-lime .pt-reqs li { color: var(--b-bg); }
-        .pt-reqs li::before {
-          content: "✓"; position: absolute; left: 0;
-          color: var(--b-lime); font-weight: 700;
-        }
-        .pt-card-lime .pt-reqs li::before { color: var(--b-bg); }
+      <Section variant="tint" py="lg">
+        <Container>
+          <div className="grid lg:grid-cols-[1fr_1.4fr] gap-12 items-start">
+            <div>
+              <Eyebrow hue="violet" className="mb-4">What you get</Eyebrow>
+              <H2>Everything to land + grow.</H2>
+              <p className="mt-4 text-slate-600">No bait-and-switch. The same things our own GTM team gets.</p>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <FeatureCard hue="violet" icon={Handshake}  title="Qualified pipeline"   body="Pre-vetted leads from our inbound funnel routed to certified partners." />
+              <FeatureCard hue="emerald" icon={BarChart3} title="Partner portal"        body="Real-time pipeline, commission tracking, marketing collateral, certification." />
+              <FeatureCard hue="amber"  icon={Globe}      title="Co-marketing"           body="Featured logos, joint webinars, customer story development, conference sponsorships." />
+              <FeatureCard hue="fuchsia" icon={DollarSign} title="Generous economics"   body="20–30% revenue share. Stacks across multi-year deals. Pays within 30 days of customer pay." />
+            </div>
+          </div>
+        </Container>
+      </Section>
 
-        .pn-cta {
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-xl);
-          padding: 64px 48px;
-          text-align: center;
-        }
-        .pn-cta h2 {
-          font-size: clamp(34px, 5vw, 56px);
-          font-weight: 600;
-          letter-spacing: -0.035em;
-          line-height: 1.05;
-          margin: 0 0 16px;
-        }
-        .pn-cta p {
-          font-size: 16px;
-          color: var(--b-t2);
-          max-width: 520px;
-          margin: 0 auto 28px;
-          line-height: 1.6;
-        }
+      <Section py="md">
+        <Container>
+          <div className="text-center">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">Active partners</p>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
+              {PARTNERS_PREVIEW.map((p) => (
+                <span key={p} className="text-slate-400 font-bold text-lg tracking-tight">{p}</span>
+              ))}
+            </div>
+          </div>
+        </Container>
+      </Section>
 
-        @media (max-width: 900px) {
-          .pr-grid { grid-template-columns: 1fr; }
-          .pt-grid { grid-template-columns: 1fr; }
-        }
-      `}</style>
+      <CTABand
+        hue="emerald"
+        title={<>Ready to <GradientText hue="amber">partner</GradientText>?</>}
+        body="Fill out a short form. We'll get back to you within 3 business days."
+        primary={{ label: "Apply to partner program", href: "mailto:partners@workwrk.com" }}
+        secondary={{ label: "Talk to our team",        href: "/contact" }}
+      />
     </>
   );
 }

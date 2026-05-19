@@ -1,37 +1,38 @@
 import type { CSSProperties } from "react";
 
-/**
- * The workwrk mark — three rounded rectangles arranged as a bento
- * grid on a 48×48 unit canvas. ClickUp-style: violet primary, with
- * subtle tonal variation across the three tiles for brand depth.
- *
- * Module A — 28×22  (top-left, primary tile)
- * Module B — 17×22  (top-right, accent tile)
- * Module C — 48×23  (full-width bottom, foundation tile)
- *
- * Gap between cells: 3 units. Corner radius: 7 units.
- *
- * Override the palette via `color` — passing a single color gives
- * the legacy single-tone mark. Default uses the gradient mark.
- */
+// The workwrk mark — three rounded rectangles arranged as a bento grid
+// on a 48x48 canvas. The shape is the brand; the color is a quiet note.
+//
+//   Tile A  top-left, 28x22     primary tile  (violet 600)
+//   Tile B  top-right, 17x22    accent tile   (violet 500)
+//   Tile C  bottom-strip, 48x23 foundation tile (violet 700)
+//
+// Gap: 3 units. Corner radius: 7 units.
+//
+// Variants:
+//   "tonal"  (default) — three shades of violet. Subtle, professional.
+//   "mono"           — single fill (use a color prop or currentColor).
+//
+// The previous "rainbow" variant — multi-hue tiles with a gradient
+// strip — was retired for being too noisy against the new restrained
+// marketing aesthetic. The shape carries the brand; chrome stays calm.
+
 export function LogoMark({
   size = 24,
   color,
   className,
   title,
   style,
-  variant = "gradient",
+  variant = "tonal",
 }: {
   size?: number | string;
-  /** Override fill. If omitted, uses the adaptive brand color. */
   color?: string;
   className?: string;
   title?: string;
   style?: CSSProperties;
-  /** "gradient" (default, ClickUp-style 3-tone) or "mono" (single fill). */
-  variant?: "gradient" | "mono";
+  variant?: "tonal" | "mono";
 }) {
-  const monoFill = color ?? "var(--b-logo-color, #7c3aed)";
+  const monoFill = color ?? "currentColor";
 
   if (variant === "mono" || color) {
     return (
@@ -46,15 +47,13 @@ export function LogoMark({
         aria-hidden={title ? undefined : true}
         style={style}
       >
-        <rect x="0" y="0" width="28" height="22" rx="7" fill={monoFill} />
-        <rect x="31" y="0" width="17" height="22" rx="7" fill={monoFill} />
-        <rect x="0" y="25" width="48" height="23" rx="7" fill={monoFill} />
+        <rect x="0"  y="0"  width="28" height="22" rx="7" fill={monoFill} />
+        <rect x="31" y="0"  width="17" height="22" rx="7" fill={monoFill} />
+        <rect x="0"  y="25" width="48" height="23" rx="7" fill={monoFill} />
       </svg>
     );
   }
 
-  // Gradient variant — three violet shades for ClickUp-style depth.
-  const gradId = "wwk-logo-grad";
   return (
     <svg
       width={size}
@@ -67,34 +66,23 @@ export function LogoMark({
       aria-hidden={title ? undefined : true}
       style={style}
     >
-      <defs>
-        <linearGradient id={gradId} x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#8b5cf6" />
-          <stop offset="1" stopColor="#6d28d9" />
-        </linearGradient>
-      </defs>
-      {/* Top-left primary tile — full violet 600 */}
-      <rect x="0" y="0" width="28" height="22" rx="7" fill="#7c3aed" />
-      {/* Top-right accent tile — violet 500 (slightly lighter) */}
-      <rect x="31" y="0" width="17" height="22" rx="7" fill="#a78bfa" />
-      {/* Bottom foundation tile — gradient 500 → 700 for depth */}
-      <rect x="0" y="25" width="48" height="23" rx="7" fill={`url(#${gradId})`} />
+      <rect x="0"  y="0"  width="28" height="22" rx="7" fill="#7c3aed" />
+      <rect x="31" y="0"  width="17" height="22" rx="7" fill="#a78bfa" />
+      <rect x="0"  y="25" width="48" height="23" rx="7" fill="#6d28d9" />
     </svg>
   );
 }
 
-/**
- * Icon + wordmark horizontal lockup. Used in nav bars, email
- * signatures, doc headers.
- */
+// Horizontal lockup — icon mark + "workwrk" wordmark.
 export function LogoLockup({
-  iconSize = 24,
+  iconSize = 26,
   wordSize = 18,
   color,
   textColor,
   gap = 9,
   className,
   style,
+  variant = "tonal",
 }: {
   iconSize?: number;
   wordSize?: number;
@@ -103,6 +91,7 @@ export function LogoLockup({
   gap?: number;
   className?: string;
   style?: CSSProperties;
+  variant?: "tonal" | "mono";
 }) {
   return (
     <span
@@ -115,7 +104,7 @@ export function LogoLockup({
         ...style,
       }}
     >
-      <LogoMark size={iconSize} color={color} />
+      <LogoMark size={iconSize} color={color} variant={variant} />
       <span
         style={{
           fontWeight: 700,

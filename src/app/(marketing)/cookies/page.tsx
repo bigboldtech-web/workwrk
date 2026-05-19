@@ -1,172 +1,99 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  CTABand,
+  HUES,
+} from "@/components/marketing/primitives";
+import { LegalPage } from "@/components/marketing/legal";
 
 export const metadata: Metadata = {
   title: "Cookie Policy — WorkwrK",
-  description: "How WorkwrK uses cookies and similar technologies.",
+  description: "What cookies we set, why, and how you can control them. Plain English; GDPR + ePrivacy compliant.",
+  alternates: { canonical: "https://workwrk.com/cookies" },
 };
 
-// NEEDS LEGAL REVIEW — this is a starting template. Have local counsel
-// review for GDPR, UK-GDPR/PECR, ePrivacy, CCPA, LGPD, PIPEDA, APPI, DPDPA
-// before publishing in a given jurisdiction.
+const COOKIES = [
+  { name: "ww_session",     purpose: "Authentication session token",                  duration: "Session",  type: "Essential" },
+  { name: "ww_csrf",         purpose: "CSRF protection",                                duration: "Session",  type: "Essential" },
+  { name: "ww_preferences",  purpose: "Theme, language, density preferences",           duration: "365 days", type: "Functional" },
+  { name: "_ga / _ga_*",     purpose: "Google Analytics (aggregate usage)",             duration: "13 months", type: "Analytics" },
+  { name: "ww_attrib",       purpose: "Marketing attribution (last-click)",             duration: "30 days",  type: "Analytics" },
+  { name: "ww_consent",      purpose: "Records your cookie preferences",                duration: "365 days", type: "Essential" },
+];
 
-export default function CookiePolicyPage() {
+export default function CookiesPage() {
+  const t = HUES.amber;
   return (
-    <div className="mx-auto max-w-3xl px-4 py-16">
-      <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-300">
-        Template — needs legal review before publication. Last updated:{" "}
-        {new Date().toISOString().slice(0, 10)}.
-      </div>
-
-      <h1 className="text-3xl font-bold tracking-tight">Cookie Policy</h1>
-      <p className="mt-3 text-sm text-muted">
-        This policy explains what cookies and similar technologies WorkwrK
-        uses, why we use them, and how you can control them. It supplements
-        our{" "}
-        <Link className="underline" href="/privacy">
-          Privacy Policy
-        </Link>
-        .
-      </p>
-
-      <Section title="1. What are cookies?">
-        Cookies are small text files a website stores on your device. They
-        help sites remember preferences, keep you signed in, and measure
-        usage. Similar technologies include local storage, pixels, SDKs, and
-        beacons — this policy covers all of them.
+    <>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="max-w-3xl">
+            <Eyebrow hue="amber" className="mb-5">Legal</Eyebrow>
+            <H1>Cookie Policy.</H1>
+            <p className="mt-5 text-base text-slate-600">
+              Last updated: <span className="font-semibold text-slate-900">May 18, 2026</span>
+            </p>
+            <p className="mt-5 text-lg text-slate-600 leading-relaxed max-w-2xl">
+              The cookies we set on workwrk.com and the WorkwrK product, what they do,
+              and how you control them. Six cookies total. No third-party ad networks.
+            </p>
+          </div>
+        </Container>
       </Section>
 
-      <Section title="2. Categories we use">
-        <Category
-          name="Strictly necessary"
-          purpose="Authentication, CSRF protection, load balancing, language/currency preference, fraud prevention."
-          examples="next-auth.session-token, NEXT_LOCALE, NEXT_CURRENCY, wwrk_consent"
-          lifetime="Session or up to 1 year"
-          legalBasis="Necessary for performance of contract (GDPR Art. 6(1)(b))."
-        />
-        <Category
-          name="Preferences"
-          purpose="Remember non-essential UI choices (theme, list layouts, dismissed tooltips)."
-          examples="theme, sidebar_collapsed"
-          lifetime="Up to 1 year"
-          legalBasis="Consent (GDPR Art. 6(1)(a))."
-        />
-        <Category
-          name="Analytics"
-          purpose="Understand which features are used so we can improve the product. Aggregate, not used to identify you."
-          examples="posthog_*, _ga, ph_session"
-          lifetime="Up to 13 months"
-          legalBasis="Consent (GDPR Art. 6(1)(a) / CCPA opt-out)."
-        />
-        <Category
-          name="Marketing"
-          purpose="Measure ad performance and show relevant product updates. Off by default."
-          examples="_fbp, _gcl_au, li_sugr"
-          lifetime="Up to 13 months"
-          legalBasis="Consent (GDPR Art. 6(1)(a))."
-        />
-      </Section>
+      <LegalPage
+        hue="amber"
+        sections={[
+          { id: "what", title: "1. What cookies are", body: (
+            <p>Cookies are small text files stored in your browser. They let us keep you logged in, remember your preferences, and understand (in aggregate) how the Service is used.</p>
+          )},
+          { id: "list", title: "2. The cookies we use", body: (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    <th className="p-3">Name</th>
+                    <th className="p-3">Purpose</th>
+                    <th className="p-3">Duration</th>
+                    <th className="p-3">Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {COOKIES.map((c) => (
+                    <tr key={c.name} className="border-t border-slate-100">
+                      <td className="p-3 font-mono text-xs text-slate-900">{c.name}</td>
+                      <td className="p-3 text-slate-700">{c.purpose}</td>
+                      <td className="p-3 text-slate-500">{c.duration}</td>
+                      <td className="p-3">
+                        <span className={`inline-flex text-[10px] font-bold uppercase tracking-[0.14em] px-2 h-5 items-center rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
+                          {c.type}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )},
+          { id: "control", title: "3. How you control them", body: (
+            <>
+              <p>Essential cookies are required for the Service to work and can&apos;t be disabled. Functional and analytics cookies are opt-in &mdash; you control them via the consent banner on first visit, or anytime by clearing cookies and reloading.</p>
+              <p>You can also block all cookies in your browser settings. The Service won&apos;t work properly without essential cookies.</p>
+            </>
+          )},
+          { id: "third", title: "4. Third-party cookies", body: (
+            <p>The only third-party cookies we set are Google Analytics (analytics). We don&apos;t use ad-tech, retargeting pixels, or social-network trackers. If we ever add a third-party cookie, we&apos;ll update this page and ask consent.</p>
+          )},
+          { id: "contact", title: "5. Contact", body: (
+            <p>Questions about cookies: <a href="mailto:privacy@workwrk.com" className="text-amber-700 underline underline-offset-2">privacy@workwrk.com</a>.</p>
+          )},
+        ]}
+      />
 
-      <Section title="3. How to manage your choices">
-        You can accept, reject, or change your cookie preferences at any
-        time from the banner that appears on first visit, or from your{" "}
-        <Link className="underline" href="/settings">
-          Settings → Privacy
-        </Link>
-        . You can also use your browser&apos;s settings to block or delete
-        cookies — note that essential cookies are required for the site to
-        function.
-      </Section>
-
-      <Section title="4. Regional rights">
-        <p className="text-sm text-muted leading-relaxed">
-          <strong className="text-foreground">EU/EEA, UK, Switzerland:</strong>{" "}
-          non-essential cookies require prior consent (GDPR/PECR). You can
-          withdraw consent at any time.
-        </p>
-        <p className="mt-3 text-sm text-muted leading-relaxed">
-          <strong className="text-foreground">California, Colorado, Virginia, and other US states:</strong>{" "}
-          you can opt out of the sale or sharing of personal information via{" "}
-          <Link className="underline" href="/do-not-sell">
-            Do Not Sell or Share My Personal Information
-          </Link>
-          .
-        </p>
-        <p className="mt-3 text-sm text-muted leading-relaxed">
-          <strong className="text-foreground">Brazil (LGPD), India (DPDPA), Japan (APPI), Singapore (PDPA), South Korea (PIPA), South Africa (POPIA):</strong>{" "}
-          local data protection rights apply. Contact our DPO below.
-        </p>
-      </Section>
-
-      <Section title="5. Third-party cookies">
-        <p className="text-sm text-muted leading-relaxed">
-          We may use trusted vendors for authentication (NextAuth), analytics
-          (PostHog or GA), error monitoring (Sentry), and payments (Stripe).
-          Each has its own privacy notice. We only set their cookies with
-          the consent you provide in the categories above.
-        </p>
-      </Section>
-
-      <Section title="6. Changes">
-        We may update this policy. If changes are material we will
-        re-prompt you for consent and log the new policy version against
-        your choice.
-      </Section>
-
-      <Section title="7. Contact">
-        <p className="text-sm text-muted leading-relaxed">
-          Data Protection Officer: <a href="mailto:dpo@workwrk.com" className="underline">dpo@workwrk.com</a>
-          <br />
-          Postal address: [company address — NEEDS LEGAL REVIEW]
-          <br />
-          EU Representative (Art. 27): [appointed rep — NEEDS LEGAL REVIEW]
-          <br />
-          UK Representative: [appointed rep — NEEDS LEGAL REVIEW]
-        </p>
-      </Section>
-    </div>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mt-8">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <div className="mt-3 space-y-2 text-sm text-muted leading-relaxed">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function Category({
-  name,
-  purpose,
-  examples,
-  lifetime,
-  legalBasis,
-}: {
-  name: string;
-  purpose: string;
-  examples: string;
-  lifetime: string;
-  legalBasis: string;
-}) {
-  return (
-    <div className="mt-4 rounded-lg border border-border bg-surface p-4">
-      <p className="font-medium text-foreground">{name}</p>
-      <dl className="mt-2 grid grid-cols-[120px,1fr] gap-x-3 gap-y-1 text-xs text-muted">
-        <dt>Purpose</dt><dd>{purpose}</dd>
-        <dt>Examples</dt><dd className="font-mono">{examples}</dd>
-        <dt>Lifetime</dt><dd>{lifetime}</dd>
-        <dt>Legal basis</dt><dd>{legalBasis}</dd>
-      </dl>
-    </div>
+      <CTABand hue="amber" />
+    </>
   );
 }

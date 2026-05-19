@@ -1,288 +1,138 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-
-import { Label, Reveal, SectionHeader } from "@/components/bento";
+import {
+  ArrowRight,
+  Mail,
+  Headphones,
+  Briefcase,
+  Megaphone,
+  ShieldAlert,
+  MapPin,
+} from "lucide-react";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H3,
+  Button,
+  CTABand,
+  GradientText,
+  HUES,
+  type Hue,
+} from "@/components/marketing/primitives";
 
 export const metadata: Metadata = {
   title: "Contact — WorkwrK",
   description:
-    "Reach us — sales, security, support, partnerships. Real humans, one working-day response.",
+    "Talk to sales, get support, partner with us, or report a security issue. Real humans, real responses, no chatbot purgatory.",
   alternates: { canonical: "https://workwrk.com/contact" },
 };
 
-const channels = [
-  {
-    tone: "lime",
-    label: "Sales",
-    title: "hi@workwrk.com",
-    body: "For demo requests, pricing questions, and plan advice. 4-hour response on working days.",
-    cta: { label: "Book a demo →", href: "/demo" },
-  },
-  {
-    tone: "pink",
-    label: "Security",
-    title: "security@workwrk.com",
-    body: "SOC 2 reports, DPIAs, DPDPA documentation, responsible disclosure. Same-day for critical matters.",
-    cta: { label: "See security posture →", href: "/security" },
-  },
-  {
-    tone: "blue",
-    label: "Support",
-    title: "support@workwrk.com",
-    body: "Production issues, account questions, bug reports. Scale+ customers have a private Slack channel.",
-    cta: { label: "Help centre →", href: "/help-center" },
-  },
-  {
-    tone: "amber",
-    label: "Partnerships",
-    title: "partners@workwrk.com",
-    body: "Channel, integration, implementation, agency partnerships. We reply within two working days.",
-    cta: { label: "Partner programme →", href: "/partners" },
-  },
+const CHANNELS: readonly { hue: Hue; icon: typeof Mail; title: string; body: string; href: string; cta: string }[] = [
+  { hue: "fuchsia", icon: Briefcase,   title: "Sales",         body: "Pricing, demos, procurement. We respond within 4 business hours.",          href: "mailto:sales@workwrk.com",    cta: "sales@workwrk.com"    },
+  { hue: "emerald", icon: Headphones,  title: "Customer support", body: "Help with your account, billing, or product issues. 24-hour response.",   href: "mailto:support@workwrk.com",  cta: "support@workwrk.com"  },
+  { hue: "amber",   icon: Megaphone,   title: "Press & media", body: "Story ideas, interviews, product launches. Our team is happy to talk.",     href: "mailto:press@workwrk.com",    cta: "press@workwrk.com"    },
+  { hue: "violet",  icon: Mail,        title: "Partnerships",  body: "Integrations, agency partners, resellers, channel deals.",                  href: "mailto:partners@workwrk.com", cta: "partners@workwrk.com" },
+  { hue: "rose",    icon: ShieldAlert, title: "Security & abuse", body: "Vulnerability reports, abuse complaints, legal requests. PGP available.", href: "mailto:security@workwrk.com", cta: "security@workwrk.com" },
+];
+
+const OFFICES = [
+  { city: "Bengaluru",  region: "India", address: "WeWork Embassy Tech Village, Bellandur, Bengaluru 560103" },
+  { city: "Dubai",      region: "UAE",   address: "DIFC Innovation Hub, Gate Avenue, Level 3, Dubai" },
+  { city: "Singapore",  region: "APAC",  address: "1 Raffles Quay, North Tower, Level 25, Singapore 048583" },
 ];
 
 export default function ContactPage() {
   return (
     <>
-      <section className="bento-section" style={{ paddingTop: 56 }}>
-        <div className="bento-container">
-          <Reveal>
-            <SectionHeader
-              label="Contact · real humans"
-              title={
-                <>
-                  No bots. <span className="hi">No ticket queues.</span>
-                </>
-              }
-              subtitle="Our team is in Bengaluru. Small enough that you can get a real answer from a real person within a working day. Four inboxes, depending on why you're writing."
-              aside={{
-                label: "Average reply time",
-                stat: "4h",
-                text: "On working days. Security + production issues faster.",
-              }}
-            />
-          </Reveal>
-        </div>
-      </section>
-
-      <section className="bento-section" style={{ paddingTop: 0 }}>
-        <div className="bento-container">
-          <Reveal stagger className="ct-grid">
-            {channels.map((c) => (
-              <article key={c.label} className={`ct-card ct-card-${c.tone}`}>
-                <Label>{c.label}</Label>
-                <h3 className="ct-title">
-                  <a href={`mailto:${c.title}`}>{c.title}</a>
-                </h3>
-                <p className="ct-body">{c.body}</p>
-                <Link href={c.cta.href} className="ct-cta">
-                  {c.cta.label}
-                </Link>
-              </article>
-            ))}
-          </Reveal>
-        </div>
-      </section>
-
-      <section className="bento-section">
-        <div className="bento-container">
-          <div className="ct-grid-2">
-            <Reveal>
-              <div className="ct-form-card">
-                <Label>Anything else</Label>
-                <h2 className="ct-form-title">
-                  A catch-all form if you&apos;re unsure.
-                </h2>
-                <form className="ct-form">
-                  <div className="ct-field">
-                    <label htmlFor="ct-name">Your name</label>
-                    <input id="ct-name" type="text" placeholder="Priya Sharma" />
-                  </div>
-                  <div className="ct-field">
-                    <label htmlFor="ct-email">Email</label>
-                    <input id="ct-email" type="email" placeholder="priya@company.in" />
-                  </div>
-                  <div className="ct-field">
-                    <label htmlFor="ct-topic">Topic</label>
-                    <select id="ct-topic" defaultValue="">
-                      <option value="" disabled>Select</option>
-                      <option>Sales / pricing</option>
-                      <option>Security / compliance</option>
-                      <option>Support / bug</option>
-                      <option>Partnership</option>
-                      <option>Media / press</option>
-                      <option>Other</option>
-                    </select>
-                  </div>
-                  <div className="ct-field">
-                    <label htmlFor="ct-msg">Message</label>
-                    <textarea id="ct-msg" rows={5} placeholder="Tell us what you need — be specific, we like that." />
-                  </div>
-                  <button type="button" className="bento-btn bento-btn-lime bento-btn-lg">
-                    Send →
-                  </button>
-                </form>
-              </div>
-            </Reveal>
-            <Reveal>
-              <div className="ct-office">
-                <Label>Office</Label>
-                <h3 className="ct-office-title">Bengaluru, India</h3>
-                <address className="ct-addr">
-                  WorkwrK Technologies Pvt. Ltd.
-                  <br />
-                  Indiranagar, Bengaluru 560038
-                  <br />
-                  Karnataka, India
-                </address>
-                <div className="ct-meta">
-                  <div>
-                    <span className="ct-meta-label">Legal entity</span>
-                    <span className="ct-meta-val">WorkwrK Technologies Pvt. Ltd.</span>
-                  </div>
-                  <div>
-                    <span className="ct-meta-label">GSTIN</span>
-                    <span className="ct-meta-val">29AAAAA0000A0Z0</span>
-                  </div>
-                  <div>
-                    <span className="ct-meta-label">Data residency</span>
-                    <span className="ct-meta-val">AWS Mumbai · ap-south-1</span>
-                  </div>
-                  <div>
-                    <span className="ct-meta-label">Working hours</span>
-                    <span className="ct-meta-val">Mon–Fri · 10am – 7pm IST</span>
-                  </div>
-                </div>
-              </div>
-            </Reveal>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="max-w-3xl">
+            <Eyebrow hue="fuchsia" className="mb-5">Contact</Eyebrow>
+            <H1>
+              Real humans. <br />
+              <GradientText hue="fuchsia">Real responses.</GradientText>
+            </H1>
+            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
+              No chatbot purgatory. Pick the channel that fits your question
+              and you&apos;ll hear from someone on the team — usually within
+              four hours.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button href="/demo" variant="secondary" hue="fuchsia" size="lg" rightIcon={<ArrowRight size={15} />}>
+                Book a demo instead
+              </Button>
+              <Button href="mailto:hello@workwrk.com" variant="outline" size="lg" leftIcon={<Mail size={15} />}>
+                hello@workwrk.com
+              </Button>
+            </div>
           </div>
-        </div>
-      </section>
+        </Container>
+      </Section>
 
-      <style>{`
-        .ct-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 14px;
-        }
-        .ct-card {
-          padding: 36px 32px;
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-lg);
-          min-height: 240px;
-          display: flex; flex-direction: column;
-          transition: all 0.3s;
-        }
-        .ct-card:hover { transform: translateY(-3px); border-color: var(--b-line-2); background: var(--b-card-2); }
-        .ct-card-lime .bento-label { color: var(--b-lime); opacity: 1; }
-        .ct-card-pink .bento-label { color: var(--b-pink); opacity: 1; }
-        .ct-card-blue .bento-label { color: var(--b-blue); opacity: 1; }
-        .ct-card-amber .bento-label { color: var(--b-amber); opacity: 1; }
-        .ct-title {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: clamp(24px, 2.6vw, 32px);
-          font-weight: 700;
-          letter-spacing: -0.03em;
-          line-height: 1;
-          margin: 14px 0 12px;
-        }
-        .ct-card-lime .ct-title a { color: var(--b-lime); }
-        .ct-card-pink .ct-title a { color: var(--b-pink); }
-        .ct-card-blue .ct-title a { color: var(--b-blue); }
-        .ct-card-amber .ct-title a { color: var(--b-amber); }
-        .ct-title a { text-decoration: none; }
-        .ct-title a:hover { text-decoration: underline; }
-        .ct-body {
-          font-size: 15px;
-          color: var(--b-t2);
-          line-height: 1.55;
-          flex: 1;
-          margin: 0 0 20px;
-        }
-        .ct-cta {
-          font-size: 13.5px;
-          color: var(--b-fg);
-          font-weight: 500;
-          text-decoration: none;
-          letter-spacing: -0.01em;
-          display: inline-flex; align-items: center; gap: 6px;
-          transition: gap 0.2s;
-        }
-        .ct-cta:hover { gap: 10px; color: var(--b-lime); }
+      <Section py="lg">
+        <Container>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {CHANNELS.map((c) => {
+              const t = HUES[c.hue];
+              return (
+                <Link
+                  key={c.title}
+                  href={c.href}
+                  className="group p-7 bg-white rounded-2xl border border-slate-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition shadow-sm"
+                >
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${t.gradVia} text-white`}>
+                    <c.icon size={20} strokeWidth={2.4} />
+                  </div>
+                  <H3 className="mt-5">{c.title}</H3>
+                  <p className="mt-2 text-sm text-slate-600 leading-relaxed">{c.body}</p>
+                  <p className={`mt-5 inline-flex items-center gap-1 text-sm font-semibold ${t.text} group-hover:gap-2 transition-all`}>
+                    {c.cta} <ArrowRight size={13} />
+                  </p>
+                </Link>
+              );
+            })}
+          </div>
+        </Container>
+      </Section>
 
-        .ct-grid-2 {
-          display: grid;
-          grid-template-columns: 1.3fr 1fr;
-          gap: 14px;
-        }
-        .ct-form-card, .ct-office {
-          padding: 40px 36px;
-          background: var(--b-card);
-          border: 1px solid var(--b-line);
-          border-radius: var(--b-r-xl);
-        }
-        .ct-form-title {
-          font-size: 30px;
-          font-weight: 600;
-          letter-spacing: -0.03em;
-          line-height: 1.05;
-          margin: 14px 0 28px;
-        }
-        .ct-form { display: flex; flex-direction: column; gap: 16px; }
-        .ct-field { display: flex; flex-direction: column; gap: 6px; }
-        .ct-field label {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 11px;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          color: var(--b-t3);
-        }
-        .ct-field input, .ct-field select, .ct-field textarea {
-          padding: 14px 16px;
-          background: var(--b-card-2);
-          border: 1px solid var(--b-line);
-          border-radius: 12px;
-          color: var(--b-fg);
-          font-family: inherit;
-          font-size: 14.5px;
-          resize: vertical;
-        }
-        .ct-field input:focus, .ct-field select:focus, .ct-field textarea:focus {
-          outline: none;
-          border-color: var(--b-lime);
-          background: var(--b-card-3);
-        }
+      <Section variant="tint" py="lg">
+        <Container>
+          <div className="grid lg:grid-cols-[1fr_2fr] gap-12 items-start">
+            <div>
+              <Eyebrow hue="sky" className="mb-4">Offices</Eyebrow>
+              <H1 className="!text-4xl">Three cities. <GradientText hue="sky">One team.</GradientText></H1>
+              <p className="mt-5 text-slate-600">
+                Headquartered in Bengaluru, with hubs in Dubai and Singapore so
+                we&apos;re always within four hours of every customer.
+              </p>
+            </div>
+            <div className="grid sm:grid-cols-3 gap-4">
+              {OFFICES.map((o) => (
+                <div key={o.city} className="p-5 bg-white border border-slate-200 rounded-2xl">
+                  <div className="flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center">
+                      <MapPin size={14} />
+                    </span>
+                    <p className="font-bold text-slate-900 text-sm">{o.city}</p>
+                  </div>
+                  <p className="mt-3 text-xs font-bold uppercase tracking-[0.16em] text-sky-700">{o.region}</p>
+                  <p className="mt-2 text-xs text-slate-600 leading-relaxed">{o.address}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Container>
+      </Section>
 
-        .ct-office-title {
-          font-size: 28px;
-          font-weight: 600;
-          letter-spacing: -0.03em;
-          margin: 14px 0 18px;
-        }
-        .ct-addr {
-          font-size: 15px;
-          color: var(--b-off);
-          line-height: 1.6;
-          font-style: normal;
-          margin: 0 0 28px;
-        }
-        .ct-meta { display: flex; flex-direction: column; gap: 14px; padding-top: 24px; border-top: 1px solid var(--b-line); }
-        .ct-meta > div { display: flex; flex-direction: column; gap: 3px; }
-        .ct-meta-label {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: var(--b-t3);
-        }
-        .ct-meta-val { font-size: 14px; color: var(--b-off); }
-
-        @media (max-width: 900px) {
-          .ct-grid { grid-template-columns: 1fr; }
-          .ct-grid-2 { grid-template-columns: 1fr; }
-        }
-      `}</style>
+      <CTABand
+        hue="violet"
+        title={<>Got a question we missed?</>}
+        body="Drop us a line — hello@workwrk.com — and we'll route you to the right human."
+        primary={{ label: "Email hello@workwrk.com", href: "mailto:hello@workwrk.com" }}
+        secondary={{ label: "See the FAQ", href: "/faq" }}
+      />
     </>
   );
 }

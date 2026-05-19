@@ -1,170 +1,177 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-
-import { Reveal, SectionHeader } from "@/components/bento";
+import {
+  ArrowRight,
+  Sparkles,
+  Users,
+  CheckCircle2,
+  DollarSign,
+  Crosshair,
+  Star,
+  Megaphone,
+  Inbox,
+  Search,
+  BookOpen,
+  Settings,
+  ShieldCheck,
+} from "lucide-react";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H2,
+  H3,
+  Button,
+  CTABand,
+  GradientText,
+  HUES,
+  HUBS,
+  type Hue,
+} from "@/components/marketing/primitives";
 
 export const metadata: Metadata = {
   title: "Help Center — WorkwrK",
-  description:
-    "Guides, how-tos, and answers for every module of WorkwrK. Setup, onboarding, AI, integrations, security.",
+  description: "Guides, troubleshooting, and onboarding documentation. Self-serve everything — and chat with a human when you need one.",
   alternates: { canonical: "https://workwrk.com/help-center" },
 };
 
-const SECTIONS = [
-  {
-    variant: "lime" as const,
-    title: "Getting started",
-    desc: "From signup to first useful day in thirty minutes.",
-    links: [
-      { label: "Bulk-import your team", href: "/features/people#lifecycle" },
-      { label: "First SOPs to assign", href: "/features/sops#written" },
-      { label: "AI-drafted KRAs walkthrough", href: "/features/kras" },
-      { label: "Inviting managers", href: "/features/people#access" },
-    ],
-  },
-  {
-    variant: "dark" as const,
-    title: "Performance",
-    desc: "Composite scoring, review cycles, and calibration.",
-    links: [
-      { label: "How composite scores work", href: "/features/reviews" },
-      { label: "Setting up a review cycle", href: "/features/reviews" },
-      { label: "Calibration across managers", href: "/features/reviews" },
-      { label: "Exporting HR-ready PDFs", href: "/features/reviews" },
-    ],
-  },
-  {
-    variant: "dark" as const,
-    title: "SOPs & tasks",
-    desc: "Playbooks, compliance, and auto-escalation.",
-    links: [
-      { label: "Video → SOP extraction (Scribe)", href: "/features/sops#scribe" },
-      { label: "Versioning and audit trail", href: "/features/sops#written" },
-      { label: "Task SLAs and escalation", href: "/features/tasks" },
-      { label: "Nightly compliance jobs", href: "/features/sops" },
-    ],
-  },
-  {
-    variant: "dark" as const,
-    title: "AI Engine",
-    desc: "Private-by-default reasoning across your data.",
-    links: [
-      { label: "What the AI can and can't do", href: "/features/ai-engine#prompts" },
-      { label: "Drafting KRAs from job descriptions", href: "/features/kras" },
-      { label: "Attrition-risk predictions", href: "/features/ai-engine#signals" },
-      { label: "Data privacy & training", href: "/security" },
-    ],
-  },
-  {
-    variant: "dark" as const,
-    title: "Developers & integrations",
-    desc: "API, webhooks, and the OpenAPI spec.",
-    links: [
-      { label: "Public API reference", href: "/developers" },
-      { label: "Webhook signatures (HMAC-SHA256)", href: "/developers#events" },
-      { label: "OpenAPI 3.1 spec", href: "/api/v1/openapi.json" },
-      { label: "Available integrations", href: "/features/integrations" },
-    ],
-  },
-  {
-    variant: "dark" as const,
-    title: "Security & billing",
-    desc: "Access control, compliance, and subscriptions.",
-    links: [
-      { label: "RBAC + field-level permissions", href: "/features/access" },
-      { label: "SOC 2, DPDPA, data residency", href: "/security" },
-      { label: "Pricing & plan caps", href: "/pricing" },
-      { label: "Contact support", href: "/contact" },
-    ],
-  },
+const TOP_GUIDES: readonly { title: string; mins: number; hue: Hue; icon: typeof BookOpen }[] = [
+  { title: "Quickstart: your first 30 minutes in workwrk", mins: 8, hue: "violet",  icon: Sparkles  },
+  { title: "Setting up your first KPI engine",              mins: 12, hue: "sky",     icon: CheckCircle2 },
+  { title: "Running your first 360 review cycle",           mins: 14, hue: "fuchsia", icon: Users     },
+  { title: "Migrating from BambooHR / Workday / Rippling",  mins: 16, hue: "emerald", icon: Settings  },
+  { title: "Configuring SSO and SCIM provisioning",         mins: 10, hue: "rose",    icon: ShieldCheck },
+  { title: "Building a custom dashboard with Cmd-K AI",     mins: 7,  hue: "indigo",  icon: Search    },
 ];
+
+const HUB_ICONS = {
+  home: Inbox,
+  people: Users,
+  work: CheckCircle2,
+  money: DollarSign,
+  talent: Crosshair,
+  culture: Star,
+  growth: Megaphone,
+} as const;
 
 export default function HelpCenterPage() {
   return (
     <>
-      <section className="bento-section" style={{ paddingTop: 40 }}>
-        <div className="bento-container">
-          <Reveal>
-            <SectionHeader
-              label="Help center"
-              title={<>Short answers. <span className="hi">Zero fluff.</span></>}
-              subtitle="Grouped by module. If you can't find it, email hi@workwrk.com — we'll write it up and publish it."
-              aside={{
-                label: "Response",
-                stat: "<24h",
-                text: "Median first-response on support tickets. Same day, usually same hour.",
-              }}
-            />
-          </Reveal>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="max-w-3xl">
+            <Eyebrow hue="violet" className="mb-5">Help Center</Eyebrow>
+            <H1>
+              <GradientText hue="violet">Self-serve everything.</GradientText> Talk to a human when you need to.
+            </H1>
+            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
+              200+ guides, organized by hub. Searchable. Updated weekly. With a real chat button when you can&apos;t find what you need.
+            </p>
 
-          <Reveal stagger className="hc-grid">
-            {SECTIONS.map((s) => (
-              <article key={s.title} className={`hc hc-${s.variant}`}>
-                <div>
-                  <h3 className="hc-title">{s.title}</h3>
-                  <p className="hc-desc">{s.desc}</p>
-                </div>
-                <ul className="hc-links">
-                  {s.links.map((l) => (
-                    <li key={l.label}>
-                      <Link href={l.href}>{l.label} <span className="arr">→</span></Link>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ))}
-          </Reveal>
-        </div>
+            {/* Search */}
+            <div className="mt-9 relative max-w-xl">
+              <input
+                type="search"
+                placeholder="Search for a guide, a feature, an error message..."
+                className="w-full pl-12 pr-4 h-14 rounded-2xl bg-white border border-slate-200 text-base placeholder:text-slate-400 focus:outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-100 transition shadow-sm"
+              />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+            </div>
+          </div>
+        </Container>
+      </Section>
 
-        <style>{`
-          .hc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-          .hc {
-            border-radius: 28px; padding: 32px;
-            min-height: 320px;
-            display: flex; flex-direction: column; justify-content: space-between;
-            transition: all 0.3s;
-            position: relative; overflow: hidden;
-          }
-          .hc:hover { transform: translateY(-4px); }
-          .hc::before {
-            content: ""; position: absolute; inset: 0;
-            background-image: radial-gradient(circle at 1px 1px, rgba(0,0,0,0.08) 1px, transparent 0);
-            background-size: 18px 18px; pointer-events: none; opacity: 0.35;
-          }
-          .hc > * { position: relative; }
-          .hc-lime { background: var(--b-lime); color: var(--b-bg); }
-          .hc-lime:hover { box-shadow: var(--b-shadow-lime); }
-          .hc-dark {
-            background: var(--b-card);
-            border: 1px solid var(--b-line);
-            color: var(--b-fg);
-          }
-          .hc-dark:hover { border-color: var(--b-line-2); background: var(--b-card-2); }
-          .hc-dark .hc-desc { color: var(--b-t2); }
-          .hc-dark .hc-links { border-top-color: var(--b-line) !important; }
-          .hc-dark .hc-links a { color: var(--b-off); }
-          .hc-dark .hc-links a:hover { color: var(--b-lime); }
-          .hc-title { font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin-bottom: 10px; }
-          .hc-desc { font-size: 14px; line-height: 1.55; font-weight: 500; max-width: 380px; }
-          .hc-links {
-            list-style: none; padding: 20px 0 0;
-            border-top: 1px solid rgba(0,0,0,0.15);
-            display: flex; flex-direction: column; gap: 9px;
-            margin-top: 20px;
-          }
-          .hc-links a {
-            display: flex; justify-content: space-between;
-            font-size: 13.5px; font-weight: 500;
-            padding: 4px 0;
-            color: inherit; text-decoration: none;
-            transition: transform 0.2s;
-          }
-          .hc-links a:hover { transform: translateX(3px); }
-          .hc-links .arr { opacity: 0.6; transition: transform 0.2s; }
-          .hc-links a:hover .arr { transform: translateX(3px); opacity: 1; }
-          @media (max-width: 900px) { .hc-grid { grid-template-columns: 1fr; } }
-        `}</style>
-      </section>
+      {/* Top guides */}
+      <Section py="lg">
+        <Container>
+          <div className="max-w-2xl">
+            <Eyebrow hue="fuchsia" className="mb-4">Most read</Eyebrow>
+            <H2>Top guides this month.</H2>
+          </div>
+          <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {TOP_GUIDES.map((g) => {
+              const t = HUES[g.hue];
+              const Icon = g.icon;
+              return (
+                <Link
+                  key={g.title}
+                  href="#"
+                  className="group p-5 bg-white border border-slate-200 rounded-2xl hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition shadow-sm"
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${t.bgTint} ${t.text} border ${t.border}`}>
+                    <Icon size={18} strokeWidth={2.4} />
+                  </div>
+                  <p className="mt-4 font-bold text-slate-900 tracking-tight">{g.title}</p>
+                  <p className="mt-2 text-xs text-slate-500">{g.mins} min read</p>
+                </Link>
+              );
+            })}
+          </div>
+        </Container>
+      </Section>
+
+      {/* By hub */}
+      <Section variant="tint" py="lg">
+        <Container>
+          <div className="max-w-2xl">
+            <Eyebrow hue="emerald" className="mb-4">Browse by hub</Eyebrow>
+            <H2>Find guides <GradientText hue="emerald">where you work.</GradientText></H2>
+          </div>
+          <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {HUBS.map((hub) => {
+              const t = HUES[hub.hue];
+              const Icon = HUB_ICONS[hub.slug as keyof typeof HUB_ICONS];
+              return (
+                <Link
+                  key={hub.slug}
+                  href={`#${hub.slug}`}
+                  className="group p-5 bg-white border border-slate-200 rounded-2xl hover:-translate-y-0.5 hover:border-slate-300 transition shadow-sm"
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br ${t.gradVia} text-white`}>
+                    <Icon size={18} strokeWidth={2.4} />
+                  </div>
+                  <p className="mt-4 font-bold text-slate-900">{hub.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">~25 guides</p>
+                  <p className={`mt-3 inline-flex items-center gap-1 text-xs font-semibold ${t.text} group-hover:gap-2 transition-all`}>
+                    Browse <ArrowRight size={11} />
+                  </p>
+                </Link>
+              );
+            })}
+          </div>
+        </Container>
+      </Section>
+
+      <Section py="lg">
+        <Container>
+          <div className="grid lg:grid-cols-3 gap-5">
+            <Link href="/blog" className="p-7 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 transition">
+              <H3>Read essays</H3>
+              <p className="mt-3 text-sm text-slate-600">Operator playbooks and category essays from the team and our customers.</p>
+              <p className="mt-5 text-sm font-semibold text-violet-700 inline-flex items-center gap-1">Go to blog <ArrowRight size={13} /></p>
+            </Link>
+            <Link href="/changelog" className="p-7 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 transition">
+              <H3>What&apos;s new</H3>
+              <p className="mt-3 text-sm text-slate-600">Every shipped feature, every Tuesday. Years of context at a glance.</p>
+              <p className="mt-5 text-sm font-semibold text-fuchsia-700 inline-flex items-center gap-1">See changelog <ArrowRight size={13} /></p>
+            </Link>
+            <Link href="/developers" className="p-7 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 transition">
+              <H3>For developers</H3>
+              <p className="mt-3 text-sm text-slate-600">API reference, SDKs, webhooks, embeds — everything to extend workwrk.</p>
+              <p className="mt-5 text-sm font-semibold text-emerald-700 inline-flex items-center gap-1">Developer docs <ArrowRight size={13} /></p>
+            </Link>
+          </div>
+        </Container>
+      </Section>
+
+      <CTABand
+        hue="violet"
+        title="Stuck on something?"
+        body="Real humans on chat 09:00–20:00 IST / GMT. Email any time."
+        primary={{ label: "Chat with us", href: "mailto:support@workwrk.com" }}
+        secondary={{ label: "Read the FAQ", href: "/faq" }}
+      />
     </>
   );
 }

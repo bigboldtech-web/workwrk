@@ -51,6 +51,10 @@
     "tools": "Tools",
     "integrations": "Integrations",
     "aiAssistant": "AI Assistant",
+    "sidekick": "Sidekick",
+    "agentsRail": "Agents",
+    "build": "Build",
+    "store": "Product Store",
     "docs": "Docs",
     "settings": "Settings",
     "signOut": "Sign Out",
@@ -66,12 +70,20 @@
     "clock": "Clock in",
     "hub": {
       "home": "Home",
+      "workspace": "Workspace",
+      "sidekick": "Sidekick",
+      "agents": "Agents",
+      "build": "Build",
+      "meetings": "Meetings",
+      "favorites": "Favorites",
+      "more": "More",
       "people": "People",
       "work": "Work",
       "money": "Money",
       "talent": "Talent",
       "culture": "Culture",
-      "platform": "Platform"
+      "platform": "Platform",
+      "cross": "Cross-functional"
     }
   },
   "auth": {

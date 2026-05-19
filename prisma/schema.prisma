@@ -102,6 +102,14 @@ model Organization {
   overtimePolicies      OvertimePolicy[]
   memberships           OrganizationMembership[] @relation("OrgMembershipOrg")
 
+  // 🆕 Phase A — universal primitives
+  productInstallations  ProductInstallation[]
+  spaces                Space[]
+  boards                Board[]
+  items                 Item[]
+  agents                Agent[]
+  apps                  App[]
+
   @@index([slug])
 }
 
@@ -4121,4 +4129,308 @@ model JournalLine {
   @@index([debitAccountId])
   @@index([creditAccountId])
   @@index([costCenterId])
+}
+
+// ==========================================
+// 🆕 PHASE A · UNIVERSAL PRIMITIVES (Modular Work OS)
+// Product Store + Spaces + Boards + Items + Views + Agents + Apps.
+// Polymorphic Item indexes the typed module rows (Task, Candidate,
+// Lead, Ticket, ...) so cross-board queries + a single ListPage
+// renderer work without union types. Native modules implicitly own a
+// "default" Board per org so they keep working with no migration.
+// ==========================================
+
+// Global product catalog. One row per installable product (People,
+// CRM, ITSM, Marketing, Dev, Legal, Support, Finance, Ops). NOT
+// org-scoped — every org sees the same catalog and picks what to
+// install (ProductInstallation).
+model Product {
+  id                 String   @id @default(cuid())
+  slug               String   @unique
+  name               String
+  tagline            String?
+  description        String   @db.Text
+  iconKey            String?
+  hue                String?
+  suite              ProductSuite  @default(CROSS)
+  tier               ProductTier   @default(CORE)
+  status             ProductStatus @default(LIVE)
+  defaultEnabled     Boolean  @default(false)
+  displayOrder       Int      @default(0)
+  legacyModuleKey    String?
+  pathPrefix         String?
+  seededAgents       Json     @default("[]")
+  seededTemplates    Json     @default("[]")
+  seededIntegrations Json     @default("[]")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  installations ProductInstallation[]
+
+  @@index([suite])
+  @@index([status])
+  @@index([displayOrder])
+}
+
+enum ProductSuite {
+  PEOPLE
+  SALES
+  OPERATIONS
+  IT
+  MARKETING
+  FINANCE
+  ENGINEERING
+  LEGAL
+  SUPPORT
+  CROSS
+}
+
+enum ProductTier {
+  CORE
+  PLUS
+  SUITE
+  ENTERPRISE
+}
+
+enum ProductStatus {
+  LIVE
+  PREVIEW
+  COMING_SOON
+  DEPRECATED
+}
+
+model ProductInstallation {
+  id             String               @id @default(cuid())
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  status         ProductInstallStatus @default(ACTIVE)
+  installedById  String?
+  installedAt    DateTime             @default(now())
+  pausedAt       DateTime?
+  removedAt      DateTime?
+  settings       Json                 @default("{}")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@unique([organizationId, productId])
+  @@index([organizationId, status])
+}
+
+enum ProductInstallStatus {
+  ACTIVE
+  PAUSED
+  REMOVED
+}
+
+model Space {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  slug           String
+  name           String
+  description    String?
+  icon           String?
+  color          String?
+  parentSpaceId  String?
+  parentSpace    Space?       @relation("SpaceTree", fields: [parentSpaceId], references: [id], onDelete: SetNull)
+  childSpaces    Space[]      @relation("SpaceTree")
+  ownerId        String?
+  displayOrder   Int          @default(0)
+  archivedAt     DateTime?
+  settings       Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  boards Board[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@index([parentSpaceId])
+}
+
+model Board {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  spaceId        String?
+  space          Space?       @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  slug           String
+  name           String
+  description    String?
+  icon           String?
+  color          String?
+  itemType       String
+  productSlug    String?
+  ownerId        String?
+  isDefault      Boolean      @default(false)
+  archivedAt     DateTime?
+  schema         Json         @default("{}")
+  settings       Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  views View[]
+  items Item[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, productSlug])
+  @@index([spaceId])
+  @@index([itemType])
+}
+
+model View {
+  id           String   @id @default(cuid())
+  boardId      String
+  board        Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name         String
+  type         ViewType
+  config       Json     @default("{}")
+  isShared     Boolean  @default(false)
+  isDefault    Boolean  @default(false)
+  ownerId      String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([boardId])
+  @@index([ownerId])
+}
+
+enum ViewType {
+  TABLE
+  KANBAN
+  GANTT
+  CALENDAR
+  TIMELINE
+  CHART
+  DOC
+  FORM
+  DASHBOARD
+  MAP
+  WORKLOAD
+  WHITEBOARD
+  FILE_GALLERY
+}
+
+model Item {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  boardId        String
+  board          Board        @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  itemType       String
+  itemId         String
+  title          String
+  status         String?
+  ownerId        String?
+  groupKey       String?
+  position       Float        @default(0)
+  archivedAt     DateTime?
+  metadata       Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([itemType, itemId])
+  @@index([organizationId, boardId])
+  @@index([boardId, position])
+  @@index([itemType])
+  @@index([ownerId])
+}
+
+model Agent {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  slug           String
+  name           String
+  persona        String?
+  avatar         String?
+  description    String       @db.Text
+  systemPrompt   String       @db.Text
+  productSlug    String?
+  tools          Json         @default("[]")
+  modelOverride  String?
+  isPrebuilt     Boolean      @default(false)
+  prebuiltSlug   String?
+  status         AgentStatus  @default(ENABLED)
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  runs     AgentRun[]
+  memories AgentMemory[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, status])
+  @@index([productSlug])
+}
+
+enum AgentStatus {
+  ENABLED
+  DISABLED
+  ARCHIVED
+}
+
+model AgentRun {
+  id          String    @id @default(cuid())
+  agentId     String
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  triggeredBy String?
+  input       Json
+  output      Json?
+  status      String    @default("PENDING")
+  error       String?   @db.Text
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  tokensIn    Int?
+  tokensOut   Int?
+  costCents   Int?
+
+  @@index([agentId, startedAt])
+  @@index([status])
+}
+
+model AgentMemory {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  key       String
+  value     Json
+  scope     String   @default("agent")
+  scopeId   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, scope, scopeId, key])
+  @@index([agentId])
+}
+
+model App {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  slug           String
+  name           String
+  description    String?      @db.Text
+  iconKey        String?
+  hue            String?
+  prompt         String?      @db.Text
+  schema         Json         @default("{}")
+  ui             Json         @default("{}")
+  isStandalone   Boolean      @default(true)
+  status         AppStatus    @default(DRAFT)
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, status])
+}
+
+enum AppStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
 }

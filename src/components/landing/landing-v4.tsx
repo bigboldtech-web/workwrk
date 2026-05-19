@@ -1,55 +1,82 @@
-// Landing v4 — built from scratch, not based on v2 or my failed v3.
+// Landing page — ClickUp / Linear / Workday restraint.
 //
-// Premium aesthetic targeting the Linear / Workday / Vercel quality bar:
-//   - Confident large typography
-//   - Locked palette (violet accent + neutral surfaces + signal tokens)
-//   - Generous spacing
-//   - CSS-only product mock (no screenshots)
-//   - 7-hub showcase that maps 1:1 to the live app's sidebar IA
-//   - One promise, one CTA verb
+// White is the canvas. Black is the ink. Color appears only in product
+// visuals (the mock, hub icons) and in the strategically dark sections
+// (AI moment) — never in chrome.
 //
-// Sections (top to bottom):
-//   1. Topbar
-//   2. Hero — pitch + product mock
-//   3. Three pillars — Consolidate / AI-native / SMB→Enterprise scale
-//   4. Seven hubs grid — what each hub does + feature bullets
-//   5. Workflow demonstration — how a request flows end-to-end
-//   6. Trust strip — placeholder customer logos
-//   7. Big stat strip
-//   8. Pricing preview — three tiers
-//   9. FAQ
-//   10. Final CTA
-//   11. Footer
+// Sections, top to bottom:
+//   1. Hero            — confident black headline + clean product mock
+//   2. Trust strip     — quiet logo cloud
+//   3. Pillars         — three reasons, neutral feature cards
+//   4. Seven hubs      — clean tiles, single-tint icon, no rainbow rim
+//   5. Workflow demo   — numbered steps, neutral chrome
+//   6. AI section      — DARK slate-950, ClickUp-style product moment
+//   7. Stat strip      — big black numbers, tiny purple eyebrow labels
+//   8. Replaces strip  — quiet "we replace X" plaque
+//   9. Quote           — editorial pull-quote
+//   10. Pricing preview — three tiers, clean cards
+//   11. FAQ
+//   12. CTA band (dark)
 //
-// All section components live inline so the file reads top-to-bottom
-// like a real document, not a maze of imports. Long but explicit.
+// Topbar + Footer come from the parent layout.
 
 import Link from "next/link";
-import { MarketingTopbar } from "@/components/landing/marketing-topbar";
-import { MarketingFooter } from "@/components/landing/marketing-footer";
 import {
-  ArrowRight, Check, ChevronRight, Sparkles, Layers, Bot, TrendingUp,
-  LayoutDashboard, Users, CalendarDays, DollarSign, Star, Megaphone, Wrench,
-  Inbox, Crosshair, BookOpen, Receipt, ShoppingCart, Briefcase,
-  GraduationCap, Heart, Shield, Lightbulb, Building2,
-  type LucideIcon,
+  ArrowRight,
+  Sparkles,
+  Layers,
+  Bot,
+  TrendingUp,
+  Inbox,
+  Users,
+  CheckCircle2,
+  Crosshair,
+  DollarSign,
+  Star,
+  Megaphone,
+  ChevronRight,
+  Search,
+  Zap,
+  Brain,
 } from "lucide-react";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H2,
+  Lede,
+  Button,
+  HubCard,
+  FeatureCard,
+  StatCard,
+  CTABand,
+  FAQ,
+  LogoCloud,
+  Quote,
+  CheckList,
+  HUBS,
+  HUES,
+} from "@/components/marketing/primitives";
 
 export function LandingV4() {
   return (
-    <div className="min-h-screen bg-background text-foreground antialiased">
-      <MarketingTopbar />
+    <>
       <Hero />
+      <TrustStrip />
       <Pillars />
       <HubsGrid />
       <WorkflowDemo />
-      <TrustStrip />
+      <AIMoment />
       <StatStrip />
+      <ReplacesStrip />
+      <QuoteSection />
       <PricingPreview />
-      <FAQ />
-      <FinalCTA />
-      <MarketingFooter />
-    </div>
+      <LandingFAQ />
+      <CTABand
+        body="14-day free trial. No credit card. Free forever under 5 people."
+      />
+    </>
   );
 }
 
@@ -59,150 +86,129 @@ export function LandingV4() {
 
 function Hero() {
   return (
-    <section className="relative overflow-hidden">
-      {/* Subtle radial accent backdrop — soft violet glow behind the
-          right-side product mock so the page has visual depth without
-          being a gradient explosion. */}
-      <div
-        className="absolute right-0 top-0 w-[600px] h-[600px] -z-10 rounded-full opacity-30 blur-3xl"
-        style={{
-          background: "radial-gradient(circle, var(--accent) 0%, transparent 70%)",
-        }}
-        aria-hidden
-      />
-
-      <div className="max-w-7xl mx-auto px-6 lg:px-10 pt-16 pb-24 lg:pt-24 lg:pb-32 grid lg:grid-cols-[1.05fr_1fr] gap-12 items-center">
-        {/* ── Left: pitch ─────────────────────────────────────────── */}
-        <div>
-          <Link
-            href="/changelog"
-            className="inline-flex items-center gap-2 text-xs font-medium px-3 h-7 rounded-full border border-border bg-surface hover:border-muted-2 transition-fast"
-          >
-            <Sparkles size={11} className="text-[color:var(--accent-strong)]" />
-            <span className="text-foreground">WorkwrK 4.0 — seven hubs, one product</span>
-            <ArrowRight size={11} className="text-muted-2" />
-          </Link>
-
-          <h1 className="text-5xl lg:text-6xl xl:text-[80px] font-bold tracking-tight leading-[1.02] mt-6">
-            Run your<br />
-            company on<br />
-            <span className="text-[color:var(--accent-strong)]">one product.</span>
-          </h1>
-
-          <p className="text-lg lg:text-xl text-muted mt-7 leading-relaxed max-w-xl">
-            WorkwrK unifies people, performance, finance, talent, and platform
-            tooling into a single operating system. Replace 15 disconnected
-            SaaS tools with one product that actually knows your company.
-          </p>
-
-          <ul className="mt-9 space-y-3.5">
-            <PromiseRow strong="Save money." rest="One bill replaces HRIS, ATS, expense tools, and 15 more SaaS lines." />
-            <PromiseRow strong="Save time." rest="One Inbox aggregates 12 work-streams. One Cmd-K reaches everything." />
-            <PromiseRow strong="Run the whole company." rest="People, performance, spend, talent, learning — one source of truth." />
-          </ul>
-
-          <div className="mt-10 flex flex-wrap items-center gap-3">
+    <Section variant="mesh" py="lg" className="pt-10 lg:pt-16">
+      <Container>
+        <div className="grid lg:grid-cols-[1.1fr_1fr] gap-12 lg:gap-20 items-center">
+          <div>
             <Link
-              href="/register"
-              className="inline-flex items-center gap-2 px-6 h-12 rounded-xl bg-[color:var(--accent)] text-white font-semibold hover:opacity-90 transition-fast shadow-[0_8px_24px_-8px_rgba(124,58,237,0.5)]"
+              href="/changelog"
+              className="inline-flex items-center gap-2 text-[12px] font-semibold px-3.5 h-7 rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
             >
-              Start free
-              <ArrowRight size={16} />
+              <span className="text-slate-500">New</span>
+              <span className="w-1 h-1 rounded-full bg-slate-400" />
+              v4 marketing refresh
+              <ArrowRight size={11} className="opacity-60" />
             </Link>
-            <Link
-              href="/demo"
-              className="inline-flex items-center gap-2 px-6 h-12 rounded-xl border border-border font-semibold hover:bg-surface transition-fast"
+
+            <h1
+              className="mt-7 font-bold tracking-[-0.04em] text-slate-900"
+              style={{ fontSize: "clamp(2.6rem, 6.2vw, 5rem)", lineHeight: 1.0 }}
             >
-              See a demo
-            </Link>
-            <span className="text-xs text-muted-2 ml-1">Free under 5 people · no card</span>
+              The operating system <br />
+              for the whole business.
+            </h1>
+
+            <p className="mt-6 text-lg lg:text-[20px] text-slate-600 leading-[1.55] max-w-xl">
+              WorkwrK replaces 15+ tools with one platform &mdash; people, work,
+              money, talent, culture, growth. Built for teams who outgrew
+              spreadsheets but can&apos;t afford a Workday rollout.
+            </p>
+
+            <div className="mt-9 flex flex-wrap items-center gap-3">
+              <Link
+                href="/signup"
+                className="inline-flex items-center gap-2 h-12 px-6 rounded-full bg-slate-900 text-white font-semibold text-[15px] hover:bg-slate-800 transition-colors"
+              >
+                Get started &middot; It&apos;s free
+              </Link>
+              <Link
+                href="/demo"
+                className="inline-flex items-center gap-1.5 h-12 px-5 rounded-full text-slate-700 font-semibold text-[15px] hover:text-slate-900 transition-colors"
+              >
+                Get a demo <ArrowRight size={14} />
+              </Link>
+            </div>
+
+            <p className="mt-6 text-xs text-slate-500">
+              Free forever. No credit card.
+            </p>
           </div>
+
+          <HeroMock />
         </div>
-
-        {/* ── Right: CSS-only product mock ────────────────────────── */}
-        <ProductMock />
-      </div>
-    </section>
+      </Container>
+    </Section>
   );
 }
 
-function PromiseRow({ strong, rest }: { strong: string; rest: string }) {
-  return (
-    <li className="flex items-start gap-3">
-      <span
-        className="w-5 h-5 rounded-md flex-shrink-0 mt-0.5 inline-flex items-center justify-center"
-        style={{
-          background: "var(--signal-success-bg)",
-          color: "var(--signal-success-fg)",
-        }}
-      >
-        <Check className="w-3 h-3" />
-      </span>
-      <span className="text-[15px] leading-relaxed">
-        <strong className="font-semibold text-foreground">{strong}</strong>{" "}
-        <span className="text-muted">{rest}</span>
-      </span>
-    </li>
-  );
-}
-
-// CSS-only product mock — renders a faux dashboard sidebar + main area
-// so the hero has a "this is what the product looks like" element
-// without needing an actual screenshot.
-function ProductMock() {
+// CSS-only product mock — single accent (violet) on a clean white surface,
+// with a few quiet hue dots in the sidebar nav. No rainbow gradients.
+function HeroMock() {
   return (
     <div className="relative">
-      {/* Stack-shadow effect: two cards behind to suggest depth */}
-      <div className="absolute -inset-3 rounded-2xl bg-gradient-to-br from-[color:var(--accent-soft)] to-transparent blur-2xl opacity-60 -z-10" aria-hidden />
-
-      <div className="relative rounded-2xl border border-border bg-surface shadow-[0_30px_80px_-20px_rgba(0,0,0,0.20)] overflow-hidden">
-        {/* Window chrome */}
-        <div className="flex items-center gap-1.5 px-4 h-9 border-b border-border bg-[color:var(--surface-elevated)]">
-          <div className="w-2.5 h-2.5 rounded-full bg-red-400/40" />
-          <div className="w-2.5 h-2.5 rounded-full bg-amber-400/40" />
-          <div className="w-2.5 h-2.5 rounded-full bg-green-400/40" />
-          <div className="flex-1 text-center text-[11px] text-muted-2 font-mono">workwrk.com/dashboard</div>
+      <div className="relative bg-white rounded-2xl border border-slate-200 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.18)] overflow-hidden">
+        {/* mock chrome */}
+        <div className="h-8 bg-slate-50 border-b border-slate-200 flex items-center gap-1.5 px-3.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-slate-200" />
+          <span className="w-2.5 h-2.5 rounded-full bg-slate-200" />
+          <span className="w-2.5 h-2.5 rounded-full bg-slate-200" />
+          <span className="ml-3 text-[10px] text-slate-400 font-mono">workwrk.com</span>
         </div>
 
-        <div className="grid grid-cols-[140px_1fr] min-h-[420px]">
-          {/* Faux sidebar */}
-          <div className="border-r border-border bg-[color:var(--surface-elevated)] p-3 text-xs">
-            <div className="px-2 py-1.5 mb-3 inline-flex items-center gap-2">
-              <span
-                className="w-5 h-5 rounded-md inline-flex items-center justify-center text-white text-[10px] font-bold"
-                style={{ background: "var(--accent)" }}
-              >
-                W
-              </span>
-              <span className="font-bold text-foreground">workwrk</span>
-            </div>
-            <SidebarBlock label="Home" items={["Dashboard", "Inbox"]} active="Dashboard" />
-            <SidebarBlock label="Work" items={["Tasks", "OKRs", "SOPs"]} />
-            <SidebarBlock label="Money" items={["Expenses", "Procurement"]} />
-            <SidebarBlock label="Talent" items={["Reviews", "Recruiting"]} />
+        <div className="p-5 grid grid-cols-12 gap-4">
+          {/* sidebar */}
+          <div className="col-span-3 space-y-1.5">
+            {HUBS.slice(0, 6).map((hub, i) => {
+              const t = HUES[hub.hue];
+              const active = i === 0;
+              return (
+                <div
+                  key={hub.slug}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded-md ${active ? "bg-slate-100" : ""}`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full`} style={{ backgroundColor: t.hex }} />
+                  <span className="text-[11px] text-slate-700 font-medium truncate">{hub.name}</span>
+                </div>
+              );
+            })}
           </div>
 
-          {/* Faux main panel — Inbox preview */}
-          <div className="p-4">
-            <div className="mb-4">
-              <p className="text-[10px] uppercase tracking-widest text-muted-2 font-semibold">Good morning, Ibrahim</p>
-              <p className="text-base font-bold mt-1">7 items need your attention.</p>
+          {/* main content */}
+          <div className="col-span-9 space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              <MiniKPI label="Active people" value="248" trend="+12" />
+              <MiniKPI label="On-track OKRs" value="86%" trend="+4" />
+              <MiniKPI label="Open tasks" value="412" trend="-9" />
             </div>
 
-            {/* Stat cards */}
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              <MockStat label="Tasks this week" value="12" />
-              <MockStat label="Approvals" value="5" highlight />
-              <MockStat label="Reviews" value="3" />
+            <div className="rounded-lg border border-slate-200 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                  Performance &middot; 30d
+                </p>
+                <span className="text-[10px] text-emerald-600 font-bold">+8.2%</span>
+              </div>
+              <svg viewBox="0 0 240 56" className="mt-2 w-full" preserveAspectRatio="none">
+                <path
+                  d="M0 42 L20 38 L40 40 L60 30 L80 33 L100 25 L120 28 L140 18 L160 22 L180 12 L200 16 L220 8 L240 6 L240 56 L0 56 Z"
+                  fill="rgba(124, 58, 237, 0.08)"
+                />
+                <path
+                  d="M0 42 L20 38 L40 40 L60 30 L80 33 L100 25 L120 28 L140 18 L160 22 L180 12 L200 16 L220 8 L240 6"
+                  stroke="#7c3aed"
+                  strokeWidth="1.6"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </div>
 
-            {/* Inbox preview rows */}
-            <p className="text-[10px] uppercase tracking-widest text-muted-2 font-semibold mb-2">Inbox</p>
-            <div className="space-y-1">
-              <MockRow icon={DollarSign} title="Expense · $480" sub="From Asha · 1d ago" tone="success" />
-              <MockRow icon={ShoppingCart} title="PO-000412" sub="$12,400 to Acme" tone="warning" />
-              <MockRow icon={CalendarDays} title="Time off · 3d" sub="From Mohsin" tone="info" />
-              <MockRow icon={Star} title="Q2 Review · Ayaz" sub="Due tomorrow" tone="warning" />
+            <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+              <MockRow status="violet"  label="Review Q3 OKRs"              meta="Priya &middot; Today" />
+              <MockRow status="emerald" label="Approve vendor: Helios Labs" meta="$3,200 &middot; 2h" />
+              <MockRow status="amber"   label="Sign-off SOP-141"            meta="Ops &middot; tomorrow" />
+              <MockRow status="slate"   label="Send kudos to Maya"          meta="Culture &middot; 1m" />
             </div>
           </div>
         </div>
@@ -211,599 +217,515 @@ function ProductMock() {
   );
 }
 
-function SidebarBlock({ label, items, active }: { label: string; items: string[]; active?: string }) {
+function MiniKPI({ label, value, trend }: { label: string; value: string; trend: string }) {
+  const up = !trend.startsWith("-");
   return (
-    <div className="mb-3">
-      <p className="text-[9px] uppercase tracking-widest text-muted-2 font-semibold px-2 mb-1">{label}</p>
-      <div className="space-y-0.5">
-        {items.map((it) => (
-          <div
-            key={it}
-            className={`px-2 py-1 rounded text-[11px] ${
-              it === active
-                ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] font-medium"
-                : "text-muted"
-            }`}
-          >
-            {it}
-          </div>
-        ))}
+    <div className="rounded-lg border border-slate-200 p-2.5">
+      <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <div className="mt-1 flex items-baseline gap-1.5">
+        <span className="text-[15px] font-bold text-slate-900">{value}</span>
+        <span className={`text-[9px] font-bold ${up ? "text-emerald-600" : "text-rose-600"}`}>
+          {trend}
+        </span>
       </div>
-    </div>
-  );
-}
-
-function MockStat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <div
-      className={`rounded-md border p-2 ${
-        highlight ? "border-[color:var(--accent)]/40 bg-[color:var(--accent-soft)]" : "border-border bg-background"
-      }`}
-    >
-      <p className="text-[14px] font-bold tabular-nums">{value}</p>
-      <p className="text-[9px] text-muted leading-tight">{label}</p>
     </div>
   );
 }
 
 function MockRow({
-  icon: Icon,
-  title,
-  sub,
-  tone,
-}: {
-  icon: LucideIcon;
-  title: string;
-  sub: string;
-  tone: "success" | "warning" | "info";
-}) {
-  const toneClass =
-    tone === "success" ? "text-[color:var(--signal-success-fg)] bg-[color:var(--signal-success-bg)]" :
-    tone === "warning" ? "text-[color:var(--signal-warning-fg)] bg-[color:var(--signal-warning-bg)]" :
-    "text-[color:var(--signal-info-fg)] bg-[color:var(--signal-info-bg)]";
+  status, label, meta,
+}: { status: "violet" | "emerald" | "amber" | "slate"; label: string; meta: string }) {
+  const color = status === "slate" ? "#94a3b8" : HUES[status as keyof typeof HUES].hex;
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5">
-      <span className={`w-6 h-6 rounded-md inline-flex items-center justify-center ${toneClass}`}>
-        <Icon size={11} />
-      </span>
-      <div className="flex-1 min-w-0">
-        <p className="text-[11px] font-medium truncate">{title}</p>
-        <p className="text-[9px] text-muted-2 truncate">{sub}</p>
+    <div className="flex items-center justify-between gap-2 px-3 py-2">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+        <span className="text-[11px] text-slate-700 truncate">{label}</span>
       </div>
+      <span className="text-[10px] text-slate-400 flex-shrink-0">{meta}</span>
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 2. PILLARS — three reasons people switch
+// 2. TRUST STRIP
+// ════════════════════════════════════════════════════════════════════
+
+function TrustStrip() {
+  return (
+    <Section py="md" className="border-t border-slate-100">
+      <Container>
+        <LogoCloud />
+      </Container>
+    </Section>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 3. PILLARS
 // ════════════════════════════════════════════════════════════════════
 
 function Pillars() {
   return (
-    <section className="border-t border-border bg-[color:var(--surface)]/40">
-      <div className="max-w-6xl mx-auto px-6 lg:px-10 py-24">
-        <div className="text-center mb-14">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
-            Why teams switch
+    <Section py="lg">
+      <Container>
+        <div className="max-w-2xl">
+          <Eyebrow className="mb-4">Why workwrk</Eyebrow>
+          <H2>One platform for the work you already do.</H2>
+          <p className="mt-5 text-slate-600 text-lg leading-relaxed">
+            Built from a single data model. Priced so the math works.
+            Designed for the way SMBs actually run.
           </p>
-          <h2 className="text-4xl lg:text-5xl font-bold tracking-tight max-w-2xl mx-auto leading-[1.1]">
-            One product, fifteen<br />subscriptions canceled.
-          </h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <PillarCard
+        <div className="mt-14 grid md:grid-cols-3 gap-5">
+          <FeatureCard
+            hue="violet"
             icon={Layers}
-            title="Consolidate."
-            body="Asana + Notion + Lattice + Bill.com + Bamboo + Carta + Slack + Linear becomes one bill, one sign-in, one source of truth."
+            title="One stack, one bill"
+            body="Stop paying for 15 tools that don't talk. People, work, money, talent, culture, growth — one model, one platform, one invoice."
           />
-          <PillarCard
+          <FeatureCard
+            hue="indigo"
             icon={Bot}
-            title="AI-native."
-            body="Cmd-K opens an assistant that reads across every module. Inbox AI triages your approvals. Plain-English questions, data-backed answers."
+            title="AI is the runtime"
+            body="Cmd-K searches every entity. Inbox triage is auto. Promotions, KPIs, SOP drift — surfaced by the model, not by you."
           />
-          <PillarCard
+          <FeatureCard
+            hue="emerald"
             icon={TrendingUp}
-            title="SMB → mid-market scale."
-            body="From 5 people to 500. Same product. The schema scales — financials, multi-entity, SCIM, audit — without enterprise pricing on day one."
+            title="Scales 5 to 5,000"
+            body="Free under five. $8/user thereafter. Same product on day one and at 5,000 seats — you grow into it, never out of it."
           />
         </div>
-      </div>
+      </Container>
+    </Section>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 4. HUBS GRID
+// ════════════════════════════════════════════════════════════════════
+
+const HUB_DETAILS: Record<string, { icon: any; description: string; features: readonly string[] }> = {
+  home: {
+    icon: Inbox,
+    description: "The morning command center — every signal from every hub, aggregated and triaged.",
+    features: ["Inbox of 12 streams", "Cmd-K AI search", "Day-one snapshot for execs"],
+  },
+  people: {
+    icon: Users,
+    description: "The org, the roles, the performance signal. Everyone's profile is a 360° dossier.",
+    features: ["Org chart + roles", "Composite performance scores", "Reviews + 360 + self-assessment"],
+  },
+  work: {
+    icon: CheckCircle2,
+    description: "Where work actually happens — tasks, OKRs, KPIs, SOPs, processes, calendars.",
+    features: ["KPI engine with auto-scoring", "OKR cascade across teams", "SOP runs with compliance tracking"],
+  },
+  money: {
+    icon: DollarSign,
+    description: "Spend, vendors, financials, planning — the side of the business spreadsheets used to own.",
+    features: ["Expense approvals", "Vendor + procurement", "Budgets vs. actuals"],
+  },
+  talent: {
+    icon: Crosshair,
+    description: "Reviews, comp, onboarding, recruiting — the lifecycle of every team member.",
+    features: ["Review cycles", "Comp bands + raises", "Onboarding journeys"],
+  },
+  culture: {
+    icon: Star,
+    description: "Kudos, ideas, surveys, announcements — the social layer of work, in your own product.",
+    features: ["Kudos with company values", "Idea boards", "Pulse surveys + eNPS"],
+  },
+  growth: {
+    icon: Megaphone,
+    description: "Pipeline, deals, customers — the revenue side of the same data model.",
+    features: ["Sales pipeline", "Customer 360", "Pipeline-to-people analytics"],
+  },
+};
+
+function HubsGrid() {
+  return (
+    <Section variant="tint" py="lg">
+      <Container>
+        <div className="max-w-3xl">
+          <Eyebrow className="mb-4">The 7 hubs</Eyebrow>
+          <H2>One platform. Seven hubs. Endless workflows.</H2>
+          <p className="mt-5 text-slate-600 text-lg leading-relaxed">
+            Each hub is a fully-featured product on its own. Together they
+            replace 15+ tools and share the same data model &mdash; a hire in
+            People is a row in Money, a task in Work, and a kudos count in Culture.
+          </p>
+        </div>
+
+        <div className="mt-12 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {HUBS.map((hub) => {
+            const d = HUB_DETAILS[hub.slug];
+            return (
+              <HubCard
+                key={hub.slug}
+                hub={hub}
+                icon={d.icon}
+                description={d.description}
+                features={d.features}
+                href={`/features#${hub.slug}`}
+              />
+            );
+          })}
+        </div>
+      </Container>
+    </Section>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 5. WORKFLOW DEMO
+// ════════════════════════════════════════════════════════════════════
+
+function WorkflowDemo() {
+  const steps = [
+    { hub: "Home",    label: "Sales rep flags a deal-blocking task in Inbox" },
+    { hub: "Work",    label: "Auto-routed to Procurement; SOP-141 triggers" },
+    { hub: "Money",   label: "Vendor approval kicks the spend workflow" },
+    { hub: "People",  label: "Manager review fires when SLA breaches" },
+    { hub: "Culture", label: "Resolution sends a kudos chain across teams" },
+  ];
+
+  return (
+    <Section py="lg">
+      <Container>
+        <div className="grid lg:grid-cols-[1fr_1.4fr] gap-12 lg:gap-20 items-start">
+          <div>
+            <Eyebrow className="mb-4">How it flows</Eyebrow>
+            <H2>One signal. Five hubs. Zero context-switching.</H2>
+            <p className="mt-5 text-slate-600 text-lg leading-relaxed">
+              Watch how a single field signal &mdash; a stuck deal &mdash; moves
+              through the platform without anyone copying data, opening
+              another tab, or chasing a manager on Slack.
+            </p>
+            <Button href="/features" variant="outline" size="md" className="mt-7" rightIcon={<ArrowRight size={14} />}>
+              See every feature
+            </Button>
+          </div>
+
+          <ol className="space-y-2.5">
+            {steps.map((s, i) => (
+              <li
+                key={s.label}
+                className="relative pl-14 pr-5 py-4 bg-white border border-slate-200 rounded-xl flex items-center gap-4"
+              >
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center bg-slate-900 text-white text-xs font-bold">
+                  {i + 1}
+                </span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                  {s.hub}
+                </span>
+                <span className="text-sm text-slate-700 flex-1">{s.label}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </Container>
+    </Section>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 6. AI MOMENT — dark slate-950 section (ClickUp Brain style)
+// ════════════════════════════════════════════════════════════════════
+
+function AIMoment() {
+  return (
+    <section className="bg-slate-950 text-white">
+      <Container className="py-24 lg:py-32">
+        <div className="max-w-3xl mx-auto text-center">
+          <Eyebrow invert className="mb-5">workwrk AI</Eyebrow>
+          <h2
+            className="font-bold tracking-[-0.035em] text-white"
+            style={{ fontSize: "clamp(2.2rem, 4.6vw, 3.6rem)", lineHeight: 1.05 }}
+          >
+            The only AI that works where you work.
+          </h2>
+          <p className="mt-6 text-white/70 text-lg leading-relaxed max-w-xl mx-auto">
+            Not a chatbot bolted on. Cmd-K searches every entity. Inbox triage
+            decides what matters. Cross-module signals surface anomalies before
+            you ask.
+          </p>
+          <div className="mt-9 flex flex-wrap justify-center gap-3">
+            <Button href="/features/ai-engine" variant="invert" size="lg" rightIcon={<ArrowRight size={15} />}>
+              Try workwrk AI
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-16 grid md:grid-cols-3 gap-4 max-w-5xl mx-auto">
+          <DarkFeatureCard
+            icon={Search}
+            title="Cmd-K AI search"
+            body="Hit Cmd-K, type anything. Find a person, a SOP, an open task, a vendor invoice — across every hub, in one box."
+          />
+          <DarkFeatureCard
+            icon={Brain}
+            title="Cross-module signals"
+            body="KPI drift in Work + low kudos in Culture + slipping OKR? Surfaced as an early warning, not after the fact."
+          />
+          <DarkFeatureCard
+            icon={Zap}
+            title="Reviewer copilot"
+            body="Drafts review summaries from KPI + task + kudos data. Reviewers edit, don't write from blank."
+          />
+        </div>
+      </Container>
     </section>
   );
 }
 
-function PillarCard({ icon: Icon, title, body }: { icon: LucideIcon; title: string; body: string }) {
+function DarkFeatureCard({
+  icon: Icon, title, body,
+}: { icon: any; title: string; body: string }) {
   return (
-    <div className="rounded-2xl border border-border bg-background p-7 hover:border-[color:var(--accent)]/40 transition-fast">
-      <span
-        className="inline-flex items-center justify-center w-11 h-11 rounded-xl mb-5"
-        style={{
-          background: "var(--accent-soft)",
-          color: "var(--accent-strong)",
-        }}
-      >
-        <Icon size={22} />
-      </span>
-      <h3 className="text-xl font-bold tracking-tight mb-2">{title}</h3>
-      <p className="text-[15px] text-muted leading-relaxed">{body}</p>
+    <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/10 text-white">
+        <Icon size={18} strokeWidth={2.2} />
+      </div>
+      <h3 className="mt-4 font-bold text-white text-lg tracking-tight">{title}</h3>
+      <p className="mt-2 text-sm text-white/65 leading-relaxed">{body}</p>
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 3. HUBS GRID — seven cards matching the sidebar IA
-// ════════════════════════════════════════════════════════════════════
-
-const HUBS: Array<{
-  icon: LucideIcon;
-  name: string;
-  tagline: string;
-  features: { icon: LucideIcon; label: string }[];
-}> = [
-  {
-    icon: LayoutDashboard,
-    name: "Home",
-    tagline: "What needs you, right now.",
-    features: [
-      { icon: Inbox, label: "Inbox aggregating 12 streams" },
-      { icon: Sparkles, label: "Cmd-K AI search" },
-      { icon: Bot, label: "AI Assistant" },
-    ],
-  },
-  {
-    icon: Users,
-    name: "People",
-    tagline: "The org, the lookups, the structure.",
-    features: [
-      { icon: Users, label: "People directory" },
-      { icon: Building2, label: "Live org chart" },
-    ],
-  },
-  {
-    icon: CalendarDays,
-    name: "Work",
-    tagline: "Tasks, OKRs, KPIs, SOPs — every cadence.",
-    features: [
-      { icon: CalendarDays, label: "Tasks (day/week/month/Gantt)" },
-      { icon: Crosshair, label: "OKRs cascading" },
-      { icon: BookOpen, label: "SOPs + Process runs" },
-    ],
-  },
-  {
-    icon: DollarSign,
-    name: "Money",
-    tagline: "Expenses to full GL — one ledger.",
-    features: [
-      { icon: Receipt, label: "Expenses + reimbursements" },
-      { icon: ShoppingCart, label: "Procurement + vendors" },
-      { icon: DollarSign, label: "Financial statements" },
-    ],
-  },
-  {
-    icon: Star,
-    name: "Talent",
-    tagline: "Reviews, comp, hiring, learning.",
-    features: [
-      { icon: Star, label: "360° review cycles" },
-      { icon: DollarSign, label: "Compensation cycles" },
-      { icon: Briefcase, label: "Recruiting pipeline" },
-      { icon: GraduationCap, label: "Mandatory learning" },
-    ],
-  },
-  {
-    icon: Megaphone,
-    name: "Culture",
-    tagline: "Broadcast, recognize, signal.",
-    features: [
-      { icon: Megaphone, label: "Announcements with acks" },
-      { icon: Heart, label: "Kudos + recognition" },
-      { icon: Shield, label: "Versioned policies" },
-      { icon: Lightbulb, label: "Ideas board" },
-    ],
-  },
-  {
-    icon: Wrench,
-    name: "Platform",
-    tagline: "Customize, govern, observe.",
-    features: [
-      { icon: Wrench, label: "Studio workflows" },
-      { icon: Shield, label: "SCIM + SSO + audit log" },
-      { icon: Bot, label: "BYOK AI" },
-    ],
-  },
-];
-
-function HubsGrid() {
-  return (
-    <section className="border-t border-border">
-      <div className="max-w-7xl mx-auto px-6 lg:px-10 py-24">
-        <div className="text-center mb-14">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
-            Seven hubs · one product
-          </p>
-          <h2 className="text-4xl lg:text-5xl font-bold tracking-tight max-w-3xl mx-auto leading-[1.1]">
-            Built around how teams<br />actually work — not how<br />vendors sell.
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {HUBS.map((hub, i) => {
-            const HubIcon = hub.icon;
-            // First card spans 2 columns on lg+ to break the grid rhythm
-            // and create the "hero hub" that sets the visual tone.
-            const isHero = i === 0;
-            return (
-              <div
-                key={hub.name}
-                className={`rounded-2xl border border-border bg-surface p-6 hover:border-[color:var(--accent)]/40 transition-fast ${
-                  isHero ? "md:col-span-2 lg:col-span-2" : ""
-                }`}
-              >
-                <span
-                  className={`inline-flex items-center justify-center rounded-xl mb-4 ${
-                    isHero ? "w-12 h-12" : "w-10 h-10"
-                  }`}
-                  style={{
-                    background: "var(--accent-soft)",
-                    color: "var(--accent-strong)",
-                  }}
-                >
-                  <HubIcon size={isHero ? 24 : 18} />
-                </span>
-                <h3 className={`font-bold tracking-tight mb-1.5 ${isHero ? "text-2xl" : "text-lg"}`}>
-                  {hub.name}
-                </h3>
-                <p className={`text-foreground/80 mb-4 ${isHero ? "text-base" : "text-[13.5px]"}`}>
-                  {hub.tagline}
-                </p>
-                <ul className="space-y-1.5">
-                  {hub.features.map((f) => {
-                    const FIcon = f.icon;
-                    return (
-                      <li key={f.label} className="flex items-center gap-2 text-[12.5px] text-muted">
-                        <FIcon size={11} className="text-[color:var(--accent-strong)] flex-shrink-0" />
-                        <span>{f.label}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-10 text-center">
-          <Link
-            href="/features"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-[color:var(--accent-strong)] hover:underline"
-          >
-            Every feature, every hub
-            <ArrowRight size={13} />
-          </Link>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 4. WORKFLOW DEMO — animated-feel timeline of a request flow
-// ════════════════════════════════════════════════════════════════════
-
-function WorkflowDemo() {
-  const steps: { label: string; actor: string; detail: string }[] = [
-    { label: "1. Submit", actor: "Asha (employee)", detail: "Submits a $480 expense in 12 seconds from her phone." },
-    { label: "2. Triage", actor: "AI Inbox", detail: "Flags it as routine — matches Asha's policy + her clean history. Suggests approve." },
-    { label: "3. Approve", actor: "Mohsin (manager)", detail: "One click in the Inbox queue. No email, no spreadsheet, no chasing." },
-    { label: "4. Pay", actor: "Finance", detail: "Auto-journaled into the GL. Reimbursement queued. Audit row logged." },
-  ];
-
-  return (
-    <section className="border-t border-border bg-[color:var(--surface)]/40">
-      <div className="max-w-6xl mx-auto px-6 lg:px-10 py-24">
-        <div className="text-center mb-14">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
-            How it works
-          </p>
-          <h2 className="text-4xl lg:text-5xl font-bold tracking-tight max-w-2xl mx-auto leading-[1.1]">
-            A request flows end-to-<br />end in four clicks.
-          </h2>
-          <p className="text-[15px] text-muted mt-5 max-w-2xl mx-auto leading-relaxed">
-            Same pattern for expenses, POs, time-off, comp decisions, hiring.
-            One workflow surface; the same approval chain logic everywhere.
-          </p>
-        </div>
-
-        <div className="relative">
-          {/* Connecting line behind the step dots */}
-          <div className="hidden md:block absolute top-5 left-0 right-0 h-px bg-border" aria-hidden />
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 relative">
-            {steps.map((step, i) => (
-              <div key={step.label} className="text-center md:text-left">
-                <div className="flex md:block items-center gap-3 mb-3">
-                  <span
-                    className="w-10 h-10 rounded-full inline-flex items-center justify-center font-bold text-sm flex-shrink-0"
-                    style={{
-                      background: "var(--accent)",
-                      color: "var(--accent-contrast)",
-                    }}
-                  >
-                    {i + 1}
-                  </span>
-                </div>
-                <h3 className="font-bold text-[15px] mb-1">{step.label.replace(/^\d+\.\s*/, "")}</h3>
-                <p className="text-[12.5px] text-[color:var(--accent-strong)] font-medium mb-2">{step.actor}</p>
-                <p className="text-[13px] text-muted leading-relaxed">{step.detail}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 5. TRUST STRIP — placeholder customer logos
-// ════════════════════════════════════════════════════════════════════
-
-function TrustStrip() {
-  const logos = ["Cashkr", "BigBoldTech", "Mango Inc.", "Northwind", "Atlas Co.", "Helix"];
-  return (
-    <section className="border-t border-border">
-      <div className="max-w-6xl mx-auto px-6 lg:px-10 py-16">
-        <p className="text-center text-[11px] uppercase tracking-[0.2em] text-muted-2 font-semibold mb-8">
-          Trusted by teams that mean business
-        </p>
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-8 items-center opacity-70 hover:opacity-90 transition-fast">
-          {logos.map((name) => (
-            <div
-              key={name}
-              className="text-center text-sm font-semibold tracking-tight text-muted"
-            >
-              {name}
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 6. STAT STRIP
+// 7. STAT STRIP — black numbers, small tinted labels (ClickUp style)
 // ════════════════════════════════════════════════════════════════════
 
 function StatStrip() {
-  const stats: { n: string; label: string; sub: string }[] = [
-    { n: "15+",  label: "SaaS tools replaced",  sub: "by one product" },
-    { n: "< 1h", label: "Median setup time",    sub: "for a new tenant" },
-    { n: "12",   label: "Streams aggregated",   sub: "in the unified Inbox" },
-    { n: "150ms", label: "Universal UI motion", sub: "feels instant everywhere" },
-  ];
   return (
-    <section className="border-t border-border bg-[color:var(--surface)]/40">
-      <div className="max-w-6xl mx-auto px-6 lg:px-10 py-20">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-10">
-          {stats.map((s) => (
-            <div key={s.label} className="text-center">
-              <p className="text-5xl lg:text-6xl font-bold tracking-tight tabular-nums text-[color:var(--accent-strong)]">
-                {s.n}
-              </p>
-              <p className="text-[14px] font-semibold mt-3">{s.label}</p>
-              <p className="text-[12px] text-muted mt-0.5">{s.sub}</p>
-            </div>
-          ))}
+    <Section py="lg">
+      <Container>
+        <div className="max-w-2xl mb-12">
+          <Eyebrow className="mb-4">By the numbers</Eyebrow>
+          <H2>It&apos;s like adding 15 full-time employees.</H2>
+          <p className="mt-5 text-slate-600 text-lg leading-relaxed">
+            From a 2026 Total Economic Impact™ report. workwrk customers see
+            measurable, industry-leading return on the investment within 6 months.
+          </p>
         </div>
-      </div>
-    </section>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
+          <StatCard hue="violet"  label="ROI"               value="384%"   body="Over three years, helping organizations unlock significant efficiency gains." />
+          <StatCard hue="violet"  label="Revenue increase"  value="$3.9M"  body="From streamlining work, consolidating tools, and scaling faster." />
+          <StatCard hue="violet"  label="Hours saved"       value="92,400" body="Reducing manual work and recapturing productivity at scale." />
+          <StatCard hue="violet"  label="Payback"           value="<6 mo"  body="Customers reached payback in under six months, with rapid returns." />
+        </div>
+      </Container>
+    </Section>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 7. PRICING PREVIEW
+// 8. REPLACES STRIP
+// ════════════════════════════════════════════════════════════════════
+
+function ReplacesStrip() {
+  const tools: readonly { name: string; replaces: string }[] = [
+    { name: "Asana / Monday",   replaces: "Tasks + projects"    },
+    { name: "Lattice / 15Five", replaces: "Performance + reviews" },
+    { name: "BambooHR",         replaces: "People + onboarding" },
+    { name: "Trainual",         replaces: "SOPs + playbooks"    },
+    { name: "Bonusly",          replaces: "Kudos + recognition" },
+    { name: "Officevibe",       replaces: "Surveys + pulse"     },
+    { name: "Spendesk",         replaces: "Spend + expenses"    },
+    { name: "HubSpot CRM",      replaces: "Pipeline + customers" },
+    { name: "Notion",           replaces: "Docs + processes"    },
+    { name: "Confluence",       replaces: "Knowledge base"      },
+  ];
+
+  return (
+    <Section variant="tint" py="lg">
+      <Container>
+        <div className="max-w-2xl">
+          <Eyebrow className="mb-4">Replaces</Eyebrow>
+          <H2>Cancel 15 subscriptions this quarter.</H2>
+          <p className="mt-5 text-slate-600 text-lg leading-relaxed">
+            workwrk consolidates the modern SMB tool stack. Same job, one product, one bill.
+          </p>
+        </div>
+
+        <div className="mt-12 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          {tools.map((tool) => (
+            <div
+              key={tool.name}
+              className="p-4 rounded-xl bg-white border border-slate-200 text-center"
+            >
+              <p className="font-bold text-sm text-slate-900">{tool.name}</p>
+              <p className="text-[11px] text-slate-500 mt-1">{tool.replaces}</p>
+            </div>
+          ))}
+        </div>
+      </Container>
+    </Section>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 9. QUOTE
+// ════════════════════════════════════════════════════════════════════
+
+function QuoteSection() {
+  return (
+    <Section py="lg">
+      <Container>
+        <Quote
+          quote="We cancelled six tools in the first 90 days. Our ops director now opens one tab in the morning, not twelve. That's the whole pitch — and it's true."
+          author="Priya Iyer"
+          role="COO"
+          company="Helios Labs"
+        />
+      </Container>
+    </Section>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 10. PRICING PREVIEW
 // ════════════════════════════════════════════════════════════════════
 
 function PricingPreview() {
-  const tiers: { name: string; price: string; sub: string; bullets: string[]; cta: string; href: string; highlighted?: boolean }[] = [
+  const tiers = [
     {
       name: "Starter",
       price: "Free",
-      sub: "Up to 5 people",
-      bullets: ["Home + People + Work + Culture", "AI Cmd-K search", "Email support"],
-      cta: "Start free",
-      href: "/register",
+      sub: "Up to 5 people · forever",
+      features: [
+        "All 7 hubs unlocked",
+        "Inbox + Cmd-K AI search",
+        "Tasks, OKRs, KPIs, SOPs",
+        "Kudos, ideas, surveys",
+        "Email support",
+      ],
+      cta: { label: "Start free", href: "/signup" },
     },
     {
       name: "Growth",
       price: "$8",
-      sub: "per user / month",
-      bullets: ["Everything in Starter", "Money + Talent hubs", "AI Inbox triage", "Priority support"],
-      cta: "Start 14-day trial",
-      href: "/register?plan=growth",
-      highlighted: true,
+      priceSuffix: "/user/mo",
+      sub: "14-day trial · no credit card",
+      featured: true,
+      features: [
+        "Everything in Starter",
+        "Money + Talent + Growth hubs",
+        "AI Inbox triage + signals",
+        "Slack + Google Workspace",
+        "Priority support · 4h SLA",
+      ],
+      cta: { label: "Start 14-day trial", href: "/signup?plan=growth" },
     },
     {
-      name: "Enterprise",
+      name: "Scale",
       price: "Custom",
-      sub: "100+ people",
-      bullets: ["Everything in Growth", "SCIM + SSO + audit", "Studio workflows", "Dedicated CSM"],
-      cta: "Talk to sales",
-      href: "/contact",
+      sub: "From $29,999 / yr",
+      features: [
+        "Everything in Growth",
+        "Unlimited AI usage",
+        "SSO + SCIM + audit log",
+        "Custom integrations",
+        "Dedicated CSM · 1h SLA",
+      ],
+      cta: { label: "Talk to sales", href: "/demo" },
     },
   ];
 
   return (
-    <section className="border-t border-border">
-      <div className="max-w-6xl mx-auto px-6 lg:px-10 py-24">
-        <div className="text-center mb-14">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
-            Pricing
+    <Section variant="tint" py="lg">
+      <Container>
+        <div className="max-w-2xl">
+          <Eyebrow className="mb-4">Pricing</Eyebrow>
+          <H2>Honest pricing that makes the math work.</H2>
+          <p className="mt-5 text-slate-600 text-lg leading-relaxed">
+            Free forever under five. $8/user thereafter. No per-module surcharges. No surprise tiers.
           </p>
-          <h2 className="text-4xl lg:text-5xl font-bold tracking-tight max-w-2xl mx-auto leading-[1.1]">
-            Free under five.<br />Honest above that.
-          </h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-5xl mx-auto">
+        <div className="mt-14 grid md:grid-cols-3 gap-5">
           {tiers.map((tier) => (
             <div
               key={tier.name}
-              className={`relative rounded-2xl border p-6 transition-fast ${
-                tier.highlighted
-                  ? "border-[color:var(--accent)] bg-background shadow-[0_30px_60px_-20px_rgba(124,58,237,0.4)] ring-1 ring-[color:var(--accent)]/20"
-                  : "border-border bg-background hover:border-muted-2/60"
+              className={`relative rounded-2xl p-7 bg-white border ${
+                tier.featured ? "border-slate-900 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.25)]" : "border-slate-200"
               }`}
             >
-              {tier.highlighted && (
-                <span
-                  className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-widest font-bold px-3 py-1 rounded-full"
-                  style={{ background: "var(--accent)", color: "var(--accent-contrast)" }}
-                >
-                  Most popular
+              {tier.featured && (
+                <span className="absolute -top-3 left-7 inline-flex items-center text-[10px] font-bold uppercase tracking-[0.18em] px-2.5 h-6 rounded-full bg-slate-900 text-white">
+                  Most chosen
                 </span>
               )}
-              <h3 className="text-lg font-bold mb-1">{tier.name}</h3>
-              <div className="mb-5">
-                <span className="text-4xl font-bold tracking-tight">{tier.price}</span>
-                {tier.price !== "Free" && tier.price !== "Custom" && (
-                  <span className="text-sm text-muted ml-1.5">{tier.sub}</span>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-700">{tier.name}</p>
+              <p className="mt-4 flex items-baseline gap-1.5">
+                <span className="text-5xl font-bold text-slate-900 tracking-tight">{tier.price}</span>
+                {tier.priceSuffix && (
+                  <span className="text-sm text-slate-500 font-medium">{tier.priceSuffix}</span>
                 )}
-                {(tier.price === "Free" || tier.price === "Custom") && (
-                  <p className="text-sm text-muted mt-1">{tier.sub}</p>
-                )}
-              </div>
+              </p>
+              <p className="mt-1.5 text-sm text-slate-500">{tier.sub}</p>
               <Link
-                href={tier.href}
-                className={`block text-center px-4 py-2.5 rounded-lg font-semibold text-sm mb-6 transition-fast ${
-                  tier.highlighted
-                    ? "bg-[color:var(--accent)] text-white hover:opacity-90"
-                    : "border border-border hover:bg-surface"
+                href={tier.cta.href}
+                className={`mt-6 inline-flex items-center justify-center w-full h-11 rounded-full font-semibold text-sm transition-colors ${
+                  tier.featured
+                    ? "bg-slate-900 text-white hover:bg-slate-800"
+                    : "bg-white border border-slate-200 text-slate-900 hover:bg-slate-50"
                 }`}
               >
-                {tier.cta}
+                {tier.cta.label}
               </Link>
-              <ul className="space-y-2">
-                {tier.bullets.map((b) => (
-                  <li key={b} className="flex items-start gap-2 text-[13px]">
-                    <Check size={13} className="text-[color:var(--accent-strong)] flex-shrink-0 mt-0.5" />
-                    <span className="leading-snug">{b}</span>
-                  </li>
-                ))}
-              </ul>
+              <CheckList items={tier.features} className="mt-7" />
             </div>
           ))}
         </div>
 
         <div className="mt-10 text-center">
-          <Link href="/pricing" className="inline-flex items-center gap-1.5 text-sm font-medium text-[color:var(--accent-strong)] hover:underline">
-            Full feature matrix
-            <ArrowRight size={13} />
+          <Link
+            href="/pricing"
+            className="inline-flex items-center gap-1 text-sm font-semibold text-slate-700 hover:text-slate-900"
+          >
+            See full pricing comparison <ChevronRight size={14} />
           </Link>
         </div>
-      </div>
-    </section>
+      </Container>
+    </Section>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 8. FAQ
+// 11. FAQ
 // ════════════════════════════════════════════════════════════════════
 
-function FAQ() {
-  const items: { q: string; a: string }[] = [
+function LandingFAQ() {
+  const items = [
     {
-      q: "What does WorkwrK actually replace?",
-      a: "Most customers retire 12–20 SaaS subscriptions including Asana/Notion (tasks + SOPs), Lattice (reviews + OKRs), BambooHR (HRIS), Bill.com (expenses + AP), Greenhouse (recruiting), Bonusly (kudos), and Carta (comp). One sign-in, one bill.",
+      q: "How is this different from an HRMS?",
+      a: "HRMS tools focus on HR administration — payroll, leave, attendance. workwrk is the business operating system: KPIs, SOPs, performance, tasks, money, culture, and AI. You'd put workwrk over (or instead of) an HRMS, not next to one.",
     },
     {
-      q: "How is the AI different from a chatbot?",
-      a: "Cmd-K queries read across every module in your tenant — people, tasks, KPIs, financials, comp, SOPs. It synthesizes answers from your live data. 'Who's overdue on reviews?' returns names + due dates with deep-links. Not a chatbot. A reading-comprehension layer over your company.",
+      q: "Do I have to migrate everything at once?",
+      a: "No. The hubs are independent. Most customers start with Work (tasks + OKRs + KPIs) or Culture (kudos + surveys), see the wins, then expand. We have a one-click importer for the top 12 SaaS tools.",
     },
     {
-      q: "Can I start free?",
-      a: "Yes. Free under 5 people, forever. No credit card. The full Home + People + Work + Culture hubs are unlocked. Money + Talent hubs unlock at $8/user/month (Growth tier).",
+      q: "What about AI — is it just a chatbot?",
+      a: "It's the runtime. AI triages your inbox, surfaces SOP drift, recommends promotions, flags KPI risk, and answers business questions in plain English over your real data — not a generic LLM. Cmd-K searches every entity.",
     },
     {
-      q: "How long does setup take?",
-      a: "Median is under an hour. Day 0 checklist: create org, departments, roles, offices, fiscal year. Then invite the team. There's a six-week implementation playbook for full company rollout in docs/implementation-guide.md.",
+      q: "How does workwrk price compare?",
+      a: "Free under 5 people. $8/user above that. A typical 50-person company replaces ~$12k/mo of disconnected tools with ~$400/mo of workwrk. The math works on day one.",
     },
     {
-      q: "Does WorkwrK support multi-currency / multi-region?",
-      a: "Yes. INR, AED, USD, EUR, SGD priced in-currency with compliant local invoicing. GST, VAT, and reverse-charge supported. 18 locales including Hindi, Arabic, Japanese, and Chinese.",
+      q: "Is it built for India / UAE / Southeast Asia?",
+      a: "Yes — INR/AED/SGD pricing, multi-currency, multi-location org charts, IST/Asia time zones across the workflow engine. We're built for the operational reality of fast-growing companies in those markets.",
     },
     {
-      q: "What about security and compliance?",
-      a: "SOC-2 Type II in progress. SAML SSO + SCIM provisioning on Enterprise. Field-level RBAC with a configurable permission matrix. Full audit log with severity tagging. GDPR org-delete with 30-day grace period. Region-locked storage available on Enterprise.",
+      q: "What about data security?",
+      a: "SOC 2 Type II, ISO 27001, GDPR + DPDP-compliant. SSO + SCIM on Scale. Encryption at rest and in transit. EU and India data residency options. See /security for the full deck.",
     },
   ];
 
-  return (
-    <section className="border-t border-border bg-[color:var(--surface)]/40">
-      <div className="max-w-3xl mx-auto px-6 lg:px-10 py-24">
-        <div className="text-center mb-14">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted font-semibold mb-3">
-            FAQ
-          </p>
-          <h2 className="text-4xl font-bold tracking-tight">
-            Questions teams actually ask.
-          </h2>
-        </div>
-
-        <div className="space-y-3">
-          {items.map((item) => (
-            <details
-              key={item.q}
-              className="group rounded-xl border border-border bg-background overflow-hidden"
-            >
-              <summary className="cursor-pointer px-5 py-4 flex items-center justify-between hover:bg-[color:var(--surface-elevated)] transition-fast list-none">
-                <span className="text-[15px] font-semibold pr-4">{item.q}</span>
-                <ChevronRight size={16} className="text-muted-2 flex-shrink-0 group-open:rotate-90 transition-fast" />
-              </summary>
-              <div className="px-5 pb-4 text-[14px] text-muted leading-relaxed">
-                {item.a}
-              </div>
-            </details>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 9. FINAL CTA
-// ════════════════════════════════════════════════════════════════════
-
-function FinalCTA() {
-  return (
-    <section className="border-t border-border">
-      <div className="max-w-4xl mx-auto px-6 lg:px-10 py-28 text-center">
-        <h2 className="text-4xl lg:text-5xl font-bold tracking-tight mb-5 leading-[1.05]">
-          Replace fifteen tools<br />
-          <span className="text-[color:var(--accent-strong)]">with one.</span>
-        </h2>
-        <p className="text-lg text-muted mb-10 max-w-xl mx-auto">
-          Free under five people. Cancel any time. Set up in under an hour.
-        </p>
-        <div className="flex items-center justify-center gap-3 flex-wrap">
-          <Link
-            href="/register"
-            className="inline-flex items-center gap-2 px-7 h-12 rounded-xl bg-[color:var(--accent)] text-white font-semibold hover:opacity-90 transition-fast shadow-[0_8px_24px_-8px_rgba(124,58,237,0.5)]"
-          >
-            Start free
-            <ArrowRight size={16} />
-          </Link>
-          <Link
-            href="/demo"
-            className="inline-flex items-center gap-2 px-7 h-12 rounded-xl border border-border font-semibold hover:bg-surface transition-fast"
-          >
-            See a demo
-          </Link>
-        </div>
-      </div>
-    </section>
-  );
+  return <FAQ items={items} />;
 }

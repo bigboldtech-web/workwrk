@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon } from "lucide-react";
+import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon, Grid3x3 } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import {
   DropdownMenu,
@@ -396,6 +396,17 @@ export function Topbar() {
         <CurrencySwitcher />
 
         <HelpButton />
+
+        {/* Apps Grid → Product Store. monday.com puts this in the same
+            slot; clicking opens the catalog of installable products. */}
+        <Link
+          href="/store"
+          className="app-icon-btn"
+          aria-label="Product Store"
+          title="Product Store"
+        >
+          <Grid3x3 size={16} />
+        </Link>
 
         {/* Notifications */}
         <DropdownMenu onOpenChange={(open) => { if (!open) setSnoozePickerOpenFor(null); }}>

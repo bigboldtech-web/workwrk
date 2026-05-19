@@ -1,153 +1,152 @@
-// Public careers page. Lists every OPEN Job across the WorkwrK
-// site itself (we eat our own dog food — these are real WorkwrK
-// openings). Org-aware deployments serving career.acme.com would
-// resolve org from the host header in proxy.ts and filter by it;
-// for now this page surfaces the canonical workwrk.com org.
-
-import Link from "next/link";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
-import { ArrowRight, Briefcase, MapPin, Building } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, MapPin, Heart, Globe, Compass, Coffee, Briefcase } from "lucide-react";
+import {
+  Section,
+  Container,
+  Eyebrow,
+  H1,
+  H2,
+  H3,
+  Button,
+  CTABand,
+  GradientText,
+  HUES,
+  type Hue,
+} from "@/components/marketing/primitives";
 
 export const metadata: Metadata = {
   title: "Careers — WorkwrK",
-  description:
-    "Open roles at WorkwrK. We're building the operating system that lets every business run with the rigor of a Fortune 500 — without the bureaucracy.",
+  description: "Build the operating system for the rest of the business world. Engineering, design, product, ops — open across India, UAE, and remote globally.",
+  alternates: { canonical: "https://workwrk.com/careers" },
 };
 
-export const dynamic = "force-dynamic";
+const PERKS: readonly { hue: Hue; icon: typeof Heart; title: string; body: string }[] = [
+  { hue: "fuchsia", icon: Heart,    title: "Real ownership",           body: "Engineers ship to prod week one. Designers own surfaces, not Figma files. PMs run the org chart." },
+  { hue: "emerald", icon: Globe,    title: "Remote-friendly",           body: "Offices in Bengaluru, Dubai, Singapore. Remote across IN/UAE/SEA timezones. Quarterly team gatherings." },
+  { hue: "amber",   icon: Coffee,   title: "We respect Fridays",        body: "Weekend protected. We ship every Tuesday, not every Friday-night. Sustainable cadence, every week, for years." },
+  { hue: "violet",  icon: Compass,  title: "Learning budget",           body: "$2,000/year per person. Books, courses, conferences. We expect you to spend it." },
+];
 
-const PUBLIC_ORG_SLUG = process.env.PUBLIC_CAREERS_ORG_SLUG ?? "workwrk";
+const ROLES: readonly { hue: Hue; team: string; title: string; loc: string; type: string; id: string }[] = [
+  { hue: "violet",  team: "Engineering", title: "Senior Full-Stack Engineer",       loc: "Bengaluru / Remote IN",          type: "Full-time", id: "swe-fs-01" },
+  { hue: "violet",  team: "Engineering", title: "Staff Backend Engineer (AI)",      loc: "Bengaluru / Remote IN",          type: "Full-time", id: "swe-be-02" },
+  { hue: "indigo",  team: "Engineering", title: "Mobile Engineer (React Native)",   loc: "Remote IN / UAE",                type: "Full-time", id: "swe-mob-03" },
+  { hue: "fuchsia", team: "Design",      title: "Product Designer — Money hub",     loc: "Remote (IST/GMT)",               type: "Full-time", id: "dsg-04" },
+  { hue: "emerald", team: "Product",     title: "PM — Talent hub",                   loc: "Bengaluru / Dubai",              type: "Full-time", id: "pm-tal-05" },
+  { hue: "amber",   team: "GTM",         title: "Solutions Architect — UAE",        loc: "Dubai",                           type: "Full-time", id: "sa-uae-06" },
+  { hue: "sky",     team: "GTM",         title: "Customer Success Manager — SEA",   loc: "Singapore / Remote SEA",          type: "Full-time", id: "csm-sea-07" },
+  { hue: "rose",    team: "Operations",  title: "Head of People",                    loc: "Bengaluru",                       type: "Full-time", id: "ops-hr-08" },
+];
 
-type JobRow = {
-  id: string;
-  title: string;
-  description: string | null;
-  employmentType: "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN" | "TEMPORARY";
-  location: string | null;
-  salaryMin: number | null;
-  salaryMax: number | null;
-  salaryCurrency: string;
-  department: { name: string } | null;
-};
+const TEAMS = ["All", "Engineering", "Design", "Product", "GTM", "Operations"];
 
-const TYPE_LABEL: Record<JobRow["employmentType"], string> = {
-  FULL_TIME: "Full-time",
-  PART_TIME: "Part-time",
-  CONTRACT: "Contract",
-  INTERN: "Internship",
-  TEMPORARY: "Temporary",
-};
-
-function fmtSalary(min: number | null, max: number | null, currency: string): string | null {
-  if (!min && !max) return null;
-  const fmt = (n: number) => {
-    try {
-      return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
-    } catch {
-      return `${currency} ${n.toFixed(0)}`;
-    }
-  };
-  if (min && max) return `${fmt(min)} – ${fmt(max)}`;
-  return min ? `${fmt(min)}+` : `Up to ${fmt(max!)}`;
-}
-
-export default async function CareersPage() {
-  const org = await prisma.organization.findFirst({
-    where: { slug: PUBLIC_ORG_SLUG },
-    select: { id: true, name: true },
-  });
-
-  const jobs: JobRow[] = org
-    ? (await prisma.job.findMany({
-        where: { organizationId: org.id, status: "OPEN" },
-        orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          employmentType: true,
-          location: true,
-          salaryMin: true,
-          salaryMax: true,
-          salaryCurrency: true,
-          department: { select: { name: true } },
-        },
-      })).map((j) => ({
-        ...j,
-        salaryMin: j.salaryMin ? Number(j.salaryMin) : null,
-        salaryMax: j.salaryMax ? Number(j.salaryMax) : null,
-      }))
-    : [];
-
-  // Group by department so the listing reads as departments → roles.
-  const grouped = new Map<string, JobRow[]>();
-  for (const j of jobs) {
-    const k = j.department?.name ?? "General";
-    const arr = grouped.get(k) ?? [];
-    arr.push(j);
-    grouped.set(k, arr);
-  }
-
+export default function CareersPage() {
   return (
-    <div className="bg-white">
-      <section className="px-6 sm:px-8 py-16 sm:py-24 max-w-5xl mx-auto">
-        <div className="text-xs uppercase tracking-widest text-emerald-700 mb-4 flex items-center gap-2">
-          <Briefcase size={12} /> Careers at WorkwrK
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight text-slate-900">
-          Build the operating system every business deserves.
-        </h1>
-        <p className="mt-5 text-lg text-slate-600 max-w-2xl">
-          We're a small team shipping fast: people, performance, KPIs, SOPs, payroll, benefits, financials — everything an SMB needs to run with Fortune-500 rigor. Bring craft, judgment, and ownership.
-        </p>
-      </section>
-
-      <section className="px-6 sm:px-8 pb-24 max-w-5xl mx-auto">
-        {jobs.length === 0 ? (
-          <div className="border border-slate-200 rounded-xl p-12 text-center">
-            <div className="text-slate-500 text-sm">
-              No open roles right now. Check back soon, or send your resume to{" "}
-              <a className="text-slate-900 underline" href="mailto:hiring@workwrk.com">hiring@workwrk.com</a>.
+    <>
+      <Section variant="mesh" py="lg" className="pt-10 lg:pt-14">
+        <Container>
+          <div className="max-w-3xl">
+            <Eyebrow hue="fuchsia" className="mb-5">Careers</Eyebrow>
+            <H1>
+              Build the operating system <br />
+              <GradientText hue="fuchsia">for the rest of the business world.</GradientText>
+            </H1>
+            <p className="mt-6 text-lg lg:text-xl text-slate-600 leading-relaxed max-w-2xl">
+              We&apos;re 35 operators building workwrk for 500+ teams across 8 countries.
+              If &ldquo;build something Fortune 500s wish they could buy&rdquo; is your kind of mission, read on.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button href="#roles" variant="secondary" hue="fuchsia" size="lg" rightIcon={<ArrowRight size={15} />}>
+                See open roles ({ROLES.length})
+              </Button>
+              <Button href="mailto:hiring@workwrk.com" variant="outline" size="lg">Spontaneous application</Button>
             </div>
           </div>
-        ) : (
-          <div className="space-y-10">
-            {Array.from(grouped.entries()).map(([dept, items]) => (
-              <div key={dept}>
-                <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-slate-500 mb-3">
-                  <Building size={12} /> {dept}
+        </Container>
+      </Section>
+
+      <Section py="lg">
+        <Container>
+          <div className="max-w-2xl">
+            <Eyebrow hue="emerald" className="mb-4">What it&apos;s like</Eyebrow>
+            <H2>Four things <GradientText hue="emerald">we care about.</GradientText></H2>
+          </div>
+          <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {PERKS.map((p) => {
+              const t = HUES[p.hue];
+              return (
+                <div key={p.title} className="p-6 bg-white border border-slate-200 rounded-2xl">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${t.bgTint} ${t.text} border ${t.border}`}>
+                    <p.icon size={18} strokeWidth={2.4} />
+                  </div>
+                  <p className="mt-4 font-bold text-slate-900">{p.title}</p>
+                  <p className="mt-2 text-sm text-slate-600 leading-relaxed">{p.body}</p>
                 </div>
-                <div className="border border-slate-200 rounded-xl divide-y divide-slate-200 overflow-hidden">
-                  {items.map((j) => (
-                    <Link
-                      key={j.id}
-                      href={`/careers/${j.id}`}
-                      className="block px-5 py-4 hover:bg-slate-50 transition flex items-center justify-between gap-4"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium text-slate-900">{j.title}</div>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
-                          <span>{TYPE_LABEL[j.employmentType]}</span>
-                          {j.location && (
-                            <span className="flex items-center gap-1">
-                              <MapPin size={11} /> {j.location}
-                            </span>
-                          )}
-                          {fmtSalary(j.salaryMin, j.salaryMax, j.salaryCurrency) && (
-                            <span>{fmtSalary(j.salaryMin, j.salaryMax, j.salaryCurrency)}</span>
-                          )}
-                        </div>
-                      </div>
-                      <ArrowRight size={16} className="text-slate-400 flex-shrink-0" />
-                    </Link>
-                  ))}
-                </div>
-              </div>
+              );
+            })}
+          </div>
+        </Container>
+      </Section>
+
+      <section id="roles" className="scroll-mt-20 bg-slate-50 py-20 lg:py-28">
+        <Container>
+          <div className="max-w-2xl">
+            <Eyebrow hue="violet" className="mb-4">Open roles</Eyebrow>
+            <H2>{ROLES.length} positions <GradientText hue="violet">currently open</GradientText>.</H2>
+          </div>
+
+          <div className="mt-10 flex flex-wrap gap-2">
+            {TEAMS.map((t) => (
+              <button
+                key={t}
+                className={`inline-flex items-center text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full border transition ${
+                  t === "All" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                {t}
+              </button>
             ))}
           </div>
-        )}
+
+          <div className="mt-8 space-y-3">
+            {ROLES.map((r) => {
+              const t = HUES[r.hue];
+              return (
+                <Link
+                  key={r.id}
+                  href={`/careers/${r.id}`}
+                  className="group p-5 bg-white border border-slate-200 rounded-2xl flex flex-wrap items-center justify-between gap-4 hover:border-slate-300 hover:shadow-[0_10px_28px_-12px_rgba(15,23,42,0.12)] transition"
+                >
+                  <div className="flex items-start gap-4 min-w-0">
+                    <span className={`w-10 h-10 rounded-xl ${t.bgTint} ${t.text} border ${t.border} flex items-center justify-center flex-shrink-0`}>
+                      <Briefcase size={18} strokeWidth={2.4} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 tracking-tight">{r.title}</p>
+                      <p className="text-xs text-slate-500 mt-1">{r.team} · {r.type}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="hidden md:inline-flex items-center gap-1.5 text-xs text-slate-600">
+                      <MapPin size={12} /> {r.loc}
+                    </span>
+                    <ArrowRight size={16} className={`${t.text} group-hover:translate-x-1 transition`} />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </Container>
       </section>
-    </div>
+
+      <CTABand
+        hue="fuchsia"
+        title={<>Don&apos;t see your role <GradientText hue="amber">listed</GradientText>?</>}
+        body="We're always looking. Drop us a line — hiring@workwrk.com — and tell us what you'd build."
+        primary={{ label: "Email hiring@workwrk.com", href: "mailto:hiring@workwrk.com" }}
+        secondary={{ label: "Read more about us",     href: "/about" }}
+      />
+    </>
   );
 }
