@@ -7,7 +7,7 @@
 // Static. No client code needed.
 
 import Link from "next/link";
-import { LogoMark } from "@/components/brand/logo";
+import { LogoLockup } from "@/components/brand/logo";
 
 export function MarketingFooter() {
   return (
@@ -18,8 +18,7 @@ export function MarketingFooter() {
           {/* ── Brand column ─────────────────────────────────────── */}
           <div className="col-span-2 md:col-span-4">
             <Link href="/" className="inline-flex items-center gap-2.5">
-              <LogoMark size={32} title="workwrk" />
-              <span className="font-extrabold text-xl text-slate-900 tracking-[-0.045em]">workwrk</span>
+              <LogoLockup size={24} />
             </Link>
             <p className="mt-5 text-slate-600 leading-relaxed max-w-sm">
               The business operating system for teams who outgrew spreadsheets

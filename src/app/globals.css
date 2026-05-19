@@ -81,6 +81,43 @@
   --row-h-compact: 32px;
 
   --scrollbar-color: #DADAD7;
+
+  /* ═══════════════════════════════════════════════════════════════
+   * monday-style brand tokens. Used by the marketing site only.
+   * Three primary brand hues + four status hues. Every status pill,
+   * board column, and category chip uses one of these — no rainbow
+   * soup. Category-coding, not decoration.
+   * ═══════════════════════════════════════════════════════════════ */
+  --brand-red: #FF3D57;          /* primary brand — CTAs, accents */
+  --brand-red-hover: #FF1F3F;
+  --brand-red-soft: #FFEDF0;
+  --brand-blue: #0073EA;         /* secondary — links, second-tier CTAs */
+  --brand-blue-hover: #0060C2;
+  --brand-blue-soft: #E6F2FD;
+  --brand-yellow: #FFCB00;       /* accent — highlights, attention pills */
+  --brand-yellow-soft: #FFF6D6;
+
+  /* Status hues (the board palette). Use these for every column/pill. */
+  --status-working: #FDAB3D;     /* orange — "Working on it" */
+  --status-done:    #00C875;     /* green  — "Done" */
+  --status-stuck:   #E2445C;     /* red    — "Stuck" */
+  --status-pending: #C4C4C4;     /* slate  — "Not started" */
+  --status-info:    #579BFC;     /* blue   — "Review" */
+  --status-special: #A25DDC;     /* purple — "Special" */
+
+  /* Marketing-specific neutral scale (independent of dashboard tokens). */
+  --m-bg:          #FFFFFF;
+  --m-surface:     #F6F7FB;
+  --m-border:      #E6E9EF;
+  --m-border-dark: #D0D4DC;
+  --m-text:        #181B34;
+  --m-text-muted:  #676879;
+  --m-text-soft:   #9B9FAE;
+
+  /* Marketing motion — slower, more confident than dashboard motion. */
+  --m-ease:        cubic-bezier(0.22, 1, 0.36, 1);
+  --m-duration-md: 400ms;
+  --m-duration-lg: 700ms;
 }
 
 .dark {

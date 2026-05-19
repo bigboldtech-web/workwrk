@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { useEffect, useState, useRef } from "react";
 import { ChevronDown, ArrowRight, Menu, X } from "lucide-react";
-import { LogoMark } from "@/components/brand/logo";
+import { LogoLockup } from "@/components/brand/logo";
 import { HUBS, HUES } from "@/components/marketing/primitives";
 
 export function MarketingTopbar() {
@@ -33,11 +33,10 @@ export function MarketingTopbar() {
       <div className="max-w-7xl mx-auto px-6 lg:px-10 h-16 flex items-center justify-between gap-4">
         <Link
           href="/"
-          className="flex items-center gap-2.5 group flex-shrink-0"
+          className="flex items-center group flex-shrink-0"
           aria-label="workwrk home"
         >
-          <LogoMark size={28} title="workwrk" />
-          <span className="font-bold text-[17px] text-slate-900 tracking-[-0.04em]">workwrk</span>
+          <LogoLockup size={20} />
         </Link>
 
         <nav className="hidden lg:flex items-center gap-1 text-sm">
@@ -282,9 +281,8 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
   return (
     <div className="lg:hidden fixed inset-0 z-50 bg-white overflow-y-auto">
       <div className="flex items-center justify-between h-16 px-6 border-b border-slate-200">
-        <Link href="/" onClick={onClose} className="flex items-center gap-2.5">
-          <LogoMark size={26} title="workwrk" />
-          <span className="font-bold text-[17px] text-slate-900 tracking-[-0.04em]">workwrk</span>
+        <Link href="/" onClick={onClose} className="flex items-center">
+          <LogoLockup size={19} />
         </Link>
         <button
           onClick={onClose}
