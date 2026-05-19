@@ -114,6 +114,10 @@ model Organization {
   crmAccounts           Account[]
   crmOpportunities      Opportunity[]
   pipelineStages        PipelineStage[]
+  // 🆕 Phase E3 — WorkwrK ITSM
+  itsmTickets           Ticket[]
+  itsmIncidents         Incident[]
+  itsmKbArticles        KbArticle[]
 
   @@index([slug])
 }
@@ -4565,4 +4569,135 @@ model Opportunity {
   @@index([organizationId, ownerId])
   @@index([organizationId, accountId])
   @@index([expectedCloseDate])
+}
+
+// ==========================================
+// 🆕 PHASE E3 · WorkwrK ITSM
+// IT Service Management — internal IT tickets, incidents, knowledge
+// base. Distinct from /helpdesk (external customer support) which lives
+// under the SUPPORT suite. ITSM is for the IT team handling employee
+// requests + production incidents.
+// ==========================================
+
+model Ticket {
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?         @db.Text
+  status         TicketStatus    @default(OPEN)
+  priority       TicketPriority  @default(NORMAL)
+  category       String?         // "Access" | "Hardware" | "Software" | "Network" | ...
+  source         TicketSource    @default(PORTAL)
+  requesterId    String?         // user who filed it (usually employee)
+  assigneeId     String?         // IT staff handling it
+  slaTier        String?         // "P1" | "Standard" | "VIP"
+  dueAt          DateTime?
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+  resolutionNotes String?        @db.Text
+  customFields   Json            @default("{}")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, assigneeId])
+  @@index([organizationId, priority])
+  @@index([requesterId])
+  @@index([dueAt])
+}
+
+enum TicketStatus {
+  OPEN
+  TRIAGED
+  IN_PROGRESS
+  WAITING_ON_USER
+  WAITING_ON_VENDOR
+  RESOLVED
+  CLOSED
+  CANCELLED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+  CRITICAL
+}
+
+enum TicketSource {
+  PORTAL
+  EMAIL
+  CHAT
+  PHONE
+  API
+  AGENT
+}
+
+model Incident {
+  id              String           @id @default(cuid())
+  organizationId  String
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title           String
+  summary         String?          @db.Text
+  severity        IncidentSeverity @default(SEV3)
+  status          IncidentStatus   @default(DETECTED)
+  commanderId     String?          // incident commander
+  affectedServices Json            @default("[]")    // string[] of service names
+  startedAt       DateTime         @default(now())
+  acknowledgedAt  DateTime?
+  resolvedAt      DateTime?
+  postmortemUrl   String?
+  rootCause       String?          @db.Text
+  customFields    Json             @default("{}")
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, severity])
+  @@index([startedAt])
+}
+
+enum IncidentSeverity {
+  SEV1
+  SEV2
+  SEV3
+  SEV4
+  SEV5
+}
+
+enum IncidentStatus {
+  DETECTED
+  ACKNOWLEDGED
+  INVESTIGATING
+  MITIGATING
+  RESOLVED
+  POSTMORTEM
+  CLOSED
+}
+
+model KbArticle {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  slug           String
+  title          String
+  body           String       @db.Text
+  excerpt        String?
+  category       String?
+  tags           Json         @default("[]")
+  authorId       String?
+  publishedAt    DateTime?
+  viewCount      Int          @default(0)
+  helpfulCount   Int          @default(0)
+  notHelpfulCount Int         @default(0)
+  archivedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, category])
+  @@index([publishedAt])
 }

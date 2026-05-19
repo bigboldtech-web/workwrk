@@ -344,14 +344,14 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   {
     slug: "workwrk-itsm",
     name: "WorkwrK ITSM",
-    tagline: "Tickets, incidents, SLAs",
+    tagline: "Tickets, incidents, SLAs, KB",
     description:
-      "Internal IT tickets, incidents, problems, changes, SLAs, knowledge base. Jira Service Management for SMB IT teams.",
+      "Internal IT service management for the IT team. Ticket queue (8 statuses, 5 priority tiers), incident timeline with severity (SEV1-SEV5) + lifecycle (Detected → Acknowledged → Investigating → Mitigating → Resolved → Postmortem), and an integrated knowledge base. Jira Service Management for SMB IT teams.",
     iconKey: "Headphones",
     hue: "blue",
     suite: "IT",
     tier: "PLUS",
-    status: "PREVIEW",
+    status: "LIVE",
     defaultEnabled: false,
     displayOrder: 400,
     pathPrefix: "/itsm",

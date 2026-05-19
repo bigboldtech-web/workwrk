@@ -65,6 +65,7 @@ import {
   MoreHorizontal,
   Store,
   TrendingUp,
+  Headphones,
 } from "lucide-react";
 
 type NavItem = {
@@ -197,6 +198,8 @@ const navigation: NavItem[] = [
   { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, comingSoon: true, section: "workspace", hue: "rose" },
   // ── Sales suite (CRM)
   { name: "CRM", key: "crm", href: "/crm", icon: TrendingUp, section: "workspace", hue: "green" },
+  // ── IT Service Management (ITSM)
+  { name: "ITSM", key: "itsm", href: "/itsm", icon: Headphones, managerOnly: true, section: "workspace", hue: "blue" },
   // ── Money / finance suite
   { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "workspace", hue: "amber" },
   { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "workspace", hue: "sky" },
