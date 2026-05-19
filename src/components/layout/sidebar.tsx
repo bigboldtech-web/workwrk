@@ -66,6 +66,7 @@ import {
   Store,
   TrendingUp,
   Headphones,
+  Code,
 } from "lucide-react";
 
 type NavItem = {
@@ -200,6 +201,10 @@ const navigation: NavItem[] = [
   { name: "CRM", key: "crm", href: "/crm", icon: TrendingUp, section: "workspace", hue: "green" },
   // ── IT Service Management (ITSM)
   { name: "ITSM", key: "itsm", href: "/itsm", icon: Headphones, managerOnly: true, section: "workspace", hue: "blue" },
+  // ── Marketing suite
+  { name: "Marketing", key: "marketing", href: "/marketing", icon: Megaphone, managerOnly: true, section: "workspace", hue: "amber" },
+  // ── Engineering suite
+  { name: "Dev", key: "dev", href: "/dev", icon: Code, managerOnly: true, section: "workspace", hue: "violet" },
   // ── Money / finance suite
   { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "workspace", hue: "amber" },
   { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "workspace", hue: "sky" },

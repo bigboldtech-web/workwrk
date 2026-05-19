@@ -118,6 +118,14 @@ model Organization {
   itsmTickets           Ticket[]
   itsmIncidents         Incident[]
   itsmKbArticles        KbArticle[]
+  // 🆕 Phase E4 — WorkwrK Marketing
+  mktCampaigns          Campaign[]
+  mktContentItems       ContentItem[]
+  mktEventBriefs        EventBrief[]
+  // 🆕 Phase E5 — WorkwrK Dev
+  devSprints            Sprint[]
+  devReleases           Release[]
+  devRoadmapItems       RoadmapItem[]
 
   @@index([slug])
 }
@@ -4700,4 +4708,254 @@ model KbArticle {
   @@unique([organizationId, slug])
   @@index([organizationId, category])
   @@index([publishedAt])
+}
+
+// ==========================================
+// 🆕 PHASE E4 · WorkwrK Marketing
+// Campaigns + Content calendar + Events. Distinct from /announcements
+// (internal company comms) — this is external go-to-market work
+// owned by the CMO + marketing managers.
+// ==========================================
+
+model Campaign {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?        @db.Text
+  status         CampaignStatus @default(PLANNING)
+  channel        String?        // "Email" | "Paid Search" | "Social" | "Outbound" | "Event" | "Content" | "Webinar"
+  budget         Decimal?       @db.Decimal(12, 2)
+  spent          Decimal?       @db.Decimal(12, 2)
+  currency       String         @default("USD")
+  startDate      DateTime?
+  endDate        DateTime?
+  ownerId        String?
+  goalMetric     String?        // "Leads" | "MQLs" | "Pipeline" | "Brand"
+  goalTarget     Int?
+  goalActual     Int?
+  utmCampaign    String?
+  customFields   Json           @default("{}")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, ownerId])
+  @@index([startDate])
+}
+
+enum CampaignStatus {
+  PLANNING
+  APPROVED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+model ContentItem {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  type           ContentType   @default(BLOG_POST)
+  status         ContentStatus @default(IDEA)
+  channel        String?       // "Blog" | "LinkedIn" | "Twitter" | "Email" | "YouTube" | "TikTok"
+  ownerId        String?
+  authorId       String?       // can differ from owner
+  briefUrl       String?
+  draftUrl       String?
+  publishedUrl   String?
+  scheduledFor   DateTime?
+  publishedAt    DateTime?
+  campaignId     String?       // optional link to parent Campaign
+  notes          String?       @db.Text
+  customFields   Json          @default("{}")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, type])
+  @@index([scheduledFor])
+}
+
+enum ContentType {
+  BLOG_POST
+  EMAIL
+  SOCIAL_POST
+  VIDEO
+  PODCAST
+  WHITEPAPER
+  EBOOK
+  CASE_STUDY
+  WEBINAR
+  ONE_PAGER
+  PRESS_RELEASE
+  OTHER
+}
+
+enum ContentStatus {
+  IDEA
+  BRIEFED
+  IN_DRAFT
+  IN_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+model EventBrief {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?        @db.Text
+  type           String?        // "Conference" | "Trade Show" | "Webinar" | "Customer Event" | "Field Event"
+  format         String?        // "In-person" | "Virtual" | "Hybrid"
+  startDate      DateTime?
+  endDate        DateTime?
+  location       String?
+  capacity       Int?
+  registeredCount Int?          @default(0)
+  attendedCount  Int?           @default(0)
+  budget         Decimal?       @db.Decimal(12, 2)
+  spent          Decimal?       @db.Decimal(12, 2)
+  status         EventStatus    @default(PLANNING)
+  ownerId        String?
+  campaignId     String?
+  url            String?
+  notes          String?        @db.Text
+  customFields   Json           @default("{}")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([organizationId, status])
+  @@index([startDate])
+}
+
+enum EventStatus {
+  PLANNING
+  PROMOTING
+  REGISTERING
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+// ==========================================
+// 🆕 PHASE E5 · WorkwrK Dev
+// Software engineering surface. Sprints + Releases + Roadmap. Note:
+// production incidents already live in the ITSM Incident model — Dev
+// teams use the SAME model since incidents cross both surfaces. Dev
+// gets its own Sprint board distinct from /tasks (which is the general
+// task spine).
+// ==========================================
+
+model Sprint {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String       // "Sprint 23" | "Q1 W3"
+  goal           String?      @db.Text
+  startDate      DateTime
+  endDate        DateTime
+  status         SprintStatus @default(PLANNED)
+  teamId         String?      // optional team/squad assignment
+  capacityPoints Int?         // story points the team can absorb
+  committedPoints Int?
+  completedPoints Int?
+  velocityRolling7 Decimal?   @db.Decimal(8, 2)
+  retroNotes     String?      @db.Text
+  customFields   Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, startDate])
+}
+
+enum SprintStatus {
+  PLANNED
+  ACTIVE
+  REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+model Release {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  version        String        // "2024.11.3" | "v3.0.0-beta.2"
+  name           String?
+  description    String?       @db.Text
+  changelog      String?       @db.Text
+  status         ReleaseStatus @default(PLANNED)
+  releaseType    String?       // "Major" | "Minor" | "Patch" | "Hotfix"
+  scheduledFor   DateTime?
+  shippedAt      DateTime?
+  rolledBackAt   DateTime?
+  shipNotesUrl   String?
+  isPublic       Boolean       @default(false)  // public changelog page
+  customFields   Json          @default("{}")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([organizationId, version])
+  @@index([organizationId, status])
+  @@index([scheduledFor])
+}
+
+enum ReleaseStatus {
+  PLANNED
+  IN_DEVELOPMENT
+  READY
+  ROLLING_OUT
+  SHIPPED
+  ROLLED_BACK
+  CANCELLED
+}
+
+model RoadmapItem {
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?         @db.Text
+  theme          String?         // "Performance" | "AI" | "Mobile" | "Enterprise" | ...
+  priority       RoadmapPriority @default(P2)
+  status         RoadmapStatus   @default(EXPLORING)
+  quarter        String?         // "2024-Q4" | "2025-Q1"
+  ownerId        String?
+  effortPoints   Int?            // T-shirt sized in points
+  impactScore    Int?            // 1-10
+  parentId       String?
+  parent         RoadmapItem?    @relation("RoadmapTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       RoadmapItem[]   @relation("RoadmapTree")
+  publicVisible  Boolean         @default(false)
+  customFields   Json            @default("{}")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, quarter])
+  @@index([parentId])
+}
+
+enum RoadmapPriority {
+  P0
+  P1
+  P2
+  P3
+}
+
+enum RoadmapStatus {
+  EXPLORING
+  COMMITTED
+  IN_PROGRESS
+  BETA
+  SHIPPED
+  PAUSED
+  CANCELLED
 }
