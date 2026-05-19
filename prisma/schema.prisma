@@ -109,6 +109,11 @@ model Organization {
   items                 Item[]
   agents                Agent[]
   apps                  App[]
+  // 🆕 Phase E2 — WorkwrK CRM
+  crmLeads              Lead[]
+  crmAccounts           Account[]
+  crmOpportunities      Opportunity[]
+  pipelineStages        PipelineStage[]
 
   @@index([slug])
 }
@@ -4433,4 +4438,131 @@ enum AppStatus {
   DRAFT
   PUBLISHED
   ARCHIVED
+}
+
+// ==========================================
+// 🆕 PHASE E2 · WorkwrK CRM
+// First showcase product beyond HR. Validates the Product Store
+// architecture with a brand-new buyer story (Sales VP). 4 core models:
+// Lead (top-of-funnel), Account (customer org), Opportunity (deal),
+// PipelineStage (per-org configurable workflow). Activities/calls/
+// emails leverage the existing ActivityLog rather than a new model.
+// ==========================================
+
+model Lead {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  firstName      String
+  lastName       String?
+  email          String?
+  phone          String?
+  company        String?
+  title          String?
+  source         String?       // "website" | "referral" | "outbound" | "linkedin" | "event" | "import"
+  status         LeadStatus    @default(NEW)
+  score          Int           @default(0)
+  notes          String?       @db.Text
+  ownerId        String?       // assigned SDR/AE
+  convertedAt    DateTime?
+  convertedToAccountId    String?
+  convertedToOpportunityId String?
+  customFields   Json          @default("{}")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, ownerId])
+  @@index([email])
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+  DISQUALIFIED
+}
+
+model Account {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  domain         String?
+  industry       String?
+  size           String?       // "1-10", "11-50", etc.
+  website        String?
+  phone          String?
+  description    String?       @db.Text
+  type           AccountType   @default(PROSPECT)
+  ownerId        String?
+  customFields   Json          @default("{}")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  opportunities  Opportunity[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, type])
+  @@index([organizationId, ownerId])
+}
+
+enum AccountType {
+  PROSPECT
+  CUSTOMER
+  PARTNER
+  CHURNED
+  COMPETITOR
+}
+
+model PipelineStage {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  position       Int           @default(0)
+  // Default % chance the deal closes when in this stage. Drives weighted
+  // forecast on the kanban board.
+  probability    Int           @default(50)
+  color          String?
+  isWon          Boolean       @default(false)
+  isLost         Boolean       @default(false)
+  archivedAt     DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  opportunities  Opportunity[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, position])
+}
+
+model Opportunity {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  accountId      String?
+  account        Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  pipelineStageId String?
+  pipelineStage  PipelineStage? @relation(fields: [pipelineStageId], references: [id], onDelete: SetNull)
+  amount         Decimal?      @db.Decimal(14, 2)
+  currency       String        @default("USD")
+  // Expected close date drives quarter buckets + age-in-stage alerts.
+  expectedCloseDate DateTime?
+  closedAt       DateTime?     // set by the Won/Lost transition
+  isWon          Boolean?      // null = open
+  lossReason     String?
+  description    String?       @db.Text
+  ownerId        String?       // assigned AE
+  customFields   Json          @default("{}")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId, pipelineStageId])
+  @@index([organizationId, ownerId])
+  @@index([organizationId, accountId])
+  @@index([expectedCloseDate])
 }

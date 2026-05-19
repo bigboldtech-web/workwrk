@@ -35,7 +35,10 @@ export default function DashboardLayout({
         .then((res) => res.json())
         .then((data) => {
           if (!data.setupCompleted) {
-            router.push("/setup");
+            // Phase B3: new signups land on /onboard (department router +
+            // product picker). The legacy /setup wizard still works at
+            // its own URL for anyone who navigates there directly.
+            router.push("/onboard");
           } else {
             setSetupChecked(true);
           }

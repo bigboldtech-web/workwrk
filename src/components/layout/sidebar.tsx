@@ -64,6 +64,7 @@ import {
   Wand2,
   MoreHorizontal,
   Store,
+  TrendingUp,
 } from "lucide-react";
 
 type NavItem = {
@@ -194,6 +195,8 @@ const navigation: NavItem[] = [
   { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true, comingSoon: true, section: "workspace", hue: "green" },
   { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true, comingSoon: true, section: "workspace", hue: "pink" },
   { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, comingSoon: true, section: "workspace", hue: "rose" },
+  // ── Sales suite (CRM)
+  { name: "CRM", key: "crm", href: "/crm", icon: TrendingUp, section: "workspace", hue: "green" },
   // ── Money / finance suite
   { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "workspace", hue: "amber" },
   { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "workspace", hue: "sky" },
