@@ -16,6 +16,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { BoardView, type BoardField } from "@/components/board-view/board-view";
 
 type FieldType = "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX" | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL";
 
@@ -168,55 +169,42 @@ export default function BuildAppPage() {
         </div>
       )}
 
-      {/* Data table */}
-      <div className="rounded-xl border border-border bg-surface overflow-hidden">
-        {rows.length === 0 ? (
-          <div className="text-center py-16">
-            <Wand2 size={32} className="mx-auto mb-2 text-muted-2" />
-            <p className="font-medium text-sm mb-1">No rows yet</p>
-            <p className="text-xs text-muted mb-4">Add the first row to populate your app.</p>
-            <button
-              type="button"
-              onClick={() => setShowNewRow(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium"
-            >
-              <Plus size={11} /> Add first row
-            </button>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-surface-2 text-xs uppercase tracking-wider text-muted-2">
-                <tr>
-                  {fields.map((f) => <th key={f.key} className="text-left px-4 py-2.5 font-medium">{f.label}</th>)}
-                  <th className="px-2 py-2.5 w-8" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, idx) => (
-                  <tr key={idx} className="border-t border-border hover:bg-surface-2 group">
-                    {fields.map((f) => (
-                      <td key={f.key} className="px-4 py-2.5 text-sm">
-                        <CellValue field={f} value={row[f.key]} />
-                      </td>
-                    ))}
-                    <td className="px-2 py-2.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => deleteRow(idx)}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-muted-2 hover:text-rose-600 transition-opacity"
-                        aria-label="Delete row"
-                      >
-                        <X size={12} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* Multi-view rendering — Table / Kanban / Calendar / Gallery */}
+      {rows.length === 0 ? (
+        <div className="rounded-xl border border-border bg-surface text-center py-16">
+          <Wand2 size={32} className="mx-auto mb-2 text-muted-2" />
+          <p className="font-medium text-sm mb-1">No rows yet</p>
+          <p className="text-xs text-muted mb-4">Add the first row to populate your app.</p>
+          <button
+            type="button"
+            onClick={() => setShowNewRow(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium"
+          >
+            <Plus size={11} /> Add first row
+          </button>
+        </div>
+      ) : (
+        <BoardView
+          boardKey={`build-app:${app.slug}`}
+          items={rows.map((row, idx) => ({ ...row, __idx: idx }))}
+          fields={fields as BoardField[]}
+          getId={(r) => String((r as { __idx: number }).__idx)}
+          getTitle={(r) => {
+            const firstText = fields.find((f) => f.fieldType === "TEXT");
+            return String((r as Record<string, unknown>)[firstText?.key ?? fields[0]?.key ?? ""] ?? "Untitled");
+          }}
+          getValue={(r, key) => (r as Record<string, unknown>)[key]}
+          onChangeField={async (id, fieldKey, value) => {
+            const idx = Number(id);
+            const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ index: idx, row: { [fieldKey]: value } }),
+            });
+            if (res.ok) await load();
+          }}
+        />
+      )}
 
       {showNewRow && (
         <NewRowModal
