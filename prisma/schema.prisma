@@ -4384,6 +4384,7 @@ model Agent {
 
   runs     AgentRun[]
   memories AgentMemory[]
+  chatSessions ChatSession[]
 
   @@unique([organizationId, slug])
   @@index([organizationId, status])
@@ -5138,6 +5139,10 @@ model ChatSession {
   title          String?       // auto-derived from first user message (truncated)
   pinned         Boolean       @default(false)
   archivedAt     DateTime?
+  // Optional agent this session is scoped to. Null = general Sidekick.
+  // When set, /api/sidekick/chat uses that agent's systemPrompt instead.
+  agentId        String?
+  agent          Agent?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
   // Last assistant model used for this session — handy for "the model
   // changed mid-thread" diagnostics + cost analytics.
   lastModel      String?
@@ -5151,6 +5156,7 @@ model ChatSession {
 
   @@index([organizationId, userId, updatedAt])
   @@index([userId, pinned, updatedAt])
+  @@index([agentId])
 }
 
 model ChatMessage {

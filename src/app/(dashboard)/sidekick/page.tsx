@@ -8,6 +8,7 @@
 // AI client (BYOK if Enterprise).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Sparkles,
   Plus,
@@ -59,8 +60,11 @@ const STARTERS = [
 ] as const;
 
 export default function SidekickPage() {
+  const searchParams = useSearchParams();
+  const initialSessionId = searchParams.get("session");
+
   const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(initialSessionId);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -75,6 +79,13 @@ export default function SidekickPage() {
   }, []);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // If a ?session=<id> arrived via the URL (e.g. from /agents → Chat
+  // with <agent>), auto-load that session's messages on mount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (initialSessionId) openSession(initialSessionId);
+  }, []);
 
   // Auto-scroll to bottom on new messages.
   useEffect(() => {

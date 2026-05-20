@@ -21,7 +21,7 @@ import { z } from "zod";
 // for general chat. Org BYOK preferredModel overrides this.
 const SIDEKICK_DEFAULT_MODEL = "claude-sonnet-4-6";
 
-const SYSTEM_PROMPT = `You are Sidekick, the AI assistant inside WorkwrK — a modular Work OS.
+const DEFAULT_SYSTEM_PROMPT = `You are Sidekick, the AI assistant inside WorkwrK — a modular Work OS.
 
 You help the user with everyday work tasks across whatever products their team has installed: boards (Work), SOPs, OKRs, Meetings, Culture, CRM, ITSM, Marketing, Dev, Legal, and more.
 
@@ -29,7 +29,7 @@ When the user asks you to do something you can act on inside WorkwrK (create a b
 
 Keep responses concise and useful. Use markdown for structure when helpful (lists, headings, code blocks). When appropriate, suggest the next step the user can take.
 
-You do NOT have direct access to read or write the user's WorkwrK data yet — that capability ships in Phase D when Agents and tools are wired. For now you can reason about anything they describe in the conversation.`;
+You do NOT have direct access to read or write the user's WorkwrK data yet — that capability ships in Phase D3 when tool calling is wired. For now you can reason about anything they describe in the conversation.`;
 
 const inputSchema = z.object({
   sessionId: z.string().min(1),
@@ -42,8 +42,11 @@ async function ctxAndSession(sessionId: string) {
   const userId = (session.user as { id?: string }).id;
   if (!userId) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
 
+  // Load chat session WITH its scoped agent (if any) so we can pull
+  // agent-specific systemPrompt + modelOverride in one query.
   const chat = await prisma.chatSession.findFirst({
     where: { id: sessionId, userId, archivedAt: null },
+    include: { agent: { select: { id: true, name: true, systemPrompt: true, modelOverride: true, status: true } } },
   });
   if (!chat) return { error: NextResponse.json({ error: "session not found" }, { status: 404 }) };
   return { userId, chat };
@@ -86,9 +89,14 @@ export async function POST(req: Request) {
   });
   history.reverse();
 
-  // 3. Call Claude.
+  // 3. Pick system prompt + model. Agent-scoped sessions use the
+  //    agent's prompt; the agent's modelOverride wins over the org's
+  //    BYOK preferredModel which wins over the Sidekick default.
+  const agentScoped = c.chat.agent && c.chat.agent.status === "ENABLED" ? c.chat.agent : null;
+  const systemPrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+
   const resolved = await getAnthropicForOrg(c.chat.organizationId);
-  const model = modelFor(resolved, SIDEKICK_DEFAULT_MODEL);
+  const model = agentScoped?.modelOverride ?? modelFor(resolved, SIDEKICK_DEFAULT_MODEL);
 
   let assistantText = "";
   let tokensIn: number | null = null;
@@ -100,7 +108,7 @@ export async function POST(req: Request) {
     const result = await resolved.client.messages.create({
       model,
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: history.map((m) => ({
         role: m.role === "USER" ? "user" : "assistant",
         content: m.content,

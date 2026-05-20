@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
+import { AGENTS_BY_PRODUCT } from "@/lib/agents/catalog";
 
 async function resolveOrgAndRole() {
   const session = await getServerSession(authOptions);
@@ -107,6 +108,43 @@ export async function POST(req: Request) {
       ...(parsed.data.settings ? { settings: parsed.data.settings as object } : {}),
     },
   });
+
+  // Auto-install prebuilt agents that ship with this product. Idempotent
+  // via upsert; if the org previously had an agent then uninstalled it
+  // (status=ARCHIVED), this re-enables. Best-effort: failure here does
+  // not block the product install — the user can install agents manually
+  // from /agents later.
+  try {
+    const agents = AGENTS_BY_PRODUCT[product.slug] ?? [];
+    for (const a of agents) {
+      await prisma.agent.upsert({
+        where: { organizationId_slug: { organizationId: ctx.orgId, slug: a.slug } },
+        create: {
+          organizationId: ctx.orgId,
+          slug: a.slug,
+          name: a.name,
+          persona: a.persona,
+          description: a.description,
+          systemPrompt: a.systemPrompt,
+          productSlug: a.productSlug,
+          tools: a.tools as object,
+          isPrebuilt: true,
+          prebuiltSlug: a.slug,
+          status: "ENABLED",
+          createdById: ctx.userId,
+        },
+        update: {
+          status: "ENABLED",
+          name: a.name,
+          persona: a.persona,
+          description: a.description,
+          systemPrompt: a.systemPrompt,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("[products/installations] agent auto-install failed:", err);
+  }
 
   return NextResponse.json({
     installation: {

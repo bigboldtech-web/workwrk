@@ -40,6 +40,7 @@ export async function GET() {
 
 const createSchema = z.object({
   title: z.string().max(200).optional(),
+  agentSlug: z.string().max(64).optional(),
 });
 
 export async function POST(req: Request) {
@@ -49,13 +50,27 @@ export async function POST(req: Request) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
+  // Resolve optional agent — must belong to the same org + be enabled.
+  let agentId: string | null = null;
+  let inheritedTitle: string | null = null;
+  if (parsed.data.agentSlug) {
+    const agent = await prisma.agent.findFirst({
+      where: { organizationId: c.orgId, slug: parsed.data.agentSlug, status: "ENABLED" },
+      select: { id: true, name: true },
+    });
+    if (!agent) return NextResponse.json({ error: "agent not found or not enabled" }, { status: 404 });
+    agentId = agent.id;
+    inheritedTitle = `Chat with ${agent.name}`;
+  }
+
   const session = await prisma.chatSession.create({
     data: {
       organizationId: c.orgId,
       userId: c.userId,
-      title: parsed.data.title ?? null,
+      title: parsed.data.title ?? inheritedTitle,
+      agentId,
     },
-    select: { id: true, title: true, createdAt: true },
+    select: { id: true, title: true, agentId: true, createdAt: true },
   });
   return NextResponse.json({ session });
 }
