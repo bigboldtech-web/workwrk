@@ -239,7 +239,7 @@ const navigation: NavItem[] = [
   { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true, section: "more", hue: "amber" },
   { name: "Tools", key: "tools", href: "/tools", icon: Wrench, managerOnly: true, section: "more", hue: "slate" },
   { name: "Integrations", key: "integrations", href: "/integrations", icon: Link2, adminOnly: true, section: "more", hue: "sky" },
-  { name: "Studio", key: "studio", href: "/studio", icon: Wrench, adminOnly: true, comingSoon: true, section: "more", hue: "lime" },
+  { name: "Studio", key: "studio", href: "/studio", icon: Wrench, adminOnly: true, section: "more", hue: "lime" },
   { name: "Brand Guide", key: "brandGuide", href: "/brand-guide", icon: Palette, section: "more", hue: "pink" },
   { name: "Admin Console", key: "admin", href: "/admin", icon: Shield, superAdminOnly: true, section: "more", hue: "rose" },
 ];

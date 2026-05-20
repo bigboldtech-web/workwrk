@@ -32,7 +32,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { Wrench, Plus, GitBranch, ListPlus, Trash2, GripVertical } from "lucide-react";
+import { Wrench, Plus, GitBranch, ListPlus, Trash2, GripVertical, FlaskConical } from "lucide-react";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 
 type WorkflowStep = {
   id: string;
@@ -89,15 +90,79 @@ export default function StudioPage() {
           Custom approval workflows and per-org fields. Define the platform's behavior to fit how you work.
         </p>
       </div>
-      <Tabs defaultValue="workflows">
+      <Tabs defaultValue="fields">
         <TabsList>
-          <TabsTrigger value="workflows">Workflows</TabsTrigger>
           <TabsTrigger value="fields">Custom fields</TabsTrigger>
+          <TabsTrigger value="workflows">Workflows</TabsTrigger>
+          <TabsTrigger value="playground">Playground</TabsTrigger>
         </TabsList>
-        <TabsContent value="workflows" className="mt-4"><WorkflowsTab /></TabsContent>
         <TabsContent value="fields" className="mt-4"><CustomFieldsTab /></TabsContent>
+        <TabsContent value="workflows" className="mt-4"><WorkflowsTab /></TabsContent>
+        <TabsContent value="playground" className="mt-4"><PlaygroundTab /></TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+// Playground — verify your custom field definitions work end-to-end
+// without leaving Studio. Pick a target type + paste any record ID
+// from that table, see the live field editor render + save.
+function PlaygroundTab() {
+  const [entityType, setEntityType] = useState<string>("TASK");
+  const [entityId, setEntityId] = useState<string>("");
+  const [activeEntityId, setActiveEntityId] = useState<string>("");
+
+  return (
+    <Card>
+      <CardContent className="p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <FlaskConical size={16} className="text-violet-600" />
+          <h3 className="text-sm font-semibold">Live preview</h3>
+          <Badge variant="secondary" className="text-[10px]">Phase C1</Badge>
+        </div>
+        <p className="text-xs text-muted">
+          Pick a target type, paste a record ID from that table, and see your custom fields render
+          + save in real time. Field values persist to <code className="text-[11px]">CustomFieldValue</code> and
+          can be read back from any feature via <code className="text-[11px]">/api/custom-fields/values</code>.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr_auto] gap-2 items-end">
+          <div>
+            <Label className="text-xs">Target type</Label>
+            <Select value={entityType} onValueChange={setEntityType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TARGET_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Record ID (cuid)</Label>
+            <Input
+              value={entityId}
+              onChange={(e) => setEntityId(e.target.value)}
+              placeholder="paste an id from the database"
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={() => setActiveEntityId(entityId.trim())}
+            disabled={!entityId.trim()}
+          >
+            Load
+          </Button>
+        </div>
+
+        {activeEntityId && (
+          <div className="border border-border rounded-lg p-4 bg-surface-2">
+            <CustomFieldsPanel
+              entityType={entityType}
+              entityId={activeEntityId}
+              showEmptyState
+            />
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
