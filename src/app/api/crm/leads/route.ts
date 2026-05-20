@@ -67,3 +67,36 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ lead });
 }
+
+const patchSchema = z.object({
+  id: z.string().min(1),
+  status: z.enum(["NEW", "CONTACTED", "QUALIFIED", "UNQUALIFIED", "CONVERTED", "DISQUALIFIED"]).optional(),
+  source: z.string().max(40).optional(),
+  ownerId: z.string().nullable().optional(),
+  notes: z.string().max(8000).optional(),
+});
+
+export async function PATCH(req: Request) {
+  const ctx = await resolveCrmContext();
+  if ("error" in ctx) return ctx.error;
+  const body = await req.json().catch(() => null);
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+
+  const existing = await prisma.lead.findFirst({
+    where: { id: parsed.data.id, organizationId: ctx.orgId },
+  });
+  if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  const lead = await prisma.lead.update({
+    where: { id: existing.id },
+    data: {
+      ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+      ...(parsed.data.source !== undefined ? { source: parsed.data.source } : {}),
+      ...(parsed.data.ownerId !== undefined ? { ownerId: parsed.data.ownerId } : {}),
+      ...(parsed.data.notes !== undefined ? { notes: parsed.data.notes } : {}),
+      ...(parsed.data.status === "CONVERTED" && !existing.convertedAt ? { convertedAt: new Date() } : {}),
+    },
+  });
+  return NextResponse.json({ lead });
+}

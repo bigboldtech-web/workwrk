@@ -15,6 +15,57 @@ import {
   TrendingUp,
   DollarSign,
 } from "lucide-react";
+import { BoardView, type BoardField } from "@/components/board-view/board-view";
+
+// Field configs for BoardView. Kanban groups by `status`, Calendar by
+// `scheduledFor`. Keep these aligned with the API payload shape.
+const CONTENT_FIELDS: BoardField[] = [
+  { key: "title", label: "Title", fieldType: "TEXT" },
+  {
+    key: "status", label: "Status", fieldType: "SELECT",
+    options: { choices: [
+      { value: "IDEA", label: "Idea", color: "#94a3b8" },
+      { value: "BRIEFED", label: "Briefed", color: "#60a5fa" },
+      { value: "IN_DRAFT", label: "In draft", color: "#f59e0b" },
+      { value: "IN_REVIEW", label: "In review", color: "#a78bfa" },
+      { value: "APPROVED", label: "Approved", color: "#10b981" },
+      { value: "SCHEDULED", label: "Scheduled", color: "#14b8a6" },
+      { value: "PUBLISHED", label: "Published", color: "#059669" },
+      { value: "ARCHIVED", label: "Archived", color: "#71717a" },
+    ] },
+  },
+  {
+    key: "type", label: "Type", fieldType: "SELECT",
+    options: { choices: [
+      { value: "BLOG_POST", label: "Blog post" }, { value: "EMAIL", label: "Email" },
+      { value: "SOCIAL_POST", label: "Social" }, { value: "VIDEO", label: "Video" },
+      { value: "WEBINAR", label: "Webinar" }, { value: "CASE_STUDY", label: "Case study" },
+      { value: "WHITEPAPER", label: "Whitepaper" }, { value: "EBOOK", label: "Ebook" },
+      { value: "PODCAST", label: "Podcast" }, { value: "ONE_PAGER", label: "One-pager" },
+      { value: "PRESS_RELEASE", label: "Press release" },
+    ] },
+  },
+  { key: "channel", label: "Channel", fieldType: "TEXT" },
+  { key: "scheduledFor", label: "Scheduled", fieldType: "DATE" },
+];
+
+const CAMPAIGN_FIELDS: BoardField[] = [
+  { key: "name", label: "Name", fieldType: "TEXT" },
+  {
+    key: "status", label: "Status", fieldType: "SELECT",
+    options: { choices: [
+      { value: "PLANNING", label: "Planning", color: "#94a3b8" },
+      { value: "APPROVED", label: "Approved", color: "#60a5fa" },
+      { value: "ACTIVE", label: "Active", color: "#10b981" },
+      { value: "PAUSED", label: "Paused", color: "#f59e0b" },
+      { value: "COMPLETED", label: "Completed", color: "#a78bfa" },
+      { value: "CANCELLED", label: "Cancelled", color: "#ef4444" },
+    ] },
+  },
+  { key: "channel", label: "Channel", fieldType: "TEXT" },
+  { key: "startDate", label: "Start", fieldType: "DATE" },
+  { key: "endDate", label: "End", fieldType: "DATE" },
+];
 
 type Campaign = {
   id: string;
@@ -181,60 +232,48 @@ export default function MarketingPage() {
       </div>
 
       {tab === "campaigns" && (
-        <div className="rounded-xl border border-border bg-surface overflow-hidden">
-          {loading ? <Loading /> : campaigns.length === 0 ? <Empty Icon={Megaphone} title="No campaigns yet" hint="Plan your first campaign — track budget vs spend, leads vs target." onAction={() => setShowNew("campaigns")} actionLabel="Plan a campaign" tone="amber" /> : (
-            <table className="w-full text-sm">
-              <thead className="bg-surface-2 text-xs uppercase tracking-wider text-muted-2">
-                <tr>
-                  <th className="text-left px-4 py-2.5 font-medium">Name</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Channel</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Status</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Budget</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Spent</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Goal</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Dates</th>
-                </tr>
-              </thead>
-              <tbody>
-                {campaigns.map((c) => (
-                  <tr key={c.id} className="border-t border-border hover:bg-surface-2">
-                    <td className="px-4 py-2.5 font-medium">{c.name}</td>
-                    <td className="px-4 py-2.5 text-muted">{c.channel ?? "—"}</td>
-                    <td className="px-4 py-2.5"><span className={`text-[10px] font-medium px-2 py-0.5 rounded-full uppercase tracking-wider ${CAMPAIGN_TONES[c.status]}`}>{c.status}</span></td>
-                    <td className="px-4 py-2.5 text-muted">{money(c.budget)}</td>
-                    <td className="px-4 py-2.5 text-muted">{money(c.spent)}</td>
-                    <td className="px-4 py-2.5 text-xs text-muted-2">{c.goalMetric ? `${c.goalActual ?? 0} / ${c.goalTarget ?? "?"} ${c.goalMetric}` : "—"}</td>
-                    <td className="px-4 py-2.5 text-xs text-muted-2">{dateRange(c.startDate, c.endDate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        loading ? <div className="rounded-xl border border-border bg-surface"><Loading /></div>
+        : campaigns.length === 0
+          ? <div className="rounded-xl border border-border bg-surface"><Empty Icon={Megaphone} title="No campaigns yet" hint="Plan your first campaign — track budget vs spend, leads vs target." onAction={() => setShowNew("campaigns")} actionLabel="Plan a campaign" tone="amber" /></div>
+          : (
+            <BoardView
+              boardKey="marketing:campaigns"
+              items={campaigns}
+              fields={CAMPAIGN_FIELDS}
+              getId={(c) => c.id}
+              getTitle={(c) => c.name}
+              getValue={(c, key) => {
+                const raw = (c as unknown as Record<string, unknown>)[key];
+                if (key === "budget" || key === "spent") return raw != null ? Number(raw) : null;
+                return raw;
+              }}
+              onChangeField={async (id, key, value) => {
+                if (key !== "status") return;
+                await fetch("/api/marketing/campaigns", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ id, status: value }),
+                });
+                await refresh();
+              }}
+            />
+          )
       )}
 
       {tab === "content" && (
-        <div className="rounded-xl border border-border bg-surface overflow-hidden">
-          {loading ? <Loading /> : content.length === 0 ? <Empty Icon={FileText} title="Empty content calendar" hint="Start planning content — briefs, drafts, schedule, publish." onAction={() => setShowNew("content")} actionLabel="Add first piece" tone="amber" /> : (
-            <div className="divide-y divide-border">
-              {content.map((c) => (
-                <div key={c.id} className="px-4 py-3 hover:bg-surface-2 flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wider ${CONTENT_TONES[c.status]}`}>{c.status.replace(/_/g, " ")}</span>
-                      <span className="text-[10px] uppercase tracking-wider text-muted-2">{c.type.replace(/_/g, " ")}</span>
-                      {c.channel && <span className="text-[10px] text-muted-2">· {c.channel}</span>}
-                    </div>
-                    <div className="font-medium text-sm">{c.title}</div>
-                  </div>
-                  <div className="text-xs text-muted-2 flex-shrink-0">
-                    {c.scheduledFor ? new Date(c.scheduledFor).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "unscheduled"}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        loading ? <div className="rounded-xl border border-border bg-surface"><Loading /></div>
+        : content.length === 0
+          ? <div className="rounded-xl border border-border bg-surface"><Empty Icon={FileText} title="Empty content calendar" hint="Start planning content — briefs, drafts, schedule, publish." onAction={() => setShowNew("content")} actionLabel="Add first piece" tone="amber" /></div>
+          : (
+            <BoardView
+              boardKey="marketing:content"
+              items={content}
+              fields={CONTENT_FIELDS}
+              getId={(c) => c.id}
+              getTitle={(c) => c.title}
+              getValue={(c, key) => (c as unknown as Record<string, unknown>)[key]}
+            />
+          )
       )}
 
       {tab === "events" && (
