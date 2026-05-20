@@ -126,6 +126,10 @@ model Organization {
   devSprints            Sprint[]
   devReleases           Release[]
   devRoadmapItems       RoadmapItem[]
+  // 🆕 Phase E6 — WorkwrK Legal
+  legalContracts        Contract[]
+  legalPrivacyRequests  PrivacyRequest[]
+  legalTrademarks       Trademark[]
 
   @@index([slug])
 }
@@ -4958,4 +4962,160 @@ enum RoadmapStatus {
   SHIPPED
   PAUSED
   CANCELLED
+}
+
+// ==========================================
+// 🆕 PHASE E6 · WorkwrK Legal
+// Contracts (CLM) + Privacy requests (DSARs) + IP records. General
+// Counsel buyer surface. Distinct from /policies (internal company
+// rules) — this is external-party contracts + compliance work.
+// ==========================================
+
+model Contract {
+  id              String         @id @default(cuid())
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title           String
+  counterparty    String         // the other party's name
+  counterpartyType String?       // "Customer" | "Vendor" | "Partner" | "Investor" | "Employee" | ...
+  type            String?        // "MSA" | "DPA" | "NDA" | "SOW" | "Order Form" | ...
+  status          ContractStatus @default(DRAFT)
+  value           Decimal?       @db.Decimal(14, 2)
+  currency        String         @default("USD")
+  signedAt        DateTime?
+  effectiveDate   DateTime?
+  expiresAt       DateTime?
+  // Auto-renew alert. Each contract has a renewal notice date; legal
+  // gets pinged this many days before expiry.
+  renewalNoticeDays Int?         @default(60)
+  autoRenew       Boolean        @default(false)
+  ownerId         String?        // legal lead on this contract
+  documentUrl     String?
+  description     String?        @db.Text
+  terms           Json           @default("{}")    // key clauses / extracted terms
+  customFields    Json           @default("{}")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, counterparty])
+  @@index([expiresAt])
+}
+
+enum ContractStatus {
+  DRAFT
+  IN_REVIEW
+  IN_NEGOTIATION
+  AWAITING_SIGNATURE
+  SIGNED
+  ACTIVE
+  EXPIRED
+  RENEWED
+  TERMINATED
+  CANCELLED
+}
+
+model PrivacyRequest {
+  id             String                @id @default(cuid())
+  organizationId String
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Type of request — GDPR/CCPA-aligned.
+  type           PrivacyRequestType
+  status         PrivacyRequestStatus  @default(RECEIVED)
+  subjectEmail   String
+  subjectName    String?
+  subjectId      String?               // optional User id if matched to an internal account
+  // The legal framework the request was filed under (drives the SLA).
+  jurisdiction   String?               // "GDPR" | "CCPA" | "LGPD" | "PIPEDA" | "Other"
+  // Verification status — anti-fraud measure. Identity must be verified
+  // before fulfilling Access/Deletion requests.
+  verifiedAt     DateTime?
+  receivedAt     DateTime              @default(now())
+  dueAt          DateTime?             // computed from jurisdiction SLA
+  completedAt    DateTime?
+  assigneeId     String?
+  notes          String?               @db.Text
+  resolutionNotes String?              @db.Text
+  customFields   Json                  @default("{}")
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, type])
+  @@index([dueAt])
+}
+
+enum PrivacyRequestType {
+  ACCESS
+  RECTIFICATION
+  DELETION
+  PORTABILITY
+  OBJECTION
+  CONSENT_WITHDRAWAL
+  RESTRICTION
+  AUTOMATED_DECISION
+}
+
+enum PrivacyRequestStatus {
+  RECEIVED
+  VERIFYING
+  IN_PROGRESS
+  PENDING_REVIEW
+  COMPLETED
+  DENIED
+  CANCELLED
+}
+
+model Trademark {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mark           String           // the actual word/logo/phrase
+  type           IpAssetType      @default(WORD_MARK)
+  status         TrademarkStatus  @default(PROPOSED)
+  // Jurisdictions where the mark is registered or applied for. Stored as
+  // a string[] in JSON so legal can add new ones without schema changes.
+  jurisdictions  Json             @default("[]")
+  classes        Json             @default("[]")  // Nice Classification class numbers
+  registrationNumber String?
+  applicationNumber  String?
+  filedAt        DateTime?
+  registeredAt   DateTime?
+  expiresAt      DateTime?
+  renewalDueAt   DateTime?
+  ownerId        String?          // internal owner (paralegal/IP counsel)
+  externalCounselFirm String?     // outside counsel handling this
+  notes          String?          @db.Text
+  customFields   Json             @default("{}")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([organizationId, status])
+  @@index([renewalDueAt])
+}
+
+enum IpAssetType {
+  WORD_MARK
+  DESIGN_MARK
+  COMBINED_MARK
+  SOUND_MARK
+  COLOR_MARK
+  PATENT
+  COPYRIGHT
+  TRADE_SECRET
+  DOMAIN_NAME
+}
+
+enum TrademarkStatus {
+  PROPOSED
+  CLEARANCE_SEARCH
+  APPLIED
+  PENDING
+  PUBLISHED
+  REGISTERED
+  RENEWAL_DUE
+  EXPIRED
+  ABANDONED
+  CANCELLED
+  OPPOSED
 }

@@ -67,6 +67,7 @@ import {
   TrendingUp,
   Headphones,
   Code,
+  Scale,
 } from "lucide-react";
 
 type NavItem = {
@@ -205,6 +206,8 @@ const navigation: NavItem[] = [
   { name: "Marketing", key: "marketing", href: "/marketing", icon: Megaphone, managerOnly: true, section: "workspace", hue: "amber" },
   // ── Engineering suite
   { name: "Dev", key: "dev", href: "/dev", icon: Code, managerOnly: true, section: "workspace", hue: "violet" },
+  // ── Legal & Compliance suite
+  { name: "Legal", key: "legal", href: "/legal", icon: Scale, managerOnly: true, section: "workspace", hue: "violet" },
   // ── Money / finance suite
   { name: "Expenses", key: "expenses", href: "/expenses", icon: Receipt, section: "workspace", hue: "amber" },
   { name: "Procurement", key: "procurement", href: "/procurement", icon: ShoppingCart, managerOnly: true, section: "workspace", hue: "sky" },
