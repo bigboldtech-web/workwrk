@@ -883,6 +883,248 @@ const searchEmployees: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
+// Meetings (cross-product read)
+// ─────────────────────────────────────────────────────────
+
+const searchMeetings: ToolDefinition = {
+  name: "search_meetings",
+  description:
+    "Search meetings on the org's calendar. Use to answer 'what's on my schedule', 'find my last 1:1 with Priya', or to pull up recent decisions/action items context.",
+  input_schema: {
+    type: "object",
+    properties: {
+      type: {
+        type: "string",
+        enum: ["DAILY_STANDUP", "WEEKLY_REVIEW", "ONE_ON_ONE", "QUARTERLY_REVIEW", "ANNUAL_PLANNING", "ADHOC"],
+      },
+      titleContains: { type: "string" },
+      attendedByMe: { type: "boolean", description: "Only meetings the caller is invited to / attended" },
+      upcoming: { type: "boolean", description: "Only meetings scheduled in the future" },
+      withinDays: { type: "integer", description: "Window in days (past or future depending on `upcoming`)" },
+      limit: { type: "integer", description: "Max rows (default 20, max 50)" },
+    },
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(50, Number(input.limit ?? 20));
+    const now = new Date();
+    const windowMs = input.withinDays ? Number(input.withinDays) * 86400000 : null;
+
+    const dateRange: { gte?: Date; lte?: Date } = {};
+    if (input.upcoming) {
+      dateRange.gte = now;
+      if (windowMs) dateRange.lte = new Date(now.getTime() + windowMs);
+    } else if (windowMs) {
+      dateRange.gte = new Date(now.getTime() - windowMs);
+      dateRange.lte = now;
+    }
+
+    const meetings = await prisma.meeting.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        ...(input.type ? { type: input.type as "DAILY_STANDUP" | "WEEKLY_REVIEW" | "ONE_ON_ONE" | "QUARTERLY_REVIEW" | "ANNUAL_PLANNING" | "ADHOC" } : {}),
+        ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
+        ...(input.attendedByMe ? { attendees: { some: { userId: ctx.userId } } } : {}),
+        ...(Object.keys(dateRange).length ? { scheduledAt: dateRange } : {}),
+      },
+      select: {
+        id: true, title: true, type: true, scheduledAt: true, duration: true, agenda: true,
+        attendees: { select: { user: { select: { firstName: true, lastName: true, email: true } }, attended: true } },
+      },
+      orderBy: input.upcoming ? { scheduledAt: "asc" } : { scheduledAt: "desc" },
+      take: limit,
+    });
+    return {
+      count: meetings.length,
+      meetings: meetings.map((m) => ({
+        id: m.id, title: m.title, type: m.type, scheduledAt: m.scheduledAt, durationMin: m.duration,
+        agenda: m.agenda,
+        attendees: m.attendees.map((a) => `${a.user.firstName ?? ""} ${a.user.lastName ?? ""}`.trim() || a.user.email).filter(Boolean),
+      })),
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// OKRs (read)
+// ─────────────────────────────────────────────────────────
+
+const searchOkrs: ToolDefinition = {
+  name: "search_okrs",
+  description:
+    "Search the org's OKRs (Objectives + Key Results). Use to find a specific objective, list a person's quarterly OKRs, or surface OKRs that are at risk.",
+  input_schema: {
+    type: "object",
+    properties: {
+      level: { type: "string", enum: ["COMPANY", "TEAM", "INDIVIDUAL"] },
+      status: { type: "string", enum: ["ON_TRACK", "AT_RISK", "BEHIND", "COMPLETED"] },
+      quarter: { type: "string", description: "e.g. 'Q2 2026'" },
+      ownedByMe: { type: "boolean", description: "Only OKRs owned by the caller" },
+      titleContains: { type: "string" },
+      limit: { type: "integer" },
+    },
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(50, Number(input.limit ?? 20));
+    const okrs = await prisma.oKR.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        ...(input.level ? { level: input.level as string } : {}),
+        ...(input.status ? { status: input.status as string } : {}),
+        ...(input.quarter ? { quarter: input.quarter as string } : {}),
+        ...(input.ownedByMe ? { ownerId: ctx.userId } : {}),
+        ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
+      },
+      select: {
+        id: true, title: true, level: true, status: true, progress: true, quarter: true, ownerId: true,
+        keyResults: { select: { id: true, title: true, progress: true, currentValue: true, targetValue: true, unit: true } },
+      },
+      orderBy: [{ progress: "asc" }, { createdAt: "desc" }],
+      take: limit,
+    });
+    return { count: okrs.length, okrs };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// SOPs (read)
+// ─────────────────────────────────────────────────────────
+
+const searchSops: ToolDefinition = {
+  name: "search_sops",
+  description:
+    "Search the org's Standard Operating Procedures. Use to find process docs the user is asking about, or to discover what's been documented for a given workflow.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Substring matched against title/description (case-insensitive)" },
+      category: { type: "string" },
+      tag: { type: "string", description: "Single tag to filter by" },
+      status: { type: "string", enum: ["DRAFT", "PUBLISHED", "ARCHIVED"] },
+      limit: { type: "integer" },
+    },
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(30, Number(input.limit ?? 15));
+    const q = input.query as string | undefined;
+    const sops = await prisma.sOP.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        ...(input.category ? { category: input.category as string } : {}),
+        ...(input.status ? { status: input.status as "DRAFT" | "PUBLISHED" | "ARCHIVED" } : {}),
+        ...(input.tag ? { tags: { has: input.tag as string } } : {}),
+        ...(q ? {
+          OR: [
+            { title: { contains: q, mode: "insensitive" } },
+            { description: { contains: q, mode: "insensitive" } },
+          ],
+        } : {}),
+      },
+      select: {
+        id: true, title: true, description: true, category: true, subcategory: true,
+        sopType: true, tags: true, status: true, version: true, publishedAt: true, updatedAt: true,
+      },
+      orderBy: [{ updatedAt: "desc" }],
+      take: limit,
+    });
+    return { count: sops.length, sops };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// Legal contract update
+// ─────────────────────────────────────────────────────────
+
+const updateContract: ToolDefinition = {
+  name: "update_contract",
+  description:
+    "Update a tracked contract — change status, capture renewal terms, push out an expiry date. Use this after a redline round, a signature, or a renewal decision. Auto-stamps signedAt on first SIGNED transition.",
+  input_schema: {
+    type: "object",
+    properties: {
+      contractId: { type: "string" },
+      status: {
+        type: "string",
+        enum: ["DRAFT", "IN_REVIEW", "IN_NEGOTIATION", "AWAITING_SIGNATURE", "SIGNED", "ACTIVE", "EXPIRED", "RENEWED", "TERMINATED", "CANCELLED"],
+      },
+      value: { type: "number", description: "New contract value" },
+      effectiveDate: { type: "string", description: "ISO date" },
+      expiresAt: { type: "string", description: "ISO date" },
+      autoRenew: { type: "boolean" },
+      counterparty: { type: "string", description: "Updated counterparty name (rarely needed)" },
+      description: { type: "string", description: "Updated description / notes" },
+    },
+    required: ["contractId"],
+  },
+  handler: async (ctx, input) => {
+    const existing = await prisma.contract.findFirst({
+      where: { id: input.contractId as string, organizationId: ctx.orgId },
+    });
+    if (!existing) return { error: "Contract not found in this org" };
+
+    const now = new Date();
+    const status = input.status as string | undefined;
+    const signedAt = status === "SIGNED" && !existing.signedAt ? now : undefined;
+
+    const contract = await prisma.contract.update({
+      where: { id: existing.id },
+      data: {
+        ...(status !== undefined ? { status: status as "DRAFT" | "IN_REVIEW" | "IN_NEGOTIATION" | "AWAITING_SIGNATURE" | "SIGNED" | "ACTIVE" | "EXPIRED" | "RENEWED" | "TERMINATED" | "CANCELLED" } : {}),
+        ...(input.value !== undefined ? { value: input.value as number } : {}),
+        ...(input.effectiveDate !== undefined ? { effectiveDate: input.effectiveDate ? new Date(input.effectiveDate as string) : null } : {}),
+        ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt ? new Date(input.expiresAt as string) : null } : {}),
+        ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew as boolean } : {}),
+        ...(input.counterparty !== undefined ? { counterparty: input.counterparty as string } : {}),
+        ...(input.description !== undefined ? { description: input.description as string } : {}),
+        ...(signedAt ? { signedAt } : {}),
+      },
+      select: { id: true, title: true, counterparty: true, status: true, value: true, expiresAt: true, signedAt: true },
+    });
+    return { ok: true, contract };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// Ticket assignment (lightweight — just reassign, no status change)
+// ─────────────────────────────────────────────────────────
+
+const assignTicket: ToolDefinition = {
+  name: "assign_ticket",
+  description:
+    "Reassign an IT ticket to a different teammate. Use when triaging — point a ticket at the right responder without changing its status. Look up the responder by email.",
+  input_schema: {
+    type: "object",
+    properties: {
+      ticketId: { type: "string" },
+      assigneeEmail: { type: "string", description: "Email of the user who should own the ticket" },
+    },
+    required: ["ticketId", "assigneeEmail"],
+  },
+  handler: async (ctx, input) => {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: input.ticketId as string, organizationId: ctx.orgId },
+    });
+    if (!ticket) return { error: "Ticket not found in this org" };
+
+    const assignee = await prisma.user.findFirst({
+      where: { email: input.assigneeEmail as string, organizationId: ctx.orgId },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+    if (!assignee) return { error: `User with email '${input.assigneeEmail}' not found in this org` };
+
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { assigneeId: assignee.id },
+      select: { id: true, title: true, status: true, assigneeId: true },
+    });
+    return {
+      ok: true,
+      ticket: updated,
+      assignee: { id: assignee.id, name: `${assignee.firstName ?? ""} ${assignee.lastName ?? ""}`.trim(), email: assignee.email },
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
 // Registry — all tools by name
 // ─────────────────────────────────────────────────────────
 
@@ -893,6 +1135,9 @@ export const TOOLS: Record<string, ToolDefinition> = {
   send_kudos: sendKudos,
   search_employees: searchEmployees,
   search_kb: searchKb,
+  search_meetings: searchMeetings,
+  search_okrs: searchOkrs,
+  search_sops: searchSops,
   // CRM
   create_lead: createLead,
   search_leads: searchLeads,
@@ -904,9 +1149,11 @@ export const TOOLS: Record<string, ToolDefinition> = {
   create_ticket: createTicket,
   search_tickets: searchTickets,
   update_ticket_status: updateTicketStatus,
+  assign_ticket: assignTicket,
   // Legal
   create_contract: createContract,
   search_contracts: searchContracts,
+  update_contract: updateContract,
   // Dev
   create_sprint: createSprint,
   // Marketing
@@ -918,7 +1165,7 @@ export const TOOLS: Record<string, ToolDefinition> = {
 
 // Tools every session can use, regardless of agent (or no agent).
 // Includes cross-product search so Sidekick can look stuff up.
-export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos", "search_employees", "search_kb"];
+export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos", "search_employees", "search_kb", "search_meetings", "search_okrs", "search_sops"];
 
 // Tools per agent product. When a chat session is scoped to an agent,
 // the agent's productSlug determines which create-tools light up in
@@ -930,8 +1177,8 @@ export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos", "s
 // reliable bridge until every catalog slug has a real handler.
 export const PRODUCT_TOOL_NAMES: Record<string, string[]> = {
   "workwrk-crm": ["create_lead", "search_leads", "update_lead_status", "create_opportunity", "search_opportunities", "move_opportunity_stage"],
-  "workwrk-itsm": ["create_ticket", "search_tickets", "update_ticket_status"],
-  "workwrk-contracts": ["create_contract", "search_contracts"],
+  "workwrk-itsm": ["create_ticket", "search_tickets", "update_ticket_status", "assign_ticket"],
+  "workwrk-contracts": ["create_contract", "search_contracts", "update_contract"],
   "workwrk-dev": ["create_sprint"],
   "workwrk-campaigns": ["create_campaign"],
   "workwrk-help": ["create_support_ticket", "apply_macro"],
