@@ -14,6 +14,7 @@ import {
   Calendar,
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
+import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 
 const ROADMAP_FIELDS: BoardField[] = [
   { key: "title", label: "Title", fieldType: "TEXT" },
@@ -126,6 +127,7 @@ export default function DevPage() {
   const [roadmap, setRoadmap] = useState<RoadmapItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState<Tab | null>(null);
+  const [openRoadmap, setOpenRoadmap] = useState<RoadmapItem | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -258,6 +260,7 @@ export default function DevPage() {
             getValue={(r, key) => (r as unknown as Record<string, unknown>)[key]}
             editableFields={["status", "priority", "quarter", "impactScore", "effortPoints"]}
             selectable
+            onRowClick={(r) => setOpenRoadmap(r)}
             onChangeField={async (id, key, value) => {
               await fetch("/api/dev/roadmap", {
                 method: "PATCH",
@@ -265,6 +268,7 @@ export default function DevPage() {
                 body: JSON.stringify({ id, [key]: value }),
               });
               await refresh();
+              setOpenRoadmap((prev) => prev && prev.id === id ? { ...prev, [key]: value } as RoadmapItem : prev);
             }}
             onBulkChange={async (ids, key, value) => {
               await Promise.all(ids.map((id) => fetch("/api/dev/roadmap", {
@@ -281,6 +285,26 @@ export default function DevPage() {
       {showNew === "sprints" && <SprintModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
       {showNew === "releases" && <ReleaseModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
       {showNew === "roadmap" && <RoadmapModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
+
+      <ItemDetailDrawer
+        open={!!openRoadmap}
+        onClose={() => setOpenRoadmap(null)}
+        item={openRoadmap}
+        title={openRoadmap?.title ?? ""}
+        entityType="ROADMAP_ITEM"
+        fields={ROADMAP_FIELDS}
+        editableFields={["status", "priority", "quarter", "impactScore", "effortPoints"]}
+        getValue={(r, k) => (r as unknown as Record<string, unknown>)[k]}
+        onChangeField={async (id, key, value) => {
+          await fetch("/api/dev/roadmap", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, [key]: value }),
+          }).catch(() => {});
+          await refresh();
+          setOpenRoadmap((prev) => prev && prev.id === id ? { ...prev, [key]: value } as RoadmapItem : prev);
+        }}
+      />
     </div>
   );
 }

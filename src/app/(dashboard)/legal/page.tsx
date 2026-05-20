@@ -16,6 +16,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
+import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 
 const CONTRACT_FIELDS: BoardField[] = [
   { key: "title", label: "Title", fieldType: "TEXT" },
@@ -145,6 +146,7 @@ export default function LegalPage() {
   const [trademarks, setTrademarks] = useState<Trademark[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState<Tab | null>(null);
+  const [openContract, setOpenContract] = useState<Contract | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -243,6 +245,7 @@ export default function LegalPage() {
             }}
             editableFields={["status"]}
             selectable
+            onRowClick={(c) => setOpenContract(c)}
             onChangeField={async (id, key, value) => {
               await fetch("/api/legal/contracts", {
                 method: "PATCH",
@@ -250,6 +253,7 @@ export default function LegalPage() {
                 body: JSON.stringify({ id, [key]: value }),
               });
               await refresh();
+              setOpenContract((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Contract : prev);
             }}
             onBulkChange={async (ids, key, value) => {
               await Promise.all(ids.map((id) => fetch("/api/legal/contracts", {
@@ -336,6 +340,30 @@ export default function LegalPage() {
       {showNew === "contracts" && <ContractModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
       {showNew === "privacy" && <PrivacyModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
       {showNew === "ip" && <TrademarkModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
+
+      <ItemDetailDrawer
+        open={!!openContract}
+        onClose={() => setOpenContract(null)}
+        item={openContract}
+        title={openContract?.title ?? ""}
+        entityType="CONTRACT"
+        fields={CONTRACT_FIELDS}
+        editableFields={["status"]}
+        getValue={(c, k) => {
+          const raw = (c as unknown as Record<string, unknown>)[k];
+          if (k === "value") return raw != null ? Number(raw) : null;
+          return raw;
+        }}
+        onChangeField={async (id, key, value) => {
+          await fetch("/api/legal/contracts", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, [key]: value }),
+          }).catch(() => {});
+          await refresh();
+          setOpenContract((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Contract : prev);
+        }}
+      />
     </div>
   );
 }

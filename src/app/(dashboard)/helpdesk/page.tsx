@@ -16,6 +16,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
+import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 
 const SUPPORT_TICKET_FIELDS: BoardField[] = [
   { key: "subject", label: "Subject", fieldType: "TEXT" },
@@ -121,6 +122,7 @@ export default function HelpdeskPage() {
   const [macros, setMacros] = useState<Macro[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState<Tab | null>(null);
+  const [openTicket, setOpenTicket] = useState<Ticket | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -216,6 +218,7 @@ export default function HelpdeskPage() {
             }}
             editableFields={["status", "priority"]}
             selectable
+            onRowClick={(t) => setOpenTicket(t)}
             onChangeField={async (id, key, value) => {
               await fetch("/api/helpdesk/tickets", {
                 method: "PATCH",
@@ -223,6 +226,7 @@ export default function HelpdeskPage() {
                 body: JSON.stringify({ id, [key]: value }),
               });
               await refresh();
+              setOpenTicket((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Ticket : prev);
             }}
             onBulkChange={async (ids, key, value) => {
               await Promise.all(ids.map((id) => fetch("/api/helpdesk/tickets", {
@@ -290,6 +294,26 @@ export default function HelpdeskPage() {
       {showNew === "tickets" && <TicketModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
       {showNew === "customers" && <CustomerModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
       {showNew === "macros" && <MacroModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
+
+      <ItemDetailDrawer
+        open={!!openTicket}
+        onClose={() => setOpenTicket(null)}
+        item={openTicket}
+        title={openTicket?.subject ?? ""}
+        entityType="SUPPORT_TICKET"
+        fields={SUPPORT_TICKET_FIELDS}
+        editableFields={["status", "priority"]}
+        getValue={(t, k) => (t as unknown as Record<string, unknown>)[k]}
+        onChangeField={async (id, key, value) => {
+          await fetch("/api/helpdesk/tickets", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, [key]: value }),
+          }).catch(() => {});
+          await refresh();
+          setOpenTicket((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Ticket : prev);
+        }}
+      />
     </div>
   );
 }

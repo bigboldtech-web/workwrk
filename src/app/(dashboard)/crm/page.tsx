@@ -21,6 +21,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
+import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 
 const LEAD_FIELDS: BoardField[] = [
   { key: "firstName", label: "First name", fieldType: "TEXT" },
@@ -126,6 +127,7 @@ export default function CrmPage() {
   const [showNewOpp, setShowNewOpp] = useState(false);
   const [showNewLead, setShowNewLead] = useState(false);
   const [showNewAccount, setShowNewAccount] = useState(false);
+  const [openLead, setOpenLead] = useState<Lead | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -326,6 +328,7 @@ export default function CrmPage() {
             getValue={(l, key) => (l as unknown as Record<string, unknown>)[key]}
             editableFields={["status", "source"]}
             selectable
+            onRowClick={(l) => setOpenLead(l)}
             onChangeField={async (id, key, value) => {
               await fetch("/api/crm/leads", {
                 method: "PATCH",
@@ -411,6 +414,26 @@ export default function CrmPage() {
           onCreated={() => { setShowNewAccount(false); refresh(); }}
         />
       )}
+
+      <ItemDetailDrawer
+        open={!!openLead}
+        onClose={() => setOpenLead(null)}
+        item={openLead}
+        title={openLead ? `${openLead.firstName} ${openLead.lastName ?? ""}`.trim() : ""}
+        entityType="LEAD"
+        fields={LEAD_FIELDS}
+        editableFields={["status", "source"]}
+        getValue={(l, k) => (l as unknown as Record<string, unknown>)[k]}
+        onChangeField={async (id, key, value) => {
+          await fetch("/api/crm/leads", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, [key]: value }),
+          }).catch(() => {});
+          await refresh();
+          setOpenLead((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Lead : prev);
+        }}
+      />
     </div>
   );
 }

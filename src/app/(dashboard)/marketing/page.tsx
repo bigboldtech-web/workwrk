@@ -16,6 +16,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
+import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 
 // Field configs for BoardView. Kanban groups by `status`, Calendar by
 // `scheduledFor`. Keep these aligned with the API payload shape.
@@ -160,6 +161,8 @@ export default function MarketingPage() {
   const [events, setEvents] = useState<EventBrief[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState<Tab | null>(null);
+  const [openCampaign, setOpenCampaign] = useState<Campaign | null>(null);
+  const [openContentItem, setOpenContentItem] = useState<ContentItem | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -248,6 +251,7 @@ export default function MarketingPage() {
                 return raw;
               }}
               editableFields={["status"]}
+              onRowClick={(c) => setOpenCampaign(c)}
               onChangeField={async (id, key, value) => {
                 await fetch("/api/marketing/campaigns", {
                   method: "PATCH",
@@ -255,6 +259,7 @@ export default function MarketingPage() {
                   body: JSON.stringify({ id, [key]: value }),
                 });
                 await refresh();
+                setOpenCampaign((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Campaign : prev);
               }}
             />
           )
@@ -272,6 +277,7 @@ export default function MarketingPage() {
               getId={(c) => c.id}
               getTitle={(c) => c.title}
               getValue={(c, key) => (c as unknown as Record<string, unknown>)[key]}
+              onRowClick={(c) => setOpenContentItem(c)}
             />
           )
       )}
@@ -303,6 +309,41 @@ export default function MarketingPage() {
       {showNew === "campaigns" && <CampaignModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
       {showNew === "content" && <ContentModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
       {showNew === "events" && <EventModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}
+
+      <ItemDetailDrawer
+        open={!!openCampaign}
+        onClose={() => setOpenCampaign(null)}
+        item={openCampaign}
+        title={openCampaign?.name ?? ""}
+        entityType="CAMPAIGN"
+        fields={CAMPAIGN_FIELDS}
+        editableFields={["status"]}
+        getValue={(c, k) => {
+          const raw = (c as unknown as Record<string, unknown>)[k];
+          if (k === "budget" || k === "spent") return raw != null ? Number(raw) : null;
+          return raw;
+        }}
+        onChangeField={async (id, key, value) => {
+          await fetch("/api/marketing/campaigns", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, [key]: value }),
+          }).catch(() => {});
+          await refresh();
+          setOpenCampaign((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Campaign : prev);
+        }}
+      />
+
+      <ItemDetailDrawer
+        open={!!openContentItem}
+        onClose={() => setOpenContentItem(null)}
+        item={openContentItem}
+        title={openContentItem?.title ?? ""}
+        entityType="CONTENT_ITEM"
+        fields={CONTENT_FIELDS}
+        editableFields={[]}
+        getValue={(c, k) => (c as unknown as Record<string, unknown>)[k]}
+      />
     </div>
   );
 }

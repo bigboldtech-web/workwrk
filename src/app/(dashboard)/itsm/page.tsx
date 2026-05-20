@@ -16,6 +16,7 @@ import {
   Clock,
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
+import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 
 const TICKET_FIELDS: BoardField[] = [
   { key: "title", label: "Title", fieldType: "TEXT" },
@@ -154,6 +155,7 @@ export default function ItsmPage() {
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [showNewIncident, setShowNewIncident] = useState(false);
   const [showNewArticle, setShowNewArticle] = useState(false);
+  const [openTicket, setOpenTicket] = useState<Ticket | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -265,6 +267,7 @@ export default function ItsmPage() {
             getValue={(t, key) => (t as unknown as Record<string, unknown>)[key]}
             editableFields={["status", "priority"]}
             selectable
+            onRowClick={(t) => setOpenTicket(t)}
             onChangeField={async (id, key, value) => {
               await fetch("/api/itsm/tickets", {
                 method: "PATCH",
@@ -272,6 +275,7 @@ export default function ItsmPage() {
                 body: JSON.stringify({ id, [key]: value }),
               });
               await refresh();
+              setOpenTicket((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Ticket : prev);
             }}
             onBulkChange={async (ids, key, value) => {
               await Promise.all(ids.map((id) => fetch("/api/itsm/tickets", {
@@ -362,6 +366,26 @@ export default function ItsmPage() {
       {showNewTicket && <NewTicketModal onClose={() => setShowNewTicket(false)} onCreated={() => { setShowNewTicket(false); refresh(); }} />}
       {showNewIncident && <NewIncidentModal onClose={() => setShowNewIncident(false)} onCreated={() => { setShowNewIncident(false); refresh(); }} />}
       {showNewArticle && <NewArticleModal onClose={() => setShowNewArticle(false)} onCreated={() => { setShowNewArticle(false); refresh(); }} />}
+
+      <ItemDetailDrawer
+        open={!!openTicket}
+        onClose={() => setOpenTicket(null)}
+        item={openTicket}
+        title={openTicket?.title ?? ""}
+        entityType="TICKET"
+        fields={TICKET_FIELDS}
+        editableFields={["status", "priority"]}
+        getValue={(t, k) => (t as unknown as Record<string, unknown>)[k]}
+        onChangeField={async (id, key, value) => {
+          await fetch("/api/itsm/tickets", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, [key]: value }),
+          }).catch(() => {});
+          await refresh();
+          setOpenTicket((prev) => prev && prev.id === id ? { ...prev, [key]: value } as Ticket : prev);
+        }}
+      />
     </div>
   );
 }
