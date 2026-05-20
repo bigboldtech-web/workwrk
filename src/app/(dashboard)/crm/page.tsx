@@ -422,7 +422,7 @@ export default function CrmPage() {
         title={openLead ? `${openLead.firstName} ${openLead.lastName ?? ""}`.trim() : ""}
         entityType="LEAD"
         fields={LEAD_FIELDS}
-        editableFields={["status", "source"]}
+        editableFields={["firstName", "lastName", "company", "title", "email", "status", "source"]}
         getValue={(l, k) => (l as unknown as Record<string, unknown>)[k]}
         onChangeField={async (id, key, value) => {
           await fetch("/api/crm/leads", {

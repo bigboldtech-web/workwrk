@@ -317,7 +317,7 @@ export default function MarketingPage() {
         title={openCampaign?.name ?? ""}
         entityType="CAMPAIGN"
         fields={CAMPAIGN_FIELDS}
-        editableFields={["status"]}
+        editableFields={["name", "status", "channel", "budget", "startDate", "endDate"]}
         getValue={(c, k) => {
           const raw = (c as unknown as Record<string, unknown>)[k];
           if (k === "budget" || k === "spent") return raw != null ? Number(raw) : null;
@@ -341,8 +341,17 @@ export default function MarketingPage() {
         title={openContentItem?.title ?? ""}
         entityType="CONTENT_ITEM"
         fields={CONTENT_FIELDS}
-        editableFields={[]}
+        editableFields={["title", "type", "status", "channel", "scheduledFor"]}
         getValue={(c, k) => (c as unknown as Record<string, unknown>)[k]}
+        onChangeField={async (id, key, value) => {
+          await fetch("/api/marketing/content", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, [key]: value }),
+          }).catch(() => {});
+          await refresh();
+          setOpenContentItem((prev) => prev && prev.id === id ? { ...prev, [key]: value } as ContentItem : prev);
+        }}
       />
     </div>
   );

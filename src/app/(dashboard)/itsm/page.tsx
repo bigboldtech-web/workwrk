@@ -374,7 +374,7 @@ export default function ItsmPage() {
         title={openTicket?.title ?? ""}
         entityType="TICKET"
         fields={TICKET_FIELDS}
-        editableFields={["status", "priority"]}
+        editableFields={["title", "status", "priority", "category", "dueAt"]}
         getValue={(t, k) => (t as unknown as Record<string, unknown>)[k]}
         onChangeField={async (id, key, value) => {
           await fetch("/api/itsm/tickets", {

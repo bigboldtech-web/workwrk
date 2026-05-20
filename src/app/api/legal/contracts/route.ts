@@ -61,7 +61,16 @@ export async function POST(req: Request) {
 
 const patchSchema = z.object({
   id: z.string().min(1),
+  title: z.string().min(1).max(300).optional(),
+  counterparty: z.string().min(1).max(200).optional(),
+  counterpartyType: z.string().max(40).nullable().optional(),
+  type: z.string().max(40).nullable().optional(),
   status: z.enum(["DRAFT", "IN_REVIEW", "IN_NEGOTIATION", "AWAITING_SIGNATURE", "SIGNED", "ACTIVE", "EXPIRED", "RENEWED", "TERMINATED", "CANCELLED"]).optional(),
+  value: z.number().nonnegative().nullable().optional(),
+  effectiveDate: z.string().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  autoRenew: z.boolean().optional(),
+  description: z.string().max(8000).nullable().optional(),
 });
 
 export async function PATCH(req: Request) {
@@ -83,7 +92,16 @@ export async function PATCH(req: Request) {
   const contract = await prisma.contract.update({
     where: { id: parsed.data.id },
     data: {
+      ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
+      ...(parsed.data.counterparty !== undefined ? { counterparty: parsed.data.counterparty } : {}),
+      ...(parsed.data.counterpartyType !== undefined ? { counterpartyType: parsed.data.counterpartyType } : {}),
+      ...(parsed.data.type !== undefined ? { type: parsed.data.type } : {}),
       ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+      ...(parsed.data.value !== undefined ? { value: parsed.data.value } : {}),
+      ...(parsed.data.effectiveDate !== undefined ? { effectiveDate: parsed.data.effectiveDate ? new Date(parsed.data.effectiveDate) : null } : {}),
+      ...(parsed.data.expiresAt !== undefined ? { expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null } : {}),
+      ...(parsed.data.autoRenew !== undefined ? { autoRenew: parsed.data.autoRenew } : {}),
+      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
       ...(signedAt ? { signedAt } : {}),
     },
   });

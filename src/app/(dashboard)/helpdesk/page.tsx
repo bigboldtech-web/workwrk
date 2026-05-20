@@ -302,7 +302,7 @@ export default function HelpdeskPage() {
         title={openTicket?.subject ?? ""}
         entityType="SUPPORT_TICKET"
         fields={SUPPORT_TICKET_FIELDS}
-        editableFields={["status", "priority"]}
+        editableFields={["subject", "status", "priority", "channel", "category", "slaTier"]}
         getValue={(t, k) => (t as unknown as Record<string, unknown>)[k]}
         onChangeField={async (id, key, value) => {
           await fetch("/api/helpdesk/tickets", {

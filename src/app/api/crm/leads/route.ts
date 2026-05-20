@@ -70,10 +70,16 @@ export async function POST(req: Request) {
 
 const patchSchema = z.object({
   id: z.string().min(1),
+  firstName: z.string().min(1).max(120).optional(),
+  lastName: z.string().max(120).nullable().optional(),
+  email: z.string().email().max(200).nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
+  company: z.string().max(200).nullable().optional(),
+  title: z.string().max(200).nullable().optional(),
   status: z.enum(["NEW", "CONTACTED", "QUALIFIED", "UNQUALIFIED", "CONVERTED", "DISQUALIFIED"]).optional(),
-  source: z.string().max(40).optional(),
+  source: z.string().max(40).nullable().optional(),
   ownerId: z.string().nullable().optional(),
-  notes: z.string().max(8000).optional(),
+  notes: z.string().max(8000).nullable().optional(),
 });
 
 export async function PATCH(req: Request) {
@@ -91,6 +97,12 @@ export async function PATCH(req: Request) {
   const lead = await prisma.lead.update({
     where: { id: existing.id },
     data: {
+      ...(parsed.data.firstName !== undefined ? { firstName: parsed.data.firstName } : {}),
+      ...(parsed.data.lastName !== undefined ? { lastName: parsed.data.lastName } : {}),
+      ...(parsed.data.email !== undefined ? { email: parsed.data.email } : {}),
+      ...(parsed.data.phone !== undefined ? { phone: parsed.data.phone } : {}),
+      ...(parsed.data.company !== undefined ? { company: parsed.data.company } : {}),
+      ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
       ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
       ...(parsed.data.source !== undefined ? { source: parsed.data.source } : {}),
       ...(parsed.data.ownerId !== undefined ? { ownerId: parsed.data.ownerId } : {}),

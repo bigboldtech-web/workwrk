@@ -55,9 +55,17 @@ export async function POST(req: Request) {
 
 const patchSchema = z.object({
   id: z.string().min(1),
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(8000).nullable().optional(),
   status: z.enum(["PLANNING", "APPROVED", "ACTIVE", "PAUSED", "COMPLETED", "CANCELLED"]).optional(),
-  spent: z.number().nonnegative().optional(),
-  goalActual: z.number().int().nonnegative().optional(),
+  channel: z.string().max(80).nullable().optional(),
+  budget: z.number().nonnegative().nullable().optional(),
+  spent: z.number().nonnegative().nullable().optional(),
+  startDate: z.string().nullable().optional(),
+  endDate: z.string().nullable().optional(),
+  goalMetric: z.string().max(40).nullable().optional(),
+  goalTarget: z.number().int().nonnegative().nullable().optional(),
+  goalActual: z.number().int().nonnegative().nullable().optional(),
 });
 
 export async function PATCH(req: Request) {
@@ -75,8 +83,16 @@ export async function PATCH(req: Request) {
   const campaign = await prisma.campaign.update({
     where: { id: parsed.data.id },
     data: {
+      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
       ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+      ...(parsed.data.channel !== undefined ? { channel: parsed.data.channel } : {}),
+      ...(parsed.data.budget !== undefined ? { budget: parsed.data.budget } : {}),
       ...(parsed.data.spent !== undefined ? { spent: parsed.data.spent } : {}),
+      ...(parsed.data.startDate !== undefined ? { startDate: parsed.data.startDate ? new Date(parsed.data.startDate) : null } : {}),
+      ...(parsed.data.endDate !== undefined ? { endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null } : {}),
+      ...(parsed.data.goalMetric !== undefined ? { goalMetric: parsed.data.goalMetric } : {}),
+      ...(parsed.data.goalTarget !== undefined ? { goalTarget: parsed.data.goalTarget } : {}),
       ...(parsed.data.goalActual !== undefined ? { goalActual: parsed.data.goalActual } : {}),
     },
   });

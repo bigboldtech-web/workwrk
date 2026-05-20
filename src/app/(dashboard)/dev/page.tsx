@@ -293,7 +293,7 @@ export default function DevPage() {
         title={openRoadmap?.title ?? ""}
         entityType="ROADMAP_ITEM"
         fields={ROADMAP_FIELDS}
-        editableFields={["status", "priority", "quarter", "impactScore", "effortPoints"]}
+        editableFields={["title", "theme", "status", "priority", "quarter", "impactScore", "effortPoints"]}
         getValue={(r, k) => (r as unknown as Record<string, unknown>)[k]}
         onChangeField={async (id, key, value) => {
           await fetch("/api/dev/roadmap", {

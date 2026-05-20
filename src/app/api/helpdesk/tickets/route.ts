@@ -88,8 +88,12 @@ export async function POST(req: Request) {
 
 const patchSchema = z.object({
   id: z.string().min(1),
+  subject: z.string().min(1).max(300).optional(),
   status: z.enum(["NEW", "OPEN", "PENDING_CUSTOMER", "PENDING_INTERNAL", "RESOLVED", "CLOSED", "SPAM"]).optional(),
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+  channel: z.enum(["EMAIL", "CHAT", "PORTAL", "PHONE", "SOCIAL", "API"]).optional(),
+  category: z.string().max(80).nullable().optional(),
+  slaTier: z.string().max(40).nullable().optional(),
   assigneeId: z.string().nullable().optional(),
   csatScore: z.number().int().min(0).max(5).nullable().optional(),
   csatComment: z.string().max(2000).nullable().optional(),
@@ -109,8 +113,12 @@ export async function PATCH(req: Request) {
 
   const now = new Date();
   const updates: Record<string, unknown> = {};
+  if (parsed.data.subject !== undefined) updates.subject = parsed.data.subject;
   if (parsed.data.status !== undefined) updates.status = parsed.data.status;
   if (parsed.data.priority !== undefined) updates.priority = parsed.data.priority;
+  if (parsed.data.channel !== undefined) updates.channel = parsed.data.channel;
+  if (parsed.data.category !== undefined) updates.category = parsed.data.category;
+  if (parsed.data.slaTier !== undefined) updates.slaTier = parsed.data.slaTier;
   if (parsed.data.assigneeId !== undefined) updates.assigneeId = parsed.data.assigneeId;
   if (parsed.data.csatScore !== undefined) updates.csatScore = parsed.data.csatScore;
   if (parsed.data.csatComment !== undefined) updates.csatComment = parsed.data.csatComment;

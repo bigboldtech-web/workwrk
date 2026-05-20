@@ -69,10 +69,15 @@ export async function POST(req: Request) {
 
 const patchSchema = z.object({
   id: z.string().min(1),
+  title: z.string().min(1).max(300).optional(),
+  description: z.string().max(8000).nullable().optional(),
   status: z.enum(["OPEN", "TRIAGED", "IN_PROGRESS", "WAITING_ON_USER", "WAITING_ON_VENDOR", "RESOLVED", "CLOSED", "CANCELLED"]).optional(),
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT", "CRITICAL"]).optional(),
+  category: z.string().max(80).nullable().optional(),
+  slaTier: z.string().max(40).nullable().optional(),
+  dueAt: z.string().nullable().optional(),
   assigneeId: z.string().nullable().optional(),
-  resolutionNotes: z.string().max(8000).optional(),
+  resolutionNotes: z.string().max(8000).nullable().optional(),
 });
 
 export async function PATCH(req: Request) {
@@ -94,9 +99,14 @@ export async function PATCH(req: Request) {
 
   const now = new Date();
   // Auto-stamp lifecycle timestamps on status transitions.
-  const updates: Partial<{ status: typeof parsed.data.status; priority: typeof parsed.data.priority; assigneeId: string | null; resolutionNotes: string; acknowledgedAt: Date | null; resolvedAt: Date | null; closedAt: Date | null }> = {};
+  const updates: Record<string, unknown> = {};
+  if (parsed.data.title !== undefined) updates.title = parsed.data.title;
+  if (parsed.data.description !== undefined) updates.description = parsed.data.description;
   if (parsed.data.status !== undefined) updates.status = parsed.data.status;
   if (parsed.data.priority !== undefined) updates.priority = parsed.data.priority;
+  if (parsed.data.category !== undefined) updates.category = parsed.data.category;
+  if (parsed.data.slaTier !== undefined) updates.slaTier = parsed.data.slaTier;
+  if (parsed.data.dueAt !== undefined) updates.dueAt = parsed.data.dueAt ? new Date(parsed.data.dueAt) : null;
   if (parsed.data.assigneeId !== undefined) updates.assigneeId = parsed.data.assigneeId;
   if (parsed.data.resolutionNotes !== undefined) updates.resolutionNotes = parsed.data.resolutionNotes;
 

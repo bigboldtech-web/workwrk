@@ -348,7 +348,7 @@ export default function LegalPage() {
         title={openContract?.title ?? ""}
         entityType="CONTRACT"
         fields={CONTRACT_FIELDS}
-        editableFields={["status"]}
+        editableFields={["title", "counterparty", "type", "status", "value", "effectiveDate", "expiresAt"]}
         getValue={(c, k) => {
           const raw = (c as unknown as Record<string, unknown>)[k];
           if (k === "value") return raw != null ? Number(raw) : null;
