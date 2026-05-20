@@ -247,12 +247,12 @@ export default function MarketingPage() {
                 if (key === "budget" || key === "spent") return raw != null ? Number(raw) : null;
                 return raw;
               }}
+              editableFields={["status"]}
               onChangeField={async (id, key, value) => {
-                if (key !== "status") return;
                 await fetch("/api/marketing/campaigns", {
                   method: "PATCH",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ id, status: value }),
+                  body: JSON.stringify({ id, [key]: value }),
                 });
                 await refresh();
               }}

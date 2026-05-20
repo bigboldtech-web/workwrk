@@ -263,18 +263,14 @@ export default function ItsmPage() {
             getId={(t) => t.id}
             getTitle={(t) => t.title}
             getValue={(t, key) => (t as unknown as Record<string, unknown>)[key]}
+            editableFields={["status", "priority"]}
             onChangeField={async (id, key, value) => {
-              if (key !== "status" && key !== "priority") return;
-              await moveTicket(id, value as string);
-              if (key === "priority") {
-                // moveTicket only handles status; for priority, do a direct PATCH.
-                await fetch("/api/itsm/tickets", {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ id, priority: value }),
-                });
-                refresh();
-              }
+              await fetch("/api/itsm/tickets", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, [key]: value }),
+              });
+              await refresh();
             }}
           />
         )

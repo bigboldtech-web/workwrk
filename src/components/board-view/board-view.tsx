@@ -64,6 +64,10 @@ interface Props<T> {
   hideSearch?: boolean;
   /** Placeholder for the search box. */
   searchPlaceholder?: string;
+  /** Field keys that can be edited inline in the Table view. If omitted,
+   *  all fields are editable when onChangeField is provided. Pass an
+   *  empty array to disable inline editing entirely. */
+  editableFields?: string[];
 }
 
 const VIEW_OPTIONS: { id: BoardViewType; label: string; Icon: typeof List }[] = [
@@ -296,13 +300,25 @@ export function BoardView<T>(props: Props<T>) {
 }
 
 // ─────────────────────────────────────────────────────────
-// Table view
+// Table view (with inline cell editing)
 // ─────────────────────────────────────────────────────────
 
-function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick }: Props<T>) {
+function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, onChangeField, editableFields }: Props<T>) {
+  // Edit state: which (rowId, fieldKey) is currently being edited.
+  const [editing, setEditing] = useState<{ id: string; field: string } | null>(null);
+
   if (items.length === 0) {
     return <EmptyView label="No rows" />;
   }
+
+  // Resolve editability per field. Default = all fields editable when
+  // onChangeField is provided. Empty array = nothing is editable.
+  const canEdit = (field: BoardField) => {
+    if (!onChangeField) return false;
+    if (editableFields === undefined) return true;
+    return editableFields.includes(field.key);
+  };
+
   return (
     <div className="rounded-xl border border-border bg-surface overflow-hidden">
       <div className="overflow-x-auto">
@@ -315,24 +331,213 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick }: 
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr
-                key={getId(item)}
-                onClick={() => onRowClick?.(item)}
-                className={"border-t border-border hover:bg-surface-2 " + (onRowClick ? "cursor-pointer" : "")}
-              >
-                {fields.map((f) => (
-                  <td key={f.key} className="px-4 py-2.5 text-sm">
-                    <CellValue field={f} value={getValue(item, f.key)} />
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {items.map((item) => {
+              const id = getId(item);
+              return (
+                <tr
+                  key={id}
+                  className="border-t border-border hover:bg-surface-2 group"
+                >
+                  {fields.map((f) => {
+                    const editable = canEdit(f);
+                    const isEditing = editing?.id === id && editing?.field === f.key;
+                    const value = getValue(item, f.key);
+                    return (
+                      <td
+                        key={f.key}
+                        className={"px-4 py-2.5 text-sm " + (editable && !isEditing ? "cursor-text" : "")}
+                        onClick={(e) => {
+                          if (isEditing) return;
+                          if (editable) {
+                            e.stopPropagation();
+                            setEditing({ id, field: f.key });
+                            return;
+                          }
+                          if (onRowClick) onRowClick(item);
+                        }}
+                      >
+                        {isEditing ? (
+                          <InlineEditor
+                            field={f}
+                            value={value}
+                            onCommit={(next) => {
+                              setEditing(null);
+                              if (next !== value && onChangeField) onChangeField(id, f.key, next);
+                            }}
+                            onCancel={() => setEditing(null)}
+                          />
+                        ) : (
+                          <CellValue field={f} value={value} />
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
   );
+}
+
+// Per-fieldType inline editor. Auto-focus the right control, commit on
+// blur/Enter, cancel on Escape. Click anywhere outside the cell to
+// commit (handled via blur).
+function InlineEditor({
+  field, value, onCommit, onCancel,
+}: {
+  field: BoardField;
+  value: unknown;
+  onCommit: (next: unknown) => void;
+  onCancel: () => void;
+}) {
+  const [local, setLocal] = useState<unknown>(value);
+
+  const baseInputClass = "w-full px-2 py-1 rounded border border-violet-400 bg-surface text-sm focus:outline-none focus:ring-1 focus:ring-violet-500";
+
+  // Stop click bubbling so clicks inside the editor don't trigger the
+  // td onClick (which would re-enter edit mode).
+  const stop = (e: React.MouseEvent | React.KeyboardEvent) => e.stopPropagation();
+
+  switch (field.fieldType) {
+    case "TEXTAREA":
+      return (
+        <textarea
+          autoFocus
+          rows={3}
+          defaultValue={(value as string) ?? ""}
+          onClick={stop}
+          onBlur={(e) => onCommit(e.target.value || null)}
+          onKeyDown={(e) => {
+            stop(e);
+            if (e.key === "Escape") onCancel();
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) (e.target as HTMLTextAreaElement).blur();
+          }}
+          className={baseInputClass + " resize-none"}
+        />
+      );
+    case "NUMBER":
+      return (
+        <input
+          autoFocus
+          type="number"
+          defaultValue={value != null ? String(value) : ""}
+          onClick={stop}
+          onBlur={(e) => onCommit(e.target.value === "" ? null : Number(e.target.value))}
+          onKeyDown={(e) => {
+            stop(e);
+            if (e.key === "Escape") onCancel();
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          className={baseInputClass}
+        />
+      );
+    case "DATE":
+      return (
+        <input
+          autoFocus
+          type="date"
+          defaultValue={value ? String(value).slice(0, 10) : ""}
+          onClick={stop}
+          onBlur={(e) => onCommit(e.target.value || null)}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); }}
+          className={baseInputClass}
+        />
+      );
+    case "CHECKBOX":
+      // Checkbox: toggle on click, commit immediately
+      return (
+        <input
+          autoFocus
+          type="checkbox"
+          defaultChecked={!!value}
+          onClick={stop}
+          onChange={(e) => onCommit(e.target.checked)}
+          onBlur={onCancel}
+          className="w-4 h-4"
+        />
+      );
+    case "SELECT": {
+      const choices = field.options?.choices ?? [];
+      return (
+        <select
+          autoFocus
+          defaultValue={(value as string) ?? ""}
+          onClick={stop}
+          onChange={(e) => onCommit(e.target.value || null)}
+          onBlur={onCancel}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); }}
+          className={baseInputClass}
+        >
+          <option value="">— None —</option>
+          {choices.map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
+        </select>
+      );
+    }
+    case "MULTI_SELECT": {
+      const choices = field.options?.choices ?? [];
+      const current = Array.isArray(value) ? (value as string[]) : [];
+      const toggle = (v: string) => {
+        const next = local && Array.isArray(local) ? [...(local as string[])] : [...current];
+        const i = next.indexOf(v);
+        if (i >= 0) next.splice(i, 1); else next.push(v);
+        setLocal(next);
+      };
+      return (
+        <div className="flex flex-wrap gap-1 max-w-xs" onClick={stop}>
+          {choices.map((c) => {
+            const arr = Array.isArray(local) ? (local as string[]) : current;
+            const on = arr.includes(c.value);
+            return (
+              <button
+                key={c.value}
+                type="button"
+                onClick={() => toggle(c.value)}
+                className={"text-[10px] px-1.5 py-0.5 rounded border " + (on ? "bg-violet-600 text-white border-violet-600" : "bg-surface border-border text-muted")}
+              >
+                {c.label ?? c.value}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => onCommit(Array.isArray(local) ? local : current)}
+            className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600 text-white"
+          >
+            ✓
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted"
+          >
+            ×
+          </button>
+        </div>
+      );
+    }
+    case "URL":
+    case "EMAIL":
+    case "TEXT":
+    default:
+      return (
+        <input
+          autoFocus
+          type={field.fieldType === "EMAIL" ? "email" : field.fieldType === "URL" ? "url" : "text"}
+          defaultValue={(value as string) ?? ""}
+          onClick={stop}
+          onBlur={(e) => onCommit(e.target.value || null)}
+          onKeyDown={(e) => {
+            stop(e);
+            if (e.key === "Escape") onCancel();
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          className={baseInputClass}
+        />
+      );
+  }
 }
 
 // ─────────────────────────────────────────────────────────

@@ -214,8 +214,8 @@ export default function HelpdeskPage() {
               if (key === "subject") return t.subject;
               return (t as unknown as Record<string, unknown>)[key];
             }}
+            editableFields={["status", "priority"]}
             onChangeField={async (id, key, value) => {
-              if (key !== "status" && key !== "priority") return;
               await fetch("/api/helpdesk/tickets", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },

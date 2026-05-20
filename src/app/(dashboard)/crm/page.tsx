@@ -324,18 +324,12 @@ export default function CrmPage() {
             getId={(l) => l.id}
             getTitle={(l) => `${l.firstName} ${l.lastName ?? ""}`.trim()}
             getValue={(l, key) => (l as unknown as Record<string, unknown>)[key]}
+            editableFields={["status", "source"]}
             onChangeField={async (id, key, value) => {
-              if (key !== "status") return;
-              // Use the lead update endpoint via PATCH; reuse the tool-API
-              // semantics: PATCH /api/crm/leads with body { id, status }.
-              // The existing /api/crm/leads doesn't have PATCH yet, so wire
-              // it now: call a one-off update via /api/sidekick/... no,
-              // simplest: refetch and rely on a future PATCH route. For
-              // now leave as a TODO when route ships.
               await fetch("/api/crm/leads", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id, status: value }),
+                body: JSON.stringify({ id, [key]: value }),
               }).catch(() => {});
               await refresh();
             }}

@@ -256,8 +256,8 @@ export default function DevPage() {
             getId={(r) => r.id}
             getTitle={(r) => r.title}
             getValue={(r, key) => (r as unknown as Record<string, unknown>)[key]}
+            editableFields={["status", "priority", "quarter", "impactScore", "effortPoints"]}
             onChangeField={async (id, key, value) => {
-              if (key !== "status" && key !== "priority") return;
               await fetch("/api/dev/roadmap", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
