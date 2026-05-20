@@ -106,6 +106,21 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     pathPrefix: "/meetings",
   },
   {
+    slug: "workwrk-whiteboards",
+    name: "WorkwrK Whiteboards",
+    tagline: "Infinite canvas for mind maps + diagrams",
+    description:
+      "Excalidraw-powered whiteboards for mind maps, system diagrams, brainstorms, retros, flow charts. Hand-drawn aesthetic with shapes, arrows, freehand draw, text, images, frames. Saved per-org, listable from /whiteboards. Autosaves every 3 seconds.",
+    iconKey: "PenTool",
+    hue: "pink",
+    suite: "CROSS",
+    tier: "CORE",
+    status: "LIVE",
+    defaultEnabled: true,
+    displayOrder: 45,
+    pathPrefix: "/whiteboards",
+  },
+  {
     slug: "workwrk-culture",
     name: "WorkwrK Culture",
     tagline: "Kudos, ideas, surveys, announcements",

@@ -132,6 +132,8 @@ model Organization {
   legalTrademarks       Trademark[]
   // 🆕 Phase D1 — Sidekick chat
   chatSessions          ChatSession[]
+  // 🆕 Whiteboards (Excalidraw-powered canvases)
+  whiteboards           Whiteboard[]
 
   @@index([slug])
 }
@@ -5183,4 +5185,43 @@ enum ChatRole {
   ASSISTANT
   SYSTEM
   TOOL
+}
+
+// ==========================================
+// 🆕 Whiteboards — Excalidraw-powered infinite canvas
+// Mind maps, diagrams, brainstorming, retros, flow charts. Each board
+// is one row; the `scene` JSON holds the full Excalidraw scene
+// (elements + appState). Lightweight + auditable: who created, who
+// last touched, when, and a thumbnail for the listing page.
+// ==========================================
+
+model Whiteboard {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?      @db.Text
+  // The Excalidraw scene serialized — { elements: [...], appState: {...},
+  // files: {...} }. Opaque to us; round-tripped to/from the client.
+  scene          Json         @default("{}")
+  // Optional preview image (data URL or S3 key) generated on save so the
+  // listing page can show what's inside without loading the full scene.
+  thumbnail      String?      @db.Text
+  // Owner is the creator. Edit access is org-wide by default; share
+  // policies (public links, granular permissions) come in a follow-up.
+  ownerId        String?
+  lastEditedById String?
+  lastEditedAt   DateTime?
+  archivedAt     DateTime?
+  // Optional pinning to a Space or Product so it shows under the right
+  // surface (e.g. a brainstorm tied to /marketing or /dev).
+  spaceId        String?
+  productSlug    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, archivedAt])
+  @@index([organizationId, ownerId])
+  @@index([spaceId])
+  @@index([productSlug])
 }

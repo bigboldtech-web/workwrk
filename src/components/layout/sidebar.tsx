@@ -68,6 +68,7 @@ import {
   Headphones,
   Code,
   Scale,
+  PenTool,
 } from "lucide-react";
 
 type NavItem = {
@@ -180,6 +181,7 @@ const navigation: NavItem[] = [
   // ── Cross-functional core (always-on for every org)
   { name: "Work Calendar", key: "calendar", href: "/tasks", icon: CalendarDays, moduleKey: "tasks", section: "workspace", hue: "blue" },
   { name: "SOPs", key: "sops", href: "/sops", icon: BookOpen, moduleKey: "sops", section: "workspace", hue: "teal" },
+  { name: "Whiteboards", key: "whiteboards", href: "/whiteboards", icon: PenTool, section: "workspace", hue: "pink" },
   { name: "Process Runs", key: "processRuns", href: "/process-runs", icon: ListChecks, moduleKey: "sops", managerOnly: true, section: "workspace", hue: "sky" },
   { name: "OKRs", key: "okrs", href: "/okrs", icon: Crosshair, section: "workspace", hue: "violet" },
   { name: "KRA & KPIs", key: "kraKpi", href: "/kra-kpi", icon: Target, moduleKey: "kra-kpi", section: "workspace", hue: "rose" },
