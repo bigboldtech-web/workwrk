@@ -130,6 +130,8 @@ model Organization {
   legalContracts        Contract[]
   legalPrivacyRequests  PrivacyRequest[]
   legalTrademarks       Trademark[]
+  // 🆕 Phase D1 — Sidekick chat
+  chatSessions          ChatSession[]
 
   @@index([slug])
 }
@@ -5118,4 +5120,61 @@ enum TrademarkStatus {
   ABANDONED
   CANCELLED
   OPPOSED
+}
+
+// ==========================================
+// 🆕 PHASE D1 · Sidekick (real AI chat)
+// Persisted multi-turn conversations with Claude. Each session belongs
+// to one user; messages stamp the role + token/cost telemetry from the
+// Anthropic SDK response. Tools live in a separate JSON field so we
+// can experiment with tool calling without schema changes.
+// ==========================================
+
+model ChatSession {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String        // the person whose chat this is
+  title          String?       // auto-derived from first user message (truncated)
+  pinned         Boolean       @default(false)
+  archivedAt     DateTime?
+  // Last assistant model used for this session — handy for "the model
+  // changed mid-thread" diagnostics + cost analytics.
+  lastModel      String?
+  totalTokensIn  Int           @default(0)
+  totalTokensOut Int           @default(0)
+  totalCostCents Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  messages       ChatMessage[]
+
+  @@index([organizationId, userId, updatedAt])
+  @@index([userId, pinned, updatedAt])
+}
+
+model ChatMessage {
+  id          String         @id @default(cuid())
+  sessionId   String
+  session     ChatSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role        ChatRole
+  content     String         @db.Text
+  // Anthropic SDK response telemetry. Null on user/system messages.
+  modelUsed   String?
+  tokensIn    Int?
+  tokensOut   Int?
+  costCents   Int?
+  // Future: tool calls + tool results. For now stored as opaque JSON.
+  toolCalls   Json?
+  finishReason String?       // "stop_reason" from the SDK response
+  createdAt   DateTime       @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
 }
