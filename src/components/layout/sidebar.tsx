@@ -70,6 +70,7 @@ import {
   Scale,
   PenTool,
   Zap,
+  Mic,
 } from "lucide-react";
 
 type NavItem = {
@@ -234,6 +235,9 @@ const navigation: NavItem[] = [
   { name: "Agents", key: "agentsRail", href: "/agents", icon: Bot, moduleKey: "ai", section: "agents", hue: "violet" },
   { name: "Build", key: "build", href: "/build", icon: Wand2, moduleKey: "ai", managerOnly: true, section: "build", hue: "pink" },
   { name: "Meetings", key: "meetings", href: "/meetings", icon: MessageSquare, moduleKey: "meetings", section: "meetings", hue: "amber" },
+  // Notetaker is the meetings AI surface — lives under Workspace so it's
+  // easy to discover, but conceptually adjacent to the Meetings rail.
+  { name: "Notetaker", key: "notetaker", href: "/notetaker", icon: Mic, section: "workspace", hue: "amber" },
 
   // ⚙️ More — admin / configuration / observability + Product Store.
   { name: "Product Store", key: "store", href: "/store", icon: Store, section: "more", hue: "violet" },
