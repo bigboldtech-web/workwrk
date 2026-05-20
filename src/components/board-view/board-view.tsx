@@ -26,10 +26,12 @@ import {
   LayoutPanelLeft,
   MoreVertical,
   ChevronDown,
+  ChevronUp,
   Clock,
   Search,
   X,
   Filter,
+  ArrowUpDown,
 } from "lucide-react";
 
 export type BoardFieldType =
@@ -138,7 +140,63 @@ export function BoardView<T>(props: Props<T>) {
     });
   }, [props, query, filters, searchableFields]);
 
-  const filteredProps = { ...props, items: filteredItems };
+  // ── Sort state ─────────────────────────────────────────
+  // Persisted per-board in localStorage like view choice. Tri-state per
+  // column: click → asc, click again → desc, click again → clear.
+  const sortStorageKey = `boardview-sort:${props.boardKey}`;
+  const [sortField, setSortField] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(sortStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { field?: string; dir?: "asc" | "desc" };
+        if (parsed.field) setSortField(parsed.field);
+        if (parsed.dir) setSortDir(parsed.dir);
+      }
+    } catch {
+      // Bad JSON / quota / private mode — fall back to no sort.
+    }
+  }, [sortStorageKey]);
+
+  const cycleSort = useCallback((fieldKey: string) => {
+    setSortField((prevField) => {
+      let nextField: string | null;
+      let nextDir: "asc" | "desc" = "asc";
+      if (prevField !== fieldKey) {
+        nextField = fieldKey;
+        nextDir = "asc";
+      } else if (sortDir === "asc") {
+        nextField = fieldKey;
+        nextDir = "desc";
+      } else {
+        nextField = null;
+      }
+      setSortDir(nextDir);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(sortStorageKey, JSON.stringify({ field: nextField, dir: nextDir }));
+      }
+      return nextField;
+    });
+  }, [sortDir, sortStorageKey]);
+
+  const sortedItems = useMemo(() => {
+    if (!sortField) return filteredItems;
+    const field = props.fields.find((f) => f.key === sortField);
+    if (!field) return filteredItems;
+    const arr = [...filteredItems];
+    arr.sort((a, b) => {
+      const av = props.getValue(a, sortField);
+      const bv = props.getValue(b, sortField);
+      return compareValues(av, bv, field);
+    });
+    if (sortDir === "desc") arr.reverse();
+    return arr;
+  }, [filteredItems, sortField, sortDir, props]);
+
+  const filteredProps = { ...props, items: sortedItems, sortField, sortDir, onSortClick: cycleSort };
 
   function toggleFilter(fieldKey: string, value: string) {
     setFilters((prev) => {
@@ -299,11 +357,56 @@ export function BoardView<T>(props: Props<T>) {
   );
 }
 
+// Typed comparison for sort. Returns negative if a < b, 0 if equal,
+// positive if a > b. nulls sort last on asc (the typical expectation).
+function compareValues(a: unknown, b: unknown, field: BoardField): number {
+  const aNull = a == null || a === "";
+  const bNull = b == null || b === "";
+  if (aNull && bNull) return 0;
+  if (aNull) return 1;   // null sorts after
+  if (bNull) return -1;
+
+  switch (field.fieldType) {
+    case "NUMBER":
+      return Number(a) - Number(b);
+    case "DATE": {
+      const ad = typeof a === "string" ? new Date(a).getTime() : NaN;
+      const bd = typeof b === "string" ? new Date(b).getTime() : NaN;
+      if (Number.isNaN(ad) && Number.isNaN(bd)) return 0;
+      if (Number.isNaN(ad)) return 1;
+      if (Number.isNaN(bd)) return -1;
+      return ad - bd;
+    }
+    case "CHECKBOX":
+      return (a ? 1 : 0) - (b ? 1 : 0);
+    case "SELECT": {
+      // Sort by choice position (declared order in options.choices)
+      const choices = field.options?.choices ?? [];
+      const ai = choices.findIndex((c) => c.value === a);
+      const bi = choices.findIndex((c) => c.value === b);
+      if (ai < 0 && bi < 0) return String(a).localeCompare(String(b));
+      if (ai < 0) return 1;
+      if (bi < 0) return -1;
+      return ai - bi;
+    }
+    case "MULTI_SELECT":
+      return (Array.isArray(a) ? a.length : 0) - (Array.isArray(b) ? b.length : 0);
+    default:
+      return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+  }
+}
+
 // ─────────────────────────────────────────────────────────
-// Table view (with inline cell editing)
+// Table view (with inline cell editing + sortable headers)
 // ─────────────────────────────────────────────────────────
 
-function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, onChangeField, editableFields }: Props<T>) {
+interface TableProps<T> extends Props<T> {
+  sortField?: string | null;
+  sortDir?: "asc" | "desc";
+  onSortClick?: (fieldKey: string) => void;
+}
+
+function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, onChangeField, editableFields, sortField, sortDir, onSortClick }: TableProps<T>) {
   // Edit state: which (rowId, fieldKey) is currently being edited.
   const [editing, setEditing] = useState<{ id: string; field: string } | null>(null);
 
@@ -325,9 +428,34 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
         <table className="w-full text-sm">
           <thead className="bg-surface-2 text-xs uppercase tracking-wider text-muted-2">
             <tr>
-              {fields.map((f) => (
-                <th key={f.key} className="text-left px-4 py-2.5 font-medium">{f.label}</th>
-              ))}
+              {fields.map((f) => {
+                const isSorted = sortField === f.key;
+                const canSort = !!onSortClick;
+                return (
+                  <th key={f.key} className="text-left px-4 py-2.5 font-medium">
+                    {canSort ? (
+                      <button
+                        type="button"
+                        onClick={() => onSortClick!(f.key)}
+                        className={
+                          "inline-flex items-center gap-1 -ml-1 px-1 py-0.5 rounded transition-colors " +
+                          (isSorted ? "text-violet-700 dark:text-violet-300" : "hover:bg-surface")
+                        }
+                        title={isSorted ? `Sorted ${sortDir} · click to ${sortDir === "asc" ? "reverse" : "clear"}` : "Click to sort"}
+                      >
+                        <span>{f.label}</span>
+                        {isSorted ? (
+                          sortDir === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />
+                        ) : (
+                          <ArrowUpDown size={10} className="opacity-30 group-hover:opacity-60" />
+                        )}
+                      </button>
+                    ) : (
+                      f.label
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
