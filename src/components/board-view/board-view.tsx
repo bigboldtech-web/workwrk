@@ -27,6 +27,9 @@ import {
   MoreVertical,
   ChevronDown,
   Clock,
+  Search,
+  X,
+  Filter,
 } from "lucide-react";
 
 export type BoardFieldType =
@@ -57,6 +60,10 @@ interface Props<T> {
   extraToolbar?: React.ReactNode;
   /** Default view if no localStorage pref exists. */
   defaultView?: BoardViewType;
+  /** Hide the search input (some surfaces have their own). Default: false. */
+  hideSearch?: boolean;
+  /** Placeholder for the search box. */
+  searchPlaceholder?: string;
 }
 
 const VIEW_OPTIONS: { id: BoardViewType; label: string; Icon: typeof List }[] = [
@@ -90,48 +97,199 @@ export function BoardView<T>(props: Props<T>) {
   const kanbanField = useMemo(() => props.fields.find((f) => f.fieldType === "SELECT"), [props.fields]);
   const calendarField = useMemo(() => props.fields.find((f) => f.fieldType === "DATE"), [props.fields]);
 
+  // ── Search + filter state ──────────────────────────────
+  // Search runs against title + every TEXT/TEXTAREA/EMAIL/URL field
+  // value, case-insensitive. Filter chips toggle SELECT field values
+  // — clicking "Status: Open" hides anything not Open. Multiple chips
+  // on the same field OR together; different fields AND together.
+  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<Record<string, Set<string>>>({});
+  const [showFilters, setShowFilters] = useState(false);
+
+  const selectFields = useMemo(() => props.fields.filter((f) => f.fieldType === "SELECT"), [props.fields]);
+  const searchableFields = useMemo(
+    () => props.fields.filter((f) => f.fieldType === "TEXT" || f.fieldType === "TEXTAREA" || f.fieldType === "EMAIL" || f.fieldType === "URL"),
+    [props.fields],
+  );
+
+  const filteredItems = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return props.items.filter((item) => {
+      // Query match: title OR any searchable field
+      if (q) {
+        const titleHit = props.getTitle(item).toLowerCase().includes(q);
+        const fieldHit = !titleHit && searchableFields.some((f) => {
+          const v = props.getValue(item, f.key);
+          return typeof v === "string" && v.toLowerCase().includes(q);
+        });
+        if (!titleHit && !fieldHit) return false;
+      }
+      // Filter pills: each field's set must include the row's value
+      for (const [fieldKey, allowed] of Object.entries(filters)) {
+        if (allowed.size === 0) continue;
+        const v = props.getValue(item, fieldKey);
+        if (typeof v !== "string" || !allowed.has(v)) return false;
+      }
+      return true;
+    });
+  }, [props, query, filters, searchableFields]);
+
+  const filteredProps = { ...props, items: filteredItems };
+
+  function toggleFilter(fieldKey: string, value: string) {
+    setFilters((prev) => {
+      const next = { ...prev };
+      const set = new Set(next[fieldKey] ?? []);
+      if (set.has(value)) set.delete(value);
+      else set.add(value);
+      next[fieldKey] = set;
+      return next;
+    });
+  }
+  function clearAllFilters() {
+    setFilters({});
+    setQuery("");
+  }
+  const activeFilterCount = Object.values(filters).reduce((n, s) => n + s.size, 0);
+
   return (
     <div>
-      {/* View switcher + extra toolbar */}
-      <div className="flex items-center justify-between mb-3 gap-2">
-        <div className="inline-flex rounded-lg border border-border bg-surface p-0.5">
-          {VIEW_OPTIONS.map(({ id, label, Icon }) => {
-            const disabled = (id === "kanban" && !kanbanField) || (id === "calendar" && !calendarField);
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => persistView(id)}
-                disabled={disabled}
-                title={disabled ? `${label} view needs a ${id === "kanban" ? "SELECT" : "DATE"} field` : label}
-                className={
-                  "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors " +
-                  (view === id
-                    ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
-                    : "text-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed")
-                }
-              >
-                <Icon size={12} /> {label}
-              </button>
-            );
-          })}
+      {/* Toolbar: view switcher · search · filter · extraToolbar */}
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-lg border border-border bg-surface p-0.5">
+            {VIEW_OPTIONS.map(({ id, label, Icon }) => {
+              const disabled = (id === "kanban" && !kanbanField) || (id === "calendar" && !calendarField);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => persistView(id)}
+                  disabled={disabled}
+                  title={disabled ? `${label} view needs a ${id === "kanban" ? "SELECT" : "DATE"} field` : label}
+                  className={
+                    "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors " +
+                    (view === id
+                      ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
+                      : "text-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed")
+                  }
+                >
+                  <Icon size={12} /> {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {!props.hideSearch && (
+            <div className="relative">
+              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none" aria-hidden />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={props.searchPlaceholder ?? `Search ${props.items.length} row${props.items.length === 1 ? "" : "s"}…`}
+                className="pl-7 pr-7 py-1.5 rounded-md border border-border bg-surface text-xs w-56 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {selectFields.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowFilters((v) => !v)}
+              className={
+                "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors " +
+                (activeFilterCount > 0 || showFilters
+                  ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700 dark:text-violet-300"
+                  : "border-border text-muted hover:text-foreground hover:bg-surface-2")
+              }
+            >
+              <Filter size={11} /> Filter
+              {activeFilterCount > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-violet-200 dark:bg-violet-800 text-[10px] font-bold">{activeFilterCount}</span>
+              )}
+            </button>
+          )}
+
+          {(activeFilterCount > 0 || query) && (
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="text-[11px] text-muted hover:text-foreground"
+            >
+              Clear
+            </button>
+          )}
         </div>
+
         {props.extraToolbar}
       </div>
 
+      {/* Filter chip panel — expanded when "Filter" toggled */}
+      {showFilters && selectFields.length > 0 && (
+        <div className="mb-3 rounded-lg border border-border bg-surface-2 p-3 space-y-2">
+          {selectFields.map((field) => {
+            const choices = field.options?.choices ?? [];
+            const selected = filters[field.key] ?? new Set<string>();
+            return (
+              <div key={field.key} className="flex items-start gap-2 flex-wrap">
+                <span className="text-[10px] uppercase tracking-wider text-muted-2 font-semibold pt-1.5 min-w-[80px]">{field.label}</span>
+                <div className="flex flex-wrap gap-1">
+                  {choices.map((c) => {
+                    const isOn = selected.has(c.value);
+                    return (
+                      <button
+                        key={c.value}
+                        type="button"
+                        onClick={() => toggleFilter(field.key, c.value)}
+                        className={
+                          "text-[11px] px-2 py-0.5 rounded-md border transition-colors " +
+                          (isOn
+                            ? "bg-violet-600 border-violet-600 text-white"
+                            : "bg-surface border-border text-muted hover:border-violet-300")
+                        }
+                      >
+                        {c.label ?? c.value}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Result count when filtered */}
+      {(query || activeFilterCount > 0) && (
+        <div className="text-[11px] text-muted-2 mb-2">
+          Showing {filteredItems.length} of {props.items.length}
+        </div>
+      )}
+
       {/* Force a stable wrapper before hydration so layout doesn't jump */}
       {!hydrated ? (
-        <TableView {...props} />
+        <TableView {...filteredProps} />
       ) : view === "table" ? (
-        <TableView {...props} />
+        <TableView {...filteredProps} />
       ) : view === "kanban" && kanbanField ? (
-        <KanbanView {...props} groupBy={kanbanField} />
+        <KanbanView {...filteredProps} groupBy={kanbanField} />
       ) : view === "calendar" && calendarField ? (
-        <CalendarView {...props} dateField={calendarField} />
+        <CalendarView {...filteredProps} dateField={calendarField} />
       ) : view === "gallery" ? (
-        <GalleryView {...props} />
+        <GalleryView {...filteredProps} />
       ) : (
-        <TableView {...props} />
+        <TableView {...filteredProps} />
       )}
     </div>
   );
