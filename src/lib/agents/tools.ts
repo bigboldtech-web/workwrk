@@ -401,6 +401,70 @@ const createCampaign: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
+// Helpdesk (Maya's tool)
+// ─────────────────────────────────────────────────────────
+
+const createSupportTicket: ToolDefinition = {
+  name: "create_support_ticket",
+  description: "File a new external customer support ticket in WorkwrK Helpdesk. Use when the user describes a customer issue or request.",
+  input_schema: {
+    type: "object",
+    properties: {
+      subject: { type: "string" },
+      body: { type: "string", description: "The customer's message / what they reported" },
+      customerEmail: { type: "string", description: "Customer's email — used to find-or-create their record" },
+      customerName: { type: "string" },
+      customerCompany: { type: "string" },
+      priority: { type: "string", enum: ["LOW", "NORMAL", "HIGH", "URGENT"] },
+      category: { type: "string", description: "Billing | Product | Bug | Feature Request | Onboarding" },
+      slaTier: { type: "string", description: "Free | Standard | Premium | Enterprise" },
+    },
+    required: ["subject", "customerEmail"],
+  },
+  handler: async (ctx, input) => {
+    // Find-or-create customer
+    let customer = await prisma.supportCustomer.findUnique({
+      where: { organizationId_email: { organizationId: ctx.orgId, email: input.customerEmail as string } },
+    });
+    if (!customer) {
+      customer = await prisma.supportCustomer.create({
+        data: {
+          organizationId: ctx.orgId,
+          email: input.customerEmail as string,
+          name: (input.customerName as string) ?? null,
+          companyName: (input.customerCompany as string) ?? null,
+        },
+      });
+    }
+
+    const slaHours: Record<string, number> = { Free: 48, Standard: 24, Premium: 8, Enterprise: 4 };
+    const firstResponseDueAt = input.slaTier
+      ? new Date(Date.now() + (slaHours[input.slaTier as string] ?? 24) * 60 * 60 * 1000)
+      : null;
+
+    const priorityMap: Record<string, "LOW" | "NORMAL" | "HIGH" | "URGENT"> = {
+      LOW: "LOW", NORMAL: "NORMAL", HIGH: "HIGH", URGENT: "URGENT",
+    };
+
+    const ticket = await prisma.supportTicket.create({
+      data: {
+        organizationId: ctx.orgId,
+        subject: input.subject as string,
+        body: (input.body as string) ?? null,
+        customerId: customer.id,
+        channel: "PORTAL",
+        priority: priorityMap[input.priority as string] ?? "NORMAL",
+        category: (input.category as string) ?? null,
+        slaTier: (input.slaTier as string) ?? null,
+        firstResponseDueAt,
+      },
+      select: { id: true, subject: true, status: true, priority: true },
+    });
+    return { ok: true, ticket, customer: { email: customer.email, name: customer.name } };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
 // Registry — all tools by name
 // ─────────────────────────────────────────────────────────
 
@@ -414,6 +478,7 @@ export const TOOLS: Record<string, ToolDefinition> = {
   create_contract: createContract,
   create_sprint: createSprint,
   create_campaign: createCampaign,
+  create_support_ticket: createSupportTicket,
 };
 
 // Tools every session can use, regardless of agent (or no agent).
@@ -433,6 +498,7 @@ export const PRODUCT_TOOL_NAMES: Record<string, string[]> = {
   "workwrk-contracts": ["create_contract"],
   "workwrk-dev": ["create_sprint"],
   "workwrk-campaigns": ["create_campaign"],
+  "workwrk-help": ["create_support_ticket"],
 };
 
 // Resolve which tools are available to a given chat session.

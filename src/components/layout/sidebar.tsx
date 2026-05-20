@@ -204,6 +204,8 @@ const navigation: NavItem[] = [
   { name: "CRM", key: "crm", href: "/crm", icon: TrendingUp, section: "workspace", hue: "green" },
   // ── IT Service Management (ITSM)
   { name: "ITSM", key: "itsm", href: "/itsm", icon: Headphones, managerOnly: true, section: "workspace", hue: "blue" },
+  // ── Customer Helpdesk
+  { name: "Helpdesk", key: "helpdesk", href: "/helpdesk", icon: Headphones, managerOnly: true, section: "workspace", hue: "teal" },
   // ── Marketing suite
   { name: "Marketing", key: "marketing", href: "/marketing", icon: Megaphone, managerOnly: true, section: "workspace", hue: "amber" },
   // ── Engineering suite

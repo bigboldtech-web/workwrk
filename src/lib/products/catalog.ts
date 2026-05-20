@@ -593,18 +593,18 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // ─────────────────────────────────────────────
   {
     slug: "workwrk-help",
-    name: "WorkwrK Help",
-    tagline: "Customer support tickets + KB",
+    name: "WorkwrK Helpdesk",
+    tagline: "Customer tickets · CSAT · canned responses",
     description:
-      "External customer support tickets, queues + SLAs, macros, CSAT surveys, integrated knowledge base. Zendesk-for-SMB.",
+      "External customer support distinct from internal ITSM. Tickets across 6 channels (Email, Chat, Phone, Portal, Social, In-app), 7-state lifecycle (NEW → OPEN → PENDING → RESOLVED → CLOSED), tier-driven SLA timers (Free 48h / Standard 24h / Premium 8h / Enterprise 4h), CSAT scores per ticket, reusable macros (canned responses) with auto-resolve flag. Zendesk-for-SMB.",
     iconKey: "Headphones",
     hue: "teal",
     suite: "SUPPORT",
     tier: "PLUS",
-    status: "COMING_SOON",
+    status: "LIVE",
     defaultEnabled: false,
     displayOrder: 900,
-    pathPrefix: "/help",
+    pathPrefix: "/helpdesk",
     seededAgents: ["maya-support-lead", "kai-kb-curator"],
     seededIntegrations: ["gmail", "intercom-migrate", "zendesk-migrate"],
   },
