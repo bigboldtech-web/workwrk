@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveCrmContext } from "@/lib/crm/auth";
+import { triggerEvent } from "@/lib/workflows/runtime";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -143,6 +144,18 @@ export async function PATCH(req: Request) {
       pipelineStage: { select: { id: true, name: true, color: true, isWon: true, isLost: true } },
     },
   });
+
+  // Fire stage_changed only when the stage actually changed. Won/Lost
+  // get their own dedicated event for cleaner routing.
+  if (parsed.data.pipelineStageId && parsed.data.pipelineStageId !== existing.pipelineStageId) {
+    const stageName = opportunity.pipelineStage?.name ?? "";
+    triggerEvent(ctx.orgId, "opportunity.stage_changed", opportunity as unknown as Record<string, unknown>);
+    if (opportunity.pipelineStage?.isWon) {
+      triggerEvent(ctx.orgId, "opportunity.won", { ...opportunity, stageName } as unknown as Record<string, unknown>);
+    } else if (opportunity.pipelineStage?.isLost) {
+      triggerEvent(ctx.orgId, "opportunity.lost", { ...opportunity, stageName } as unknown as Record<string, unknown>);
+    }
+  }
 
   return NextResponse.json({ opportunity });
 }

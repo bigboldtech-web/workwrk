@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveItsmContext } from "@/lib/itsm/auth";
+import { triggerEvent } from "@/lib/workflows/runtime";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -60,6 +61,8 @@ export async function POST(req: Request) {
       assigneeId: parsed.data.assigneeId,
     },
   });
+
+  triggerEvent(ctx.orgId, "ticket.created", ticket as unknown as Record<string, unknown>);
 
   return NextResponse.json({ ticket });
 }

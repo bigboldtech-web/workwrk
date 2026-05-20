@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveCrmContext } from "@/lib/crm/auth";
+import { triggerEvent } from "@/lib/workflows/runtime";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -61,6 +62,8 @@ export async function POST(req: Request) {
       ownerId: parsed.data.ownerId ?? ctx.userId,
     },
   });
+
+  triggerEvent(ctx.orgId, "lead.created", lead as unknown as Record<string, unknown>);
 
   return NextResponse.json({ lead });
 }

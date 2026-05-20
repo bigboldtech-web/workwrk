@@ -69,6 +69,7 @@ import {
   Code,
   Scale,
   PenTool,
+  Zap,
 } from "lucide-react";
 
 type NavItem = {
@@ -236,6 +237,7 @@ const navigation: NavItem[] = [
 
   // ⚙️ More — admin / configuration / observability + Product Store.
   { name: "Product Store", key: "store", href: "/store", icon: Store, section: "more", hue: "violet" },
+  { name: "Autopilot", key: "autopilot", href: "/autopilot", icon: Zap, adminOnly: true, section: "more", hue: "amber" },
   { name: "Activity", key: "activity", href: "/activity", icon: Activity, section: "more", hue: "slate" },
   { name: "Analytics", key: "analytics", href: "/analytics", icon: BarChart3, moduleKey: "analytics", managerOnly: true, section: "more", hue: "blue" },
   { name: "Assets", key: "assets", href: "/assets", icon: Package, managerOnly: true, section: "more", hue: "amber" },

@@ -3779,9 +3779,22 @@ model Workflow {
   // applicable; free strings allowed for new types.
   targetType     String
   active         Boolean      @default(true)
-  // Steps are stored as an ordered JSON array so admins can
-  // rearrange + insert without table juggling. Each step is
-  // { id, name, approverRule, slaHours, requireNote }.
+  // What kind of workflow this is. APPROVAL = approval chain (legacy
+  // step-based). AUTOMATION = event-driven Autopilot rule with
+  // trigger + conditions + actions.
+  kind           WorkflowKind @default(APPROVAL)
+  // For AUTOMATION workflows: event name that fires this rule.
+  // Format "domain.event" e.g. "lead.created" | "ticket.created" |
+  // "opportunity.stage_changed". Null for APPROVAL.
+  triggerEvent   String?
+  // For AUTOMATION: JSON conditions evaluated against the trigger
+  // payload. Shape: { field: "priority", op: "eq", value: "URGENT" }
+  // (single condition for v1; AND-list later).
+  conditions     Json         @default("{}")
+  // Steps are stored as an ordered JSON array.
+  //   APPROVAL: { id, name, approverRule, slaHours, requireNote }
+  //   AUTOMATION: { id, type: "notify" | "create_task" | "run_agent",
+  //                 config: { ... } }
   steps          Json         @default("[]")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -3790,6 +3803,12 @@ model Workflow {
 
   @@unique([organizationId, name])
   @@index([organizationId, targetType, active])
+  @@index([organizationId, kind, triggerEvent, active])
+}
+
+enum WorkflowKind {
+  APPROVAL
+  AUTOMATION
 }
 
 model WorkflowRun {
@@ -3819,6 +3838,9 @@ enum WorkflowRunStatus {
   APPROVED
   REJECTED
   CANCELLED
+  // 🆕 Phase D5 Autopilot — AUTOMATION workflow runs use these
+  COMPLETED
+  FAILED
 }
 
 model CustomFieldDefinition {

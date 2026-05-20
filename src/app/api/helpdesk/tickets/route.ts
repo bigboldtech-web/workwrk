@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
+import { triggerEvent } from "@/lib/workflows/runtime";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -79,6 +80,8 @@ export async function POST(req: Request) {
     },
     include: { customer: { select: { id: true, name: true, email: true, companyName: true } } },
   });
+
+  triggerEvent(ctx.orgId, "support_ticket.created", ticket as unknown as Record<string, unknown>);
 
   return NextResponse.json({ ticket });
 }
