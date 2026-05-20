@@ -194,6 +194,7 @@ export default function BuildAppPage() {
             return String((r as Record<string, unknown>)[firstText?.key ?? fields[0]?.key ?? ""] ?? "Untitled");
           }}
           getValue={(r, key) => (r as Record<string, unknown>)[key]}
+          selectable
           onChangeField={async (id, fieldKey, value) => {
             const idx = Number(id);
             const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
@@ -202,6 +203,30 @@ export default function BuildAppPage() {
               body: JSON.stringify({ index: idx, row: { [fieldKey]: value } }),
             });
             if (res.ok) await load();
+          }}
+          onBulkChange={async (ids, fieldKey, value) => {
+            // Patch each row by index. Indexes are stable for a single
+            // load (we re-render after each batch).
+            await Promise.all(ids.map((id) => fetch(`/api/build/apps/${app.slug}/rows`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ index: Number(id), row: { [fieldKey]: value } }),
+            })));
+            await load();
+          }}
+          onBulkDelete={async (ids) => {
+            // Delete in DESC order so prior deletes don't shift later
+            // indexes. The rows API deletes by index against the live
+            // app.ui.rows array.
+            const desc = [...ids].map(Number).sort((a, b) => b - a);
+            for (const idx of desc) {
+              await fetch(`/api/build/apps/${app.slug}/rows`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ index: idx }),
+              });
+            }
+            await load();
           }}
         />
       )}

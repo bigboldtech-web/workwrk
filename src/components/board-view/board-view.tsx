@@ -70,6 +70,13 @@ interface Props<T> {
    *  all fields are editable when onChangeField is provided. Pass an
    *  empty array to disable inline editing entirely. */
   editableFields?: string[];
+  /** When true, render a checkbox column + enable bulk actions. */
+  selectable?: boolean;
+  /** Batch update — called for each selected row when the user picks
+   *  a value from the bulk "Update <field>" menu. */
+  onBulkChange?: (ids: string[], fieldKey: string, value: unknown) => Promise<void> | void;
+  /** Batch delete — called once with all selected ids. */
+  onBulkDelete?: (ids: string[]) => Promise<void> | void;
 }
 
 const VIEW_OPTIONS: { id: BoardViewType; label: string; Icon: typeof List }[] = [
@@ -196,7 +203,76 @@ export function BoardView<T>(props: Props<T>) {
     return arr;
   }, [filteredItems, sortField, sortDir, props]);
 
-  const filteredProps = { ...props, items: sortedItems, sortField, sortDir, onSortClick: cycleSort };
+  // ── Selection state (for bulk actions) ──────────────────
+  // Tracks selected row IDs. Clears when items array reference changes
+  // (refetch invalidates stale selections).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulking, setBulking] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [showBulkUpdate, setShowBulkUpdate] = useState<string | null>(null); // fieldKey
+
+  // Reset selection whenever the underlying items list changes by
+  // identity (a refetch produces a new array even when contents match).
+  useEffect(() => { setSelectedIds(new Set()); }, [props.items]);
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === sortedItems.length) return new Set();
+      return new Set(sortedItems.map(props.getId));
+    });
+  }, [sortedItems, props.getId]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  async function runBulkChange(fieldKey: string, value: unknown) {
+    if (!props.onBulkChange || selectedIds.size === 0) return;
+    setBulking(true);
+    setBulkError(null);
+    try {
+      await props.onBulkChange(Array.from(selectedIds), fieldKey, value);
+      setSelectedIds(new Set());
+      setShowBulkUpdate(null);
+    } catch (e) {
+      setBulkError(e instanceof Error ? e.message : "Bulk update failed");
+    } finally {
+      setBulking(false);
+    }
+  }
+
+  async function runBulkDelete() {
+    if (!props.onBulkDelete || selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    if (!confirm(`Delete ${count} row${count === 1 ? "" : "s"}? This can't be undone.`)) return;
+    setBulking(true);
+    setBulkError(null);
+    try {
+      await props.onBulkDelete(Array.from(selectedIds));
+      setSelectedIds(new Set());
+    } catch (e) {
+      setBulkError(e instanceof Error ? e.message : "Bulk delete failed");
+    } finally {
+      setBulking(false);
+    }
+  }
+
+  const filteredProps = {
+    ...props,
+    items: sortedItems,
+    sortField,
+    sortDir,
+    onSortClick: cycleSort,
+    selectedIds,
+    toggleSelected,
+    toggleSelectAll,
+  };
 
   function toggleFilter(fieldKey: string, value: string) {
     setFilters((prev) => {
@@ -339,6 +415,82 @@ export function BoardView<T>(props: Props<T>) {
         </div>
       )}
 
+      {/* Bulk action bar — appears when ≥1 row selected */}
+      {props.selectable && selectedIds.size > 0 && (
+        <div className="mb-3 rounded-lg border border-violet-300 bg-violet-50 dark:bg-violet-950/40 px-3 py-2 flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
+            {selectedIds.size} selected
+          </span>
+          {bulkError && (
+            <span className="text-[11px] text-rose-700">· {bulkError}</span>
+          )}
+          <div className="ml-auto flex items-center gap-1.5">
+            {props.onBulkChange && selectFields.length > 0 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowBulkUpdate((v) => v ? null : selectFields[0]?.key ?? null)}
+                  disabled={bulking}
+                  className="text-xs px-3 py-1.5 rounded-md border border-violet-300 bg-surface text-violet-700 hover:bg-violet-100 dark:hover:bg-violet-950/60 disabled:opacity-50"
+                >
+                  Update {selectFields.find((f) => f.key === showBulkUpdate)?.label ?? selectFields[0]?.label} ▾
+                </button>
+                {showBulkUpdate && (
+                  <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg bg-surface border border-border shadow-lg py-1 max-h-72 overflow-y-auto">
+                    <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-muted-2">
+                      Set <span className="font-mono normal-case">{selectFields.find((f) => f.key === showBulkUpdate)?.label}</span> for {selectedIds.size}
+                    </div>
+                    {selectFields.length > 1 && (
+                      <div className="px-2 py-1 border-b border-border">
+                        <select
+                          value={showBulkUpdate}
+                          onChange={(e) => setShowBulkUpdate(e.target.value)}
+                          className="w-full text-xs px-2 py-1 rounded border border-border bg-surface"
+                        >
+                          {selectFields.map((f) => (
+                            <option key={f.key} value={f.key}>{f.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {(selectFields.find((f) => f.key === showBulkUpdate)?.options?.choices ?? []).map((c) => (
+                      <button
+                        key={c.value}
+                        type="button"
+                        onClick={() => runBulkChange(showBulkUpdate!, c.value)}
+                        disabled={bulking}
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 disabled:opacity-40 inline-flex items-center gap-2"
+                      >
+                        <span className="w-2 h-2 rounded-full" style={{ background: c.color ?? "#94a3b8" }} aria-hidden />
+                        {c.label ?? c.value}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {props.onBulkDelete && (
+              <button
+                type="button"
+                onClick={runBulkDelete}
+                disabled={bulking}
+                className="text-xs px-3 py-1.5 rounded-md border border-rose-300 bg-surface text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
+              >
+                Delete {selectedIds.size}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={clearSelection}
+              disabled={bulking}
+              className="text-xs px-3 py-1.5 rounded-md text-muted hover:bg-surface-2"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Force a stable wrapper before hydration so layout doesn't jump */}
       {!hydrated ? (
         <TableView {...filteredProps} />
@@ -404,9 +556,12 @@ interface TableProps<T> extends Props<T> {
   sortField?: string | null;
   sortDir?: "asc" | "desc";
   onSortClick?: (fieldKey: string) => void;
+  selectedIds?: Set<string>;
+  toggleSelected?: (id: string) => void;
+  toggleSelectAll?: () => void;
 }
 
-function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, onChangeField, editableFields, sortField, sortDir, onSortClick }: TableProps<T>) {
+function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, onChangeField, editableFields, sortField, sortDir, onSortClick, selectable, selectedIds, toggleSelected, toggleSelectAll }: TableProps<T>) {
   // Edit state: which (rowId, fieldKey) is currently being edited.
   const [editing, setEditing] = useState<{ id: string; field: string } | null>(null);
 
@@ -428,6 +583,23 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
         <table className="w-full text-sm">
           <thead className="bg-surface-2 text-xs uppercase tracking-wider text-muted-2">
             <tr>
+              {selectable && (
+                <th className="w-8 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds && selectedIds.size > 0 && selectedIds.size === items.length}
+                    ref={(el) => {
+                      // Indeterminate state when some-but-not-all are selected
+                      if (el && selectedIds) {
+                        el.indeterminate = selectedIds.size > 0 && selectedIds.size < items.length;
+                      }
+                    }}
+                    onChange={() => toggleSelectAll?.()}
+                    className="cursor-pointer"
+                    aria-label="Select all"
+                  />
+                </th>
+              )}
               {fields.map((f) => {
                 const isSorted = sortField === f.key;
                 const canSort = !!onSortClick;
@@ -461,11 +633,27 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
           <tbody>
             {items.map((item) => {
               const id = getId(item);
+              const isSelected = selectedIds?.has(id) ?? false;
               return (
                 <tr
                   key={id}
-                  className="border-t border-border hover:bg-surface-2 group"
+                  className={
+                    "border-t border-border group " +
+                    (isSelected ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-surface-2")
+                  }
                 >
+                  {selectable && (
+                    <td className="px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelected?.(id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="cursor-pointer"
+                        aria-label="Select row"
+                      />
+                    </td>
+                  )}
                   {fields.map((f) => {
                     const editable = canEdit(f);
                     const isEditing = editing?.id === id && editing?.field === f.key;

@@ -325,12 +325,21 @@ export default function CrmPage() {
             getTitle={(l) => `${l.firstName} ${l.lastName ?? ""}`.trim()}
             getValue={(l, key) => (l as unknown as Record<string, unknown>)[key]}
             editableFields={["status", "source"]}
+            selectable
             onChangeField={async (id, key, value) => {
               await fetch("/api/crm/leads", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id, [key]: value }),
               }).catch(() => {});
+              await refresh();
+            }}
+            onBulkChange={async (ids, key, value) => {
+              await Promise.all(ids.map((id) => fetch("/api/crm/leads", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, [key]: value }),
+              })));
               await refresh();
             }}
           />

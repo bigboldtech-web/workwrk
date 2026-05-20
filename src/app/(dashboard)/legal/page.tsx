@@ -242,12 +242,21 @@ export default function LegalPage() {
               return raw;
             }}
             editableFields={["status"]}
+            selectable
             onChangeField={async (id, key, value) => {
               await fetch("/api/legal/contracts", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id, [key]: value }),
               });
+              await refresh();
+            }}
+            onBulkChange={async (ids, key, value) => {
+              await Promise.all(ids.map((id) => fetch("/api/legal/contracts", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, [key]: value }),
+              })));
               await refresh();
             }}
           />

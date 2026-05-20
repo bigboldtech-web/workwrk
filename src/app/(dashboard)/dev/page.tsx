@@ -257,12 +257,21 @@ export default function DevPage() {
             getTitle={(r) => r.title}
             getValue={(r, key) => (r as unknown as Record<string, unknown>)[key]}
             editableFields={["status", "priority", "quarter", "impactScore", "effortPoints"]}
+            selectable
             onChangeField={async (id, key, value) => {
               await fetch("/api/dev/roadmap", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id, [key]: value }),
               });
+              await refresh();
+            }}
+            onBulkChange={async (ids, key, value) => {
+              await Promise.all(ids.map((id) => fetch("/api/dev/roadmap", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, [key]: value }),
+              })));
               await refresh();
             }}
           />

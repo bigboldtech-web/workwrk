@@ -215,12 +215,21 @@ export default function HelpdeskPage() {
               return (t as unknown as Record<string, unknown>)[key];
             }}
             editableFields={["status", "priority"]}
+            selectable
             onChangeField={async (id, key, value) => {
               await fetch("/api/helpdesk/tickets", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id, [key]: value }),
               });
+              await refresh();
+            }}
+            onBulkChange={async (ids, key, value) => {
+              await Promise.all(ids.map((id) => fetch("/api/helpdesk/tickets", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, [key]: value }),
+              })));
               await refresh();
             }}
           />
