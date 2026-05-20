@@ -15,6 +15,31 @@ import {
   Clock,
   AlertTriangle,
 } from "lucide-react";
+import { BoardView, type BoardField } from "@/components/board-view/board-view";
+
+const CONTRACT_FIELDS: BoardField[] = [
+  { key: "title", label: "Title", fieldType: "TEXT" },
+  { key: "counterparty", label: "Counterparty", fieldType: "TEXT" },
+  {
+    key: "status", label: "Status", fieldType: "SELECT",
+    options: { choices: [
+      { value: "DRAFT", label: "Draft", color: "#a1a1aa" },
+      { value: "IN_REVIEW", label: "In review", color: "#f59e0b" },
+      { value: "IN_NEGOTIATION", label: "In negotiation", color: "#f59e0b" },
+      { value: "AWAITING_SIGNATURE", label: "Awaiting signature", color: "#a78bfa" },
+      { value: "SIGNED", label: "Signed", color: "#60a5fa" },
+      { value: "ACTIVE", label: "Active", color: "#10b981" },
+      { value: "EXPIRED", label: "Expired", color: "#ef4444" },
+      { value: "RENEWED", label: "Renewed", color: "#14b8a6" },
+      { value: "TERMINATED", label: "Terminated", color: "#71717a" },
+      { value: "CANCELLED", label: "Cancelled", color: "#71717a" },
+    ] },
+  },
+  { key: "type", label: "Type", fieldType: "TEXT" },
+  { key: "counterpartyType", label: "Party type", fieldType: "TEXT" },
+  { key: "value", label: "Value", fieldType: "NUMBER" },
+  { key: "expiresAt", label: "Expires", fieldType: "DATE" },
+];
 
 type Contract = {
   id: string;
@@ -202,38 +227,31 @@ export default function LegalPage() {
       </div>
 
       {tab === "contracts" && (
-        <div className="rounded-xl border border-border bg-surface overflow-hidden">
-          {loading ? <Loading /> : contracts.length === 0 ? <Empty Icon={FileText} title="No contracts tracked" hint="Track every MSA, NDA, SOW, DPA — get alerted before renewals expire." onAction={() => setShowNew("contracts")} actionLabel="Add first contract" /> : (
-            <table className="w-full text-sm">
-              <thead className="bg-surface-2 text-xs uppercase tracking-wider text-muted-2"><tr>
-                <th className="text-left px-4 py-2.5">Title</th>
-                <th className="text-left px-4 py-2.5">Counterparty</th>
-                <th className="text-left px-4 py-2.5">Type</th>
-                <th className="text-left px-4 py-2.5">Status</th>
-                <th className="text-left px-4 py-2.5">Value</th>
-                <th className="text-left px-4 py-2.5">Expires</th>
-              </tr></thead>
-              <tbody>{contracts.map((c) => {
-                const d = daysUntil(c.expiresAt);
-                const expiringSoon = d !== null && d <= 60 && d >= 0;
-                return (
-                  <tr key={c.id} className="border-t border-border hover:bg-surface-2">
-                    <td className="px-4 py-2.5 font-medium">{c.title}</td>
-                    <td className="px-4 py-2.5 text-muted">{c.counterparty}{c.counterpartyType && <span className="text-muted-2"> · {c.counterpartyType}</span>}</td>
-                    <td className="px-4 py-2.5 text-xs text-muted-2">{c.type ?? "—"}</td>
-                    <td className="px-4 py-2.5"><span className={`text-[10px] font-medium px-2 py-0.5 rounded-full uppercase tracking-wider ${CONTRACT_TONES[c.status]}`}>{c.status.replace(/_/g, " ")}</span></td>
-                    <td className="px-4 py-2.5 text-muted">{fmtMoney(c.value, c.currency)}</td>
-                    <td className={`px-4 py-2.5 text-xs ${expiringSoon ? "text-amber-700 font-medium" : "text-muted-2"}`}>
-                      {expiringSoon && <Clock size={11} className="inline mr-1" />}
-                      {fmtDate(c.expiresAt)}
-                      {expiringSoon && d !== null && <span className="ml-1">({d}d)</span>}
-                    </td>
-                  </tr>
-                );
-              })}</tbody>
-            </table>
-          )}
-        </div>
+        loading ? <div className="rounded-xl border border-border bg-surface"><Loading /></div>
+        : contracts.length === 0 ? <div className="rounded-xl border border-border bg-surface"><Empty Icon={FileText} title="No contracts tracked" hint="Track every MSA, NDA, SOW, DPA — get alerted before renewals expire." onAction={() => setShowNew("contracts")} actionLabel="Add first contract" /></div>
+        : (
+          <BoardView
+            boardKey="legal:contracts"
+            items={contracts}
+            fields={CONTRACT_FIELDS}
+            getId={(c) => c.id}
+            getTitle={(c) => c.title}
+            getValue={(c, key) => {
+              const raw = (c as unknown as Record<string, unknown>)[key];
+              if (key === "value") return raw != null ? Number(raw) : null;
+              return raw;
+            }}
+            onChangeField={async (id, key, value) => {
+              if (key !== "status") return;
+              await fetch("/api/legal/contracts", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, status: value }),
+              });
+              await refresh();
+            }}
+          />
+        )
       )}
 
       {tab === "privacy" && (

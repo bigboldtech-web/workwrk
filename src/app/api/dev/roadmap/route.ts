@@ -52,3 +52,37 @@ export async function POST(req: Request) {
   });
   return NextResponse.json({ item });
 }
+
+const patchSchema = z.object({
+  id: z.string().min(1),
+  status: z.enum(["EXPLORING", "COMMITTED", "IN_PROGRESS", "BETA", "SHIPPED", "PAUSED", "CANCELLED"]).optional(),
+  priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
+  quarter: z.string().max(20).optional(),
+  impactScore: z.number().int().min(1).max(10).nullable().optional(),
+  effortPoints: z.number().int().nonnegative().nullable().optional(),
+});
+
+export async function PATCH(req: Request) {
+  const ctx = await resolveSuiteContext();
+  if ("error" in ctx) return ctx.error;
+  const body = await req.json().catch(() => null);
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+
+  const existing = await prisma.roadmapItem.findFirst({
+    where: { id: parsed.data.id, organizationId: ctx.orgId },
+  });
+  if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  const item = await prisma.roadmapItem.update({
+    where: { id: existing.id },
+    data: {
+      ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+      ...(parsed.data.priority !== undefined ? { priority: parsed.data.priority } : {}),
+      ...(parsed.data.quarter !== undefined ? { quarter: parsed.data.quarter } : {}),
+      ...(parsed.data.impactScore !== undefined ? { impactScore: parsed.data.impactScore } : {}),
+      ...(parsed.data.effortPoints !== undefined ? { effortPoints: parsed.data.effortPoints } : {}),
+    },
+  });
+  return NextResponse.json({ item });
+}

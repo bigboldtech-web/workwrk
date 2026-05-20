@@ -13,6 +13,36 @@ import {
   Zap,
   Calendar,
 } from "lucide-react";
+import { BoardView, type BoardField } from "@/components/board-view/board-view";
+
+const ROADMAP_FIELDS: BoardField[] = [
+  { key: "title", label: "Title", fieldType: "TEXT" },
+  {
+    key: "status", label: "Status", fieldType: "SELECT",
+    options: { choices: [
+      { value: "EXPLORING", label: "Exploring", color: "#a1a1aa" },
+      { value: "COMMITTED", label: "Committed", color: "#60a5fa" },
+      { value: "IN_PROGRESS", label: "In progress", color: "#a78bfa" },
+      { value: "BETA", label: "Beta", color: "#f59e0b" },
+      { value: "SHIPPED", label: "Shipped", color: "#10b981" },
+      { value: "PAUSED", label: "Paused", color: "#71717a" },
+      { value: "CANCELLED", label: "Cancelled", color: "#ef4444" },
+    ] },
+  },
+  {
+    key: "priority", label: "Priority", fieldType: "SELECT",
+    options: { choices: [
+      { value: "P0", label: "P0", color: "#ef4444" },
+      { value: "P1", label: "P1", color: "#f59e0b" },
+      { value: "P2", label: "P2", color: "#60a5fa" },
+      { value: "P3", label: "P3", color: "#a1a1aa" },
+    ] },
+  },
+  { key: "theme", label: "Theme", fieldType: "TEXT" },
+  { key: "quarter", label: "Quarter", fieldType: "TEXT" },
+  { key: "impactScore", label: "Impact", fieldType: "NUMBER" },
+  { key: "effortPoints", label: "Effort", fieldType: "NUMBER" },
+];
 
 type Sprint = {
   id: string;
@@ -216,29 +246,27 @@ export default function DevPage() {
       )}
 
       {tab === "roadmap" && (
-        <div>
-          {loading ? <Loading /> : roadmap.length === 0 ? <div className="rounded-xl border border-border bg-surface"><Empty Icon={MapIcon} title="Empty roadmap" hint="Themes → initiatives → outcomes. Tied to OKRs + Releases." onAction={() => setShowNew("roadmap")} actionLabel="Add first item" /></div> : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {roadmap.map((r) => (
-                <article key={r.id} className="rounded-xl border border-border bg-surface p-4 hover:border-violet-300">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${PRIORITY_TONES[r.priority]}`}>{r.priority}</span>
-                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full uppercase tracking-wider ${ROADMAP_TONES[r.status]}`}>{r.status.replace(/_/g, " ")}</span>
-                    {r.quarter && <span className="text-[10px] text-muted-2 ml-auto">{r.quarter}</span>}
-                  </div>
-                  <h3 className="font-semibold text-sm mb-1">{r.title}</h3>
-                  {r.theme && <p className="text-[10px] text-muted-2 uppercase tracking-wider mb-2">{r.theme}</p>}
-                  {r.description && <p className="text-xs text-muted line-clamp-3 mb-2">{r.description}</p>}
-                  <div className="flex items-center gap-3 text-[11px] text-muted-2">
-                    {r.effortPoints !== null && <span>Effort: {r.effortPoints}</span>}
-                    {r.impactScore !== null && <span>· Impact: {r.impactScore}/10</span>}
-                    {r.publicVisible && <span className="text-emerald-600">· public</span>}
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </div>
+        loading ? <div className="rounded-xl border border-border bg-surface"><Loading /></div>
+        : roadmap.length === 0 ? <div className="rounded-xl border border-border bg-surface"><Empty Icon={MapIcon} title="Empty roadmap" hint="Themes → initiatives → outcomes. Tied to OKRs + Releases." onAction={() => setShowNew("roadmap")} actionLabel="Add first item" /></div>
+        : (
+          <BoardView
+            boardKey="dev:roadmap"
+            items={roadmap}
+            fields={ROADMAP_FIELDS}
+            getId={(r) => r.id}
+            getTitle={(r) => r.title}
+            getValue={(r, key) => (r as unknown as Record<string, unknown>)[key]}
+            onChangeField={async (id, key, value) => {
+              if (key !== "status" && key !== "priority") return;
+              await fetch("/api/dev/roadmap", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, [key]: value }),
+              });
+              await refresh();
+            }}
+          />
+        )
       )}
 
       {showNew === "sprints" && <SprintModal onClose={() => setShowNew(null)} onCreated={() => { setShowNew(null); refresh(); }} />}

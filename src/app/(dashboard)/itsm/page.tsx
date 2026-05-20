@@ -15,6 +15,37 @@ import {
   Zap,
   Clock,
 } from "lucide-react";
+import { BoardView, type BoardField } from "@/components/board-view/board-view";
+
+const TICKET_FIELDS: BoardField[] = [
+  { key: "title", label: "Title", fieldType: "TEXT" },
+  {
+    key: "status", label: "Status", fieldType: "SELECT",
+    options: { choices: [
+      { value: "OPEN", label: "Open", color: "#60a5fa" },
+      { value: "TRIAGED", label: "Triaged", color: "#f59e0b" },
+      { value: "IN_PROGRESS", label: "In progress", color: "#a78bfa" },
+      { value: "WAITING_ON_USER", label: "Waiting on user", color: "#71717a" },
+      { value: "WAITING_ON_VENDOR", label: "Waiting on vendor", color: "#71717a" },
+      { value: "RESOLVED", label: "Resolved", color: "#10b981" },
+      { value: "CLOSED", label: "Closed", color: "#a1a1aa" },
+      { value: "CANCELLED", label: "Cancelled", color: "#ef4444" },
+    ] },
+  },
+  {
+    key: "priority", label: "Priority", fieldType: "SELECT",
+    options: { choices: [
+      { value: "LOW", label: "Low", color: "#a1a1aa" },
+      { value: "NORMAL", label: "Normal", color: "#60a5fa" },
+      { value: "HIGH", label: "High", color: "#f59e0b" },
+      { value: "URGENT", label: "Urgent", color: "#ef4444" },
+      { value: "CRITICAL", label: "Critical", color: "#b91c1c" },
+    ] },
+  },
+  { key: "category", label: "Category", fieldType: "TEXT" },
+  { key: "source", label: "Source", fieldType: "TEXT" },
+  { key: "dueAt", label: "Due", fieldType: "DATE" },
+];
 
 type Ticket = {
   id: string;
@@ -213,49 +244,40 @@ export default function ItsmPage() {
         ))}
       </div>
 
-      {/* Tickets tab — grouped kanban by status */}
+      {/* Tickets tab — BoardView with auto-detected Kanban by status */}
       {tab === "tickets" && (
-        <>
-          {loading ? (
-            <div className="text-sm text-muted py-20 text-center">Loading tickets…</div>
-          ) : tickets.length === 0 ? (
-            <EmptyState
-              Icon={Headphones}
-              title="No tickets yet"
-              hint="Submit your first IT support ticket to start tracking employee requests."
-              action={{ label: "Create first ticket", onClick: () => setShowNewTicket(true) }}
-            />
-          ) : (
-            <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 480 }}>
-              {TICKET_STATUSES.map((status) => {
-                const inStatus = tickets.filter((t) => t.status === status);
-                return (
-                  <div key={status} className="flex-shrink-0 w-[280px] rounded-xl bg-surface-2 p-3">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wider ${STATUS_TONES[status]}`}>
-                          {status.replace(/_/g, " ")}
-                        </span>
-                      </div>
-                      <span className="text-xs text-muted-2">{inStatus.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {inStatus.length === 0 ? (
-                        <div className="text-xs text-muted-2 italic py-4 text-center border border-dashed border-border rounded-lg">
-                          None
-                        </div>
-                      ) : (
-                        inStatus.map((t) => (
-                          <TicketCard key={t.id} ticket={t} onMove={(s) => moveTicket(t.id, s)} />
-                        ))
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
+        loading ? (
+          <div className="text-sm text-muted py-20 text-center">Loading tickets…</div>
+        ) : tickets.length === 0 ? (
+          <EmptyState
+            Icon={Headphones}
+            title="No tickets yet"
+            hint="Submit your first IT support ticket to start tracking employee requests."
+            action={{ label: "Create first ticket", onClick: () => setShowNewTicket(true) }}
+          />
+        ) : (
+          <BoardView
+            boardKey="itsm:tickets"
+            items={tickets}
+            fields={TICKET_FIELDS}
+            getId={(t) => t.id}
+            getTitle={(t) => t.title}
+            getValue={(t, key) => (t as unknown as Record<string, unknown>)[key]}
+            onChangeField={async (id, key, value) => {
+              if (key !== "status" && key !== "priority") return;
+              await moveTicket(id, value as string);
+              if (key === "priority") {
+                // moveTicket only handles status; for priority, do a direct PATCH.
+                await fetch("/api/itsm/tickets", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ id, priority: value }),
+                });
+                refresh();
+              }
+            }}
+          />
+        )
       )}
 
       {/* Incidents tab — timeline */}

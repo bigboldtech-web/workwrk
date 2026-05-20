@@ -15,6 +15,43 @@ import {
   Clock,
   AlertTriangle,
 } from "lucide-react";
+import { BoardView, type BoardField } from "@/components/board-view/board-view";
+
+const SUPPORT_TICKET_FIELDS: BoardField[] = [
+  { key: "subject", label: "Subject", fieldType: "TEXT" },
+  {
+    key: "status", label: "Status", fieldType: "SELECT",
+    options: { choices: [
+      { value: "NEW", label: "New", color: "#60a5fa" },
+      { value: "OPEN", label: "Open", color: "#a78bfa" },
+      { value: "PENDING_CUSTOMER", label: "Pending customer", color: "#f59e0b" },
+      { value: "PENDING_INTERNAL", label: "Pending internal", color: "#f59e0b" },
+      { value: "RESOLVED", label: "Resolved", color: "#10b981" },
+      { value: "CLOSED", label: "Closed", color: "#a1a1aa" },
+      { value: "SPAM", label: "Spam", color: "#ef4444" },
+    ] },
+  },
+  {
+    key: "priority", label: "Priority", fieldType: "SELECT",
+    options: { choices: [
+      { value: "LOW", label: "Low", color: "#a1a1aa" },
+      { value: "NORMAL", label: "Normal", color: "#60a5fa" },
+      { value: "HIGH", label: "High", color: "#f59e0b" },
+      { value: "URGENT", label: "Urgent", color: "#ef4444" },
+    ] },
+  },
+  {
+    key: "channel", label: "Channel", fieldType: "SELECT",
+    options: { choices: [
+      { value: "EMAIL", label: "Email" }, { value: "CHAT", label: "Chat" },
+      { value: "PHONE", label: "Phone" }, { value: "PORTAL", label: "Portal" },
+      { value: "SOCIAL", label: "Social" }, { value: "IN_APP", label: "In-app" },
+    ] },
+  },
+  { key: "category", label: "Category", fieldType: "TEXT" },
+  { key: "slaTier", label: "SLA", fieldType: "TEXT" },
+  { key: "firstResponseDueAt", label: "First response due", fieldType: "DATE" },
+];
 
 type Customer = { id: string; name: string | null; email: string; companyName: string | null; createdAt: string; _count: { tickets: number } };
 type Ticket = {
@@ -163,58 +200,32 @@ export default function HelpdeskPage() {
       </div>
 
       {tab === "tickets" && (
-        <div className="rounded-xl border border-border bg-surface overflow-hidden">
-          {loading ? <Loading /> : tickets.length === 0 ? (
-            <Empty Icon={Headphones} title="No tickets yet" hint="When a customer emails support or files a request, the ticket lands here." onAction={() => setShowNew("tickets")} actionLabel="Log first ticket" />
-          ) : (
-            <div className="divide-y divide-border">
-              {tickets.map((t) => {
-                const slaH = hoursUntil(t.firstResponseDueAt);
-                const slaBreach = !t.firstResponseAt && slaH !== null && slaH < 0;
-                const slaUrgent = !t.firstResponseAt && slaH !== null && slaH >= 0 && slaH <= 2;
-                return (
-                  <div key={t.id} className="px-4 py-3 hover:bg-surface-2">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-[10px] font-bold uppercase tracking-wider ${PRIORITY_TONES[t.priority]}`}>{t.priority}</span>
-                          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full uppercase tracking-wider ${STATUS_TONES[t.status]}`}>{t.status.replace(/_/g, " ")}</span>
-                          <span className="text-[10px] text-muted-2">{CHANNEL_LABEL[t.channel] ?? t.channel}</span>
-                          {t.category && <span className="text-[10px] text-muted-2">· {t.category}</span>}
-                          {t.slaTier && <span className="text-[10px] text-muted-2 ml-1">· {t.slaTier} SLA</span>}
-                        </div>
-                        <div className="font-medium text-sm">{t.subject}</div>
-                        <div className="text-xs text-muted-2 mt-0.5">
-                          {t.customer.name ?? t.customer.email}
-                          {t.customer.companyName && <span> · {t.customer.companyName}</span>}
-                          <span className="mx-1">·</span>
-                          {timeAgo(t.createdAt)}
-                        </div>
-                      </div>
-                      <div className="flex-shrink-0 text-right">
-                        {t.csatScore !== null && (
-                          <div className="text-xs text-emerald-700 font-medium mb-1">CSAT {t.csatScore}/5</div>
-                        )}
-                        {slaBreach && (
-                          <div className="text-xs text-rose-700 font-medium inline-flex items-center gap-1">
-                            <AlertTriangle size={11} /> SLA breached
-                          </div>
-                        )}
-                        {slaUrgent && (
-                          <div className="text-xs text-amber-700 font-medium inline-flex items-center gap-1">
-                            <Clock size={11} /> SLA due in {slaH}h
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        loading ? <div className="rounded-xl border border-border bg-surface"><Loading /></div>
+        : tickets.length === 0 ? (
+          <div className="rounded-xl border border-border bg-surface"><Empty Icon={Headphones} title="No tickets yet" hint="When a customer emails support or files a request, the ticket lands here." onAction={() => setShowNew("tickets")} actionLabel="Log first ticket" /></div>
+        ) : (
+          <BoardView
+            boardKey="helpdesk:tickets"
+            items={tickets}
+            fields={SUPPORT_TICKET_FIELDS}
+            getId={(t) => t.id}
+            getTitle={(t) => t.subject}
+            getValue={(t, key) => {
+              if (key === "subject") return t.subject;
+              return (t as unknown as Record<string, unknown>)[key];
+            }}
+            onChangeField={async (id, key, value) => {
+              if (key !== "status" && key !== "priority") return;
+              await fetch("/api/helpdesk/tickets", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, [key]: value }),
+              });
+              await refresh();
+            }}
+          />
+        )
       )}
-
       {tab === "customers" && (
         <div className="rounded-xl border border-border bg-surface overflow-hidden">
           {loading ? <Loading /> : customers.length === 0 ? (
