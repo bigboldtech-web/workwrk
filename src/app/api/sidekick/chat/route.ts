@@ -2,13 +2,19 @@
 //
 // Body: { sessionId, message }
 //
-// 1. Append the user message to the session
-// 2. Load prior messages as conversation context
-// 3. Call Claude via the org's AI client (BYOK if Enterprise)
-// 4. Persist the assistant response + token telemetry
-// 5. Return the assistant message
+// Agentic loop (Phase D3):
+//   1. Append the user message to the session
+//   2. Load prior conversation history
+//   3. Resolve tools for this session (cross + agent's product tools)
+//   4. Call Claude with tools enabled
+//   5. While stop_reason === "tool_use": execute the tool(s) server-
+//      side, append tool results, call Claude again
+//   6. Persist the assistant message + each tool call as toolCalls JSON
+//   7. Return everything
 //
-// Non-streaming v1. Streaming + tool calling come in D3/D4.
+// Limit: max 5 iterations to prevent runaway loops. Each tool exec is
+// logged as an AgentRun row when the session is agent-scoped, for
+// audit + cost analytics.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -16,25 +22,35 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
+import type Anthropic from "@anthropic-ai/sdk";
+import { TOOLS, toolsForSession } from "@/lib/agents/tools";
 
-// Default model for Sidekick. Sonnet 4.6 is the cost/quality sweet spot
-// for general chat. Org BYOK preferredModel overrides this.
 const SIDEKICK_DEFAULT_MODEL = "claude-sonnet-4-6";
+const MAX_TOOL_ITERATIONS = 5;
 
 const DEFAULT_SYSTEM_PROMPT = `You are Sidekick, the AI assistant inside WorkwrK — a modular Work OS.
 
 You help the user with everyday work tasks across whatever products their team has installed: boards (Work), SOPs, OKRs, Meetings, Culture, CRM, ITSM, Marketing, Dev, Legal, and more.
 
-When the user asks you to do something you can act on inside WorkwrK (create a board, write a doc, brainstorm OKRs, analyze data, summarize a meeting, draft a contract clause, etc.), give them a clear, structured response they can copy or refine.
+When the user asks you to do something you can act on inside WorkwrK (create a task, log a lead, file a ticket, send kudos, etc.) and you have a tool for it, USE THE TOOL. Don't just describe what you would do — actually do it.
 
-Keep responses concise and useful. Use markdown for structure when helpful (lists, headings, code blocks). When appropriate, suggest the next step the user can take.
+When the user asks for advice or drafting (writing copy, brainstorming, summarizing), respond directly with markdown.
 
-You do NOT have direct access to read or write the user's WorkwrK data yet — that capability ships in Phase D3 when tool calling is wired. For now you can reason about anything they describe in the conversation.`;
+Keep responses concise. Use markdown for structure when helpful.`;
 
 const inputSchema = z.object({
   sessionId: z.string().min(1),
   message: z.string().min(1).max(20000),
 });
+
+interface ToolCallLog {
+  toolUseId: string;
+  name: string;
+  input: Record<string, unknown>;
+  result: unknown;
+  errorText: string | null;
+  durationMs: number;
+}
 
 async function ctxAndSession(sessionId: string) {
   const session = await getServerSession(authOptions);
@@ -42,11 +58,13 @@ async function ctxAndSession(sessionId: string) {
   const userId = (session.user as { id?: string }).id;
   if (!userId) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
 
-  // Load chat session WITH its scoped agent (if any) so we can pull
-  // agent-specific systemPrompt + modelOverride in one query.
   const chat = await prisma.chatSession.findFirst({
     where: { id: sessionId, userId, archivedAt: null },
-    include: { agent: { select: { id: true, name: true, systemPrompt: true, modelOverride: true, status: true } } },
+    include: {
+      agent: {
+        select: { id: true, name: true, systemPrompt: true, modelOverride: true, status: true, productSlug: true },
+      },
+    },
   });
   if (!chat) return { error: NextResponse.json({ error: "session not found" }, { status: 404 }) };
   return { userId, chat };
@@ -62,8 +80,7 @@ export async function POST(req: Request) {
   const c = await ctxAndSession(parsed.data.sessionId);
   if ("error" in c) return c.error;
 
-  // 1. Append the user message right away — even if Claude errors, the
-  //    user's input is preserved for next time.
+  // 1. Persist user message + auto-title.
   const userMessage = await prisma.chatMessage.create({
     data: {
       sessionId: c.chat.id,
@@ -71,8 +88,6 @@ export async function POST(req: Request) {
       content: parsed.data.message,
     },
   });
-
-  // 1b. Auto-title the session from the first user message if untitled.
   if (!c.chat.title) {
     const title = parsed.data.message.length > 60
       ? parsed.data.message.slice(0, 57) + "…"
@@ -80,8 +95,7 @@ export async function POST(req: Request) {
     await prisma.chatSession.update({ where: { id: c.chat.id }, data: { title } });
   }
 
-  // 2. Build conversation history. Limit to last 30 turns to keep the
-  //    request size sane on long sessions; older context still in DB.
+  // 2. Load history.
   const history = await prisma.chatMessage.findMany({
     where: { sessionId: c.chat.id, role: { in: ["USER", "ASSISTANT"] } },
     orderBy: { createdAt: "desc" },
@@ -89,83 +103,193 @@ export async function POST(req: Request) {
   });
   history.reverse();
 
-  // 3. Pick system prompt + model. Agent-scoped sessions use the
-  //    agent's prompt; the agent's modelOverride wins over the org's
-  //    BYOK preferredModel which wins over the Sidekick default.
+  // 3. Resolve agent + tools + system prompt + model.
   const agentScoped = c.chat.agent && c.chat.agent.status === "ENABLED" ? c.chat.agent : null;
   const systemPrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+  const availableTools = toolsForSession({ agentProductSlug: agentScoped?.productSlug ?? null });
+  const toolDefs = availableTools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.input_schema,
+  }));
 
   const resolved = await getAnthropicForOrg(c.chat.organizationId);
   const model = agentScoped?.modelOverride ?? modelFor(resolved, SIDEKICK_DEFAULT_MODEL);
 
+  // 4. Agentic loop.
+  const messages: Anthropic.MessageParam[] = history.map((m) => ({
+    role: m.role === "USER" ? "user" : "assistant",
+    content: m.content,
+  }));
+
   let assistantText = "";
-  let tokensIn: number | null = null;
-  let tokensOut: number | null = null;
+  let totalTokensIn = 0;
+  let totalTokensOut = 0;
   let finishReason: string | null = null;
   let errorText: string | null = null;
+  const toolCallsLog: ToolCallLog[] = [];
 
   try {
-    const result = await resolved.client.messages.create({
-      model,
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages: history.map((m) => ({
-        role: m.role === "USER" ? "user" : "assistant",
-        content: m.content,
-      })),
-    });
-    // The SDK returns content blocks; concatenate any text blocks.
-    assistantText = result.content
-      .filter((b) => b.type === "text")
-      .map((b) => ("text" in b ? b.text : ""))
-      .join("\n\n");
-    tokensIn = result.usage?.input_tokens ?? null;
-    tokensOut = result.usage?.output_tokens ?? null;
-    finishReason = result.stop_reason ?? null;
+    for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+      const result: Anthropic.Message = await resolved.client.messages.create({
+        model,
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools: toolDefs.length > 0 ? (toolDefs as unknown as Anthropic.Tool[]) : undefined,
+        messages,
+      });
+
+      totalTokensIn += result.usage?.input_tokens ?? 0;
+      totalTokensOut += result.usage?.output_tokens ?? 0;
+      finishReason = result.stop_reason ?? null;
+
+      // Accumulate text + handle tool_use blocks
+      const textBlocks: string[] = [];
+      const toolUses: { id: string; name: string; input: Record<string, unknown> }[] = [];
+      for (const block of result.content) {
+        if (block.type === "text" && "text" in block) {
+          textBlocks.push(block.text);
+        } else if (block.type === "tool_use" && "name" in block && "input" in block && "id" in block) {
+          toolUses.push({
+            id: block.id,
+            name: block.name,
+            input: (block.input as Record<string, unknown>) ?? {},
+          });
+        }
+      }
+      if (textBlocks.length > 0) {
+        assistantText = textBlocks.join("\n\n");
+      }
+
+      // No tool calls? We're done.
+      if (toolUses.length === 0 || result.stop_reason !== "tool_use") {
+        break;
+      }
+
+      // Append the assistant's tool_use turn verbatim.
+      messages.push({
+        role: "assistant",
+        content: result.content as Anthropic.ContentBlock[],
+      });
+
+      // Execute every tool the model asked for, collect results.
+      const toolResultBlocks: Anthropic.ToolResultBlockParam[] = [];
+      for (const tu of toolUses) {
+        const tool = TOOLS[tu.name];
+        const startedAt = Date.now();
+        let outcome: unknown;
+        let execErr: string | null = null;
+        if (!tool) {
+          execErr = `Unknown tool: ${tu.name}`;
+          outcome = { error: execErr };
+        } else {
+          try {
+            outcome = await tool.handler(
+              { orgId: c.chat.organizationId, userId: c.userId },
+              tu.input,
+            );
+          } catch (e) {
+            execErr = e instanceof Error ? e.message : "tool execution failed";
+            outcome = { error: execErr };
+          }
+        }
+        const durationMs = Date.now() - startedAt;
+
+        toolCallsLog.push({
+          toolUseId: tu.id,
+          name: tu.name,
+          input: tu.input,
+          result: outcome,
+          errorText: execErr,
+          durationMs,
+        });
+
+        // Log to AgentRun if agent-scoped, for telemetry.
+        if (agentScoped) {
+          prisma.agentRun
+            .create({
+              data: {
+                agentId: agentScoped.id,
+                triggeredBy: c.userId,
+                input: { toolName: tu.name, input: tu.input } as object,
+                output: outcome as object,
+                status: execErr ? "FAILED" : "SUCCEEDED",
+                error: execErr,
+                startedAt: new Date(startedAt),
+                endedAt: new Date(),
+              },
+            })
+            .catch(() => {});
+        }
+
+        toolResultBlocks.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: JSON.stringify(outcome),
+          is_error: !!execErr,
+        });
+      }
+
+      // Append tool results as a user message turn.
+      messages.push({
+        role: "user",
+        content: toolResultBlocks,
+      });
+    }
   } catch (err) {
     errorText = err instanceof Error ? err.message : "Claude request failed";
-    assistantText = `Sorry — I hit an error reaching the model.\n\n\`${errorText}\``;
+    if (!assistantText) {
+      assistantText = `Sorry — I hit an error reaching the model.\n\n\`${errorText}\``;
+    }
   }
 
-  // 4. Persist assistant message + update session telemetry.
+  // 5. Persist assistant message.
   const assistantMessage = await prisma.chatMessage.create({
     data: {
       sessionId: c.chat.id,
       role: "ASSISTANT",
       content: assistantText,
       modelUsed: model,
-      tokensIn,
-      tokensOut,
+      tokensIn: totalTokensIn || null,
+      tokensOut: totalTokensOut || null,
       finishReason,
+      ...(toolCallsLog.length > 0
+        ? { toolCalls: toolCallsLog as unknown as object }
+        : {}),
     },
   });
 
-  // Rough cost computation (cents). Sonnet 4.6: $3/M input, $15/M output.
-  // These are approximate — adjust as pricing changes.
-  const costCents = tokensIn != null && tokensOut != null
-    ? Math.ceil((tokensIn * 0.0003 + tokensOut * 0.0015) * 100)
+  // Sonnet 4.6 pricing (approx): $3/M input, $15/M output.
+  const costCents = totalTokensIn && totalTokensOut
+    ? Math.ceil((totalTokensIn * 0.0003 + totalTokensOut * 0.0015) * 100)
     : 0;
 
   await prisma.chatSession.update({
     where: { id: c.chat.id },
     data: {
       lastModel: model,
-      totalTokensIn: { increment: tokensIn ?? 0 },
-      totalTokensOut: { increment: tokensOut ?? 0 },
+      totalTokensIn: { increment: totalTokensIn },
+      totalTokensOut: { increment: totalTokensOut },
       totalCostCents: { increment: costCents },
     },
   });
 
   return NextResponse.json({
-    userMessage: { id: userMessage.id, role: "USER", content: userMessage.content, createdAt: userMessage.createdAt },
+    userMessage: {
+      id: userMessage.id,
+      role: "USER",
+      content: userMessage.content,
+      createdAt: userMessage.createdAt,
+    },
     assistantMessage: {
       id: assistantMessage.id,
       role: "ASSISTANT",
       content: assistantMessage.content,
       modelUsed: assistantMessage.modelUsed,
-      tokensIn,
-      tokensOut,
+      tokensIn: totalTokensIn,
+      tokensOut: totalTokensOut,
       finishReason,
+      toolCalls: toolCallsLog,
       createdAt: assistantMessage.createdAt,
     },
     error: errorText,

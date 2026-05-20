@@ -37,6 +37,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       tokensIn: true,
       tokensOut: true,
       finishReason: true,
+      toolCalls: true,
       createdAt: true,
     },
   });

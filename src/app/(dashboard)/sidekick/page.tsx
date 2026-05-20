@@ -24,6 +24,11 @@ import {
   Lightbulb,
   Image as ImageIcon,
   BookOpen,
+  Wrench,
+  ChevronDown,
+  ChevronRight,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 
 type SessionRow = {
@@ -37,6 +42,15 @@ type SessionRow = {
   updatedAt: string;
 };
 
+type ToolCall = {
+  toolUseId: string;
+  name: string;
+  input: Record<string, unknown>;
+  result: unknown;
+  errorText: string | null;
+  durationMs: number;
+};
+
 type Message = {
   id: string;
   role: "USER" | "ASSISTANT" | "SYSTEM" | "TOOL";
@@ -45,6 +59,7 @@ type Message = {
   tokensIn?: number | null;
   tokensOut?: number | null;
   finishReason?: string | null;
+  toolCalls?: ToolCall[] | null;
   createdAt: string;
 };
 
@@ -385,21 +400,97 @@ function MessageBubble({ message }: { message: Message }) {
       </div>
     );
   }
+  const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
   return (
     <div className="flex items-start gap-3">
       <div className="w-7 h-7 rounded-lg bg-violet-100 dark:bg-violet-900/40 text-violet-600 flex items-center justify-center flex-shrink-0">
         <Sparkles size={14} />
       </div>
-      <div className="flex-1 pt-1 text-sm whitespace-pre-wrap">
+      <div className="flex-1 pt-1 text-sm whitespace-pre-wrap min-w-0">
+        {toolCalls.length > 0 && (
+          <div className="mb-3 space-y-1.5">
+            {toolCalls.map((tc) => <ToolCallCard key={tc.toolUseId} toolCall={tc} />)}
+          </div>
+        )}
         {renderContent(message.content)}
         {(message.tokensIn || message.tokensOut) && (
           <div className="mt-2 text-[10px] text-muted-2">
             {message.modelUsed} · {message.tokensIn} in + {message.tokensOut} out tokens
+            {toolCalls.length > 0 && <span> · {toolCalls.length} tool call{toolCalls.length === 1 ? "" : "s"}</span>}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
+  const [open, setOpen] = useState(false);
+  const ok = !toolCall.errorText;
+  const summary = toolCallSummary(toolCall);
+
+  return (
+    <div
+      className={`rounded-lg border ${ok ? "border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20" : "border-rose-200 bg-rose-50 dark:bg-rose-950/20"} overflow-hidden`}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-3 py-2 flex items-center gap-2 text-xs"
+      >
+        {ok ? <CheckCircle2 size={12} className="text-emerald-600 flex-shrink-0" /> : <AlertCircle size={12} className="text-rose-600 flex-shrink-0" />}
+        <Wrench size={11} className="text-muted-2 flex-shrink-0" />
+        <span className="font-mono text-[11px] text-muted-2">{toolCall.name}</span>
+        <span className="flex-1 text-left text-muted truncate">{summary}</span>
+        <span className="text-[10px] text-muted-2 flex-shrink-0">{toolCall.durationMs}ms</span>
+        {open ? <ChevronDown size={11} className="text-muted-2" /> : <ChevronRight size={11} className="text-muted-2" />}
+      </button>
+      {open && (
+        <div className="px-3 pb-2 space-y-2 text-[11px] font-mono">
+          <div>
+            <div className="text-muted-2 mb-0.5">Input</div>
+            <pre className="bg-surface rounded p-2 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(toolCall.input, null, 2)}</pre>
+          </div>
+          <div>
+            <div className="text-muted-2 mb-0.5">Result</div>
+            <pre className="bg-surface rounded p-2 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(toolCall.result, null, 2)}</pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One-line summary for a tool call so the user can see what happened
+// without expanding the card. Falls back to JSON if we don't have a
+// nice format for this tool name.
+function toolCallSummary(tc: ToolCall): string {
+  if (tc.errorText) return tc.errorText;
+  const input = tc.input ?? {};
+  switch (tc.name) {
+    case "create_task":
+      return `Created task: ${String(input.title ?? "")}`;
+    case "search_tasks": {
+      const r = tc.result as { count?: number } | undefined;
+      return `Found ${r?.count ?? 0} task${r?.count === 1 ? "" : "s"}`;
+    }
+    case "send_kudos":
+      return `Sent kudos to ${String(input.receiverEmail ?? "")}`;
+    case "create_lead":
+      return `Logged lead: ${String(input.firstName ?? "")} ${String(input.lastName ?? "")}${input.company ? " · " + String(input.company) : ""}`;
+    case "create_opportunity":
+      return `Created deal: ${String(input.name ?? "")}${input.amount ? " · $" + String(input.amount) : ""}`;
+    case "create_ticket":
+      return `Filed ticket: ${String(input.title ?? "")}`;
+    case "create_contract":
+      return `Logged contract: ${String(input.title ?? "")} (${String(input.counterparty ?? "")})`;
+    case "create_sprint":
+      return `Planned sprint: ${String(input.name ?? "")}`;
+    case "create_campaign":
+      return `Created campaign: ${String(input.name ?? "")}`;
+    default:
+      return JSON.stringify(input).slice(0, 80);
+  }
 }
 
 // Very lightweight rendering: split paragraphs, preserve newlines. Real
