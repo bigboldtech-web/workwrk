@@ -467,27 +467,49 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
 function toolCallSummary(tc: ToolCall): string {
   if (tc.errorText) return tc.errorText;
   const input = tc.input ?? {};
+  const result = tc.result as Record<string, unknown> | undefined;
+  const count = (result?.count as number | undefined) ?? undefined;
   switch (tc.name) {
     case "create_task":
       return `Created task: ${String(input.title ?? "")}`;
-    case "search_tasks": {
-      const r = tc.result as { count?: number } | undefined;
-      return `Found ${r?.count ?? 0} task${r?.count === 1 ? "" : "s"}`;
-    }
+    case "search_tasks":
+      return `Found ${count ?? 0} task${count === 1 ? "" : "s"}`;
     case "send_kudos":
       return `Sent kudos to ${String(input.receiverEmail ?? "")}`;
+    case "search_employees":
+      return `Found ${count ?? 0} employee${count === 1 ? "" : "s"}`;
+    case "search_kb":
+      return `Found ${count ?? 0} KB article${count === 1 ? "" : "s"} for "${String(input.query ?? "")}"`;
     case "create_lead":
       return `Logged lead: ${String(input.firstName ?? "")} ${String(input.lastName ?? "")}${input.company ? " · " + String(input.company) : ""}`;
+    case "search_leads":
+      return `Found ${count ?? 0} lead${count === 1 ? "" : "s"}`;
+    case "update_lead_status":
+      return `Lead status → ${String(input.status ?? "")}`;
     case "create_opportunity":
       return `Created deal: ${String(input.name ?? "")}${input.amount ? " · $" + String(input.amount) : ""}`;
+    case "search_opportunities":
+      return `Found ${count ?? 0} deal${count === 1 ? "" : "s"}`;
+    case "move_opportunity_stage":
+      return `Moved deal to "${String(input.newStageName ?? "")}"`;
     case "create_ticket":
       return `Filed ticket: ${String(input.title ?? "")}`;
+    case "search_tickets":
+      return `Found ${count ?? 0} ticket${count === 1 ? "" : "s"}`;
+    case "update_ticket_status":
+      return `Ticket → ${String(input.status ?? "")}`;
     case "create_contract":
       return `Logged contract: ${String(input.title ?? "")} (${String(input.counterparty ?? "")})`;
+    case "search_contracts":
+      return `Found ${count ?? 0} contract${count === 1 ? "" : "s"}`;
     case "create_sprint":
       return `Planned sprint: ${String(input.name ?? "")}`;
     case "create_campaign":
       return `Created campaign: ${String(input.name ?? "")}`;
+    case "create_support_ticket":
+      return `Filed support ticket: ${String(input.subject ?? "")}`;
+    case "apply_macro":
+      return `Applied macro "${String(input.macroSlug ?? "")}"`;
     default:
       return JSON.stringify(input).slice(0, 80);
   }

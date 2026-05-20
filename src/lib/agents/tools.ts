@@ -465,24 +465,460 @@ const createSupportTicket: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
+// CRM read + update tools (D3 Phase 2)
+// ─────────────────────────────────────────────────────────
+
+const searchLeads: ToolDefinition = {
+  name: "search_leads",
+  description: "Search this org's CRM leads. Use to find an existing lead before updating, or to answer 'how many leads from referrals are still open'.",
+  input_schema: {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["NEW", "CONTACTED", "QUALIFIED", "UNQUALIFIED", "CONVERTED", "DISQUALIFIED"] },
+      source: { type: "string", description: "e.g. website / referral / outbound" },
+      emailContains: { type: "string" },
+      nameContains: { type: "string", description: "Match against firstName OR lastName OR company" },
+      assignedToMe: { type: "boolean" },
+      limit: { type: "integer", description: "Max rows (default 20, max 50)" },
+    },
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(50, Number(input.limit ?? 20));
+    const nameNeedle = input.nameContains as string | undefined;
+    const leads = await prisma.lead.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        ...(input.status ? { status: input.status as "NEW" | "CONTACTED" | "QUALIFIED" | "UNQUALIFIED" | "CONVERTED" | "DISQUALIFIED" } : {}),
+        ...(input.source ? { source: input.source as string } : {}),
+        ...(input.emailContains ? { email: { contains: input.emailContains as string, mode: "insensitive" } } : {}),
+        ...(input.assignedToMe ? { ownerId: ctx.userId } : {}),
+        ...(nameNeedle ? {
+          OR: [
+            { firstName: { contains: nameNeedle, mode: "insensitive" } },
+            { lastName: { contains: nameNeedle, mode: "insensitive" } },
+            { company: { contains: nameNeedle, mode: "insensitive" } },
+          ],
+        } : {}),
+      },
+      select: { id: true, firstName: true, lastName: true, email: true, company: true, status: true, score: true, source: true, createdAt: true },
+      orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+      take: limit,
+    });
+    return { count: leads.length, leads };
+  },
+};
+
+const updateLeadStatus: ToolDefinition = {
+  name: "update_lead_status",
+  description: "Move a lead to a new status. Use to qualify/disqualify a lead after a call, or mark CONVERTED after handing off to a closer.",
+  input_schema: {
+    type: "object",
+    properties: {
+      leadId: { type: "string", description: "The Lead's id" },
+      status: { type: "string", enum: ["NEW", "CONTACTED", "QUALIFIED", "UNQUALIFIED", "CONVERTED", "DISQUALIFIED"] },
+      notes: { type: "string", description: "Optional notes appended to the lead" },
+    },
+    required: ["leadId", "status"],
+  },
+  handler: async (ctx, input) => {
+    const existing = await prisma.lead.findFirst({
+      where: { id: input.leadId as string, organizationId: ctx.orgId },
+      select: { id: true, notes: true },
+    });
+    if (!existing) return { error: "Lead not found in this org" };
+
+    const appendedNotes = input.notes
+      ? (existing.notes ? existing.notes + "\n\n" : "") + `[${new Date().toISOString().slice(0, 10)}] ${input.notes}`
+      : existing.notes;
+
+    const status = input.status as "NEW" | "CONTACTED" | "QUALIFIED" | "UNQUALIFIED" | "CONVERTED" | "DISQUALIFIED";
+    const lead = await prisma.lead.update({
+      where: { id: existing.id },
+      data: {
+        status,
+        notes: appendedNotes,
+        ...(status === "CONVERTED" ? { convertedAt: new Date() } : {}),
+      },
+      select: { id: true, firstName: true, lastName: true, status: true },
+    });
+    return { ok: true, lead };
+  },
+};
+
+const searchOpportunities: ToolDefinition = {
+  name: "search_opportunities",
+  description: "Search CRM deals, optionally filtered by stage. Use to answer 'what's in the pipeline this quarter' or to find a specific deal.",
+  input_schema: {
+    type: "object",
+    properties: {
+      stageName: { type: "string", description: "Match the pipeline stage by name (case-insensitive)" },
+      accountName: { type: "string" },
+      isOpen: { type: "boolean", description: "Only deals that aren't Won or Lost" },
+      minAmount: { type: "number" },
+      limit: { type: "integer" },
+    },
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(50, Number(input.limit ?? 20));
+    const opps = await prisma.opportunity.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        ...(input.isOpen ? { closedAt: null } : {}),
+        ...(input.accountName ? { account: { name: { contains: input.accountName as string, mode: "insensitive" } } } : {}),
+        ...(input.stageName ? { pipelineStage: { name: { equals: input.stageName as string, mode: "insensitive" } } } : {}),
+        ...(input.minAmount !== undefined ? { amount: { gte: input.minAmount as number } } : {}),
+      },
+      include: {
+        account: { select: { name: true } },
+        pipelineStage: { select: { name: true, isWon: true, isLost: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: limit,
+    });
+    return {
+      count: opps.length,
+      opportunities: opps.map((o) => ({
+        id: o.id, name: o.name, amount: o.amount, currency: o.currency,
+        stage: o.pipelineStage?.name, accountName: o.account?.name,
+        expectedCloseDate: o.expectedCloseDate, isWon: o.isWon,
+      })),
+    };
+  },
+};
+
+const moveOpportunityStage: ToolDefinition = {
+  name: "move_opportunity_stage",
+  description: "Move a deal to a different pipeline stage. Use to advance a deal after a positive customer signal, or close it Won/Lost. Auto-stamps closedAt + isWon on terminal stages.",
+  input_schema: {
+    type: "object",
+    properties: {
+      opportunityId: { type: "string" },
+      newStageName: { type: "string", description: "Target stage name (must exist in this org's pipeline)" },
+    },
+    required: ["opportunityId", "newStageName"],
+  },
+  handler: async (ctx, input) => {
+    const opp = await prisma.opportunity.findFirst({
+      where: { id: input.opportunityId as string, organizationId: ctx.orgId },
+    });
+    if (!opp) return { error: "Opportunity not found in this org" };
+
+    const stage = await prisma.pipelineStage.findFirst({
+      where: { organizationId: ctx.orgId, name: { equals: input.newStageName as string, mode: "insensitive" }, archivedAt: null },
+    });
+    if (!stage) return { error: `Stage "${input.newStageName}" not found. Use search_opportunities to see available stages.` };
+
+    const now = new Date();
+    let closedAt: Date | null | undefined;
+    let isWon: boolean | null | undefined;
+    if (stage.isWon) { closedAt = now; isWon = true; }
+    else if (stage.isLost) { closedAt = now; isWon = false; }
+    else if (opp.closedAt) { closedAt = null; isWon = null; }
+
+    const updated = await prisma.opportunity.update({
+      where: { id: opp.id },
+      data: {
+        pipelineStageId: stage.id,
+        ...(closedAt !== undefined ? { closedAt } : {}),
+        ...(isWon !== undefined ? { isWon } : {}),
+      },
+      select: { id: true, name: true, isWon: true, closedAt: true },
+    });
+    return { ok: true, opportunity: updated, stage: stage.name };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// ITSM read + update tools
+// ─────────────────────────────────────────────────────────
+
+const searchTickets: ToolDefinition = {
+  name: "search_tickets",
+  description: "Search internal IT tickets. Use to triage the queue or find a specific ticket before updating.",
+  input_schema: {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["OPEN", "TRIAGED", "IN_PROGRESS", "WAITING_ON_USER", "WAITING_ON_VENDOR", "RESOLVED", "CLOSED", "CANCELLED"] },
+      priority: { type: "string", enum: ["LOW", "NORMAL", "HIGH", "URGENT", "CRITICAL"] },
+      category: { type: "string" },
+      titleContains: { type: "string" },
+      assignedToMe: { type: "boolean" },
+      limit: { type: "integer" },
+    },
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(50, Number(input.limit ?? 20));
+    const tickets = await prisma.ticket.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        ...(input.status ? { status: input.status as "OPEN" | "TRIAGED" | "IN_PROGRESS" | "WAITING_ON_USER" | "WAITING_ON_VENDOR" | "RESOLVED" | "CLOSED" | "CANCELLED" } : {}),
+        ...(input.priority ? { priority: input.priority as "LOW" | "NORMAL" | "HIGH" | "URGENT" | "CRITICAL" } : {}),
+        ...(input.category ? { category: input.category as string } : {}),
+        ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
+        ...(input.assignedToMe ? { assigneeId: ctx.userId } : {}),
+      },
+      select: { id: true, title: true, status: true, priority: true, category: true, requesterId: true, assigneeId: true, createdAt: true, dueAt: true },
+      orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+      take: limit,
+    });
+    return { count: tickets.length, tickets };
+  },
+};
+
+const updateTicketStatus: ToolDefinition = {
+  name: "update_ticket_status",
+  description: "Triage or resolve a ticket. Sets the new status and auto-stamps acknowledgedAt/resolvedAt/closedAt. Optionally records resolution notes.",
+  input_schema: {
+    type: "object",
+    properties: {
+      ticketId: { type: "string" },
+      status: { type: "string", enum: ["OPEN", "TRIAGED", "IN_PROGRESS", "WAITING_ON_USER", "WAITING_ON_VENDOR", "RESOLVED", "CLOSED", "CANCELLED"] },
+      assigneeEmail: { type: "string", description: "Optional — reassign to a user by email" },
+      resolutionNotes: { type: "string", description: "Required-ish when status=RESOLVED. Captures how the ticket was solved." },
+    },
+    required: ["ticketId", "status"],
+  },
+  handler: async (ctx, input) => {
+    const existing = await prisma.ticket.findFirst({
+      where: { id: input.ticketId as string, organizationId: ctx.orgId },
+    });
+    if (!existing) return { error: "Ticket not found in this org" };
+
+    let assigneeId: string | undefined;
+    if (input.assigneeEmail) {
+      const u = await prisma.user.findFirst({
+        where: { email: input.assigneeEmail as string, organizationId: ctx.orgId },
+        select: { id: true },
+      });
+      if (!u) return { error: `User with email '${input.assigneeEmail}' not found in this org` };
+      assigneeId = u.id;
+    }
+
+    const now = new Date();
+    const status = input.status as "OPEN" | "TRIAGED" | "IN_PROGRESS" | "WAITING_ON_USER" | "WAITING_ON_VENDOR" | "RESOLVED" | "CLOSED" | "CANCELLED";
+    const ticket = await prisma.ticket.update({
+      where: { id: existing.id },
+      data: {
+        status,
+        ...(assigneeId ? { assigneeId } : {}),
+        ...(input.resolutionNotes ? { resolutionNotes: input.resolutionNotes as string } : {}),
+        ...(status === "TRIAGED" && !existing.acknowledgedAt ? { acknowledgedAt: now } : {}),
+        ...(status === "RESOLVED" && !existing.resolvedAt ? { resolvedAt: now } : {}),
+        ...(status === "CLOSED" && !existing.closedAt ? { closedAt: now } : {}),
+      },
+      select: { id: true, title: true, status: true },
+    });
+    return { ok: true, ticket };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// Legal read tools
+// ─────────────────────────────────────────────────────────
+
+const searchContracts: ToolDefinition = {
+  name: "search_contracts",
+  description: "Search the contract portfolio. Use to find a contract by counterparty or to flag what's expiring soon.",
+  input_schema: {
+    type: "object",
+    properties: {
+      counterpartyContains: { type: "string" },
+      status: { type: "string", enum: ["DRAFT", "IN_REVIEW", "IN_NEGOTIATION", "AWAITING_SIGNATURE", "SIGNED", "ACTIVE", "EXPIRED", "RENEWED", "TERMINATED", "CANCELLED"] },
+      expiringWithinDays: { type: "integer", description: "Only contracts expiring within N days" },
+      limit: { type: "integer" },
+    },
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(50, Number(input.limit ?? 20));
+    const expWindow = input.expiringWithinDays as number | undefined;
+    const expiresBefore = expWindow != null ? new Date(Date.now() + expWindow * 86400000) : null;
+
+    const contracts = await prisma.contract.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        ...(input.counterpartyContains ? { counterparty: { contains: input.counterpartyContains as string, mode: "insensitive" } } : {}),
+        ...(input.status ? { status: input.status as "DRAFT" | "IN_REVIEW" | "IN_NEGOTIATION" | "AWAITING_SIGNATURE" | "SIGNED" | "ACTIVE" | "EXPIRED" | "RENEWED" | "TERMINATED" | "CANCELLED" } : {}),
+        ...(expiresBefore ? { expiresAt: { lte: expiresBefore, gte: new Date() } } : {}),
+      },
+      select: { id: true, title: true, counterparty: true, type: true, status: true, value: true, expiresAt: true, autoRenew: true },
+      orderBy: { expiresAt: "asc" },
+      take: limit,
+    });
+    return { count: contracts.length, contracts };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// Helpdesk: apply macro to a ticket
+// ─────────────────────────────────────────────────────────
+
+const applyMacro: ToolDefinition = {
+  name: "apply_macro",
+  description: "Apply a canned-response macro to a Helpdesk ticket. Looks up the macro by slug, copies its body to the ticket's resolution context, optionally moves the ticket to RESOLVED when the macro is marked resolves=true. Records macro usage for analytics.",
+  input_schema: {
+    type: "object",
+    properties: {
+      ticketId: { type: "string", description: "The SupportTicket id" },
+      macroSlug: { type: "string", description: "The macro's slug (e.g. 'password-reset')" },
+    },
+    required: ["ticketId", "macroSlug"],
+  },
+  handler: async (ctx, input) => {
+    const ticket = await prisma.supportTicket.findFirst({
+      where: { id: input.ticketId as string, organizationId: ctx.orgId },
+    });
+    if (!ticket) return { error: "Support ticket not found in this org" };
+
+    const macro = await prisma.supportMacro.findFirst({
+      where: { organizationId: ctx.orgId, slug: input.macroSlug as string, archivedAt: null },
+    });
+    if (!macro) return { error: `Macro '${input.macroSlug}' not found` };
+
+    const now = new Date();
+    const updated = await prisma.supportTicket.update({
+      where: { id: ticket.id },
+      data: {
+        ...(macro.resolves ? { status: "RESOLVED", resolvedAt: ticket.resolvedAt ?? now } : {}),
+        ...(ticket.firstResponseAt ? {} : { firstResponseAt: now }),
+      },
+      select: { id: true, subject: true, status: true },
+    });
+
+    await prisma.supportMacro.update({
+      where: { id: macro.id },
+      data: { usageCount: { increment: 1 } },
+    });
+
+    return { ok: true, ticket: updated, macro: { slug: macro.slug, body: macro.body, resolves: macro.resolves } };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// Cross-product search
+// ─────────────────────────────────────────────────────────
+
+const searchKb: ToolDefinition = {
+  name: "search_kb",
+  description: "Search the KB articles (internal IT KB). Use to deflect a ticket — find an article that already answers the user's question.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Substring matched against title and body" },
+      category: { type: "string" },
+      onlyPublished: { type: "boolean" },
+      limit: { type: "integer" },
+    },
+    required: ["query"],
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(20, Number(input.limit ?? 10));
+    const q = input.query as string;
+    const articles = await prisma.kbArticle.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        archivedAt: null,
+        ...(input.category ? { category: input.category as string } : {}),
+        ...(input.onlyPublished ? { publishedAt: { not: null } } : {}),
+        OR: [
+          { title: { contains: q, mode: "insensitive" } },
+          { body: { contains: q, mode: "insensitive" } },
+          { excerpt: { contains: q, mode: "insensitive" } },
+        ],
+      },
+      select: { id: true, slug: true, title: true, excerpt: true, category: true, viewCount: true, publishedAt: true },
+      orderBy: [{ viewCount: "desc" }, { updatedAt: "desc" }],
+      take: limit,
+    });
+    return { count: articles.length, articles };
+  },
+};
+
+const searchEmployees: ToolDefinition = {
+  name: "search_employees",
+  description: "Search this org's employees by name / email / role / department. Use to find a teammate to assign work to or to look up a coworker.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Matches firstName, lastName, email (case-insensitive substring)" },
+      department: { type: "string", description: "Department name filter" },
+      limit: { type: "integer" },
+    },
+  },
+  handler: async (ctx, input) => {
+    const limit = Math.min(30, Number(input.limit ?? 10));
+    const q = input.query as string | undefined;
+    const employees = await prisma.user.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        status: "ACTIVE",
+        ...(input.department ? { department: { name: { equals: input.department as string, mode: "insensitive" } } } : {}),
+        ...(q ? {
+          OR: [
+            { firstName: { contains: q, mode: "insensitive" } },
+            { lastName: { contains: q, mode: "insensitive" } },
+            { email: { contains: q, mode: "insensitive" } },
+          ],
+        } : {}),
+      },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, accessLevel: true,
+        department: { select: { name: true } },
+        role: { select: { title: true } },
+      },
+      orderBy: [{ firstName: "asc" }],
+      take: limit,
+    });
+    return {
+      count: employees.length,
+      employees: employees.map((e) => ({
+        id: e.id,
+        name: `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim(),
+        email: e.email,
+        department: e.department?.name ?? null,
+        role: e.role?.title ?? null,
+        accessLevel: e.accessLevel,
+      })),
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
 // Registry — all tools by name
 // ─────────────────────────────────────────────────────────
 
 export const TOOLS: Record<string, ToolDefinition> = {
+  // Cross-product
   create_task: createTask,
   search_tasks: searchTasks,
   send_kudos: sendKudos,
+  search_employees: searchEmployees,
+  search_kb: searchKb,
+  // CRM
   create_lead: createLead,
+  search_leads: searchLeads,
+  update_lead_status: updateLeadStatus,
   create_opportunity: createOpportunity,
+  search_opportunities: searchOpportunities,
+  move_opportunity_stage: moveOpportunityStage,
+  // ITSM
   create_ticket: createTicket,
+  search_tickets: searchTickets,
+  update_ticket_status: updateTicketStatus,
+  // Legal
   create_contract: createContract,
+  search_contracts: searchContracts,
+  // Dev
   create_sprint: createSprint,
+  // Marketing
   create_campaign: createCampaign,
+  // Helpdesk
   create_support_ticket: createSupportTicket,
+  apply_macro: applyMacro,
 };
 
 // Tools every session can use, regardless of agent (or no agent).
-export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos"];
+// Includes cross-product search so Sidekick can look stuff up.
+export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos", "search_employees", "search_kb"];
 
 // Tools per agent product. When a chat session is scoped to an agent,
 // the agent's productSlug determines which create-tools light up in
@@ -493,12 +929,12 @@ export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos"];
 // but the actual runtime tools come from this map — it's the most
 // reliable bridge until every catalog slug has a real handler.
 export const PRODUCT_TOOL_NAMES: Record<string, string[]> = {
-  "workwrk-crm": ["create_lead", "create_opportunity"],
-  "workwrk-itsm": ["create_ticket"],
-  "workwrk-contracts": ["create_contract"],
+  "workwrk-crm": ["create_lead", "search_leads", "update_lead_status", "create_opportunity", "search_opportunities", "move_opportunity_stage"],
+  "workwrk-itsm": ["create_ticket", "search_tickets", "update_ticket_status"],
+  "workwrk-contracts": ["create_contract", "search_contracts"],
   "workwrk-dev": ["create_sprint"],
   "workwrk-campaigns": ["create_campaign"],
-  "workwrk-help": ["create_support_ticket"],
+  "workwrk-help": ["create_support_ticket", "apply_macro"],
 };
 
 // Resolve which tools are available to a given chat session.
