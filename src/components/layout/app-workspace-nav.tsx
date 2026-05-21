@@ -21,8 +21,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Home, Box, Sparkles, Plus, ChevronDown,
+  Home, Box, Sparkles, Plus, ChevronDown, Check, Loader2, X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -74,10 +75,168 @@ function shortName(product: CatalogProduct): string {
   return product.name.replace(/^WorkwrK\s+/, "");
 }
 
+interface WorkspaceRow {
+  id: string;
+  name: string;
+  slug: string;
+  isDefault: boolean;
+  color: string | null;
+  description: string | null;
+  memberCount: number;
+}
+
+/** localStorage key for the user's last-active workspace per product —
+ *  so reloading /crm puts them back into the workspace they were
+ *  using. The server doesn't need to know yet; this is a UI hint
+ *  until data-scoping by workspace lands. */
+function activeWsStorageKey(productSlug: string) {
+  return `workwrk.activeWorkspace.${productSlug}`;
+}
+
 export function AppWorkspaceNav() {
   const pathname = usePathname();
   const { isAdmin, isManager } = useRole();
   const showManagerBoards = isAdmin || isManager;
+  const canCreateWorkspace = isAdmin || isManager;
+
+  // Workspace switcher state. Lives per-product: fetched from
+  // /api/workspaces?product=<slug>, persisted in localStorage so the
+  // user lands back in the same workspace on reload. Hooks must run
+  // unconditionally, so they sit ABOVE the early-null return below.
+  const [workspaces, setWorkspaces] = useState<WorkspaceRow[]>([]);
+  const [wsLoading, setWsLoading] = useState(false);
+  const [activeWsId, setActiveWsId] = useState<string | null>(null);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [newWsName, setNewWsName] = useState("");
+  const [creatingWs, setCreatingWs] = useState(false);
+  const [wsError, setWsError] = useState<string | null>(null);
+  const switcherRef = useRef<HTMLDivElement | null>(null);
+
+  // Resolve the active product slug from the path. We do it eagerly
+  // here (vs. inside the effect) so the effect deps stay primitive.
+  const currentProductSlug = (() => {
+    const p = findProductForPath(pathname);
+    return p?.slug ?? null;
+  })();
+
+  const loadWorkspaces = useCallback(async (productSlug: string) => {
+    setWsLoading(true);
+    setWsError(null);
+    try {
+      const r = await fetch(`/api/workspaces?product=${encodeURIComponent(productSlug)}`);
+      if (!r.ok) {
+        setWorkspaces([]);
+        return;
+      }
+      const data = await r.json();
+      const list: WorkspaceRow[] = data.workspaces ?? [];
+      setWorkspaces(list);
+      // Restore last-active selection from localStorage, falling back
+      // to the default workspace when nothing's been picked yet.
+      if (typeof window !== "undefined") {
+        const stored = window.localStorage.getItem(activeWsStorageKey(productSlug));
+        const match = stored ? list.find((w) => w.id === stored) : null;
+        const fallback = list.find((w) => w.isDefault) ?? list[0] ?? null;
+        setActiveWsId((match ?? fallback)?.id ?? null);
+      }
+    } finally {
+      setWsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentProductSlug) {
+      setWorkspaces([]);
+      setActiveWsId(null);
+      return;
+    }
+    loadWorkspaces(currentProductSlug);
+  }, [currentProductSlug, loadWorkspaces]);
+
+  // Close the popover when the user clicks anywhere outside it.
+  useEffect(() => {
+    if (!switcherOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (!switcherRef.current) return;
+      if (!switcherRef.current.contains(e.target as Node)) {
+        setSwitcherOpen(false);
+        setNewWsName("");
+        setWsError(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [switcherOpen]);
+
+  const selectWorkspace = (id: string) => {
+    setActiveWsId(id);
+    setSwitcherOpen(false);
+    if (typeof window !== "undefined" && currentProductSlug) {
+      window.localStorage.setItem(activeWsStorageKey(currentProductSlug), id);
+    }
+  };
+
+  // Studio boards inside this (product, workspace) scope — surfaces
+  // user-built boards alongside the canonical ones so the workspace
+  // nav reflects what the team has actually customized.
+  interface StudioBoardRow {
+    id: string;
+    name: string;
+    slug: string;
+    layout: "TABLE" | "KANBAN";
+  }
+  const [studioBoards, setStudioBoards] = useState<StudioBoardRow[]>([]);
+  const loadStudioBoards = useCallback(
+    async (productSlug: string, workspaceId: string | null) => {
+      const params = new URLSearchParams({ product: productSlug });
+      if (workspaceId) params.set("workspace", workspaceId);
+      try {
+        const r = await fetch(`/api/studio/boards?${params.toString()}`);
+        if (!r.ok) { setStudioBoards([]); return; }
+        const d = await r.json();
+        setStudioBoards(
+          (d.boards ?? []).map((b: { id: string; name: string; slug: string; layout: "TABLE" | "KANBAN" }) => ({
+            id: b.id, name: b.name, slug: b.slug, layout: b.layout,
+          })),
+        );
+      } catch {
+        setStudioBoards([]);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!currentProductSlug) {
+      setStudioBoards([]);
+      return;
+    }
+    loadStudioBoards(currentProductSlug, activeWsId);
+  }, [currentProductSlug, activeWsId, loadStudioBoards]);
+
+  const handleCreateWorkspace = async () => {
+    if (!currentProductSlug || !newWsName.trim() || creatingWs) return;
+    setCreatingWs(true);
+    setWsError(null);
+    try {
+      const r = await fetch("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product: currentProductSlug, name: newWsName.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        setWsError(d.error || "Failed to create workspace");
+        return;
+      }
+      // Refresh + jump into the new one so the user sees it active.
+      await loadWorkspaces(currentProductSlug);
+      if (d.workspace?.id) selectWorkspace(d.workspace.id);
+      setNewWsName("");
+    } finally {
+      setCreatingWs(false);
+    }
+  };
 
   const current = findProductForPath(pathname);
   if (!current) return null;
@@ -119,33 +278,127 @@ export function AppWorkspaceNav() {
         </div>
       </header>
 
-      {/* Workspace switcher (single workspace v1; multi-workspace UX
-          arrives with team-built customizations in a follow-up pass). */}
-      <button
-        type="button"
-        className="app-workspace-switcher"
-        title="Switch workspace"
-        // Single-workspace org for now; click is a no-op until the
-        // multi-workspace flow lands.
-      >
-        <span className={`app-workspace-switcher-dot hue-${current.hue}`} aria-hidden />
-        <span className="app-workspace-switcher-name truncate">Main workspace</span>
-        <ChevronDown size={12} className="app-workspace-switcher-caret" aria-hidden />
-      </button>
+      {/* Workspace switcher — popover with the workspaces this user can
+          see inside this product, plus an inline "+ New workspace"
+          flow for managers. Active selection is persisted to
+          localStorage (per product) until full data-scoping ships. */}
+      {(() => {
+        const active = workspaces.find((w) => w.id === activeWsId) ?? null;
+        const label = active?.name ?? (wsLoading ? "Loading…" : "Main workspace");
+        return (
+          <div ref={switcherRef} className="app-workspace-switcher-wrap">
+            <button
+              type="button"
+              className="app-workspace-switcher"
+              title="Switch workspace"
+              aria-expanded={switcherOpen}
+              onClick={() => setSwitcherOpen((v) => !v)}
+            >
+              <span className={`app-workspace-switcher-dot hue-${current.hue}`} aria-hidden />
+              <span className="app-workspace-switcher-name truncate">{label}</span>
+              <ChevronDown
+                size={12}
+                className={"app-workspace-switcher-caret" + (switcherOpen ? " is-open" : "")}
+                aria-hidden
+              />
+            </button>
+
+            {switcherOpen && (
+              <div className="app-workspace-switcher-pop" role="dialog" aria-label="Workspaces">
+                <div className="app-workspace-switcher-heading">
+                  <span>Workspaces in {shortName(current)}</span>
+                  <button
+                    type="button"
+                    className="app-workspace-switcher-close"
+                    onClick={() => { setSwitcherOpen(false); setNewWsName(""); setWsError(null); }}
+                    aria-label="Close"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+
+                {wsLoading && workspaces.length === 0 ? (
+                  <div className="app-workspace-switcher-loading">
+                    <Loader2 size={12} className="animate-spin" /> Loading…
+                  </div>
+                ) : workspaces.length === 0 ? (
+                  <div className="app-workspace-switcher-empty">No workspaces yet.</div>
+                ) : (
+                  <ul className="app-workspace-switcher-list">
+                    {workspaces.map((w) => (
+                      <li key={w.id}>
+                        <button
+                          type="button"
+                          className={
+                            "app-workspace-switcher-item" +
+                            (w.id === activeWsId ? " is-active" : "")
+                          }
+                          onClick={() => selectWorkspace(w.id)}
+                          title={w.description ?? undefined}
+                        >
+                          <span className={`app-workspace-switcher-dot hue-${current.hue}`} aria-hidden />
+                          <span className="app-workspace-switcher-item-name truncate">{w.name}</span>
+                          {w.isDefault && (
+                            <span className="app-workspace-switcher-tag">Default</span>
+                          )}
+                          {!w.isDefault && w.memberCount > 0 && (
+                            <span className="app-workspace-switcher-meta">{w.memberCount}</span>
+                          )}
+                          {w.id === activeWsId && (
+                            <Check size={11} className="app-workspace-switcher-check" />
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {canCreateWorkspace && (
+                  <div className="app-workspace-switcher-create">
+                    <p className="app-workspace-switcher-create-label">New workspace</p>
+                    <div className="app-workspace-switcher-create-row">
+                      <input
+                        type="text"
+                        value={newWsName}
+                        onChange={(e) => setNewWsName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleCreateWorkspace();
+                          }
+                        }}
+                        placeholder={`e.g. ${shortName(current)} Team B`}
+                        disabled={creatingWs}
+                        className="app-workspace-switcher-create-input"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCreateWorkspace}
+                        disabled={creatingWs || !newWsName.trim()}
+                        className="app-workspace-switcher-create-btn"
+                      >
+                        {creatingWs ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                      </button>
+                    </div>
+                    {wsError && (
+                      <p className="app-workspace-switcher-error">{wsError}</p>
+                    )}
+                    <p className="app-workspace-switcher-hint">
+                      Teams build their own workspaces inside an app — customizations land here in a follow-up.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <nav className="app-subnav-list app-workspace-list">
         {visibleBoards.length > 0 && (
           <>
             <div className="app-workspace-section-row">
               <span className="app-workspace-section-label">Boards</span>
-              <button
-                type="button"
-                className="app-workspace-add"
-                aria-label="Add board"
-                title="Add board (Studio)"
-              >
-                <Plus size={11} />
-              </button>
             </div>
 
             {visibleBoards.map((board) => {
@@ -182,6 +435,43 @@ export function AppWorkspaceNav() {
             <ProductIcon size={14} />
             <span>{shortName(current)}</span>
           </Link>
+        )}
+
+        {/* Studio boards — user-built tables/kanbans scoped to this
+            (product, workspace). The "+" link sends the user to Studio
+            to author a new one. */}
+        <div className="app-workspace-section-row" style={{ marginTop: 6 }}>
+          <span className="app-workspace-section-label">Studio boards</span>
+          <Link
+            href="/studio"
+            className="app-workspace-add"
+            aria-label="Build a board in Studio"
+            title="Build a board in Studio"
+          >
+            <Plus size={11} />
+          </Link>
+        </div>
+        {studioBoards.length === 0 ? (
+          <Link href="/studio" className="app-subnav-item app-workspace-sidekick" title="Open Studio">
+            <Plus size={13} />
+            <span>Build your team&rsquo;s own board</span>
+          </Link>
+        ) : (
+          studioBoards.map((b) => {
+            const href = `/studio/boards/${b.slug}`;
+            const active = pathname === href || pathname.startsWith(href + "/");
+            return (
+              <Link
+                key={b.id}
+                href={href}
+                className={"app-subnav-item" + (active ? " is-active" : "")}
+                aria-current={active ? "page" : undefined}
+              >
+                <Box size={14} />
+                <span className="truncate">{b.name}</span>
+              </Link>
+            );
+          })
         )}
 
         {/* Per-board AI Sidekick context — every app surface gets a

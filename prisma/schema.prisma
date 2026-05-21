@@ -146,6 +146,14 @@ model Organization {
   helpdeskCustomers     SupportCustomer[]
   helpdeskTickets       SupportTicket[]
   helpdeskMacros        SupportMacro[]
+  // 🆕 Workspaces — per-(org,product) named spaces for "Sales Team A"
+  // vs "Sales Team B" customization, the foundation for Studio + the
+  // "teams build their own town" vision pillar.
+  workspaces            Workspace[]
+  // 🆕 Studio boards — user-built tables/kanbans scoped to a workspace.
+  studioBoards          StudioBoard[]
+  // 🆕 Templates this org has published to the marketplace.
+  boardTemplates        BoardTemplate[]
 
   @@index([slug])
 }
@@ -292,6 +300,8 @@ model User {
   tasksEscalated          Task[]                       @relation("TaskEscalatedTo")
   sopComplianceRecords    SOPCompliance[]
   sopAssignments          SOPAssignment[]
+  // 🆕 Workspaces — which per-product workspaces this user belongs to.
+  workspaceMemberships    WorkspaceMember[]
   reviewsAsSubject        Review[]                     @relation("ReviewSubject")
   reviewsAsReviewer       Review[]                     @relation("ReviewReviewer")
   feedbackGiven           PeerFeedback[]               @relation("FeedbackGiver")
@@ -425,6 +435,183 @@ model Invitation {
 
   @@index([token])
   @@index([organizationId])
+}
+
+// Workspace — a named space inside a product (e.g. "Sales Team A" /
+// "Sales Team B" inside WorkwrK CRM). Multi-workspace is the vision
+// pillar "teams build their own town inside their app": each team gets
+// its own boards / dashboards / customizations under the same product.
+//
+// First cut is naming-only: a Workspace exists per (org, productSlug)
+// and a switcher in AppWorkspaceNav lets users hop between them. Data
+// scoping (workspaceId on Opportunity, Lead, Ticket, …) lands in a
+// follow-up — only Studio-built boards will be workspace-scoped at
+// first, so we don't have to migrate every existing row to a default
+// workspace.
+//
+// Conventions:
+// - `slug` is unique within (organizationId, productSlug) — the URL
+//   reads /crm/<board>?ws=<slug> when we wire workspace-scoped data.
+// - Exactly one workspace per (org, productSlug) flagged `isDefault`.
+//   Created on first access via `ensureDefaultWorkspace`.
+model Workspace {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productSlug    String       // workwrk-crm, workwrk-dev, workwrk-itsm, …
+  name           String       // "Sales Team A", "Main workspace"
+  slug           String       // url-safe, unique within (org, product)
+  isDefault      Boolean      @default(false)
+  // Optional visual accent so two workspaces inside the same product
+  // can be distinguished in the switcher at a glance.
+  color          String?
+  // Free-form description; reasoned shown in the workspace switcher
+  // tooltip when someone hovers over a workspace name.
+  description    String?
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  members        WorkspaceMember[]
+  studioBoards   StudioBoard[]
+
+  @@unique([organizationId, productSlug, slug])
+  @@index([organizationId, productSlug])
+}
+
+// WorkspaceMember — which users belong to a given workspace and what
+// they can do inside it. v1 supports OWNER / EDITOR / VIEWER; we may
+// add CUSTOM scopes later when Studio lands per-board permissions.
+model WorkspaceMember {
+  id          String              @id @default(cuid())
+  workspaceId String
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        WorkspaceMemberRole @default(EDITOR)
+  createdAt   DateTime            @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId, role])
+}
+
+enum WorkspaceMemberRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+// StudioBoard — a user-built board inside a workspace. The "teams
+// build their own town" vision pillar. Unlike the canonical
+// product-board routes (e.g. /crm/pipeline), a StudioBoard's columns
+// are defined per-board and stored on the row itself, not in a Prisma
+// model. That trades query power for instant customization.
+//
+// Conventions:
+// - `fields` is an array of { key, label, type, options? } objects.
+//   Types reuse the BoardView field-type vocabulary so the existing
+//   <BoardView> renderer can drive Studio boards too.
+// - `layout` controls the default view (TABLE / KANBAN). Other views
+//   can still be picked inside the renderer.
+// - `productSlug` is the host app the board appears under (used to
+//   color the workspace nav consistently with the surrounding app).
+//   Null = a free-standing Studio board not nested under any product.
+model StudioBoard {
+  id             String      @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?
+  workspace      Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  productSlug    String?     // workwrk-crm, workwrk-dev, … (or null)
+  name           String
+  slug           String
+  description    String?
+  layout         StudioLayout @default(TABLE)
+  // Column definitions. Shape per element:
+  //   { key: string, label: string, type: BoardFieldType,
+  //     options?: { choices?: { value, label?, color? }[] } }
+  fields         Json         @default("[]")
+  color          String?
+  createdById    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  items          StudioItem[]
+  templates      BoardTemplate[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, workspaceId])
+  @@index([organizationId, productSlug])
+}
+
+// StudioItem — one row inside a StudioBoard. `values` is a JSON map
+// keyed by the field `key` defined on the board. `title` is hoisted
+// to a top-level column so Kanban / detail rendering doesn't have to
+// guess which field is the title.
+model StudioItem {
+  id          String      @id @default(cuid())
+  boardId     String
+  board       StudioBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  title       String
+  values      Json        @default("{}")
+  position    Int         @default(0)
+  // The status / kanban group this row lives in. Resolved at runtime
+  // against the board's `status` field options.
+  status      String?
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([boardId, position])
+  @@index([boardId, status])
+}
+
+enum StudioLayout {
+  TABLE
+  KANBAN
+}
+
+// BoardTemplate — a publishable snapshot of a StudioBoard's column
+// config + layout, available for other teams (and other orgs, when
+// `visibility = PUBLIC`) to install as a starting point.
+//
+// `visibility`:
+//   - ORG: visible only inside the publishing org's marketplace.
+//   - PUBLIC: visible to every org's marketplace (this is the
+//     "marketplace" pillar — share what you built across orgs).
+//
+// We store fields + layout, NOT data. Installing creates a fresh
+// empty StudioBoard with the same shape — your team fills it in.
+model BoardTemplate {
+  id             String                  @id @default(cuid())
+  organizationId String                  // org that published it
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Optional pointer back to the source board (lets the publisher
+  // re-sync changes later). Nullable because the source board can be
+  // deleted while the template lives on.
+  sourceBoardId  String?
+  sourceBoard    StudioBoard?            @relation(fields: [sourceBoardId], references: [id], onDelete: SetNull)
+  name           String
+  description    String?
+  category       String?                 // freeform tag e.g. "Sales", "PM", "HR"
+  productSlug    String?                 // suggested host app
+  layout         StudioLayout            @default(TABLE)
+  fields         Json                    @default("[]")
+  color          String?
+  visibility     BoardTemplateVisibility @default(ORG)
+  installCount   Int                     @default(0)
+  publishedById  String?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  @@index([organizationId])
+  @@index([visibility, installCount])
+}
+
+enum BoardTemplateVisibility {
+  ORG
+  PUBLIC
 }
 
 model PasswordResetToken {
@@ -5188,6 +5375,15 @@ model ChatSession {
   // When set, /api/sidekick/chat uses that agent's systemPrompt instead.
   agentId        String?
   agent          Agent?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  // Board-level context — when the session was opened from inside an
+  // app surface (e.g. clicking the Sidekick link on /crm/pipeline),
+  // we stash the product slug and the active board key here. The chat
+  // runtime uses these to (a) light up the product's tools even
+  // without an agent and (b) augment the system prompt with "user is
+  // currently viewing X". Frees the AI from having to ask "which board
+  // do you mean?" — it already knows.
+  productContext String?
+  boardContext   String?
   // Last assistant model used for this session — handy for "the model
   // changed mid-thread" diagnostics + cost analytics.
   lastModel      String?

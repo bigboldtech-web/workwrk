@@ -7,8 +7,10 @@
 // bottom. Sends to /api/sidekick/chat which calls Claude via the org's
 // AI client (BYOK if Enterprise).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { PRODUCT_CATALOG } from "@/lib/products/catalog";
+import { getBoard } from "@/lib/products/boards";
 import {
   Sparkles,
   Plus,
@@ -41,6 +43,17 @@ type SessionRow = {
   createdAt: string;
   updatedAt: string;
 };
+
+/** Active session's board-level context — set when the session was
+ *  opened from inside an app surface (/crm/pipeline → Sidekick link).
+ *  Rendered as a chip above the chat so the user can see what scope
+ *  the model is in. */
+type ActiveContext = {
+  productSlug: string;
+  productName: string;
+  boardKey: string | null;
+  boardName: string | null;
+} | null;
 
 type ToolCall = {
   toolUseId: string;
@@ -77,9 +90,14 @@ const STARTERS = [
 export default function SidekickPage() {
   const searchParams = useSearchParams();
   const initialSessionId = searchParams.get("session");
+  // Board-context params from the launch URL — set by BoardShell and
+  // AppWorkspaceNav when the user clicks Sidekick from inside an app.
+  const initialProductContext = searchParams.get("context");
+  const initialBoardContext = searchParams.get("board");
 
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [activeId, setActiveId] = useState<string | null>(initialSessionId);
+  const [activeContext, setActiveContext] = useState<ActiveContext>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -95,11 +113,41 @@ export default function SidekickPage() {
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
+  /** Resolve product + board slugs into display labels (or null if
+   *  the catalog/registry doesn't know them — shouldn't happen for
+   *  links we generate, but be defensive against typo'd ?context=). */
+  const resolveContext = useCallback(
+    (productSlug: string | null, boardKey: string | null): ActiveContext => {
+      if (!productSlug) return null;
+      const product = PRODUCT_CATALOG.find((p) => p.slug === productSlug);
+      if (!product) return null;
+      const board = boardKey ? getBoard(productSlug, boardKey) : null;
+      return {
+        productSlug,
+        productName: product.name.replace(/^WorkwrK\s+/, ""),
+        boardKey: boardKey ?? null,
+        boardName: board?.name ?? null,
+      };
+    },
+    [],
+  );
+
+  // Pre-resolve the launch URL's context (if any) — used both for the
+  // chip rendered before any session exists, and as the payload when
+  // we eagerly create the first session for this scope.
+  const launchContext = useMemo(
+    () => resolveContext(initialProductContext, initialBoardContext),
+    [resolveContext, initialProductContext, initialBoardContext],
+  );
+
   // If a ?session=<id> arrived via the URL (e.g. from /agents → Chat
-  // with <agent>), auto-load that session's messages on mount.
+  // with <agent>), auto-load that session's messages on mount. If a
+  // ?context=<slug> arrived without a session, surface the chip
+  // immediately so the user knows the scope before sending anything.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (initialSessionId) openSession(initialSessionId);
+    else if (launchContext) setActiveContext(launchContext);
   }, []);
 
   // Auto-scroll to bottom on new messages.
@@ -117,6 +165,11 @@ export default function SidekickPage() {
       if (!res.ok) return;
       const data = await res.json();
       setMessages(data.messages ?? []);
+      // Re-apply the session's stored board context so the chip
+      // follows the session, not the launch URL.
+      setActiveContext(
+        resolveContext(data.session?.productContext ?? null, data.session?.boardContext ?? null),
+      );
     } finally {
       setLoadingSession(false);
     }
@@ -132,6 +185,7 @@ export default function SidekickPage() {
     const data = await res.json();
     setActiveId(data.session.id);
     setMessages([]);
+    setActiveContext(null);
     await loadSessions();
   }
 
@@ -142,11 +196,31 @@ export default function SidekickPage() {
 
     let sessionId = activeId;
     if (!sessionId) {
-      const r = await fetch("/api/sidekick/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      // First message in a brand-new session — carry forward the
+      // launch URL's product+board context (if any) so the new
+      // session is properly scoped on the server.
+      const r = await fetch("/api/sidekick/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          launchContext
+            ? {
+                productContext: launchContext.productSlug,
+                boardContext: launchContext.boardKey ?? undefined,
+              }
+            : {},
+        ),
+      });
       if (!r.ok) { setInput(message); return; }
       const data = await r.json();
       sessionId = data.session.id as string;
       setActiveId(sessionId);
+      // Keep the chip in sync with what the server actually stored.
+      if (data.session.productContext) {
+        setActiveContext(
+          resolveContext(data.session.productContext, data.session.boardContext ?? null),
+        );
+      }
     }
 
     // Optimistic user message
@@ -253,6 +327,22 @@ export default function SidekickPage() {
 
       {/* Main chat */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Context chip — visible whenever the session is scoped to a
+            product/board. Tells the user the AI already knows which
+            surface they're on so they don't have to repeat it. */}
+        {activeContext && (
+          <div className="border-b border-border bg-violet-50/40 dark:bg-violet-950/20 px-6 py-2 flex items-center gap-2 text-xs">
+            <Sparkles size={12} className="text-violet-600" />
+            <span className="text-muted-2">Scoped to</span>
+            <span className="font-medium text-foreground">
+              {activeContext.productName}
+              {activeContext.boardName ? ` · ${activeContext.boardName}` : ""}
+            </span>
+            <span className="ml-auto text-[10px] text-muted-2">
+              Tools + context narrowed to this surface
+            </span>
+          </div>
+        )}
         {!activeId && messages.length === 0 ? (
           // Empty state — starter pills + welcome
           <div className="flex-1 flex flex-col items-center justify-center max-w-3xl mx-auto px-6 text-center">

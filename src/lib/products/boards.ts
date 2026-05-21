@@ -21,9 +21,9 @@
 import type { LucideIcon } from "lucide-react";
 import {
   TrendingUp, Users, Building2, Activity, BarChart3,
-  Code, Rocket, Map, GitBranch,
-  Megaphone, Mail, Calendar, Image as ImageIcon,
-  Ticket, ServerCog, BookOpen,
+  Code, Rocket, Map,
+  Megaphone, FileText, Calendar,
+  Ticket, AlertTriangle, BookOpen,
 } from "lucide-react";
 
 export type BoardView = "table" | "kanban" | "gantt" | "calendar" | "chart";
@@ -50,6 +50,8 @@ export interface ProductBoard {
 export const CONVERTED_PRODUCTS = new Set<string>([
   "workwrk-crm",
   "workwrk-dev",
+  "workwrk-campaigns",
+  "workwrk-itsm",
 ]);
 
 // Map of product slug → ordered list of boards inside that product.
@@ -68,25 +70,15 @@ export const PRODUCT_BOARDS: Record<string, ProductBoard[]> = {
     { key: "releases", name: "Releases", Icon: Rocket, views: ["table"], tagline: "Shipped + scheduled" },
     { key: "roadmap", name: "Roadmap", Icon: Map, views: ["table", "gantt"], tagline: "Themes + outcomes" },
   ],
-  "workwrk-mktg": [
-    { key: "campaigns", name: "Campaigns", Icon: Megaphone, default: true, views: ["kanban", "table", "calendar"], tagline: "Active + planned" },
-    { key: "calendar", name: "Content calendar", Icon: Calendar, views: ["calendar", "table"], tagline: "What ships when" },
-    { key: "emails", name: "Email sequences", Icon: Mail, views: ["table"], tagline: "Drip + broadcast" },
-    { key: "assets", name: "Brand assets", Icon: ImageIcon, views: ["table"], tagline: "Approved creative" },
-    { key: "reports", name: "Reports", Icon: BarChart3, views: ["chart"], tagline: "Channel + funnel", managerOnly: true },
+  "workwrk-campaigns": [
+    { key: "campaigns", name: "Campaigns", Icon: Megaphone, default: true, views: ["kanban", "table"], tagline: "Active + planned" },
+    { key: "content", name: "Content", Icon: FileText, views: ["kanban", "table"], tagline: "Editorial calendar" },
+    { key: "events", name: "Events", Icon: Calendar, views: ["table"], tagline: "Webinars + field" },
   ],
   "workwrk-itsm": [
-    { key: "tickets", name: "Tickets", Icon: Ticket, default: true, views: ["table", "kanban"], tagline: "Open + assigned" },
-    { key: "incidents", name: "Incidents", Icon: ServerCog, views: ["table", "kanban"], tagline: "Active outages", managerOnly: true },
-    { key: "changes", name: "Change requests", Icon: GitBranch, views: ["table"], tagline: "Pending approval" },
-    { key: "knowledge", name: "Knowledge base", Icon: BookOpen, views: ["table"], tagline: "Runbooks + SOPs" },
-    { key: "reports", name: "Reports", Icon: BarChart3, views: ["chart"], tagline: "MTTR + SLA", managerOnly: true },
-  ],
-  "workwrk-helpdesk": [
-    { key: "tickets", name: "Tickets", Icon: Ticket, default: true, views: ["table", "kanban"], tagline: "Customer queue" },
-    { key: "conversations", name: "Conversations", Icon: Mail, views: ["table"], tagline: "Email + chat threads" },
-    { key: "knowledge", name: "Knowledge base", Icon: BookOpen, views: ["table"], tagline: "Customer-facing docs" },
-    { key: "reports", name: "Reports", Icon: BarChart3, views: ["chart"], tagline: "CSAT + volume", managerOnly: true },
+    { key: "tickets", name: "Tickets", Icon: Ticket, default: true, views: ["kanban", "table"], tagline: "Open + assigned" },
+    { key: "incidents", name: "Incidents", Icon: AlertTriangle, views: ["table"], tagline: "Active outages" },
+    { key: "kb", name: "Knowledge base", Icon: BookOpen, views: ["table"], tagline: "Runbooks + SOPs" },
   ],
 };
 

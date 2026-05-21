@@ -35,6 +35,7 @@ import { useToast } from "@/components/ui/toast";
 import { Wrench, Plus, GitBranch, ListPlus, Trash2, GripVertical, FlaskConical } from "lucide-react";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ColumnTypePicker } from "@/components/custom-fields/column-type-picker";
+import { StudioBoardsPanel } from "@/components/studio/boards-panel";
 import { Search as SearchIcon } from "lucide-react";
 
 type WorkflowStep = {
@@ -92,12 +93,14 @@ export default function StudioPage() {
           Custom approval workflows and per-org fields. Define the platform's behavior to fit how you work.
         </p>
       </div>
-      <Tabs defaultValue="fields">
+      <Tabs defaultValue="boards">
         <TabsList>
+          <TabsTrigger value="boards">Boards</TabsTrigger>
           <TabsTrigger value="fields">Custom fields</TabsTrigger>
           <TabsTrigger value="workflows">Workflows</TabsTrigger>
           <TabsTrigger value="playground">Playground</TabsTrigger>
         </TabsList>
+        <TabsContent value="boards" className="mt-4"><StudioBoardsPanel /></TabsContent>
         <TabsContent value="fields" className="mt-4"><CustomFieldsTab /></TabsContent>
         <TabsContent value="workflows" className="mt-4"><WorkflowsTab /></TabsContent>
         <TabsContent value="playground" className="mt-4"><PlaygroundTab /></TabsContent>

@@ -48,6 +48,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       title: c.session.title,
       pinned: c.session.pinned,
       lastModel: c.session.lastModel,
+      productContext: c.session.productContext,
+      boardContext: c.session.boardContext,
       createdAt: c.session.createdAt,
     },
     messages,

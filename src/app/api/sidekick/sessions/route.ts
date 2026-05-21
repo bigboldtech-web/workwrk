@@ -41,6 +41,12 @@ export async function GET() {
 const createSchema = z.object({
   title: z.string().max(200).optional(),
   agentSlug: z.string().max(64).optional(),
+  // Board-level context — when the session is opened from an app
+  // surface (e.g. /crm/pipeline → Sidekick link), the caller passes
+  // the product slug and current board key so the runtime can scope
+  // tools + system prompt without asking the user "which board?".
+  productContext: z.string().max(80).optional(),
+  boardContext: z.string().max(80).optional(),
 });
 
 export async function POST(req: Request) {
@@ -69,8 +75,14 @@ export async function POST(req: Request) {
       userId: c.userId,
       title: parsed.data.title ?? inheritedTitle,
       agentId,
+      productContext: parsed.data.productContext ?? null,
+      boardContext: parsed.data.boardContext ?? null,
     },
-    select: { id: true, title: true, agentId: true, createdAt: true },
+    select: {
+      id: true, title: true, agentId: true,
+      productContext: true, boardContext: true,
+      createdAt: true,
+    },
   });
   return NextResponse.json({ session });
 }

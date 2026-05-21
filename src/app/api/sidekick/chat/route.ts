@@ -70,6 +70,38 @@ async function ctxAndSession(sessionId: string) {
   return { userId, chat };
 }
 
+// Augment the system prompt with the user's current app+board context
+// so the model doesn't have to ask "which board?" — it already knows.
+// We pull the product display name from the catalog and the board's
+// display name + tagline from the boards registry. Both are stable
+// in-code lookups, no DB hit.
+async function buildContextPrefix(
+  productContext: string | null,
+  boardContext: string | null,
+): Promise<string | null> {
+  if (!productContext) return null;
+  const [{ PRODUCT_CATALOG }, { getBoard }] = await Promise.all([
+    import("@/lib/products/catalog"),
+    import("@/lib/products/boards"),
+  ]);
+  const product = PRODUCT_CATALOG.find((p) => p.slug === productContext);
+  if (!product) return null;
+  const productName = product.name;
+  const board = boardContext ? getBoard(productContext, boardContext) : null;
+  if (board) {
+    return (
+      `## Current context\n` +
+      `The user is right now looking at the **${board.name}** board inside **${productName}**.\n` +
+      (board.tagline ? `Board tagline: ${board.tagline}\n` : "") +
+      `Default the user's questions to this surface unless they explicitly point elsewhere — they almost certainly mean this board when they say "this", "here", "the deals", "the leads", etc.\n`
+    );
+  }
+  return (
+    `## Current context\n` +
+    `The user is inside **${productName}**. Default their questions to this product unless they say otherwise.\n`
+  );
+}
+
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = inputSchema.safeParse(body);
@@ -104,9 +136,19 @@ export async function POST(req: Request) {
   history.reverse();
 
   // 3. Resolve agent + tools + system prompt + model.
+  // Two sources of product scope on a session:
+  //   - `agent.productSlug` — agent-bound session (Ria the SDR, etc.)
+  //   - `chat.productContext` — board-opened session (clicked Sidekick
+  //     while on /crm/pipeline). No agent persona, just contextual.
+  // Both feed into `toolsForSession` so the model gets the right
+  // create-tools lit up either way. Board context also augments the
+  // system prompt so the model knows which surface the user is on.
   const agentScoped = c.chat.agent && c.chat.agent.status === "ENABLED" ? c.chat.agent : null;
-  const systemPrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
-  const availableTools = toolsForSession({ agentProductSlug: agentScoped?.productSlug ?? null });
+  const productScope = agentScoped?.productSlug ?? c.chat.productContext ?? null;
+  const contextPrefix = await buildContextPrefix(c.chat.productContext, c.chat.boardContext);
+  const basePrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = contextPrefix ? `${contextPrefix}\n${basePrompt}` : basePrompt;
+  const availableTools = toolsForSession({ agentProductSlug: productScope });
   const toolDefs = availableTools.map((t) => ({
     name: t.name,
     description: t.description,
