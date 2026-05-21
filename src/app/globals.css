@@ -121,11 +121,14 @@
 }
 
 .dark {
-  --color-background: #0a0a0a;
+  /* "Bluish dark" — surfaces have a faint cool blue tint so the UI
+   * doesn't feel as flat as pure neutral. The accent stays violet so
+   * existing components don't need to change. */
+  --color-background: #0B0E15;
   --color-foreground: #fafafa;
-  --color-surface: #141414;
-  --color-surface-2: #1a1a1a;
-  --color-surface-3: #222222;
+  --color-surface: #141821;
+  --color-surface-2: #1A1F2B;
+  --color-surface-3: #232938;
   --color-border: rgba(255, 255, 255, 0.08);
   --color-muted: #a0a0a0;
   --color-muted-2: #707070;
@@ -137,8 +140,8 @@
   --accent-contrast: #ffffff;
   --accent-glow: 0 6px 18px -6px rgba(139, 92, 246, 0.55);
 
-  --surface: #141414;
-  --surface-elevated: #1a1a1a;
+  --surface: #141821;
+  --surface-elevated: #1A1F2B;
 
   /* Dark-mode signal colors lift the fg up so contrast against
      near-black stays AA. Backgrounds stay translucent. */
@@ -156,6 +159,23 @@
   --signal-info-border: rgba(96, 165, 250, 0.30);
 
   --scrollbar-color: rgba(255, 255, 255, 0.14);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * Night theme — true OLED black. Applied alongside .dark so all
+ * Tailwind dark: modifiers still fire; .night just overrides the
+ * surface tokens to pure black for users who want the deepest
+ * possible look (battery-friendly on OLED screens).
+ * ═══════════════════════════════════════════════════════════════ */
+.night {
+  --color-background: #000000;
+  --color-surface: #0A0A0A;
+  --color-surface-2: #111111;
+  --color-surface-3: #181818;
+  --color-border: rgba(255, 255, 255, 0.06);
+  --surface: #0A0A0A;
+  --surface-elevated: #111111;
+  --scrollbar-color: rgba(255, 255, 255, 0.10);
 }
 
 @theme inline {

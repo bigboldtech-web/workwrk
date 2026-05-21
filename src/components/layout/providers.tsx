@@ -30,7 +30,20 @@ export function Providers({
 
   return (
     <SessionProvider>
-      <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+      <ThemeProvider
+        attribute="class"
+        defaultTheme="dark"
+        enableSystem
+        themes={["light", "dark", "night"]}
+        value={{
+          light: "light",
+          dark: "dark",
+          // Night = dark + an additional `night` class so Tailwind's
+          // dark: modifier still fires while .night overrides surface
+          // tokens to true-OLED-black.
+          night: "dark night",
+        }}
+      >
         <QueryClientProvider client={queryClient}>
           <CurrencyProvider initial={initialCurrency}>
             <ConsentProvider>

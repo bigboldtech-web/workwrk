@@ -26,7 +26,7 @@ import { applyDensity, readDensity, type Density } from "@/lib/density";
 import { Kbd } from "@/components/ui/kbd";
 import { useGoToNav } from "@/hooks/use-goto-nav";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Monitor } from "lucide-react";
+import { Sun, Moon, Monitor, Sparkle } from "lucide-react";
 
 interface SearchResult {
   type: "person" | "task" | "sop" | "department" | "meeting";
@@ -567,7 +567,7 @@ export function Topbar() {
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             {themeMounted && (
-              <ThemeRow value={(theme as "light" | "dark" | "system" | undefined) ?? "system"} onChange={setTheme} />
+              <ThemeRow value={(theme as "light" | "dark" | "night" | "system" | undefined) ?? "system"} onChange={setTheme} />
             )}
             <DensityRow value={density} onChange={handleDensityChange} />
             <DropdownMenuItem
@@ -651,12 +651,13 @@ function ThemeRow({
   value,
   onChange,
 }: {
-  value: "light" | "dark" | "system";
+  value: "light" | "dark" | "night" | "system";
   onChange: (t: string) => void;
 }) {
-  const opts: { id: "light" | "dark" | "system"; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
+  const opts: { id: "light" | "dark" | "night" | "system"; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
     { id: "light", label: "Light", Icon: Sun },
     { id: "dark", label: "Dark", Icon: Moon },
+    { id: "night", label: "Night", Icon: Sparkle },
     { id: "system", label: "System", Icon: Monitor },
   ];
   return (

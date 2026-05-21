@@ -1089,7 +1089,11 @@ export function Sidebar() {
           );
         })}
         {themeMounted && (() => {
-          const isDark = (resolvedTheme ?? theme) === "dark";
+          // Night counts as dark-family for the quick toggle so the
+          // label correctly says "Light Mode" when in either dark or
+          // night, and clicking flips to light.
+          const active = (resolvedTheme ?? theme);
+          const isDark = active === "dark" || active === "night";
           const label = isDark ? tNav("lightMode") : tNav("darkMode");
           return (
             <button
