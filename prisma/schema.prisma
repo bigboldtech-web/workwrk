@@ -137,6 +137,9 @@ model Organization {
   // 🆕 Phase 4 — universal Doc + version history. Polymorphic; can
   // attach to any entity (task, ticket, board row) OR stand alone.
   docs                  Doc[]
+  // 🆕 Phase 5 — universal Updates feed + Activity log.
+  itemUpdates           ItemUpdate[]
+  itemActivities        ItemActivity[]
   // 🆕 Phase E7 — WorkwrK Helpdesk
   helpdeskCustomers     SupportCustomer[]
   helpdeskTickets       SupportTicket[]
@@ -5430,4 +5433,57 @@ model DocVersion {
   @@unique([docId, version])
   @@index([docId])
   @@index([createdAt])
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Item Updates + Activity log — Phase 5 of the monday polish.
+// ════════════════════════════════════════════════════════════════════
+//
+// Both are polymorphic on (entityType, entityId) — attach to any row
+// in any module. ItemUpdate is user-authored ("Customer escalated to
+// priority 1"); ItemActivity is auto-emitted ("Status changed from
+// OPEN to RESOLVED by @alice").
+//
+// Updates: soft-archive only. Activity: immutable, no archive.
+
+model ItemUpdate {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  entityType     String       // "TASK" | "LEAD" | "TICKET" | "CONTRACT" | …
+  entityId       String
+
+  authorId       String?
+  body           String       @db.Text   // rich HTML — TipTap output
+
+  archivedAt     DateTime?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, entityType, entityId])
+  @@index([authorId])
+}
+
+model ItemActivity {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  entityType     String
+  entityId       String
+
+  actorId        String?      // null = system-emitted (cron, webhook)
+  action         String       // "CREATED" | "STATUS_CHANGED" | "ASSIGNED" | …
+  // Arbitrary detail — e.g. { from: "OPEN", to: "RESOLVED" } for
+  // status changes, { field: "priority", from: "LOW", to: "HIGH" }
+  // for field edits. Renderable client-side per `action` kind.
+  meta           Json         @default("{}")
+
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, entityType, entityId])
+  @@index([createdAt])
+  @@index([actorId])
 }

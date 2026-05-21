@@ -17,10 +17,11 @@
 //     onChangeField={async (id, key, value) => { ... await refresh() }}
 //   />
 
-import { useEffect } from "react";
-import { X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { X, MessageCircle } from "lucide-react";
 import type { BoardField } from "./board-view";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import { ItemActivityDrawer } from "./item-activity-drawer";
 
 interface Props<T> {
   open: boolean;
@@ -46,12 +47,20 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
   const { open, onClose, item, title, entityType, fields, getValue, editableFields, onChangeField, children, headerActions } = props;
   const getId = props.getId ?? ((it: T) => (it as { id: string }).id);
 
+  const [activityOpen, setActivityOpen] = useState(false);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      // Esc closes whichever drawer is on top.
+      if (e.key === "Escape") {
+        if (activityOpen) setActivityOpen(false);
+        else onClose();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, activityOpen]);
 
   if (!open || !item) return null;
 
@@ -69,6 +78,15 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
       <aside className="relative h-full w-full max-w-[480px] bg-surface border-l border-border shadow-2xl flex flex-col">
         <header className="flex items-center gap-3 px-5 py-4 border-b border-border">
           <h2 className="flex-1 text-base font-semibold truncate" title={title}>{title || "Untitled"}</h2>
+          <button
+            type="button"
+            onClick={() => setActivityOpen(true)}
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
+            title="Updates &amp; activity"
+          >
+            <MessageCircle size={13} />
+            <span>Updates</span>
+          </button>
           {headerActions}
           <button
             type="button"
@@ -108,6 +126,14 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
           {children}
         </div>
       </aside>
+
+      <ItemActivityDrawer
+        open={activityOpen}
+        onClose={() => setActivityOpen(false)}
+        entityType={entityType}
+        entityId={id}
+        title={title || "Untitled"}
+      />
     </div>
   );
 }

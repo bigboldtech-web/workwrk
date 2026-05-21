@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveCrmContext } from "@/lib/crm/auth";
 import { triggerEvent } from "@/lib/workflows/runtime";
+import { logItemActivity } from "@/lib/activity/log";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -64,6 +65,14 @@ export async function POST(req: Request) {
   });
 
   triggerEvent(ctx.orgId, "lead.created", lead as unknown as Record<string, unknown>);
+  logItemActivity({
+    organizationId: ctx.orgId,
+    entityType: "LEAD",
+    entityId: lead.id,
+    actorId: ctx.userId,
+    action: "CREATED",
+    meta: { source: lead.source ?? null },
+  });
 
   return NextResponse.json({ lead });
 }
@@ -110,5 +119,29 @@ export async function PATCH(req: Request) {
       ...(parsed.data.status === "CONVERTED" && !existing.convertedAt ? { convertedAt: new Date() } : {}),
     },
   });
+
+  // Activity log — emits one row per meaningful change so the Updates
+  // drawer's Activity tab shows the audit trail.
+  if (parsed.data.status !== undefined && parsed.data.status !== existing.status) {
+    logItemActivity({
+      organizationId: ctx.orgId,
+      entityType: "LEAD",
+      entityId: existing.id,
+      actorId: ctx.userId,
+      action: "STATUS_CHANGED",
+      meta: { from: existing.status, to: parsed.data.status },
+    });
+  }
+  if (parsed.data.ownerId !== undefined && parsed.data.ownerId !== existing.ownerId) {
+    logItemActivity({
+      organizationId: ctx.orgId,
+      entityType: "LEAD",
+      entityId: existing.id,
+      actorId: ctx.userId,
+      action: "ASSIGNED",
+      meta: { from: existing.ownerId, to: parsed.data.ownerId },
+    });
+  }
+
   return NextResponse.json({ lead });
 }
