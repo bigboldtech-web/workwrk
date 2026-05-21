@@ -485,6 +485,9 @@ export default function SOPDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Right rail visibility — collapsed by default so the SOP content
+  // claims the whole canvas; user can open Details on demand.
+  const [showInfo, setShowInfo] = useState(false);
   const { success: toastSuccess, error: toastError } = useToast();
   const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState("content");
@@ -1295,10 +1298,21 @@ export default function SOPDetailPage() {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Main Content — Details rail collapsed by default so the SOP
+          claims full canvas width. Toggle below opens the rail when
+          the user actually needs to inspect metadata / compliance. */}
+      <div className="flex justify-end -mt-2">
+        <button
+          type="button"
+          onClick={() => setShowInfo((v) => !v)}
+          className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground"
+        >
+          {showInfo ? "Hide details" : "Show details"}
+        </button>
+      </div>
+      <div className={"grid grid-cols-1 gap-6 " + (showInfo ? "lg:grid-cols-3" : "")}>
         {/* Left: Tabs */}
-        <div className="lg:col-span-2">
+        <div className={showInfo ? "lg:col-span-2" : ""}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="w-full justify-start">
               <TabsTrigger value="content" className="gap-1.5">
@@ -1922,7 +1936,8 @@ export default function SOPDetailPage() {
           </Tabs>
         </div>
 
-        {/* Right: Sidebar */}
+        {/* Right: Sidebar — hidden unless `showInfo` is toggled on. */}
+        {showInfo && (
         <div className="space-y-4">
           <Card>
             <CardHeader className="pb-3">
@@ -2113,6 +2128,7 @@ export default function SOPDetailPage() {
             </CardContent>
           </Card>
         </div>
+        )}
       </div>
     </div>
   );

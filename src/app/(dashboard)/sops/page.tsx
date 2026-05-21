@@ -1183,7 +1183,7 @@ export default function SOPsPage() {
   return (
     <ListPage
       header={headerNode}
-      filters={showArchive ? undefined : filtersRail}
+      filters={undefined}
     >
       {/* Archive View */}
       {showArchive ? (
@@ -1235,6 +1235,55 @@ export default function SOPsPage() {
         </div>
       ) : (
       <>
+      {/* Compact toolbar — search + folder dropdown live on top now
+          instead of a left rail, so the SOP list claims full width. */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+          <Input
+            placeholder="Search SOPs by title or description…"
+            className="pl-8 h-9 text-xs"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <select
+          value={folderFilter}
+          onChange={(e) => setFolderFilter(e.target.value)}
+          className="h-9 px-3 rounded-md border border-border bg-surface text-xs"
+          aria-label="Filter by folder"
+        >
+          <option value="all">All folders ({totalActiveSops})</option>
+          <option value="unfoldered">Unfoldered</option>
+          {folders.map((f) => (
+            <option key={f.id} value={f.id}>{f.name}</option>
+          ))}
+        </select>
+        {(categoryNodes.length > 0 || uncategorizedCount > 0) && (
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="h-9 px-3 rounded-md border border-border bg-surface text-xs"
+            aria-label="Filter by category"
+          >
+            <option value="all">All categories</option>
+            {uncategorizedCount > 0 && <option value="uncategorized">Uncategorized</option>}
+            {categoryNodes.map((cat) => (
+              <option key={cat.id ?? cat.name} value={cat.name}>{cat.name}</option>
+            ))}
+          </select>
+        )}
+        {hasActiveFilters && (
+          <button
+            type="button"
+            onClick={() => { setFolderFilter("all"); setCategoryFilter("all"); setSelectedTags([]); setSearchQuery(""); }}
+            className="text-xs text-muted hover:text-foreground"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
       {/* Stats */}
       {loading ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

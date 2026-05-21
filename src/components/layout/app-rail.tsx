@@ -18,6 +18,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useState } from "react";
+import { useRole } from "@/hooks/use-role";
 import {
   LayoutDashboard,
   Sparkles,
@@ -44,13 +45,16 @@ interface RailItem {
   label: string;
   href: string;
   Icon: typeof LayoutDashboard;
+  /** When true, only org admins / executives see this rail icon.
+   *  Department users get a cleaner shell focused on their workspace. */
+  adminOnly?: boolean;
 }
 
 const RAIL_ITEMS: RailItem[] = [
   { key: "workspace", label: "Workspace", href: "/dashboard", Icon: LayoutDashboard },
-  { key: "sidekick", label: "Sidekick", href: "/sidekick", Icon: Sparkles },
-  { key: "agents", label: "Agents", href: "/agents", Icon: Bot },
-  { key: "vibe", label: "Vibe", href: "/build", Icon: Wand2 },
+  { key: "sidekick", label: "Sidekick", href: "/sidekick", Icon: Sparkles, adminOnly: true },
+  { key: "agents", label: "Agents", href: "/agents", Icon: Bot, adminOnly: true },
+  { key: "vibe", label: "Vibe", href: "/build", Icon: Wand2, adminOnly: true },
   { key: "notetaker", label: "Notetaker", href: "/notetaker", Icon: Mic },
   { key: "favorites", label: "Favorites", href: "/favorites", Icon: Star },
 ];
@@ -67,22 +71,34 @@ interface MoreItem {
 export function AppRail() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  const { isAdmin, isManager } = useRole();
+  // Sidekick / Agents / Vibe / Studio are heavy AI tools. Dept users
+  // (Sales, Marketing, IT, etc.) see a cleaner rail; admins / execs
+  // see the full stack.
+  const showAdminTools = isAdmin || isManager;
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard" || pathname === "/";
     return pathname === href || pathname.startsWith(href + "/");
   };
 
+  const visibleItems = RAIL_ITEMS.filter((i) => !i.adminOnly || showAdminTools);
+
+  // More popover. Admin tools (Studio, Autopilot, Analytics, Admin
+  // Console) only appear for admins/managers — dept users see a
+  // shorter list.
   const moreItems: MoreItem[] = [
     { key: "store", label: "Product Store", href: "/store", Icon: Package },
-    { key: "studio", label: "Studio", href: "/studio", Icon: Wrench },
-    { key: "autopilot", label: "Autopilot", href: "/autopilot", Icon: Zap },
+    ...(showAdminTools ? [
+      { key: "studio", label: "Studio", href: "/studio", Icon: Wrench },
+      { key: "autopilot", label: "Autopilot", href: "/autopilot", Icon: Zap },
+      { key: "analytics", label: "Analytics", href: "/analytics", Icon: BarChart3 },
+      { key: "integrations", label: "Integrations", href: "/integrations", Icon: Link2 },
+      { key: "admin", label: "Admin", href: "/admin", Icon: Shield },
+    ] : []),
     { key: "activity", label: "Activity", href: "/activity", Icon: Activity },
-    { key: "analytics", label: "Analytics", href: "/analytics", Icon: BarChart3 },
-    { key: "integrations", label: "Integrations", href: "/integrations", Icon: Link2 },
     { key: "brand", label: "Brand Guide", href: "/brand-guide", Icon: Palette },
     { key: "docs", label: "Docs", href: "/docs", Icon: FileText },
-    { key: "admin", label: "Admin", href: "/admin", Icon: Shield },
     { key: "settings", label: "Settings", href: "/settings", Icon: Settings },
     { key: "signout", label: "Sign out", onClick: () => signOut({ callbackUrl: "/" }), Icon: LogOut, destructive: true },
   ];
@@ -94,7 +110,7 @@ export function AppRail() {
       </Link>
 
       <nav className="app-rail-nav">
-        {RAIL_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.Icon;
           const active = isActive(item.href);
           return (
