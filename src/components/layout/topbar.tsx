@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon, Grid3x3, Heart, Inbox as InboxIcon } from "lucide-react";
+import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon, Grid3x3, Inbox as InboxIcon, UserPlus, Puzzle } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import {
   DropdownMenu,
@@ -382,25 +382,27 @@ export function Topbar() {
         )}
       </div>
 
-      {/* Right */}
+      {/* Right — order mirrors monday.com:
+          Bell · Inbox · Invite · Integrations · Help · Apps · Avatar.
+          We keep the Bell DropdownMenu where it is structurally
+          (heavy state) but visually it stays grouped with the
+          rest of the icons. */}
       <div className="app-topbar-right">
         <ActivePunchPill />
 
-        <Link href="/tasks" className="app-quick-add">
-          <Plus size={14} />
-          Quick add
-        </Link>
-
         <OrgSwitcher />
 
-        {/* Inbox — monday-style direct entry point next to the bell.
-            /inbox is the universal home for assigned items + mentions. */}
         <InboxButton />
 
-        {/* Kudos — moved from FAB to topbar so anyone can drop a
-            recognition without scrolling to find the heart. */}
-        <Link href="/kudos" className="app-icon-btn" aria-label="Give kudos" title="Give kudos">
-          <Heart size={16} />
+        {/* Invite teammates — heavy upsell entry in monday. We send
+            users to /settings where the invite flow lives. */}
+        <Link href="/settings" className="app-icon-btn" aria-label="Invite people" title="Invite people">
+          <UserPlus size={16} />
+        </Link>
+
+        {/* Integrations / connections (matches monday's puzzle icon). */}
+        <Link href="/integrations" className="app-icon-btn" aria-label="Integrations" title="Integrations">
+          <Puzzle size={16} />
         </Link>
 
         <HelpButton />
