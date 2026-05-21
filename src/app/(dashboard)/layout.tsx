@@ -1,6 +1,7 @@
 "use client";
 
 import { AppRail } from "@/components/layout/app-rail";
+import { ProductSubNav } from "@/components/layout/product-subnav";
 import { Topbar } from "@/components/layout/topbar";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { ToastProvider } from "@/components/ui/toast";
@@ -79,18 +80,10 @@ export default function DashboardLayout({
     <ToastProvider>
       <DialogProvider>
         <TourProvider>
-          <div className="app-shell" style={{ display: "flex", minHeight: "100vh" }}>
+          <div className="app-shell app-shell-grid">
             <AppRail />
-            <div
-              className="app-shell-main"
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                paddingLeft: 60,
-                minWidth: 0,
-              }}
-            >
+            <ProductSubNav />
+            <div className="app-shell-main">
               <Topbar />
               <main className="app-content">{children}</main>
             </div>

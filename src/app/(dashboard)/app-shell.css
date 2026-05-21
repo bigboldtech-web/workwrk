@@ -2025,3 +2025,95 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
 .app-rail-more-item:hover { background: var(--surface-elevated); }
 .app-rail-more-item.is-destructive { color: #dc2626; }
 .app-rail-more-item.is-destructive:hover { background: rgba(220, 38, 38, 0.08); }
+
+/* ──────────────────────────────────────────────────────────────────
+ * Shell grid — Phase 3.
+ * 3 columns: rail (60) · sub-nav (240, collapses when no product) · main.
+ * Uses CSS grid with `auto` for the sub-nav so when it returns null
+ * the grid collapses to 2 columns and the canvas flows wide.
+ * ────────────────────────────────────────────────────────────── */
+.app-shell-grid {
+  display: grid;
+  grid-template-columns: 60px auto minmax(0, 1fr);
+  min-height: 100vh;
+}
+.app-shell-grid > .app-shell-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
+}
+
+/* Sub-nav column. */
+.app-subnav {
+  width: 240px;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+}
+.app-subnav-header {
+  padding: 16px 14px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+.app-subnav-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-2);
+  margin-bottom: 2px;
+}
+.app-subnav-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  margin: 0;
+}
+
+.app-subnav-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.app-subnav-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 6px 4px;
+}
+.app-subnav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-muted);
+  text-decoration: none;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+.app-subnav-item:hover {
+  background: var(--surface-elevated);
+  color: var(--color-foreground);
+}
+.app-subnav-item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+.app-subnav-soon {
+  margin-left: auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: var(--surface-elevated);
+  color: var(--color-muted-2);
+}
