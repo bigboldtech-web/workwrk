@@ -36,6 +36,7 @@ async function main() {
   counts.DocVersion = await prisma.docVersion.count();
   counts.ItemUpdate = await prisma.itemUpdate.count();
   counts.ItemActivity = await prisma.itemActivity.count();
+  counts.TimerSession = await prisma.timerSession.count();
   console.log(JSON.stringify(counts, null, 2));
   await prisma.$disconnect();
 }

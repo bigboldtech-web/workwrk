@@ -140,6 +140,8 @@ model Organization {
   // 🆕 Phase 5 — universal Updates feed + Activity log.
   itemUpdates           ItemUpdate[]
   itemActivities        ItemActivity[]
+  // 🆕 Phase 7 — polymorphic time-tracking sessions.
+  timerSessions         TimerSession[]
   // 🆕 Phase E7 — WorkwrK Helpdesk
   helpdeskCustomers     SupportCustomer[]
   helpdeskTickets       SupportTicket[]
@@ -5486,4 +5488,36 @@ model ItemActivity {
   @@index([organizationId, entityType, entityId])
   @@index([createdAt])
   @@index([actorId])
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Time-tracking — Phase 7 of the monday polish.
+// ════════════════════════════════════════════════════════════════════
+//
+// One row per Start/Stop session. The accumulated time on an entity
+// is SUM(durationMs) across all stopped sessions plus the in-flight
+// session (if any). Per-user — multiple people can have concurrent
+// timers on the same ticket without conflict.
+
+model TimerSession {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  entityType     String       // "TICKET" | "TASK" | "LEAD" | …
+  entityId       String
+
+  userId         String
+  startedAt      DateTime     @default(now())
+  stoppedAt      DateTime?    // null = currently running
+  // Cached so list views don't have to compute it. Set on stop.
+  durationMs     Int          @default(0)
+  notes          String?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, entityType, entityId])
+  @@index([userId, stoppedAt])
+  @@index([organizationId, userId])
 }
