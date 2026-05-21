@@ -24,6 +24,7 @@ import { ManagerTeamDashboard } from "@/components/dashboard/manager-dashboard";
 import { BirthdayCard } from "@/components/dashboard/birthday-card";
 import { AnnouncementsBanner } from "@/components/dashboard/announcements-banner";
 import { AdminSetupChecklist } from "@/components/admin-setup-checklist";
+import { DeptWorkspaceBanner } from "@/components/dashboard/dept-workspace-banner";
 import { DashboardOkrs } from "@/components/dashboard/dashboard-okrs";
 import { useRole } from "@/hooks/use-role";
 import { Trophy } from "lucide-react";
@@ -302,6 +303,10 @@ export default function DashboardContent() {
 
       {/* Announcements — pinned at the very top so everyone sees them */}
       <AnnouncementsBanner />
+
+      {/* Dept-aware shortcut — only renders for non-admin users with
+          a matched department. Sales person → CRM, IT → ITSM, etc. */}
+      <DeptWorkspaceBanner />
 
       {/* Admin setup checklist (only for admins, auto-hides when complete) */}
       <AdminSetupChecklist />
