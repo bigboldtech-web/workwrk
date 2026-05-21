@@ -32,6 +32,8 @@ async function main() {
   counts.CustomFieldDefinition = await prisma.customFieldDefinition.count();
   counts.CustomFieldValue = await prisma.customFieldValue.count();
   counts.ProductInstallation = await prisma.productInstallation.count();
+  counts.Doc = await prisma.doc.count();
+  counts.DocVersion = await prisma.docVersion.count();
   console.log(JSON.stringify(counts, null, 2));
   await prisma.$disconnect();
 }

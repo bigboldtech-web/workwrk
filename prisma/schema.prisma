@@ -134,6 +134,9 @@ model Organization {
   chatSessions          ChatSession[]
   // 🆕 Whiteboards (Excalidraw-powered canvases)
   whiteboards           Whiteboard[]
+  // 🆕 Phase 4 — universal Doc + version history. Polymorphic; can
+  // attach to any entity (task, ticket, board row) OR stand alone.
+  docs                  Doc[]
   // 🆕 Phase E7 — WorkwrK Helpdesk
   helpdeskCustomers     SupportCustomer[]
   helpdeskTickets       SupportTicket[]
@@ -5363,4 +5366,68 @@ model SupportMacro {
 
   @@unique([organizationId, slug])
   @@index([organizationId, category])
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Universal Doc + version history — Phase 4 of the monday polish.
+// ════════════════════════════════════════════════════════════════════
+//
+// A Doc is a rich-text document that can either stand alone (a note
+// the user wrote) or be attached to any other entity via the
+// polymorphic (entityType, entityId) pair — task description, ticket
+// resolution write-up, contract redline notes, board row Doc cell.
+//
+// Critical guarantee: every save creates a new DocVersion row,
+// immutable. Restore = create a new version with old content. No
+// hard delete on either Doc or DocVersion — only `archivedAt` on Doc.
+// This is how we keep the user's promise: data can never be lost.
+
+model Doc {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  title          String
+  // TipTap JSON document. Starts as empty doc; every save updates.
+  content        Json         @default("{}")
+  // Plain-text excerpt for search/list previews — derived on save.
+  excerpt        String?      @db.Text
+
+  // Polymorphic owner. Both null = standalone doc.
+  entityType     String?      // "TASK" | "TICKET" | "BOARD_ROW" | …
+  entityId       String?
+
+  createdById    String?
+  archivedAt     DateTime?    // soft-archive only; never hard-delete
+
+  versions       DocVersion[]
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([entityType, entityId])
+  @@index([createdById])
+}
+
+model DocVersion {
+  id        String   @id @default(cuid())
+  docId     String
+  doc       Doc      @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  // Monotonically incremented per Doc. Doc.versions[0] = v1.
+  version   Int
+  title     String
+  // Frozen snapshot of TipTap JSON at this version.
+  content   Json
+
+  // Who saved this version. Null only for system-generated snapshots
+  // (e.g. an import or a migration).
+  authorId  String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([docId, version])
+  @@index([docId])
+  @@index([createdAt])
 }
