@@ -47,7 +47,15 @@ import {
   Copy,
   ExternalLink,
   GitBranch,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -1067,28 +1075,64 @@ export default function SOPDetailPage() {
               </Button>
             </>
           ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditing(true)}
-              className="gap-1.5"
-            >
-              <Edit3 size={14} />
-              Edit
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEditing(true)}
+                className="gap-1.5"
+              >
+                <Edit3 size={14} />
+                Edit
+              </Button>
+
+              {/* Secondary actions — Publish / Archive / Assign / Run
+                  Process — live under a single … menu so the header
+                  doesn't sprawl. The dialogs themselves stay mounted
+                  below; menu items just flip their open state. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label="More actions">
+                    <MoreHorizontal size={16} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  {sop.status !== "PUBLISHED" && (
+                    <DropdownMenuItem onSelect={() => setShowPublishDialog(true)}>
+                      <Send size={14} className="mr-2" /> Publish
+                    </DropdownMenuItem>
+                  )}
+                  {sop.status === "PUBLISHED" && (
+                    <DropdownMenuItem onSelect={() => setShowAssignDialog(true)}>
+                      <UserPlus size={14} className="mr-2" /> Assign
+                    </DropdownMenuItem>
+                  )}
+                  {sop.status === "PUBLISHED" && sop.sopType === "CHECKLIST" && (
+                    <DropdownMenuItem onSelect={() => setShowRunDialog(true)}>
+                      <Play size={14} className="mr-2" /> Run process
+                    </DropdownMenuItem>
+                  )}
+                  {(sop.status === "PUBLISHED" || sop.sopType === "CHECKLIST") && sop.status !== "ARCHIVED" && (
+                    <DropdownMenuSeparator />
+                  )}
+                  {sop.status !== "ARCHIVED" && (
+                    <DropdownMenuItem onSelect={() => setShowArchiveDialog(true)}>
+                      <Archive size={14} className="mr-2" /> Archive
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
           )}
 
-          {/* Run Process - only for published checklists */}
+          {/* Run Process - only for published checklists. Triggered
+              from the … menu above; dialog stays here, controlled by
+              showRunDialog state. */}
           {sop.status === "PUBLISHED" && sop.sopType === "CHECKLIST" && (
             <Dialog open={showRunDialog} onOpenChange={(open) => {
               setShowRunDialog(open);
               if (!open) { setShareLink(""); setRunTitle(""); setRunDueDate(""); setRunAssigneeId(""); }
             }}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700">
-                  <Play size={14} /> Run Process
-                </Button>
-              </DialogTrigger>
               <DialogContent>
                 <DialogHeader><DialogTitle>{shareLink ? "Process Started!" : "Start Process Run"}</DialogTitle></DialogHeader>
                 {shareLink ? (
@@ -1154,11 +1198,6 @@ export default function SOPDetailPage() {
 
           {sop.status === "PUBLISHED" && (
             <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5">
-                  <UserPlus size={14} /> Assign
-                </Button>
-              </DialogTrigger>
               <DialogContent className="max-w-lg">
                 <DialogHeader><DialogTitle>Assign SOP to People</DialogTitle></DialogHeader>
                 <div className="space-y-4 py-4">
@@ -1232,12 +1271,6 @@ export default function SOPDetailPage() {
 
           {sop.status !== "PUBLISHED" && (
             <Dialog open={showPublishDialog} onOpenChange={setShowPublishDialog}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1.5">
-                  <Send size={14} />
-                  Publish
-                </Button>
-              </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Publish SOP</DialogTitle>
@@ -1263,12 +1296,6 @@ export default function SOPDetailPage() {
 
           {sop.status !== "ARCHIVED" && (
             <Dialog open={showArchiveDialog} onOpenChange={setShowArchiveDialog}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5">
-                  <Archive size={14} />
-                  Archive
-                </Button>
-              </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Archive SOP</DialogTitle>
