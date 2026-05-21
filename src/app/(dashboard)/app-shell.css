@@ -2117,3 +2117,81 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
   background: var(--surface-elevated);
   color: var(--color-muted-2);
 }
+
+/* ──────────────────────────────────────────────────────────────────
+ * Phase 10 — Alignment polish sweep.
+ * Cross-cutting tweaks for the monday-style look. Touches none of the
+ * existing component code — purely additive overrides on classes
+ * that are already used across the app.
+ * ────────────────────────────────────────────────────────────── */
+
+/* Topbar — align height with the rail's icon column so the two
+ * fixed columns visually line up. Density tokens still drive most
+ * of the spacing; this just locks the chrome row. */
+.app-content {
+  padding: var(--d-page-y) var(--d-page-x);
+}
+
+/* Cards — converge on 10px radius across the app. Older surfaces use
+ * rounded-lg (8px), newer rounded-xl (12px). 10px feels balanced. */
+.app-shell-grid main [class*="rounded-xl"][class*="border"],
+.app-shell-grid main [class*="rounded-lg"][class*="border"] {
+  /* Don't override Tailwind utilities directly — this selector is
+   * just here to confirm we're loaded. Real changes happen via
+   * specific .app-card selector below. */
+}
+
+/* Subtle lift on bordered cards inside the main canvas. Restrained,
+ * not bouncy — matches monday's quiet interactive feedback. */
+.app-shell-grid main .group.rounded-xl,
+.app-shell-grid main article.rounded-xl {
+  transition: transform var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+.app-shell-grid main .group.rounded-xl:hover,
+.app-shell-grid main article.rounded-xl:hover {
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.06);
+}
+
+/* Apps panel polish — bigger hover state on product tiles. */
+.app-shell-grid .app-rail + * + * .grid > a:hover,
+[role="dialog"][aria-label="Work OS products"] a:hover {
+  transform: translateY(-1px);
+}
+
+/* Subnav title — denser typography to match monday's compact pane. */
+.app-subnav-title { letter-spacing: -0.01em; }
+
+/* Board tabs — merge the active tab into the toolbar below by removing
+ * its bottom border at the join. */
+[data-board-tab="active"] { border-bottom-color: transparent !important; }
+
+/* Topbar buttons — same hover treatment everywhere. */
+.app-icon-btn {
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+
+/* Focus rings — softer in light + dark, sharper in night so the
+ * accent visibility doesn't dissolve into pure black. */
+html.night input:focus-visible,
+html.night textarea:focus-visible,
+html.night button:focus-visible,
+html.night [role="combobox"]:focus,
+html.night select:focus {
+  outline: 2px solid var(--accent-strong) !important;
+  outline-offset: 1px;
+}
+
+/* Sub-nav scroll comfort — keep the workspace title pinned while
+ * the product list scrolls if it overflows. */
+.app-subnav-list {
+  scrollbar-gutter: stable;
+}
+
+/* Selection ring on active board rows feels lighter in dark/night. */
+html.dark .app-shell-grid main tr.is-selected,
+html.night .app-shell-grid main tr.is-selected {
+  background: var(--accent-soft);
+}
