@@ -176,7 +176,47 @@
   --surface: #0A0A0A;
   --surface-elevated: #111111;
   --scrollbar-color: rgba(255, 255, 255, 0.10);
+  /* Bento system tokens too — many components read these directly. */
+  --color-bento-bg: #000000;
+  --color-bento-card: #0A0A0A;
+  --color-bento-card-2: #111111;
+  --color-bento-card-3: #181818;
+  --color-bento-line: rgba(255, 255, 255, 0.06);
+  --color-bento-line-2: rgba(255, 255, 255, 0.10);
 }
+
+/* Many surfaces use Tailwind's literal dark: utilities
+ * (dark:bg-zinc-900, dark:bg-gray-900, dark:bg-neutral-900). Those
+ * bypass our --surface tokens. Force them to true-black under .night
+ * so the OLED look actually reads black across the whole canvas. */
+html.night body { background: #000 !important; }
+html.night .dark\:bg-zinc-900,
+html.night .dark\:bg-zinc-950,
+html.night .dark\:bg-gray-900,
+html.night .dark\:bg-gray-950,
+html.night .dark\:bg-neutral-900,
+html.night .dark\:bg-neutral-950,
+html.night .dark\:bg-slate-900,
+html.night .dark\:bg-slate-950 { background-color: #0A0A0A !important; }
+
+html.night .dark\:bg-zinc-800,
+html.night .dark\:bg-gray-800,
+html.night .dark\:bg-neutral-800,
+html.night .dark\:bg-slate-800 { background-color: #111111 !important; }
+
+html.night .dark\:bg-zinc-700,
+html.night .dark\:bg-gray-700,
+html.night .dark\:bg-neutral-700,
+html.night .dark\:bg-slate-700 { background-color: #181818 !important; }
+
+html.night .dark\:border-zinc-800,
+html.night .dark\:border-gray-800,
+html.night .dark\:border-neutral-800,
+html.night .dark\:border-slate-800 { border-color: rgba(255,255,255,0.08) !important; }
+
+html.night .dark\:border-zinc-700,
+html.night .dark\:border-gray-700,
+html.night .dark\:border-neutral-700 { border-color: rgba(255,255,255,0.10) !important; }
 
 @theme inline {
   --color-background: var(--color-background);

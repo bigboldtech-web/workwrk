@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon, Grid3x3 } from "lucide-react";
+import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon, Grid3x3, Heart } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import {
   DropdownMenu,
@@ -16,8 +16,6 @@ import {
 import { useSession, signOut } from "next-auth/react";
 import { getInitials } from "@/lib/utils";
 import { useTranslations } from "next-intl";
-import { LanguageSwitcher } from "./language-switcher";
-import { CurrencySwitcher } from "./currency-switcher";
 import { OrgSwitcher } from "./org-switcher";
 import { ActivePunchPill } from "./active-punch-pill";
 import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
@@ -394,8 +392,12 @@ export function Topbar() {
         </Link>
 
         <OrgSwitcher />
-        <LanguageSwitcher />
-        <CurrencySwitcher />
+
+        {/* Kudos — moved from FAB to topbar so anyone can drop a
+            recognition without scrolling to find the heart. */}
+        <Link href="/kudos" className="app-icon-btn" aria-label="Give kudos" title="Give kudos">
+          <Heart size={16} />
+        </Link>
 
         <HelpButton />
 

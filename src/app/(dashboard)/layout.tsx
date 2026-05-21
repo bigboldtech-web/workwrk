@@ -6,7 +6,6 @@ import { Topbar } from "@/components/layout/topbar";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { ToastProvider } from "@/components/ui/toast";
 import { DialogProvider } from "@/components/ui/dialog-provider";
-import { KudosFab } from "@/components/kudos/kudos-fab";
 import { ScreenProtection } from "@/components/security/screen-protection";
 import { TourProvider } from "@/components/tour-provider";
 import { useSession } from "next-auth/react";
@@ -87,7 +86,6 @@ export default function DashboardLayout({
               <Topbar />
               <main className="app-content">{children}</main>
             </div>
-            <KudosFab />
             <CommandPalette />
             <ScreenProtection />
           </div>
