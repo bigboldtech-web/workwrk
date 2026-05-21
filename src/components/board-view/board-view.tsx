@@ -32,6 +32,7 @@ import {
   X,
   Filter,
   ArrowUpDown,
+  Plus,
 } from "lucide-react";
 
 export type BoardFieldType =
@@ -86,8 +87,26 @@ const VIEW_OPTIONS: { id: BoardViewType; label: string; Icon: typeof List }[] = 
   { id: "gallery", label: "Gallery", Icon: LayoutPanelLeft },
 ];
 
+// ── Multi-tab boards ──────────────────────────────────────
+// A "tab" is a saved snapshot of (view, query, filters, sort). Lets
+// users carve up the same data into named views — "Open tickets",
+// "My queue", "This week's deals". Tabs persist per board in
+// localStorage; there's always a default first tab called "Main".
+// Switching tabs replaces the current state; edits after switching
+// are ephemeral until the user saves them back to the tab.
+type SavedTab = {
+  id: string;
+  label: string;
+  viewType: BoardViewType;
+  query?: string;
+  filters?: Record<string, string[]>;
+  sortField?: string | null;
+  sortDir?: "asc" | "desc";
+};
+
 export function BoardView<T>(props: Props<T>) {
   const storageKey = `boardview:${props.boardKey}`;
+  const tabsKey = `boardtabs:${props.boardKey}`;
   const [view, setView] = useState<BoardViewType>(props.defaultView ?? "table");
 
   // Hydrate view choice from localStorage post-mount (avoid SSR mismatch).
@@ -167,6 +186,102 @@ export function BoardView<T>(props: Props<T>) {
       // Bad JSON / quota / private mode — fall back to no sort.
     }
   }, [sortStorageKey]);
+
+  // ── Tabs state ─────────────────────────────────────────
+  const [tabs, setTabs] = useState<SavedTab[]>([
+    { id: "main", label: "Main table", viewType: "table" },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>("main");
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(tabsKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as SavedTab[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Ensure a "main" tab always exists.
+          if (!parsed.some((t) => t.id === "main")) {
+            parsed.unshift({ id: "main", label: "Main table", viewType: "table" });
+          }
+          setTabs(parsed);
+        }
+      }
+    } catch {}
+  }, [tabsKey]);
+
+  const persistTabs = useCallback((next: SavedTab[]) => {
+    setTabs(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(tabsKey, JSON.stringify(next));
+    }
+  }, [tabsKey]);
+
+  const applyTab = useCallback((tab: SavedTab) => {
+    setActiveTabId(tab.id);
+    setView(tab.viewType);
+    if (typeof window !== "undefined") window.localStorage.setItem(storageKey, tab.viewType);
+    setQuery(tab.query ?? "");
+    if (tab.filters) {
+      setFilters(Object.fromEntries(Object.entries(tab.filters).map(([k, vals]) => [k, new Set(vals)])));
+    } else {
+      setFilters({});
+    }
+    setSortField(tab.sortField ?? null);
+    setSortDir(tab.sortDir ?? "asc");
+  }, [storageKey]);
+
+  const addTab = useCallback(() => {
+    const label = window.prompt("Tab name?", `View ${tabs.length}`);
+    if (!label) return;
+    const tab: SavedTab = {
+      id: `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      label,
+      viewType: view,
+      query: query || undefined,
+      filters: Object.keys(filters).length
+        ? Object.fromEntries(Object.entries(filters).map(([k, s]) => [k, Array.from(s)]))
+        : undefined,
+      sortField,
+      sortDir,
+    };
+    persistTabs([...tabs, tab]);
+    setActiveTabId(tab.id);
+  }, [tabs, view, query, filters, sortField, sortDir, persistTabs]);
+
+  const saveTabFromCurrent = useCallback((tabId: string) => {
+    const next = tabs.map((t) => t.id === tabId ? {
+      ...t,
+      viewType: view,
+      query: query || undefined,
+      filters: Object.keys(filters).length
+        ? Object.fromEntries(Object.entries(filters).map(([k, s]) => [k, Array.from(s)]))
+        : undefined,
+      sortField,
+      sortDir,
+    } : t);
+    persistTabs(next);
+  }, [tabs, view, query, filters, sortField, sortDir, persistTabs]);
+
+  const renameTab = useCallback((tabId: string, label: string) => {
+    const cleaned = label.trim();
+    if (!cleaned) return;
+    persistTabs(tabs.map((t) => t.id === tabId ? { ...t, label: cleaned } : t));
+    setRenamingTabId(null);
+  }, [tabs, persistTabs]);
+
+  const deleteTab = useCallback((tabId: string) => {
+    if (tabId === "main") return;
+    if (!window.confirm("Delete this tab? Saved view will be lost.")) return;
+    const next = tabs.filter((t) => t.id !== tabId);
+    persistTabs(next);
+    if (activeTabId === tabId) {
+      setActiveTabId("main");
+      const main = next.find((t) => t.id === "main");
+      if (main) applyTab(main);
+    }
+  }, [tabs, activeTabId, applyTab, persistTabs]);
 
   const cycleSort = useCallback((fieldKey: string) => {
     setSortField((prevField) => {
@@ -292,6 +407,77 @@ export function BoardView<T>(props: Props<T>) {
 
   return (
     <div>
+      {/* Tab strip — saved views per board. "Main" is permanent.
+          Right-click or use the X to delete (except Main). + to add. */}
+      <div className="flex items-end gap-0.5 mb-3 border-b border-border">
+        {tabs.map((t) => {
+          const active = t.id === activeTabId;
+          const isMain = t.id === "main";
+          if (renamingTabId === t.id) {
+            return (
+              <input
+                key={t.id}
+                autoFocus
+                defaultValue={t.label}
+                onBlur={(e) => renameTab(t.id, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") renameTab(t.id, (e.target as HTMLInputElement).value);
+                  if (e.key === "Escape") setRenamingTabId(null);
+                }}
+                className="px-2.5 py-1.5 text-xs font-medium border border-violet-300 bg-surface rounded-t-md outline-none"
+              />
+            );
+          }
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => applyTab(t)}
+              onDoubleClick={() => setRenamingTabId(t.id)}
+              className={
+                "group inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px " +
+                (active
+                  ? "border-violet-500 text-violet-700 dark:text-violet-300 bg-surface-2"
+                  : "border-transparent text-muted hover:text-foreground hover:bg-surface-2")
+              }
+              title={isMain ? "Main table — always present" : "Double-click to rename"}
+            >
+              <span>{t.label}</span>
+              {!isMain && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); deleteTab(t.id); }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-rose-100 hover:text-rose-600"
+                  aria-label="Delete tab"
+                  tabIndex={-1}
+                >
+                  <X size={10} />
+                </button>
+              )}
+              {active && !isMain && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); saveTabFromCurrent(t.id); }}
+                  className="opacity-0 group-hover:opacity-100 text-[9px] uppercase tracking-wider text-muted-2 hover:text-violet-600"
+                  tabIndex={-1}
+                  title="Save current view to this tab"
+                >
+                  save
+                </button>
+              )}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={addTab}
+          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs text-muted hover:text-violet-600 -mb-px"
+          title="Save current view as a new tab"
+        >
+          <Plus size={11} /> Tab
+        </button>
+      </div>
+
       {/* Toolbar: view switcher · search · filter · extraToolbar */}
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
