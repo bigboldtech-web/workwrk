@@ -34,6 +34,8 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { Wrench, Plus, GitBranch, ListPlus, Trash2, GripVertical, FlaskConical } from "lucide-react";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import { ColumnTypePicker } from "@/components/custom-fields/column-type-picker";
+import { Search as SearchIcon } from "lucide-react";
 
 type WorkflowStep = {
   id: string;
@@ -527,6 +529,7 @@ function CreateFieldDialog({ onClose, onCreated }: { onClose: () => void; onCrea
   const [required, setRequired] = useState(false);
   const [choicesText, setChoicesText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [typeSearch, setTypeSearch] = useState("");
 
   // Auto-derive a snake_case key from the label as the user types,
   // unless they've started editing the key directly.
@@ -581,14 +584,20 @@ function CreateFieldDialog({ onClose, onCreated }: { onClose: () => void; onCrea
             </div>
             <div className="space-y-1.5">
               <Label>Type</Label>
-              <Select value={fieldType} onValueChange={(v) => setFieldType(v as FieldType)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {Object.entries(FIELD_TYPE_LABEL).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* monday-style two-section visual picker. The current
+                  value gets a violet ring. Optional search filters
+                  across both sections. */}
+              <div className="relative mb-2">
+                <SearchIcon size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={typeSearch}
+                  onChange={(e) => setTypeSearch(e.target.value)}
+                  placeholder="Search or describe your column"
+                  className="w-full pl-7 pr-3 py-1.5 rounded-md border border-border bg-surface text-xs focus:outline-none focus:ring-1 focus:ring-violet-500"
+                />
+              </div>
+              <ColumnTypePicker value={fieldType} onChange={setFieldType} query={typeSearch} />
             </div>
           </div>
           <div className="space-y-1.5"><Label>Label</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Project code" autoFocus /></div>
