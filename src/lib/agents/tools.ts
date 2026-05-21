@@ -1125,6 +1125,270 @@ const assignTicket: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
+// OKR create (HR / Goals)
+// ─────────────────────────────────────────────────────────
+
+const createOkr: ToolDefinition = {
+  name: "create_okr",
+  description:
+    "Create an OKR (objective + key results) in WorkwrK Goals. Use when the user wants to capture a goal — quarterly, individual, team, or company-wide. Key results are optional; pass them as an array if known.",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Objective title — what the team is trying to achieve" },
+      description: { type: "string" },
+      level: { type: "string", enum: ["COMPANY", "TEAM", "INDIVIDUAL"], description: "Defaults to INDIVIDUAL" },
+      quarter: { type: "string", description: "e.g. 'Q2 2026'" },
+      ownerEmail: { type: "string", description: "Email of the OKR owner. Defaults to the caller." },
+      startIsoDate: { type: "string" },
+      endIsoDate: { type: "string" },
+      keyResults: {
+        type: "array",
+        description: "Optional array of key results to create alongside the OKR",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            unit: { type: "string", description: "e.g. '%', '$', 'count'" },
+            startValue: { type: "number", description: "Defaults to 0" },
+            targetValue: { type: "number" },
+          },
+          required: ["title", "targetValue"],
+        },
+      },
+    },
+    required: ["title"],
+  },
+  handler: async (ctx, input) => {
+    let ownerId = ctx.userId;
+    if (input.ownerEmail) {
+      const owner = await prisma.user.findFirst({
+        where: { email: input.ownerEmail as string, organizationId: ctx.orgId },
+        select: { id: true },
+      });
+      if (!owner) return { error: `Owner with email '${input.ownerEmail}' not found in this org` };
+      ownerId = owner.id;
+    }
+
+    const krs = Array.isArray(input.keyResults) ? (input.keyResults as Array<{ title: string; unit?: string; startValue?: number; targetValue: number }>) : [];
+
+    const okr = await prisma.oKR.create({
+      data: {
+        organizationId: ctx.orgId,
+        title: input.title as string,
+        description: (input.description as string) ?? null,
+        level: (input.level as string) ?? "INDIVIDUAL",
+        quarter: (input.quarter as string) ?? null,
+        startDate: input.startIsoDate ? new Date(input.startIsoDate as string) : null,
+        endDate: input.endIsoDate ? new Date(input.endIsoDate as string) : null,
+        ownerId,
+        keyResults: krs.length ? {
+          create: krs.map((kr) => ({
+            title: kr.title,
+            unit: kr.unit ?? null,
+            startValue: kr.startValue ?? 0,
+            targetValue: kr.targetValue,
+            currentValue: kr.startValue ?? 0,
+          })),
+        } : undefined,
+      },
+      select: { id: true, title: true, level: true, status: true, quarter: true, keyResults: { select: { id: true, title: true, targetValue: true, unit: true } } },
+    });
+    return { ok: true, okr };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// Meeting create (cross-product)
+// ─────────────────────────────────────────────────────────
+
+const createMeeting: ToolDefinition = {
+  name: "create_meeting",
+  description:
+    "Schedule a meeting in WorkwrK. Use when the user wants to capture a 1:1, standup, review, or ad-hoc. Attendees can be passed as a list of emails — unknown emails are skipped silently.",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      type: {
+        type: "string",
+        enum: ["DAILY_STANDUP", "WEEKLY_REVIEW", "ONE_ON_ONE", "QUARTERLY_REVIEW", "ANNUAL_PLANNING", "ADHOC"],
+        description: "Defaults to ADHOC",
+      },
+      scheduledAt: { type: "string", description: "ISO datetime (e.g. '2026-05-25T14:00:00Z')" },
+      durationMinutes: { type: "integer", description: "Defaults to 30" },
+      agenda: { type: "string" },
+      attendeeEmails: { type: "array", items: { type: "string" }, description: "Emails of attendees in this org" },
+    },
+    required: ["title", "scheduledAt"],
+  },
+  handler: async (ctx, input) => {
+    const attendeeEmails = Array.isArray(input.attendeeEmails) ? (input.attendeeEmails as string[]) : [];
+    const attendees = attendeeEmails.length
+      ? await prisma.user.findMany({
+          where: { organizationId: ctx.orgId, email: { in: attendeeEmails } },
+          select: { id: true, email: true },
+        })
+      : [];
+
+    // Always include the caller as an attendee.
+    const attendeeIds = new Set<string>([ctx.userId, ...attendees.map((a) => a.id)]);
+
+    const meeting = await prisma.meeting.create({
+      data: {
+        organizationId: ctx.orgId,
+        title: input.title as string,
+        type: ((input.type as string) ?? "ADHOC") as "DAILY_STANDUP" | "WEEKLY_REVIEW" | "ONE_ON_ONE" | "QUARTERLY_REVIEW" | "ANNUAL_PLANNING" | "ADHOC",
+        scheduledAt: new Date(input.scheduledAt as string),
+        duration: (input.durationMinutes as number) ?? 30,
+        agenda: (input.agenda as string) ?? null,
+        attendees: { create: Array.from(attendeeIds).map((userId) => ({ userId })) },
+      },
+      select: { id: true, title: true, type: true, scheduledAt: true, duration: true },
+    });
+    return {
+      ok: true,
+      meeting,
+      attendeesAttached: attendeeIds.size,
+      unknownEmails: attendeeEmails.filter((e) => !attendees.some((a) => a.email === e)),
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// SOP create
+// ─────────────────────────────────────────────────────────
+
+const createSop: ToolDefinition = {
+  name: "create_sop",
+  description:
+    "Create a draft Standard Operating Procedure. The SOP body is created as a stub — use the editor to flesh it out. Use this when the user describes a process and wants to capture it formally.",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      description: { type: "string", description: "Short summary of what the SOP covers" },
+      category: { type: "string" },
+      sopType: { type: "string", enum: ["WRITTEN", "RECORDED", "CHECKLIST"], description: "Defaults to WRITTEN" },
+      tags: { type: "array", items: { type: "string" } },
+    },
+    required: ["title"],
+  },
+  handler: async (ctx, input) => {
+    const tags = Array.isArray(input.tags)
+      ? (input.tags as string[]).map((t) => t.trim()).filter((t) => t.length > 0 && t.length <= 40)
+      : [];
+    const sop = await prisma.sOP.create({
+      data: {
+        organizationId: ctx.orgId,
+        title: (input.title as string).trim(),
+        description: (input.description as string) ?? null,
+        category: (input.category as string) ?? null,
+        sopType: ((input.sopType as string) ?? "WRITTEN") as "WRITTEN" | "RECORDED" | "CHECKLIST",
+        tags,
+        content: { steps: [] },
+      },
+      select: { id: true, title: true, sopType: true, status: true, category: true, tags: true },
+    });
+    return { ok: true, sop };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// KRA create
+// ─────────────────────────────────────────────────────────
+
+const createKra: ToolDefinition = {
+  name: "create_kra",
+  description:
+    "Create a Key Result Area (a major accountability for a role). KRAs anchor KPIs. Use when the user is defining a new accountability or restructuring a role.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      description: { type: "string" },
+      category: { type: "string" },
+      roleTitle: { type: "string", description: "Optional role title to link this KRA to (case-insensitive lookup)" },
+    },
+    required: ["name"],
+  },
+  handler: async (ctx, input) => {
+    let roleId: string | undefined;
+    if (input.roleTitle) {
+      const role = await prisma.role.findFirst({
+        where: { organizationId: ctx.orgId, title: { equals: input.roleTitle as string, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (!role) return { error: `Role '${input.roleTitle}' not found in this org` };
+      roleId = role.id;
+    }
+
+    const kra = await prisma.kRA.create({
+      data: {
+        organizationId: ctx.orgId,
+        name: input.name as string,
+        description: (input.description as string) ?? null,
+        category: (input.category as string) ?? null,
+        roleId,
+      },
+      select: { id: true, name: true, category: true, roleId: true },
+    });
+    return { ok: true, kra };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// KPI create
+// ─────────────────────────────────────────────────────────
+
+const createKpi: ToolDefinition = {
+  name: "create_kpi",
+  description:
+    "Create a KPI (a measurable indicator). Optionally attach it to a parent KRA by name. Use when the user wants to measure something — revenue, NPS, defect rate, etc.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      description: { type: "string" },
+      type: { type: "string", enum: ["QUANTITATIVE", "QUALITATIVE"], description: "Defaults to QUANTITATIVE" },
+      unit: { type: "string", description: "e.g. '%', '$', 'count'" },
+      frequency: { type: "string", enum: ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ANNUALLY"], description: "Defaults to MONTHLY" },
+      targetValue: { type: "number" },
+      lowerIsBetter: { type: "boolean", description: "True for cost/defect-type metrics" },
+      kraName: { type: "string", description: "Optional parent KRA — looked up by name (case-insensitive)" },
+    },
+    required: ["name"],
+  },
+  handler: async (ctx, input) => {
+    let kraId: string | undefined;
+    if (input.kraName) {
+      const kra = await prisma.kRA.findFirst({
+        where: { organizationId: ctx.orgId, name: { equals: input.kraName as string, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (!kra) return { error: `KRA '${input.kraName}' not found in this org` };
+      kraId = kra.id;
+    }
+
+    const kpi = await prisma.kPI.create({
+      data: {
+        organizationId: ctx.orgId,
+        name: input.name as string,
+        description: (input.description as string) ?? null,
+        type: ((input.type as string) ?? "QUANTITATIVE") as "QUANTITATIVE" | "QUALITATIVE",
+        unit: (input.unit as string) ?? null,
+        frequency: ((input.frequency as string) ?? "MONTHLY") as "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "ANNUALLY",
+        targetValue: input.targetValue as number | undefined,
+        lowerIsBetter: (input.lowerIsBetter as boolean) ?? false,
+        kraId,
+      },
+      select: { id: true, name: true, type: true, unit: true, frequency: true, targetValue: true, kraId: true },
+    });
+    return { ok: true, kpi };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
 // Registry — all tools by name
 // ─────────────────────────────────────────────────────────
 
@@ -1161,11 +1425,17 @@ export const TOOLS: Record<string, ToolDefinition> = {
   // Helpdesk
   create_support_ticket: createSupportTicket,
   apply_macro: applyMacro,
+  // HR / Goals
+  create_okr: createOkr,
+  create_meeting: createMeeting,
+  create_sop: createSop,
+  create_kra: createKra,
+  create_kpi: createKpi,
 };
 
 // Tools every session can use, regardless of agent (or no agent).
 // Includes cross-product search so Sidekick can look stuff up.
-export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos", "search_employees", "search_kb", "search_meetings", "search_okrs", "search_sops"];
+export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos", "search_employees", "search_kb", "search_meetings", "search_okrs", "search_sops", "create_meeting", "create_okr", "create_sop"];
 
 // Tools per agent product. When a chat session is scoped to an agent,
 // the agent's productSlug determines which create-tools light up in
@@ -1182,6 +1452,12 @@ export const PRODUCT_TOOL_NAMES: Record<string, string[]> = {
   "workwrk-dev": ["create_sprint"],
   "workwrk-campaigns": ["create_campaign"],
   "workwrk-help": ["create_support_ticket", "apply_macro"],
+  // HR / Goals — KRAs and KPIs are HR-org-design primitives, surfaced
+  // via the People product's agent (Maya HR).
+  "workwrk-people": ["create_kra", "create_kpi"],
+  "workwrk-goals": ["create_okr"],
+  "workwrk-sops": ["create_sop"],
+  "workwrk-meetings": ["create_meeting"],
 };
 
 // Resolve which tools are available to a given chat session.
