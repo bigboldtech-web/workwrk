@@ -51,48 +51,54 @@ export function AdminSetupChecklist() {
         const deptList = Array.isArray(depts) ? depts : depts?.data || [];
         const policyList = Array.isArray(policies) ? policies : policies?.data || [];
 
+        // Sequence mirrors a real first-day-in-office workflow:
+        // 1. Company profile + departments — the org skeleton
+        // 2. Policies — what the company stands for (HR/compliance)
+        // 3. SOPs — how work gets done
+        // 4. KRAs + KPIs — what each role is accountable for
+        // 5. People — invite the team into the structure
         const checks: SetupItem[] = [
           {
             key: "profile",
             label: "Set up your company profile",
-            description: "Add mission, vision, values and a description so AI knows your business.",
+            description: "Mission, vision, values, description — gives AI the context to be useful.",
             href: "/organization",
             done: !!(profile.about && profile.about.length > 30),
           },
           {
             key: "departments",
             label: "Create departments",
-            description: "Organize people by department for better structure.",
+            description: "Organize people by team — Sales, IT, HR, etc. Drives access + dashboards.",
             href: "/organization",
             done: deptList.length > 0,
           },
           {
-            key: "team",
-            label: "Invite your team",
-            description: "Add the people who'll use WorkwrK.",
-            href: "/settings",
-            done: userList.length > 1,
-          },
-          {
-            key: "kras",
-            label: "Create KRAs and KPIs",
-            description: "Define what each role is accountable for. Use AI to generate them in seconds.",
-            href: "/kra-kpi",
-            done: kraList.length > 0,
+            key: "policies",
+            label: "Publish a policy",
+            description: "Start with HR + compliance basics so new hires have something to acknowledge on day one.",
+            href: "/policies",
+            done: policyList.length > 0,
           },
           {
             key: "sops",
             label: "Document a process (SOP)",
-            description: "Create your first SOP — a step-by-step playbook for how things get done.",
+            description: "Capture how things get done — onboarding, sales call flow, refund handling, anything repeatable.",
             href: "/sops",
             done: sopList.length > 0,
           },
           {
-            key: "policies",
-            label: "Publish a policy",
-            description: "Add your first HR or compliance policy so employees can acknowledge it.",
-            href: "/policies",
-            done: policyList.length > 0,
+            key: "kras",
+            label: "Define KRAs and KPIs",
+            description: "What each role is accountable for, and how success is measured. AI can draft these in seconds.",
+            href: "/kra-kpi",
+            done: kraList.length > 0,
+          },
+          {
+            key: "team",
+            label: "Invite your team",
+            description: "Add people once the structure exists — they get role-scoped access on first login.",
+            href: "/settings",
+            done: userList.length > 1,
           },
         ];
 
