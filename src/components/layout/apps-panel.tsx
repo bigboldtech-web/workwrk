@@ -119,7 +119,7 @@ export function AppsPanel({ onClose }: AppsPanelProps) {
                 <div className="grid grid-cols-2 gap-1.5">
                   {items.map((p) => {
                     const Icon = ICON_MAP[p.iconKey] ?? Box;
-                    const href = p.pathPrefix ?? `/store/${p.slug}`;
+                    const href = p.landingHref ?? p.pathPrefix ?? `/store/${p.slug}`;
                     return (
                       <Link
                         key={p.slug}

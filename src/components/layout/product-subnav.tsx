@@ -87,7 +87,7 @@ export function ProductSubNav() {
         {siblings.map((p) => {
           const Icon = ICON_MAP[p.iconKey] ?? Box;
           const active = p.slug === current.slug;
-          const href = p.pathPrefix!;
+          const href = p.landingHref ?? p.pathPrefix!;
           const shortName = p.name.replace(/^WorkwrK\s+/, "");
           return (
             <Link

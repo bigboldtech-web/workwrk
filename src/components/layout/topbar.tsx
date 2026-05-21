@@ -395,9 +395,7 @@ export function Topbar() {
 
         {/* Inbox — monday-style direct entry point next to the bell.
             /inbox is the universal home for assigned items + mentions. */}
-        <Link href="/inbox" className="app-icon-btn" aria-label="Inbox" title="Inbox">
-          <InboxIcon size={16} />
-        </Link>
+        <InboxButton />
 
         {/* Kudos — moved from FAB to topbar so anyone can drop a
             recognition without scrolling to find the heart. */}
@@ -795,5 +793,37 @@ function HelpButton() {
         </Link>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// InboxButton — icon + live unread count badge. Polls /api/inbox/count
+// on mount + on a 60s timer so the badge stays roughly fresh without
+// a websocket.
+function InboxButton() {
+  const [total, setTotal] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/inbox/count")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled || !data) return;
+          setTotal(typeof data.total === "number" ? data.total : 0);
+        })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  return (
+    <Link href="/inbox" className="app-icon-btn relative" aria-label="Inbox" title="Inbox">
+      <InboxIcon size={16} />
+      {total > 0 && (
+        <span className="app-icon-btn-badge">{total > 9 ? "9+" : total}</span>
+      )}
+    </Link>
   );
 }

@@ -29,6 +29,11 @@ export interface CatalogProduct {
   displayOrder: number;
   legacyModuleKey?: string;
   pathPrefix?: string;
+  /** Optional override — where to *send* the user when they click
+   * the product (vs `pathPrefix` which is used for matching the
+   * current URL back to a product for the sub-nav). Falls back to
+   * pathPrefix when not set. */
+  landingHref?: string;
   seededAgents?: string[];
   seededTemplates?: string[];
   seededIntegrations?: string[];
@@ -54,7 +59,11 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     defaultEnabled: true,
     displayOrder: 10,
     legacyModuleKey: "tasks",
+    // pathPrefix stays /tasks so the legacy calendar still resolves
+    // to this product in nav matching. landingHref points users at
+    // the new monday-style board surface by default.
     pathPrefix: "/tasks",
+    landingHref: "/tasks/board",
     seededTemplates: ["personal-todo", "team-sprint", "project-tracker"],
   },
   {
