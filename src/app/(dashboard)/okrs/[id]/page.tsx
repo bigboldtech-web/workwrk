@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { ChevronLeft, AlertTriangle, Crosshair, Calendar, Clock } from "lucide-react";
 import { OkrCheckInForm } from "./okr-checkin-form";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -318,6 +319,15 @@ export default async function OkrDetailPage(
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Custom fields</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CustomFieldsPanel entityType="OKR" entityId={okr.id} showEmptyState />
+        </CardContent>
+      </Card>
     </div>
   );
 }

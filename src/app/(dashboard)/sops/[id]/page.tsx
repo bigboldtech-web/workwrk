@@ -52,6 +52,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-builder";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { RichEditor } from "@/components/ui/rich-editor";
 import { useRole } from "@/hooks/use-role";
@@ -1697,6 +1698,15 @@ export default function SOPDetailPage() {
                 </CardContent>
               </Card>
               )}
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Custom fields</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CustomFieldsPanel entityType="SOP" entityId={sop.id} showEmptyState />
+                </CardContent>
+              </Card>
             </TabsContent>
 
             {/* Compliance Tab */}

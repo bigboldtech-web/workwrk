@@ -22,6 +22,7 @@ import { KraCategoryPicker } from "@/components/kra-category-picker";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Target, Plus, TrendingUp, TrendingDown, Minus, BarChart3, ChevronRight, ChevronDown, Users,
@@ -1399,6 +1400,11 @@ export default function KraKpiPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Edit KRA</DialogTitle></DialogHeader>
           {kraFormFields(false)}
+          {editingKra && (
+            <div className="pt-3 border-t border-border">
+              <CustomFieldsPanel entityType="KRA" entityId={editingKra.id} />
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditKraDialog(false)}>Cancel</Button>
             <Button onClick={handleEditKra} disabled={savingKra || !kraName.trim()}>
@@ -1427,6 +1433,11 @@ export default function KraKpiPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Edit KPI</DialogTitle></DialogHeader>
           {kpiFormFields}
+          {editingKpi && (
+            <div className="pt-3 border-t border-border">
+              <CustomFieldsPanel entityType="KPI" entityId={editingKpi.id} />
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditKpiDialog(false)}>Cancel</Button>
             <Button onClick={handleEditKpi} disabled={savingKpi || !kpiName.trim()}>

@@ -13,6 +13,7 @@ import { formatISODate } from "./types";
 import { LabelPicker } from "./label-picker";
 import { NotesThread } from "./notes-thread";
 import { useToast } from "@/components/ui/toast";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 
 const CATEGORIES = ["Development", "Meetings", "Admin", "Planning", "Review", "Communication", "Research", "Other"];
 
@@ -514,6 +515,13 @@ export function TaskDialog({
             <div className="space-y-2">
               <Label>Notes</Label>
               <NotesThread taskId={task.id} />
+            </div>
+          )}
+
+          {/* Custom fields — only when the org has defined any for TASK */}
+          {editing && task && (
+            <div className="space-y-2">
+              <CustomFieldsPanel entityType="TASK" entityId={task.id} />
             </div>
           )}
         </div>
