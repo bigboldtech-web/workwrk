@@ -691,6 +691,82 @@ export function BoardView<T>(props: Props<T>) {
       ) : (
         <TableView {...filteredProps} />
       )}
+
+      {/* Status-distribution bar — monday-style summary at the bottom
+          of the table. Aggregates the first SELECT field across the
+          filtered + sorted items. Hidden when there's no SELECT field
+          or no items. */}
+      {view === "table" && kanbanField && sortedItems.length > 0 && (
+        <StatusDistributionBar
+          items={sortedItems}
+          field={kanbanField}
+          getValue={props.getValue}
+        />
+      )}
+    </div>
+  );
+}
+
+interface StatusBarProps<T> {
+  items: T[];
+  field: BoardField;
+  getValue: (item: T, key: string) => unknown;
+}
+
+function StatusDistributionBar<T>({ items, field, getValue }: StatusBarProps<T>) {
+  const choices = field.options?.choices ?? [];
+  const total = items.length;
+
+  // Group items by their value for the field. "Unassigned" bucket
+  // captures rows whose value isn't in the defined choices.
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const v = getValue(item, field.key);
+    const key = typeof v === "string" && v ? v : "__unassigned__";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  type Segment = { key: string; label: string; color: string; n: number; pct: number };
+  const segments: Segment[] = [];
+  for (const c of choices) {
+    const n = counts.get(c.value) ?? 0;
+    if (n === 0) continue;
+    segments.push({
+      key: c.value,
+      label: c.label ?? c.value,
+      color: c.color ?? "#a78bfa",
+      n,
+      pct: (n / total) * 100,
+    });
+  }
+  const unassigned = counts.get("__unassigned__") ?? 0;
+  if (unassigned > 0) {
+    segments.push({
+      key: "__unassigned__",
+      label: "Unassigned",
+      color: "#9CA3AF",
+      n: unassigned,
+      pct: (unassigned / total) * 100,
+    });
+  }
+  if (segments.length === 0) return null;
+
+  return (
+    <div className="mt-3 flex items-center gap-3" aria-label={`${field.label} distribution across ${total} rows`}>
+      <span className="text-[10px] uppercase tracking-wider text-muted-2 font-semibold w-20 flex-shrink-0">
+        {field.label}
+      </span>
+      <div className="flex-1 h-3 rounded-full overflow-hidden flex bg-surface-2 border border-border">
+        {segments.map((seg) => (
+          <div
+            key={seg.key}
+            style={{ width: `${seg.pct}%`, backgroundColor: seg.color }}
+            title={`${seg.label}: ${seg.n} / ${total}  ·  ${seg.pct.toFixed(1)}%`}
+            className="h-full"
+          />
+        ))}
+      </div>
+      <span className="text-[10px] text-muted-2 font-mono tabular-nums flex-shrink-0">{total}</span>
     </div>
   );
 }
