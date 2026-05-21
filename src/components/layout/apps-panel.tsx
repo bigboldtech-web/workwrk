@@ -10,13 +10,14 @@
 // tile routes to that product's pathPrefix.
 
 import Link from "next/link";
+import { useState } from "react";
 import { PRODUCT_CATALOG, type CatalogProduct } from "@/lib/products/catalog";
 import {
   CalendarDays, BookOpen, Crosshair, MessageSquare, PenTool, Heart,
   Users, Briefcase, Star, GraduationCap, Banknote, TrendingUp,
   ShoppingCart, Package, Headphones, Megaphone, Code, Scale,
   DollarSign, Receipt, FileText, BookText, Target, Shield, Truck,
-  Box,
+  Box, Search as SearchIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -61,6 +62,11 @@ interface AppsPanelProps {
 }
 
 export function AppsPanel({ onClose }: AppsPanelProps) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matches = (p: CatalogProduct) =>
+    !q || p.name.toLowerCase().includes(q) || p.tagline.toLowerCase().includes(q);
+
   return (
     <>
       <button
@@ -74,21 +80,35 @@ export function AppsPanel({ onClose }: AppsPanelProps) {
         role="dialog"
         aria-label="Work OS products"
       >
-        <div className="sticky top-0 z-10 bg-surface border-b border-border px-4 py-3 flex items-center justify-between">
-          <p className="text-sm font-semibold">Work OS products</p>
-          <Link
-            href="/store"
-            onClick={onClose}
-            className="text-xs text-violet-600 hover:text-violet-700"
-          >
-            Browse all →
-          </Link>
+        <div className="sticky top-0 z-10 bg-surface border-b border-border px-4 py-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold">Work OS products</p>
+            <Link
+              href="/store"
+              onClick={onClose}
+              className="text-xs text-violet-600 hover:text-violet-700"
+            >
+              Browse all →
+            </Link>
+          </div>
+          <div className="relative">
+            <SearchIcon size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search products…"
+              className="w-full pl-7 pr-3 py-1.5 rounded-md border border-border bg-surface-2 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500"
+              autoFocus
+            />
+          </div>
         </div>
 
         <div className="p-3 space-y-4">
           {SUITE_LABELS.map(({ suite, label }) => {
             const items = PRODUCT_CATALOG
               .filter((p) => p.suite === suite)
+              .filter(matches)
               .sort((a, b) => a.displayOrder - b.displayOrder);
             if (items.length === 0) return null;
             return (
@@ -121,6 +141,9 @@ export function AppsPanel({ onClose }: AppsPanelProps) {
               </section>
             );
           })}
+          {q && PRODUCT_CATALOG.filter(matches).length === 0 && (
+            <p className="text-xs text-muted-2 text-center py-6">No products match &ldquo;{query}&rdquo;</p>
+          )}
         </div>
       </div>
     </>

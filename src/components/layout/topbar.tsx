@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon, Grid3x3, Heart } from "lucide-react";
+import { Bell, BellOff, BellRing, Search, Plus, Users, CheckSquare, BookOpen, Building2, MessageSquare, HelpCircle, CheckCheck, X, Keyboard, Clock as ClockIcon, Grid3x3, Heart, Inbox as InboxIcon } from "lucide-react";
 import { useTour } from "@/components/tour-provider";
 import {
   DropdownMenu,
@@ -392,6 +392,12 @@ export function Topbar() {
         </Link>
 
         <OrgSwitcher />
+
+        {/* Inbox — monday-style direct entry point next to the bell.
+            /inbox is the universal home for assigned items + mentions. */}
+        <Link href="/inbox" className="app-icon-btn" aria-label="Inbox" title="Inbox">
+          <InboxIcon size={16} />
+        </Link>
 
         {/* Kudos — moved from FAB to topbar so anyone can drop a
             recognition without scrolling to find the heart. */}
