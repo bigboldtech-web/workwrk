@@ -190,6 +190,12 @@ export default function PeopleListView() {
   const [formAccessLevel, setFormAccessLevel] = useState("");
   const [formManagerId, setFormManagerId] = useState("");
   const [formOfficeId, setFormOfficeId] = useState("");
+  // Role-definition gate: KRAs + SOPs picked at invite time so the
+  // new hire enters with their role pre-defined. POST /api/invitations
+  // rejects empty arrays — the Send Invite button is disabled until
+  // both have at least one selection.
+  const [formKraIds, setFormKraIds] = useState<string[]>([]);
+  const [formSopIds, setFormSopIds] = useState<string[]>([]);
   const [offices, setOffices] = useState<{ id: string; name: string; city?: string | null; country?: string | null }[]>([]);
 
   // Inline creation state
@@ -385,11 +391,53 @@ export default function PeopleListView() {
     fetchPendingInvitations();
   }, [fetchUsers, fetchPendingInvitations]);
 
+  // Role-definition backfill banner — counts existing users in this
+  // org with zero KRA assignments. Admins see a one-click CTA to
+  // auto-assign starter KRAs/SOPs by access tier. Only HR/admin sees
+  // this; everyone else doesn't even know it's missing.
+  const [missingRoleDefs, setMissingRoleDefs] = useState<number | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const fetchMissingRoleDefs = useCallback(async () => {
+    try {
+      const r = await fetch("/api/people/backfill-role-defs");
+      if (!r.ok) { setMissingRoleDefs(null); return; }
+      const d = await r.json();
+      setMissingRoleDefs(typeof d.missing === "number" ? d.missing : null);
+    } catch {
+      setMissingRoleDefs(null);
+    }
+  }, []);
+  useEffect(() => {
+    if (canManagePeople) fetchMissingRoleDefs();
+  }, [canManagePeople, fetchMissingRoleDefs]);
+  const handleBackfillRoleDefs = async () => {
+    setBackfilling(true);
+    try {
+      const r = await fetch("/api/people/backfill-role-defs", { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) {
+        toastError(d.error || "Backfill failed");
+        return;
+      }
+      const summary = d.data || d;
+      toastSuccess(
+        `Assigned role defs to ${summary.usersTouched} ${summary.usersTouched === 1 ? "person" : "people"} ` +
+        `(${summary.totalKraAssignments} KRAs · ${summary.totalSopAssignments} SOPs).`,
+      );
+      await fetchMissingRoleDefs();
+    } catch {
+      toastError("Backfill failed");
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   const filtered = people; // Server-side filtering now
 
   const resetForm = () => {
     setFormEmail("");
     setFormDepartmentId(""); setFormRoleId(""); setFormAccessLevel(""); setFormManagerId(""); setFormOfficeId("");
+    setFormKraIds([]); setFormSopIds([]);
   };
 
   const handleAddPerson = async () => {
@@ -405,6 +453,8 @@ export default function PeopleListView() {
           roleId: formRoleId || undefined,
           managerId: formManagerId || undefined,
           officeId: formOfficeId || undefined,
+          kraIds: formKraIds,
+          sopIds: formSopIds,
         }),
       });
       if (!res.ok) {
@@ -719,10 +769,97 @@ export default function PeopleListView() {
                   </Select>
                   <p className="text-[10px] text-muted">This determines who they report to in the org chart and who evaluates them.</p>
                 </div>
+
+                {/* Role-definition gate — every invite must ship with
+                    KRAs + SOPs so the new hire enters with a clear
+                    picture of what they own. The Send button stays
+                    disabled until both have at least one selection. */}
+                <div className="pt-2 mt-2 border-t border-border">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-2 mb-2">Role definition</p>
+
+                  <div className="space-y-2">
+                    <Label>
+                      KRAs <span className="text-red-400">*</span>
+                      <span className="ml-1 text-[10px] font-normal text-muted-2">({formKraIds.length} selected)</span>
+                    </Label>
+                    {kras.length === 0 ? (
+                      <p className="text-[11px] text-amber-400">
+                        No KRAs defined yet. Create at least one in <a href="/kra-kpi" className="underline">KRA &amp; KPIs</a> before inviting people.
+                      </p>
+                    ) : (
+                      <div className="max-h-32 overflow-y-auto rounded-md border border-border p-1.5 space-y-0.5">
+                        {kras.map((k) => {
+                          const checked = formKraIds.includes(k.id);
+                          return (
+                            <label key={k.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-2 cursor-pointer text-xs">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  setFormKraIds((prev) =>
+                                    e.target.checked ? [...prev, k.id] : prev.filter((id) => id !== k.id),
+                                  );
+                                }}
+                              />
+                              <span className="truncate">{k.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 mt-3">
+                    <Label>
+                      SOPs <span className="text-red-400">*</span>
+                      <span className="ml-1 text-[10px] font-normal text-muted-2">({formSopIds.length} selected)</span>
+                    </Label>
+                    {sops.length === 0 ? (
+                      <p className="text-[11px] text-amber-400">
+                        No published SOPs yet. Publish at least one in <a href="/sops" className="underline">SOPs</a> before inviting people.
+                      </p>
+                    ) : (
+                      <div className="max-h-32 overflow-y-auto rounded-md border border-border p-1.5 space-y-0.5">
+                        {sops.map((s) => {
+                          const checked = formSopIds.includes(s.id);
+                          return (
+                            <label key={s.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-2 cursor-pointer text-xs">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  setFormSopIds((prev) =>
+                                    e.target.checked ? [...prev, s.id] : prev.filter((id) => id !== s.id),
+                                  );
+                                }}
+                              />
+                              <span className="truncate">{s.title}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {(formKraIds.length === 0 || formSopIds.length === 0) && (kras.length > 0 && sops.length > 0) && (
+                    <p className="text-[11px] text-amber-400 mt-2">
+                      Pick at least one KRA and one SOP — the new hire&rsquo;s Sidekick uses these for context from day one.
+                    </p>
+                  )}
+                </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => { setShowAddDialog(false); resetForm(); }}>Cancel</Button>
-                <Button onClick={handleAddPerson} disabled={submitting || !formEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail)}>
+                <Button
+                  onClick={handleAddPerson}
+                  disabled={
+                    submitting ||
+                    !formEmail ||
+                    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail) ||
+                    formKraIds.length === 0 ||
+                    formSopIds.length === 0
+                  }
+                >
                   {submitting ? "Sending..." : "Send Invite"}
                 </Button>
               </DialogFooter>
@@ -747,6 +884,32 @@ export default function PeopleListView() {
       {/* Bulk success toast */}
       {bulkMessage && (
         <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400 mb-3">{bulkMessage}</div>
+      )}
+
+      {/* Role-definition backfill — visible only to admins, only when
+          there are users without KRA assignments. One click auto-stamps
+          starter KRAs/SOPs by access tier so the install base catches
+          up to the entry gate. */}
+      {canManagePeople && missingRoleDefs !== null && missingRoleDefs > 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 mb-3 flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-amber-100">
+              {missingRoleDefs} {missingRoleDefs === 1 ? "person is" : "people are"} missing a role definition.
+            </p>
+            <p className="text-xs text-amber-200/70 mt-0.5">
+              Every new invite now requires KRAs &amp; SOPs at send-time. Auto-assign starter ones to your existing team
+              so their Sidekick has context from today. You can edit assignments later in <a href="/kra-kpi" className="underline">KRA &amp; KPIs</a>.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleBackfillRoleDefs}
+            disabled={backfilling}
+            className="shrink-0"
+          >
+            {backfilling ? "Assigning…" : `Auto-assign for ${missingRoleDefs}`}
+          </Button>
+        </div>
       )}
 
       {/* People Grid */}

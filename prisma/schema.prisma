@@ -412,6 +412,15 @@ model Invitation {
   roleId         String?
   managerId      String?
   officeId       String?
+  // Role-definition gate (the vision's KRA/KPI/SOP entry rule):
+  // an admin can't issue an invite without first picking at least one
+  // KRA and one SOP for the role. These arrays carry the selection so
+  // accept-invite POST can fan them out into KRAAssignment +
+  // SOPAssignment rows when the invitee signs up. KPIs are derived
+  // from KRAs (KPI.kraId), so picking KRAs implicitly assigns the
+  // KPIs underneath — no separate kpiIds array needed.
+  kraIds         String[]     @default([])
+  sopIds         String[]     @default([])
   createdAt      DateTime     @default(now())
 
   @@index([token])

@@ -44,10 +44,36 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const { email, accessLevel: inviteLevel, departmentId, roleId, managerId, officeId } = await req.json();
+    const { email, accessLevel: inviteLevel, departmentId, roleId, managerId, officeId, kraIds, sopIds } = await req.json();
 
     if (!email || !email.includes("@")) {
       return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
+    }
+
+    // Role-definition gate. Every new hire enters with KRAs + SOPs
+    // already attached so AI Sidekick has immediate context for their
+    // work. Skipped only for the very first user of an org (the
+    // founder onboarding flow uses a different code path).
+    const cleanKraIds: string[] = Array.isArray(kraIds) ? kraIds.filter((s) => typeof s === "string") : [];
+    const cleanSopIds: string[] = Array.isArray(sopIds) ? sopIds.filter((s) => typeof s === "string") : [];
+    if (cleanKraIds.length === 0) {
+      return NextResponse.json({ error: "Pick at least one KRA before sending the invite — every new hire needs a role definition." }, { status: 400 });
+    }
+    if (cleanSopIds.length === 0) {
+      return NextResponse.json({ error: "Pick at least one SOP before sending the invite — every new hire needs starter SOPs to acknowledge." }, { status: 400 });
+    }
+    // Cross-tenant safety: confirm every KRA/SOP id belongs to this org.
+    if (cleanKraIds.length > 0) {
+      const kraCount = await prisma.kRA.count({ where: { id: { in: cleanKraIds }, organizationId: orgId } });
+      if (kraCount !== cleanKraIds.length) {
+        return NextResponse.json({ error: "One or more selected KRAs don't belong to your organization." }, { status: 400 });
+      }
+    }
+    if (cleanSopIds.length > 0) {
+      const sopCount = await prisma.sOP.count({ where: { id: { in: cleanSopIds }, organizationId: orgId } });
+      if (sopCount !== cleanSopIds.length) {
+        return NextResponse.json({ error: "One or more selected SOPs don't belong to your organization." }, { status: 400 });
+      }
     }
 
     // Check if user already exists in org
@@ -77,6 +103,8 @@ export async function POST(req: Request) {
         roleId: roleId || null,
         managerId: managerId || null,
         officeId: officeId || null,
+        kraIds: cleanKraIds,
+        sopIds: cleanSopIds,
       },
     });
 
@@ -120,7 +148,7 @@ export async function POST(req: Request) {
       description: `Invited ${email} as ${inviteLevel || "EMPLOYEE"}`,
       targetId: invitation.id,
       targetType: "Invitation",
-      metadata: { email, accessLevel: inviteLevel || "EMPLOYEE", departmentId, roleId, officeId },
+      metadata: { email, accessLevel: inviteLevel || "EMPLOYEE", departmentId, roleId, officeId, kraCount: cleanKraIds.length, sopCount: cleanSopIds.length },
     });
 
     return NextResponse.json(invitation, { status: 201 });

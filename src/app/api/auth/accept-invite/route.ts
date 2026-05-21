@@ -78,9 +78,11 @@ export async function POST(req: Request) {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Create user and mark invitation as accepted
+    // Create user + materialize their KRA/SOP assignments + mark
+    // invitation accepted, all in one transaction so a partial signup
+    // can never leave a user without their role definition.
     await prisma.$transaction(async (tx) => {
-      await tx.user.create({
+      const user = await tx.user.create({
         data: {
           email: invitation.email,
           passwordHash,
@@ -94,6 +96,39 @@ export async function POST(req: Request) {
           officeId: invitation.officeId,
         },
       });
+
+      // Role-definition fan-out. KRAs and SOPs were chosen by the
+      // inviting admin and stamped on the Invitation; we materialize
+      // them as assignment rows here. Even weighting across KRAs
+      // (admin can rebalance later from /kra-kpi). SOPs default to
+      // mandatory acknowledgement.
+      if (invitation.kraIds.length > 0) {
+        const weight = Math.round((100 / invitation.kraIds.length) * 100) / 100;
+        await tx.kRAAssignment.createMany({
+          data: invitation.kraIds.map((kraId) => ({
+            userId: user.id,
+            kraId,
+            weightage: weight,
+            period: "ongoing",
+            status: "ACTIVE" as const,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      if (invitation.sopIds.length > 0) {
+        // SOP step count lives inside SOP.content (a JSON blob), not a
+        // separate relation — we leave stepsTotal at 0 and let the
+        // first acknowledgement update it from the content shape.
+        await tx.sOPAssignment.createMany({
+          data: invitation.sopIds.map((sopId) => ({
+            userId: user.id,
+            sopId,
+            status: "ASSIGNED" as const,
+            mandatory: true,
+          })),
+          skipDuplicates: true,
+        });
+      }
 
       await tx.invitation.update({
         where: { id: invitation.id },

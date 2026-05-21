@@ -1,7 +1,7 @@
 "use client";
 
 import { AppRail } from "@/components/layout/app-rail";
-import { ProductSubNav } from "@/components/layout/product-subnav";
+import { AppWorkspaceNav } from "@/components/layout/app-workspace-nav";
 import { Topbar } from "@/components/layout/topbar";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { ToastProvider } from "@/components/ui/toast";
@@ -81,7 +81,7 @@ export default function DashboardLayout({
         <TourProvider>
           <div className="app-shell app-shell-grid">
             <AppRail />
-            <ProductSubNav />
+            <AppWorkspaceNav />
             <div className="app-shell-main">
               <Topbar />
               <main className="app-content">{children}</main>

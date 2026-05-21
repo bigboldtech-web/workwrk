@@ -2124,6 +2124,257 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
 }
 
 /* ──────────────────────────────────────────────────────────────────
+ * Phase 4 — AppWorkspaceNav (monday-style in-app workspace tree).
+ * Replaces ProductSubNav when inside an app surface (/crm, /dev, …).
+ * Shows the active app's boards + a workspace switcher + suite siblings.
+ * ────────────────────────────────────────────────────────────── */
+.app-workspace.app-subnav {
+  width: 248px;
+}
+.app-workspace-header {
+  padding: 14px 14px 6px;
+}
+.app-workspace-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.app-workspace-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--surface-elevated);
+  color: var(--color-foreground);
+  flex-shrink: 0;
+}
+.app-workspace-icon.hue-blue    { background: #dbeafe; color: #1d4ed8; }
+.app-workspace-icon.hue-green   { background: #dcfce7; color: #15803d; }
+.app-workspace-icon.hue-amber   { background: #fef3c7; color: #b45309; }
+.app-workspace-icon.hue-violet  { background: #ede9fe; color: #6d28d9; }
+.app-workspace-icon.hue-pink    { background: #fce7f3; color: #be185d; }
+.app-workspace-icon.hue-teal    { background: #ccfbf1; color: #0f766e; }
+.app-workspace-icon.hue-sky     { background: #e0f2fe; color: #0369a1; }
+.app-workspace-icon.hue-rose    { background: #ffe4e6; color: #be123c; }
+.app-workspace-icon.hue-lime    { background: #ecfccb; color: #4d7c0f; }
+.app-workspace-icon.hue-slate   { background: #e2e8f0; color: #475569; }
+html.dark .app-workspace-icon.hue-blue   { background: rgba(29,78,216,0.20);  color: #93c5fd; }
+html.dark .app-workspace-icon.hue-green  { background: rgba(21,128,61,0.20);  color: #86efac; }
+html.dark .app-workspace-icon.hue-amber  { background: rgba(180,83,9,0.20);   color: #fcd34d; }
+html.dark .app-workspace-icon.hue-violet { background: rgba(109,40,217,0.22); color: #c4b5fd; }
+html.dark .app-workspace-icon.hue-pink   { background: rgba(190,24,93,0.20);  color: #f9a8d4; }
+html.dark .app-workspace-icon.hue-teal   { background: rgba(15,118,110,0.22); color: #5eead4; }
+html.dark .app-workspace-icon.hue-sky    { background: rgba(3,105,161,0.22);  color: #7dd3fc; }
+html.dark .app-workspace-icon.hue-rose   { background: rgba(190,18,60,0.20);  color: #fda4af; }
+html.dark .app-workspace-icon.hue-lime   { background: rgba(77,124,15,0.22);  color: #bef264; }
+html.dark .app-workspace-icon.hue-slate  { background: rgba(71,85,105,0.25);  color: #cbd5e1; }
+
+.app-workspace-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+  width: calc(100% - 20px);
+  text-align: left;
+}
+.app-workspace-switcher:hover { background: var(--surface-elevated); }
+.app-workspace-switcher-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.app-workspace-switcher-dot.hue-blue   { background: #3b82f6; }
+.app-workspace-switcher-dot.hue-green  { background: #10b981; }
+.app-workspace-switcher-dot.hue-amber  { background: #f59e0b; }
+.app-workspace-switcher-dot.hue-violet { background: #8b5cf6; }
+.app-workspace-switcher-dot.hue-pink   { background: #ec4899; }
+.app-workspace-switcher-dot.hue-teal   { background: #14b8a6; }
+.app-workspace-switcher-dot.hue-sky    { background: #0ea5e9; }
+.app-workspace-switcher-dot.hue-rose   { background: #f43f5e; }
+.app-workspace-switcher-dot.hue-lime   { background: #84cc16; }
+.app-workspace-switcher-dot.hue-slate  { background: #64748b; }
+.app-workspace-switcher-name { flex: 1; min-width: 0; }
+.app-workspace-switcher-caret { color: var(--color-muted-2); }
+
+.app-workspace-list { padding-top: 0; }
+.app-workspace-section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 4px;
+}
+.app-workspace-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-2);
+}
+.app-workspace-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-muted-2);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+.app-workspace-add:hover {
+  background: var(--surface-elevated);
+  color: var(--color-foreground);
+}
+.app-workspace-sidekick {
+  background: linear-gradient(90deg, rgba(168,85,247,0.06), rgba(236,72,153,0.06));
+}
+.app-workspace-sidekick-tag {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(168,85,247,0.18);
+  color: #7c3aed;
+}
+html.dark .app-workspace-sidekick-tag { color: #c4b5fd; }
+.app-workspace-sibling { color: var(--color-muted-2); }
+.app-workspace-sibling:hover { color: var(--color-foreground); }
+.app-workspace-home { color: var(--color-muted-2); font-size: 12px; }
+
+/* ──────────────────────────────────────────────────────────────────
+ * BoardShell — monday-style board chrome (header row with board name,
+ * tab strip, action toolbar). Applied to every board page inside an
+ * app via the <BoardShell> wrapper.
+ * ────────────────────────────────────────────────────────────── */
+.board-shell { padding: 0; max-width: none; }
+.board-shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px 10px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.board-shell-title-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.board-shell-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.board-shell-title-caret { color: var(--color-muted-2); }
+.board-shell-tagline {
+  font-size: 12px;
+  color: var(--color-muted-2);
+  margin-left: 8px;
+}
+.board-shell-views {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.board-shell-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 6px 6px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  margin-bottom: -1px;
+  cursor: pointer;
+  background: transparent;
+}
+.board-shell-view-tab:hover { color: var(--color-foreground); }
+.board-shell-view-tab.is-active {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-foreground);
+}
+.board-shell-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.board-shell-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+.board-shell-toolbar-btn:hover {
+  background: var(--surface-elevated);
+  color: var(--color-foreground);
+}
+.board-shell-toolbar-btn.is-primary {
+  background: var(--accent-strong);
+  color: white;
+}
+.board-shell-toolbar-btn.is-primary:hover {
+  background: var(--accent-strong);
+  filter: brightness(1.08);
+  color: white;
+}
+.board-shell-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  margin: 0 4px;
+}
+.board-shell-body {
+  padding: 16px 20px;
+}
+
+/* ──────────────────────────────────────────────────────────────────
  * Phase 10 — Alignment polish sweep.
  * Cross-cutting tweaks for the monday-style look. Touches none of the
  * existing component code — purely additive overrides on classes
