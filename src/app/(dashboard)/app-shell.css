@@ -1869,12 +1869,16 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
  * tooltips. Replaces the legacy app-sidebar; old sidebar styles
  * stay for now in case we need to roll back.
  * ────────────────────────────────────────────────────────────── */
+/* `position: sticky` not `fixed` — grid auto-placement skips items
+ * positioned out of normal flow. With `fixed`, the rail's grid cell
+ * stayed empty and the rest of the children collapsed into the wrong
+ * columns, smashing the dashboard into a thin strip. Sticky pins the
+ * rail to the top of its own grid cell while the canvas scrolls. */
 .app-rail {
-  position: fixed;
+  position: sticky;
   top: 0;
-  left: 0;
-  bottom: 0;
   width: 60px;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1883,6 +1887,7 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   z-index: 30;
+  overflow-y: auto;
 }
 
 .app-rail-brand {
