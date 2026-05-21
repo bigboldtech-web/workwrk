@@ -1,6 +1,6 @@
 "use client";
 
-import { Sidebar } from "@/components/layout/sidebar";
+import { AppRail } from "@/components/layout/app-rail";
 import { Topbar } from "@/components/layout/topbar";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { ToastProvider } from "@/components/ui/toast";
@@ -80,15 +80,14 @@ export default function DashboardLayout({
       <DialogProvider>
         <TourProvider>
           <div className="app-shell" style={{ display: "flex", minHeight: "100vh" }}>
-            <Sidebar />
+            <AppRail />
             <div
               className="app-shell-main"
               style={{
                 flex: 1,
                 display: "flex",
                 flexDirection: "column",
-                paddingLeft: "var(--sidebar-width, 232px)",
-                transition: "padding-left 0.3s cubic-bezier(0.2, 0.9, 0.3, 1)",
+                paddingLeft: 60,
                 minWidth: 0,
               }}
             >

@@ -27,6 +27,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { useGoToNav } from "@/hooks/use-goto-nav";
 import { useTheme } from "next-themes";
 import { Sun, Moon, Monitor, Sparkle } from "lucide-react";
+import { AppsPanel } from "./apps-panel";
 
 interface SearchResult {
   type: "person" | "task" | "sop" | "department" | "meeting";
@@ -99,6 +100,7 @@ export function Topbar() {
   const { theme, setTheme } = useTheme();
   const [themeMounted, setThemeMounted] = useState(false);
   useEffect(() => { setThemeMounted(true); }, []);
+  const [appsOpen, setAppsOpen] = useState(false);
   // Density (compact / cozy) — read on mount and after density-change
   // events so the user-menu radio reflects the current setting whether
   // it was set by us or by another tab.
@@ -397,16 +399,19 @@ export function Topbar() {
 
         <HelpButton />
 
-        {/* Apps Grid → Product Store. monday.com puts this in the same
-            slot; clicking opens the catalog of installable products. */}
-        <Link
-          href="/store"
+        {/* Apps Grid → Work OS panel. monday.com puts this in the same
+            slot; clicking opens the catalog of installable products,
+            grouped by team (Sales / HR / Dev / etc.). */}
+        <button
+          type="button"
+          onClick={() => setAppsOpen(true)}
           className="app-icon-btn"
-          aria-label="Product Store"
-          title="Product Store"
+          aria-label="Work OS products"
+          title="Work OS products"
         >
           <Grid3x3 size={16} />
-        </Link>
+        </button>
+        {appsOpen && <AppsPanel onClose={() => setAppsOpen(false)} />}
 
         {/* Notifications */}
         <DropdownMenu onOpenChange={(open) => { if (!open) setSnoozePickerOpenFor(null); }}>
