@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -670,6 +671,12 @@ export default function TasksPage() {
         ]}
       />
       <div className="flex items-center justify-end gap-2 flex-wrap">
+        <Link
+          href="/tasks/board"
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border text-xs font-medium text-muted hover:text-foreground hover:bg-surface-2"
+        >
+          Board view
+        </Link>
         <Button onClick={() => openNewTask()} className="gap-1.5"><Plus size={14} /> Add task</Button>
       </div>
     </>

@@ -158,7 +158,7 @@ export default function BuildPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 max-w-7xl mx-auto">
       <div className="text-center mb-8 pt-6">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-violet-200 to-pink-200 dark:from-violet-900/40 dark:to-pink-900/40 text-violet-700 dark:text-violet-300 text-xs font-medium mb-4">
           <Wand2 size={12} />
