@@ -9,10 +9,11 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ChevronLeft, Plus, Loader2, Table as TableIcon, Kanban as KanbanIcon, Trash2, X,
-  Store, Check,
+  Store, Check, Settings2, Sparkles,
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
 import { BoardHeaderActions } from "@/components/layout/board-header-actions";
+import { EditColumnsDialog } from "@/components/studio/edit-columns-dialog";
 
 type StudioField = {
   key: string;
@@ -57,6 +58,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
   const [publishCategory, setPublishCategory] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<string | null>(null);
+  const [showEditCols, setShowEditCols] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -210,6 +212,21 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href={`/sidekick?context=studio&board=${slug}`}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/20 text-xs font-medium"
+            title="Ask Sidekick about this board"
+          >
+            <Sparkles size={12} /> Ask AI
+          </Link>
+          <button
+            type="button"
+            onClick={() => setShowEditCols(true)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border text-muted hover:text-foreground hover:bg-surface-2 text-xs font-medium"
+            title="Edit columns"
+          >
+            <Settings2 size={12} /> Columns
+          </button>
           <button
             type="button"
             onClick={() => setShowPublish(true)}
@@ -241,18 +258,39 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
       </div>
 
       {board.items.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border bg-surface text-center py-16">
-          <Trash2 size={32} className="hidden" />
-          {board.layout === "KANBAN" ? <KanbanIcon size={32} className="mx-auto mb-2 text-muted-2" /> : <TableIcon size={32} className="mx-auto mb-2 text-muted-2" />}
-          <p className="text-sm font-medium mb-1">No rows yet</p>
-          <p className="text-xs text-muted-2 mb-4">Start by adding your first row.</p>
-          <button
-            type="button"
-            onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium"
-          >
-            <Plus size={12} /> Add first row
-          </button>
+        <div className="rounded-2xl border border-dashed border-violet-300/40 dark:border-violet-700/40 bg-gradient-to-br from-violet-50/40 to-transparent dark:from-violet-950/20 text-center py-20 px-6">
+          <div className="inline-flex w-12 h-12 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-950/30 text-violet-600 mb-4">
+            {board.layout === "KANBAN" ? <KanbanIcon size={20} /> : <TableIcon size={20} />}
+          </div>
+          <h2 className="text-base font-semibold mb-1">Your board is ready</h2>
+          <p className="text-sm text-muted-2 mb-5 max-w-md mx-auto">
+            Add rows to fill <span className="font-medium text-foreground">{board.name}</span> with real work. Tweak columns anytime — column edits don&rsquo;t drop your data.
+          </p>
+          <div className="inline-flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium"
+            >
+              <Plus size={12} /> Add first row
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowEditCols(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-muted hover:text-foreground hover:bg-surface text-xs font-medium"
+            >
+              <Settings2 size={12} /> Tune columns
+            </button>
+          </div>
+          {(board.fields ?? []).length > 0 && (
+            <p className="text-[11px] text-muted-2 mt-5">
+              {board.fields.length} column{board.fields.length === 1 ? "" : "s"}:
+              {" "}
+              <span className="font-mono text-foreground/80">
+                {board.fields.map((f) => f.label).join(" · ")}
+              </span>
+            </p>
+          )}
         </div>
       ) : (
         <BoardView
@@ -268,6 +306,15 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
           }}
           editableFields={editableKeys}
           onChangeField={handleChangeField}
+        />
+      )}
+
+      {showEditCols && (
+        <EditColumnsDialog
+          boardSlug={slug}
+          initialFields={board.fields ?? []}
+          onClose={() => setShowEditCols(false)}
+          onSaved={async () => { setShowEditCols(false); await refresh(); }}
         />
       )}
 

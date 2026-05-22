@@ -73,13 +73,47 @@ async function ctxAndSession(sessionId: string) {
 // Augment the system prompt with the user's current app+board context
 // so the model doesn't have to ask "which board?" — it already knows.
 // We pull the product display name from the catalog and the board's
-// display name + tagline from the boards registry. Both are stable
-// in-code lookups, no DB hit.
+// display name + tagline from the boards registry. For Studio boards
+// we hit the DB to enumerate the column list so the model can write
+// correct `values` payloads on create/update_studio_item.
 async function buildContextPrefix(
   productContext: string | null,
   boardContext: string | null,
+  organizationId: string,
 ): Promise<string | null> {
   if (!productContext) return null;
+
+  // Studio board context arrives as productContext = "studio" and
+  // boardContext = the StudioBoard.slug. Pull the board's column
+  // definitions so the model can write correct row data.
+  if (productContext === "studio" && boardContext) {
+    const board = await prisma.studioBoard.findFirst({
+      where: { organizationId, slug: boardContext },
+      select: {
+        name: true, description: true, layout: true, fields: true,
+      },
+    });
+    if (!board) return null;
+    const fields = (board.fields as Array<{ key: string; label: string; type: string; options?: { choices?: { value: string; label?: string }[] } }>) ?? [];
+    const fieldList = fields.length === 0
+      ? "(no columns defined yet)"
+      : fields
+          .map((f) => {
+            const choices = f.options?.choices?.map((c) => c.value).join(" | ");
+            const choicesNote = choices ? ` (choices: ${choices})` : "";
+            return `- \`${f.key}\` · ${f.label} · ${f.type}${choicesNote}`;
+          })
+          .join("\n");
+    return (
+      `## Current context\n` +
+      `The user is on **${board.name}**, a user-built Studio board (${board.layout.toLowerCase()} layout).` +
+      (board.description ? ` Board purpose: ${board.description}` : "") +
+      `\n\nColumns on this board (use these \`key\`s as the keys of \`values\` when calling \`create_studio_item\` or \`update_studio_item\`):\n` +
+      `${fieldList}\n\n` +
+      `Use \`boardSlug: "${boardContext}"\` for any \`*_studio_*\` tool call — that's this board. Default the user's questions to this surface.\n`
+    );
+  }
+
   const [{ PRODUCT_CATALOG }, { getBoard }] = await Promise.all([
     import("@/lib/products/catalog"),
     import("@/lib/products/boards"),
@@ -145,7 +179,7 @@ export async function POST(req: Request) {
   // system prompt so the model knows which surface the user is on.
   const agentScoped = c.chat.agent && c.chat.agent.status === "ENABLED" ? c.chat.agent : null;
   const productScope = agentScoped?.productSlug ?? c.chat.productContext ?? null;
-  const contextPrefix = await buildContextPrefix(c.chat.productContext, c.chat.boardContext);
+  const contextPrefix = await buildContextPrefix(c.chat.productContext, c.chat.boardContext, c.chat.organizationId);
   const basePrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
   const systemPrompt = contextPrefix ? `${contextPrefix}\n${basePrompt}` : basePrompt;
   const availableTools = toolsForSession({ agentProductSlug: productScope });

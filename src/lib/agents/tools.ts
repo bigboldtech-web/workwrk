@@ -1389,6 +1389,422 @@ const createKpi: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
+// Studio boards — user-built tables/kanbans
+// ─────────────────────────────────────────────────────────
+//
+// Studio is the "teams build their own town" pillar — every org has
+// its own set of custom boards, and Sidekick needs first-class access
+// to them just like canonical product boards. The four tools below
+// cover list / search / create / update over StudioBoard + StudioItem.
+
+const listStudioBoards: ToolDefinition = {
+  name: "list_studio_boards",
+  description:
+    "List the user-built Studio boards in this org. Use this to discover what custom boards exist before searching or writing to one. Returns each board's slug (use it as `boardSlug` in other studio_* tools), name, layout, and column definitions.",
+  input_schema: {
+    type: "object",
+    properties: {
+      nameContains: { type: "string", description: "Optional case-insensitive substring filter on the board name." },
+      productSlug: { type: "string", description: "Optional product the board is nested under (e.g. workwrk-crm)." },
+      limit: { type: "number", description: "Max boards to return. Default 20, max 50." },
+    },
+  },
+  async handler(ctx, input) {
+    const nameContains = (input.nameContains as string | undefined)?.trim();
+    const productSlug = input.productSlug as string | undefined;
+    const limit = Math.min(Number(input.limit ?? 20) || 20, 50);
+    const boards = await prisma.studioBoard.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        ...(productSlug ? { productSlug } : {}),
+        ...(nameContains ? { name: { contains: nameContains, mode: "insensitive" } } : {}),
+      },
+      orderBy: [{ updatedAt: "desc" }],
+      take: limit,
+      select: {
+        id: true, name: true, slug: true, description: true, layout: true,
+        productSlug: true, workspaceId: true, fields: true,
+        _count: { select: { items: true } },
+      },
+    });
+    return {
+      count: boards.length,
+      boards: boards.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        description: b.description,
+        layout: b.layout,
+        productSlug: b.productSlug,
+        itemCount: b._count.items,
+        // Trim each field down to what the model needs to draft a row.
+        fields: (b.fields as Array<{ key: string; label: string; type: string; options?: { choices?: { value: string; label?: string }[] } }>).map((f) => ({
+          key: f.key,
+          label: f.label,
+          type: f.type,
+          choices: f.options?.choices?.map((c) => c.value) ?? undefined,
+        })),
+      })),
+    };
+  },
+};
+
+const searchStudioItems: ToolDefinition = {
+  name: "search_studio_items",
+  description:
+    "Search rows in a Studio board by their title. Filter by status (the kanban-group field) if the board has one. Use this before update_studio_item to find the row id.",
+  input_schema: {
+    type: "object",
+    properties: {
+      boardSlug: { type: "string", description: "Board slug from list_studio_boards." },
+      titleContains: { type: "string", description: "Case-insensitive substring match on the row title." },
+      status: { type: "string", description: "Optional status group filter (e.g. 'Todo', 'Done')." },
+      limit: { type: "number", description: "Max rows to return. Default 20, max 50." },
+    },
+    required: ["boardSlug"],
+  },
+  async handler(ctx, input) {
+    const board = await prisma.studioBoard.findFirst({
+      where: { organizationId: ctx.orgId, slug: input.boardSlug as string },
+      select: { id: true, name: true },
+    });
+    if (!board) throw new Error(`Board not found: ${input.boardSlug as string}`);
+    const limit = Math.min(Number(input.limit ?? 20) || 20, 50);
+    const titleContains = (input.titleContains as string | undefined)?.trim();
+    const status = (input.status as string | undefined)?.trim();
+    const items = await prisma.studioItem.findMany({
+      where: {
+        boardId: board.id,
+        ...(titleContains ? { title: { contains: titleContains, mode: "insensitive" } } : {}),
+        ...(status ? { status } : {}),
+      },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      take: limit,
+    });
+    return {
+      board: { slug: input.boardSlug, name: board.name },
+      count: items.length,
+      items: items.map((i) => ({
+        id: i.id,
+        title: i.title,
+        status: i.status,
+        values: i.values,
+        createdAt: i.createdAt,
+      })),
+    };
+  },
+};
+
+const createStudioItem: ToolDefinition = {
+  name: "create_studio_item",
+  description:
+    "Add a new row to a Studio board. Pass the board slug, a title, and a values object keyed by the board's field `key`s (use list_studio_boards to see what's available). Set `status` to drop the row into a specific kanban group.",
+  input_schema: {
+    type: "object",
+    properties: {
+      boardSlug: { type: "string", description: "Board slug from list_studio_boards." },
+      title: { type: "string", description: "Row title — what shows in the first column." },
+      values: {
+        type: "object",
+        description: "Field values keyed by the board's column `key`. Pass primitive values (string / number / boolean) per the column type.",
+      },
+      status: { type: "string", description: "Optional kanban group / status value." },
+    },
+    required: ["boardSlug", "title"],
+  },
+  async handler(ctx, input) {
+    const board = await prisma.studioBoard.findFirst({
+      where: { organizationId: ctx.orgId, slug: input.boardSlug as string },
+      select: { id: true, name: true },
+    });
+    if (!board) throw new Error(`Board not found: ${input.boardSlug as string}`);
+    const max = await prisma.studioItem.findFirst({
+      where: { boardId: board.id },
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+    const values = (input.values as Record<string, unknown> | undefined) ?? {};
+    const item = await prisma.studioItem.create({
+      data: {
+        boardId: board.id,
+        title: String(input.title).trim(),
+        values: values as object,
+        status: (input.status as string | undefined) ?? null,
+        position: (max?.position ?? 0) + 1,
+        createdById: ctx.userId,
+      },
+    });
+    return {
+      ok: true,
+      board: { slug: input.boardSlug, name: board.name },
+      item: {
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        values: item.values,
+      },
+    };
+  },
+};
+
+const updateStudioItem: ToolDefinition = {
+  name: "update_studio_item",
+  description:
+    "Update an existing Studio row. Pass the board slug + row id (use search_studio_items first). `values` is shallow-merged so you can patch one column without re-sending the others.",
+  input_schema: {
+    type: "object",
+    properties: {
+      boardSlug: { type: "string", description: "Board slug from list_studio_boards." },
+      itemId: { type: "string", description: "Row id from search_studio_items." },
+      title: { type: "string", description: "New row title (optional)." },
+      values: { type: "object", description: "Field patches keyed by column `key`." },
+      status: { type: "string", description: "New kanban group / status (optional)." },
+    },
+    required: ["boardSlug", "itemId"],
+  },
+  async handler(ctx, input) {
+    const board = await prisma.studioBoard.findFirst({
+      where: { organizationId: ctx.orgId, slug: input.boardSlug as string },
+      select: { id: true, name: true },
+    });
+    if (!board) throw new Error(`Board not found: ${input.boardSlug as string}`);
+    const existing = await prisma.studioItem.findFirst({
+      where: { id: input.itemId as string, boardId: board.id },
+      select: { id: true, values: true },
+    });
+    if (!existing) throw new Error(`Row not found: ${input.itemId as string}`);
+    const patch = (input.values as Record<string, unknown> | undefined) ?? null;
+    const merged = patch
+      ? { ...(existing.values as Record<string, unknown>), ...patch }
+      : undefined;
+    const updated = await prisma.studioItem.update({
+      where: { id: existing.id },
+      data: {
+        ...(input.title !== undefined ? { title: String(input.title).trim() } : {}),
+        ...(merged !== undefined ? { values: merged as object } : {}),
+        ...(input.status !== undefined ? { status: (input.status as string) ?? null } : {}),
+      },
+    });
+    return {
+      ok: true,
+      board: { slug: input.boardSlug, name: board.name },
+      item: {
+        id: updated.id,
+        title: updated.title,
+        status: updated.status,
+        values: updated.values,
+      },
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// System-building tools — the "AI builds the system" pillar
+// ─────────────────────────────────────────────────────────
+//
+// These let the AI compose new workspaces, custom boards, and seeded
+// hires from natural-language requests. They sit on top of the same
+// libs the UI uses (`createWorkspace`, the Studio board API,
+// `runAgentAutonomously`) so anything the AI builds shows up in the
+// same places a human would have put it.
+
+const createStudioBoard: ToolDefinition = {
+  name: "create_studio_board",
+  description:
+    "Build a new custom board (Studio table or kanban) from a natural-language spec. Use this when the user asks to track something there isn't already a board for — quarterly hiring goals, customer feedback themes, vendor risk register, anything. Pass a field list with column keys + types so the AI can immediately add rows via `create_studio_item`.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Board name as it'll appear in nav (e.g. 'Customer feedback')." },
+      description: { type: "string", description: "Optional one-liner about what this board tracks." },
+      layout: { type: "string", enum: ["TABLE", "KANBAN"], description: "Default view. KANBAN groups by `status` — include a status SELECT field when picking it." },
+      productSlug: { type: "string", description: "Optional host app (e.g. workwrk-crm). Leave blank for a free-standing board." },
+      workspaceId: { type: "string", description: "Optional workspace this board belongs to." },
+      fields: {
+        type: "array",
+        description: "Column definitions. Each: { key, label, type, options? }. `type` is one of TEXT, TEXTAREA, NUMBER, DATE, CHECKBOX, SELECT, MULTI_SELECT, URL, EMAIL. For SELECT/MULTI_SELECT add options.choices = [{value, label?}].",
+        items: {
+          type: "object",
+          properties: {
+            key: { type: "string" },
+            label: { type: "string" },
+            type: { type: "string" },
+            options: { type: "object" },
+          },
+          required: ["key", "label", "type"],
+        },
+      },
+    },
+    required: ["name", "fields"],
+  },
+  async handler(ctx, input) {
+    const name = String(input.name ?? "").trim();
+    if (!name) throw new Error("Board name is required");
+    const fields = Array.isArray(input.fields) ? input.fields : [];
+    if (fields.length === 0) throw new Error("Pass at least one field — boards need columns");
+
+    // Slug + uniqueness handled in the same shape as /api/studio/boards.
+    const base = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "board";
+    let slug = base;
+    for (let i = 0; i < 50; i++) {
+      const candidate = i === 0 ? base : `${base}-${i + 1}`;
+      const clash = await prisma.studioBoard.findFirst({
+        where: { organizationId: ctx.orgId, slug: candidate },
+        select: { id: true },
+      });
+      if (!clash) { slug = candidate; break; }
+    }
+
+    // Workspace tenant-check.
+    const workspaceId = (input.workspaceId as string | undefined) || undefined;
+    if (workspaceId) {
+      const ws = await prisma.workspace.findFirst({
+        where: { id: workspaceId, organizationId: ctx.orgId },
+        select: { id: true },
+      });
+      if (!ws) throw new Error("Workspace not found in this org");
+    }
+
+    const board = await prisma.studioBoard.create({
+      data: {
+        organizationId: ctx.orgId,
+        workspaceId: workspaceId ?? null,
+        productSlug: (input.productSlug as string | undefined) ?? null,
+        name,
+        slug,
+        description: (input.description as string | undefined) ?? null,
+        layout: (input.layout as "TABLE" | "KANBAN" | undefined) ?? "TABLE",
+        fields: fields as object,
+        createdById: ctx.userId,
+      },
+      select: { id: true, slug: true, name: true, layout: true },
+    });
+    return {
+      ok: true,
+      board: {
+        slug: board.slug,
+        name: board.name,
+        layout: board.layout,
+        url: `/studio/boards/${board.slug}`,
+      },
+    };
+  },
+};
+
+const createWorkspaceTool: ToolDefinition = {
+  name: "create_workspace",
+  description:
+    "Spin up a named workspace inside a product (e.g. 'Sales Team B' inside CRM). Use this when the user asks to set up a separate team space, or when you're about to populate one — you can chain this with `create_studio_board` to seed boards into the new workspace.",
+  input_schema: {
+    type: "object",
+    properties: {
+      product: { type: "string", description: "Product slug (e.g. workwrk-crm, workwrk-dev)." },
+      name: { type: "string", description: "Display name (e.g. 'Enterprise sales team')." },
+      description: { type: "string", description: "Optional one-line description." },
+      color: { type: "string", description: "Optional accent color." },
+    },
+    required: ["product", "name"],
+  },
+  async handler(ctx, input) {
+    const { createWorkspace } = await import("@/lib/workspaces");
+    const ws = await createWorkspace({
+      organizationId: ctx.orgId,
+      productSlug: String(input.product),
+      userId: ctx.userId,
+      name: String(input.name),
+      color: input.color as string | undefined,
+      description: input.description as string | undefined,
+    });
+    return {
+      ok: true,
+      workspace: {
+        id: ws.id,
+        slug: ws.slug,
+        name: ws.name,
+      },
+    };
+  },
+};
+
+const invitePersonWithRole: ToolDefinition = {
+  name: "invite_person_with_role",
+  description:
+    "Send an invitation to a new hire with their role definition pre-attached. Required: at least one KRA id and one SOP id (the org's KRA/KPI/SOP entry gate refuses empty arrays). Use `search_employees`-style discovery to find existing KRAs/SOPs before calling this. The invitee gets the standard /register?token=… email flow.",
+  input_schema: {
+    type: "object",
+    properties: {
+      email: { type: "string", description: "Invitee email." },
+      accessLevel: { type: "string", description: "EMPLOYEE / MANAGER / DIRECTOR / etc. Defaults to EMPLOYEE." },
+      departmentId: { type: "string" },
+      roleId: { type: "string" },
+      managerId: { type: "string", description: "User id of the reporting manager." },
+      officeId: { type: "string" },
+      kraIds: { type: "array", items: { type: "string" }, description: "KRA ids to assign on accept. Required, ≥ 1." },
+      sopIds: { type: "array", items: { type: "string" }, description: "SOP ids to assign on accept. Required, ≥ 1." },
+    },
+    required: ["email", "kraIds", "sopIds"],
+  },
+  async handler(ctx, input) {
+    const email = String(input.email ?? "").trim();
+    if (!email.includes("@")) throw new Error("Valid email is required");
+    const kraIds = Array.isArray(input.kraIds) ? (input.kraIds as string[]) : [];
+    const sopIds = Array.isArray(input.sopIds) ? (input.sopIds as string[]) : [];
+    if (kraIds.length === 0) throw new Error("kraIds is required — pick at least one KRA for the role");
+    if (sopIds.length === 0) throw new Error("sopIds is required — pick at least one SOP for the role");
+
+    // Duplicates / existing-user check, same as POST /api/invitations.
+    const existingUser = await prisma.user.findFirst({
+      where: { email, organizationId: ctx.orgId },
+      select: { id: true },
+    });
+    if (existingUser) throw new Error("A user with this email already exists in this org");
+    const existingInvite = await prisma.invitation.findFirst({
+      where: { email, organizationId: ctx.orgId, accepted: false },
+      select: { id: true },
+    });
+    if (existingInvite) throw new Error("There's already a pending invitation for this email");
+
+    // Cross-tenant safety on the KRA/SOP ids.
+    const kraCount = await prisma.kRA.count({ where: { id: { in: kraIds }, organizationId: ctx.orgId } });
+    if (kraCount !== kraIds.length) throw new Error("One or more KRAs don't belong to this org");
+    const sopCount = await prisma.sOP.count({ where: { id: { in: sopIds }, organizationId: ctx.orgId } });
+    if (sopCount !== sopIds.length) throw new Error("One or more SOPs don't belong to this org");
+
+    const crypto = await import("crypto");
+    const invitation = await prisma.invitation.create({
+      data: {
+        email,
+        accessLevel: ((input.accessLevel as string | undefined) ?? "EMPLOYEE") as "EMPLOYEE",
+        token: crypto.randomBytes(32).toString("hex"),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        organizationId: ctx.orgId,
+        departmentId: (input.departmentId as string | undefined) ?? null,
+        roleId: (input.roleId as string | undefined) ?? null,
+        managerId: (input.managerId as string | undefined) ?? null,
+        officeId: (input.officeId as string | undefined) ?? null,
+        kraIds,
+        sopIds,
+      },
+      select: { id: true, email: true, token: true },
+    });
+
+    return {
+      ok: true,
+      invitation: {
+        id: invitation.id,
+        email: invitation.email,
+        // Token is sensitive — don't echo it back in chat. The email
+        // worker already includes the registration link.
+        registerLink: `/register?token=…`,
+      },
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
 // Registry — all tools by name
 // ─────────────────────────────────────────────────────────
 
@@ -1431,11 +1847,29 @@ export const TOOLS: Record<string, ToolDefinition> = {
   create_sop: createSop,
   create_kra: createKra,
   create_kpi: createKpi,
+  // Studio — user-built boards (cross-product)
+  list_studio_boards: listStudioBoards,
+  search_studio_items: searchStudioItems,
+  create_studio_item: createStudioItem,
+  update_studio_item: updateStudioItem,
+  // System-building tools — AI authors workspaces, boards, hires
+  create_studio_board: createStudioBoard,
+  create_workspace: createWorkspaceTool,
+  invite_person_with_role: invitePersonWithRole,
 };
 
 // Tools every session can use, regardless of agent (or no agent).
 // Includes cross-product search so Sidekick can look stuff up.
-export const CROSS_TOOL_NAMES = ["create_task", "search_tasks", "send_kudos", "search_employees", "search_kb", "search_meetings", "search_okrs", "search_sops", "create_meeting", "create_okr", "create_sop"];
+// Studio tools are cross-product since user-built boards can live
+// anywhere — Sidekick always gets to read/write them.
+export const CROSS_TOOL_NAMES = [
+  "create_task", "search_tasks", "send_kudos", "search_employees",
+  "search_kb", "search_meetings", "search_okrs", "search_sops",
+  "create_meeting", "create_okr", "create_sop",
+  "list_studio_boards", "search_studio_items", "create_studio_item", "update_studio_item",
+  // System-building tools — let the AI author workspaces + boards + hires
+  "create_studio_board", "create_workspace", "invite_person_with_role",
+];
 
 // Tools per agent product. When a chat session is scoped to an agent,
 // the agent's productSlug determines which create-tools light up in

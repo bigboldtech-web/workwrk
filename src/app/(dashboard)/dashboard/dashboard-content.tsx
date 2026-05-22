@@ -31,6 +31,7 @@ import { Trophy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { AISignals } from "@/components/dashboard/ai-signals";
+import { AutonomousDigest } from "@/components/dashboard/autonomous-digest";
 import { KudosReactions } from "@/components/kudos/kudos-reactions";
 
 interface DashboardStats {
@@ -313,6 +314,9 @@ export default function DashboardContent() {
 
       {/* AI Signals — cross-module attention-worthy events */}
       <AISignals />
+
+      {/* Autonomous-agent digest — what the AI got done while you were away */}
+      <AutonomousDigest />
 
       {/* OKRs */}
       <DashboardOkrs />

@@ -4610,6 +4610,25 @@ model Agent {
   isPrebuilt     Boolean      @default(false)
   prebuiltSlug   String?
   status         AgentStatus  @default(ENABLED)
+  // Autonomous-run config — the "AI controls the people" vision pillar.
+  // When `autonomousEnabled = true` and `scheduleCron` is set, the
+  // cron-tickable endpoint /api/cron/run-due-agents fires this agent
+  // every cycle without a user prompt. Output is captured as an
+  // AgentRun row and surfaced on /dashboard.
+  autonomousEnabled Boolean   @default(false)
+  // Cron-style expression OR a coarse interval ("hourly", "daily",
+  // "weekly"). Keeping it a free-form string for v1 so we don't lock
+  // ourselves into a cron lib choice yet — `nextRunAt` is recomputed
+  // on save / after each run by the scheduler lib.
+  scheduleCron      String?
+  // The prompt the autonomous loop feeds in as the user message on
+  // each scheduled run. Without this the agent has no "what should
+  // you do every hour?" instruction; with it, the agent has a recurring
+  // brief (e.g. "Review yesterday's deals and flag anything stuck >5
+  // days in the same stage").
+  autonomousPrompt  String?   @db.Text
+  lastRunAt         DateTime?
+  nextRunAt         DateTime?
   createdById    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -4621,6 +4640,7 @@ model Agent {
   @@unique([organizationId, slug])
   @@index([organizationId, status])
   @@index([productSlug])
+  @@index([autonomousEnabled, nextRunAt])
 }
 
 enum AgentStatus {

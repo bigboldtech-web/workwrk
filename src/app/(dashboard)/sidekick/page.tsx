@@ -115,10 +115,35 @@ export default function SidekickPage() {
 
   /** Resolve product + board slugs into display labels (or null if
    *  the catalog/registry doesn't know them — shouldn't happen for
-   *  links we generate, but be defensive against typo'd ?context=). */
+   *  links we generate, but be defensive against typo'd ?context=).
+   *  Studio context is special: productContext = "studio" and
+   *  boardContext = the StudioBoard slug; we fetch the board name on
+   *  demand so the chip still reads cleanly. */
   const resolveContext = useCallback(
-    (productSlug: string | null, boardKey: string | null): ActiveContext => {
+    async (productSlug: string | null, boardKey: string | null): Promise<ActiveContext> => {
       if (!productSlug) return null;
+
+      if (productSlug === "studio") {
+        let boardName: string | null = null;
+        if (boardKey) {
+          try {
+            const r = await fetch(`/api/studio/boards/${boardKey}`);
+            if (r.ok) {
+              const d = await r.json();
+              boardName = d.board?.name ?? null;
+            }
+          } catch {
+            // Fall through with no board name; chip still renders generic.
+          }
+        }
+        return {
+          productSlug,
+          productName: "Studio",
+          boardKey: boardKey ?? null,
+          boardName,
+        };
+      }
+
       const product = PRODUCT_CATALOG.find((p) => p.slug === productSlug);
       if (!product) return null;
       const board = boardKey ? getBoard(productSlug, boardKey) : null;
@@ -132,22 +157,19 @@ export default function SidekickPage() {
     [],
   );
 
-  // Pre-resolve the launch URL's context (if any) — used both for the
-  // chip rendered before any session exists, and as the payload when
-  // we eagerly create the first session for this scope.
-  const launchContext = useMemo(
-    () => resolveContext(initialProductContext, initialBoardContext),
-    [resolveContext, initialProductContext, initialBoardContext],
-  );
-
   // If a ?session=<id> arrived via the URL (e.g. from /agents → Chat
   // with <agent>), auto-load that session's messages on mount. If a
-  // ?context=<slug> arrived without a session, surface the chip
-  // immediately so the user knows the scope before sending anything.
+  // ?context=<slug> arrived without a session, resolve it async (the
+  // studio path needs a fetch to get the board name) and surface the
+  // chip so the user knows the scope before sending anything.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (initialSessionId) openSession(initialSessionId);
-    else if (launchContext) setActiveContext(launchContext);
+    else if (initialProductContext) {
+      void resolveContext(initialProductContext, initialBoardContext).then(
+        (ctx) => setActiveContext(ctx),
+      );
+    }
   }, []);
 
   // Auto-scroll to bottom on new messages.
@@ -167,9 +189,11 @@ export default function SidekickPage() {
       setMessages(data.messages ?? []);
       // Re-apply the session's stored board context so the chip
       // follows the session, not the launch URL.
-      setActiveContext(
-        resolveContext(data.session?.productContext ?? null, data.session?.boardContext ?? null),
+      const ctx = await resolveContext(
+        data.session?.productContext ?? null,
+        data.session?.boardContext ?? null,
       );
+      setActiveContext(ctx);
     } finally {
       setLoadingSession(false);
     }
@@ -203,10 +227,10 @@ export default function SidekickPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          launchContext
+          initialProductContext
             ? {
-                productContext: launchContext.productSlug,
-                boardContext: launchContext.boardKey ?? undefined,
+                productContext: initialProductContext,
+                boardContext: initialBoardContext ?? undefined,
               }
             : {},
         ),
@@ -217,9 +241,11 @@ export default function SidekickPage() {
       setActiveId(sessionId);
       // Keep the chip in sync with what the server actually stored.
       if (data.session.productContext) {
-        setActiveContext(
-          resolveContext(data.session.productContext, data.session.boardContext ?? null),
+        const ctx = await resolveContext(
+          data.session.productContext,
+          data.session.boardContext ?? null,
         );
+        setActiveContext(ctx);
       }
     }
 

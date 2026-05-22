@@ -33,6 +33,10 @@
     {
       "path": "/api/cron/announcements-publish",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/run-due-agents",
+      "schedule": "*/10 * * * *"
     }
   ],
   "functions": {
@@ -74,6 +78,9 @@
     },
     "src/app/api/cron/announcements-publish/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/run-due-agents/route.ts": {
+      "maxDuration": 300
     }
   }
 }

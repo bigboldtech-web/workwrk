@@ -24,8 +24,10 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Home, Box, Sparkles, Plus, ChevronDown, Check, Loader2, X,
+  Users as UsersIcon,
   type LucideIcon,
 } from "lucide-react";
+import { WorkspaceMembersDialog } from "@/components/layout/workspace-members-dialog";
 import {
   CalendarDays, BookOpen, Crosshair, MessageSquare, PenTool, Heart,
   Users, Briefcase, Star, GraduationCap, Banknote, TrendingUp,
@@ -107,6 +109,7 @@ export function AppWorkspaceNav() {
   const [wsLoading, setWsLoading] = useState(false);
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [membersModalWs, setMembersModalWs] = useState<{ id: string; name: string } | null>(null);
   const [newWsName, setNewWsName] = useState("");
   const [creatingWs, setCreatingWs] = useState(false);
   const [wsError, setWsError] = useState<string | null>(null);
@@ -326,7 +329,7 @@ export function AppWorkspaceNav() {
                 ) : (
                   <ul className="app-workspace-switcher-list">
                     {workspaces.map((w) => (
-                      <li key={w.id}>
+                      <li key={w.id} className="app-workspace-switcher-row">
                         <button
                           type="button"
                           className={
@@ -348,6 +351,21 @@ export function AppWorkspaceNav() {
                             <Check size={11} className="app-workspace-switcher-check" />
                           )}
                         </button>
+                        {canCreateWorkspace && (
+                          <button
+                            type="button"
+                            className="app-workspace-switcher-members"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSwitcherOpen(false);
+                              setMembersModalWs({ id: w.id, name: w.name });
+                            }}
+                            title="Manage members"
+                            aria-label="Manage members"
+                          >
+                            <UsersIcon size={10} />
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -519,6 +537,14 @@ export function AppWorkspaceNav() {
           <span>Workspace home</span>
         </Link>
       </nav>
+
+      {membersModalWs && (
+        <WorkspaceMembersDialog
+          workspaceId={membersModalWs.id}
+          workspaceName={membersModalWs.name}
+          onClose={() => setMembersModalWs(null)}
+        />
+      )}
     </aside>
   );
 }

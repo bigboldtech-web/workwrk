@@ -199,9 +199,9 @@ const navigation: NavItem[] = [
   { name: "Compensation", key: "compensation", href: "/compensation", icon: DollarSign, managerOnly: true, section: "workspace", hue: "green" },
   { name: "Talent Grid", key: "talentGrid", href: "/talent", icon: Grid3x3, managerOnly: true, section: "workspace", hue: "rose" },
   { name: "Learning", key: "learning", href: "/learning", icon: GraduationCap, section: "workspace", hue: "violet" },
-  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true, comingSoon: true, section: "workspace", hue: "green" },
-  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true, comingSoon: true, section: "workspace", hue: "pink" },
-  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, comingSoon: true, section: "workspace", hue: "rose" },
+  { name: "Payroll", key: "payroll", href: "/payroll", icon: Banknote, adminOnly: true, section: "workspace", hue: "green" },
+  { name: "Benefits", key: "benefits", href: "/benefits", icon: Heart, adminOnly: true, section: "workspace", hue: "pink" },
+  { name: "My Benefits", key: "myBenefits", href: "/my-benefits", icon: Heart, section: "workspace", hue: "rose" },
   // ── Sales suite (CRM)
   { name: "CRM", key: "crm", href: "/crm", icon: TrendingUp, section: "workspace", hue: "green" },
   // ── IT Service Management (ITSM)

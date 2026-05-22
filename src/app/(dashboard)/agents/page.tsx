@@ -18,7 +18,10 @@ import {
   Lock,
   CheckCircle2,
   Lightbulb,
+  Clock,
+  Zap,
 } from "lucide-react";
+import { AutonomousDialog } from "@/components/agents/autonomous-dialog";
 
 type InstalledAgent = {
   id: string;
@@ -32,6 +35,11 @@ type InstalledAgent = {
   isPrebuilt: boolean;
   status: string;
   examplePrompts: string[];
+  autonomousEnabled: boolean;
+  scheduleCron: string | null;
+  autonomousPrompt: string | null;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
   createdAt: string;
 };
 
@@ -52,6 +60,7 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [scheduling, setScheduling] = useState<InstalledAgent | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -152,7 +161,11 @@ export default function AgentsPage() {
                     productSlug={a.productSlug ?? null}
                     examplePrompts={a.examplePrompts}
                     busy={opening === a.slug}
+                    autonomousEnabled={a.autonomousEnabled}
+                    scheduleCron={a.scheduleCron}
+                    nextRunAt={a.nextRunAt}
                     onChat={() => chatWith(a.slug)}
+                    onSchedule={() => setScheduling(a)}
                   />
                 ))}
               </div>
@@ -195,6 +208,22 @@ export default function AgentsPage() {
           )}
         </>
       )}
+
+      {scheduling && (
+        <AutonomousDialog
+          agentSlug={scheduling.slug}
+          agentName={scheduling.name}
+          initial={{
+            autonomousEnabled: scheduling.autonomousEnabled,
+            scheduleCron: scheduling.scheduleCron,
+            autonomousPrompt: scheduling.autonomousPrompt,
+            lastRunAt: scheduling.lastRunAt,
+            nextRunAt: scheduling.nextRunAt,
+          }}
+          onClose={() => setScheduling(null)}
+          onSaved={async () => { await refresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -208,8 +237,12 @@ function AgentCard({
   productSlug,
   examplePrompts,
   busy,
+  autonomousEnabled,
+  scheduleCron,
+  nextRunAt,
   onChat,
   onInstall,
+  onSchedule,
 }: {
   name: string;
   persona: string;
@@ -219,8 +252,12 @@ function AgentCard({
   productSlug: string | null;
   examplePrompts: string[];
   busy: boolean;
+  autonomousEnabled?: boolean;
+  scheduleCron?: string | null;
+  nextRunAt?: string | null;
   onChat?: () => void;
   onInstall?: () => void;
+  onSchedule?: () => void;
 }) {
   return (
     <article className="group rounded-2xl border border-border bg-surface hover:border-violet-300 transition-all hover:shadow-md p-5 flex flex-col">
@@ -255,15 +292,39 @@ function AgentCard({
         </div>
       )}
 
+      {isInstalled && autonomousEnabled && nextRunAt && (
+        <div className="text-[10px] text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1 mb-2 font-medium">
+          <Zap size={9} /> Autonomous · next run {(() => {
+            const ms = new Date(nextRunAt).getTime() - Date.now();
+            const mins = Math.max(0, Math.round(ms / 60_000));
+            if (mins < 60) return `in ${mins}m`;
+            const hrs = Math.round(mins / 60);
+            if (hrs < 24) return `in ${hrs}h`;
+            return `in ${Math.round(hrs / 24)}d`;
+          })()}
+          {scheduleCron && <span className="text-muted-2"> · {scheduleCron}</span>}
+        </div>
+      )}
+
       {isInstalled ? (
-        <button
-          type="button"
-          onClick={onChat}
-          disabled={busy}
-          className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium disabled:opacity-50"
-        >
-          {busy ? "Opening…" : (<><MessageSquare size={12} /> Chat with {name}</>)}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onChat}
+            disabled={busy}
+            className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium disabled:opacity-50"
+          >
+            {busy ? "Opening…" : (<><MessageSquare size={12} /> Chat</>)}
+          </button>
+          <button
+            type="button"
+            onClick={onSchedule}
+            className="inline-flex items-center justify-center gap-1 px-2.5 py-2 rounded-lg border border-border hover:border-violet-300 text-xs font-medium text-muted hover:text-violet-700"
+            title="Schedule autonomous runs"
+          >
+            <Clock size={12} /> Auto
+          </button>
+        </div>
       ) : (
         <button
           type="button"
