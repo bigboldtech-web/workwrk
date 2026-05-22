@@ -502,7 +502,10 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     status: "COMING_SOON",
     defaultEnabled: false,
     displayOrder: 620,
-    pathPrefix: "/roadmap",
+    // pathPrefix avoids /roadmap because the marketing route group
+    // owns the public /roadmap (the changelog-style page). The
+    // in-product roadmap surface lives at /product-roadmap.
+    pathPrefix: "/product-roadmap",
     seededAgents: ["rhea-roadmap-strategist"],
   },
 
