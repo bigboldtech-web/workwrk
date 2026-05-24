@@ -15,11 +15,17 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const stageId = searchParams.get("stageId");
+  // Workspace filter — passed by the board pages so Sales Team A
+  // only sees its own deals. Legacy rows (workspaceId = null) are
+  // shown under every workspace so org-wide data isn't hidden after
+  // the column is added; new rows always get a workspaceId on create.
+  const workspaceId = searchParams.get("workspace");
 
   const opportunities = await prisma.opportunity.findMany({
     where: {
       organizationId: ctx.orgId,
       ...(stageId ? { pipelineStageId: stageId } : {}),
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
     },
     include: {
       account: { select: { id: true, name: true } },
@@ -41,6 +47,9 @@ const createSchema = z.object({
   expectedCloseDate: z.string().optional(),
   description: z.string().max(4000).optional(),
   ownerId: z.string().optional(),
+  // Workspace the deal belongs to — passed by the CRM board pages
+  // based on the user's active workspace selection.
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -66,6 +75,7 @@ export async function POST(req: Request) {
   const opportunity = await prisma.opportunity.create({
     data: {
       organizationId: ctx.orgId,
+      workspaceId: parsed.data.workspaceId ?? null,
       name: parsed.data.name,
       accountId: parsed.data.accountId,
       pipelineStageId: stageId,

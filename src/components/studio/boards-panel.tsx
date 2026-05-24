@@ -39,7 +39,10 @@ type BoardRow = {
 type FieldDraft = {
   key: string;
   label: string;
-  type: "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX" | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL";
+  type:
+    | "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX"
+    | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL"
+    | "USER" | "RELATION";
   optionsCsv?: string; // for SELECT / MULTI_SELECT, comma-separated values
 };
 
@@ -47,6 +50,7 @@ const FIELD_TYPE_LABEL: Record<FieldDraft["type"], string> = {
   TEXT: "Text", TEXTAREA: "Long text", NUMBER: "Number", DATE: "Date",
   CHECKBOX: "Checkbox", SELECT: "Single select", MULTI_SELECT: "Multi select",
   URL: "URL", EMAIL: "Email",
+  USER: "Person", RELATION: "Linked record",
 };
 
 function keyFromLabel(label: string): string {

@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Code, Calendar } from "lucide-react";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   Empty, Loading, SprintModal, SPRINT_TONES, type Sprint,
 } from "@/components/dev/shared";
@@ -14,14 +15,17 @@ export default function DevSprintsPage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
 
+  const workspaceId = useActiveWorkspace("workwrk-dev");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/dev/sprints");
+      const r = await fetch(`/api/dev/sprints${wsQuery}`);
       const d = r.ok ? await r.json() : { sprints: [] };
       setSprints(d.sprints || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [wsQuery]);
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
@@ -90,6 +94,7 @@ export default function DevSprintsPage() {
 
       {showNew && (
         <SprintModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

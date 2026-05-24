@@ -185,7 +185,7 @@ function MktgActions({ onClose, onSubmit, saving, disabled }: { onClose: () => v
   );
 }
 
-export function CampaignModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function CampaignModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [name, setName] = useState("");
   const [channel, setChannel] = useState("");
   const [budget, setBudget] = useState("");
@@ -199,7 +199,7 @@ export function CampaignModal({ onClose, onCreated }: { onClose: () => void; onC
       await fetch("/api/marketing/campaigns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, channel, budget: budget ? parseFloat(budget) : undefined, startDate: startDate || undefined, endDate: endDate || undefined }),
+        body: JSON.stringify({ name, channel, budget: budget ? parseFloat(budget) : undefined, startDate: startDate || undefined, endDate: endDate || undefined, workspaceId: workspaceId ?? undefined }),
       });
       onCreated();
     } finally { setSaving(false); }
@@ -220,7 +220,7 @@ export function CampaignModal({ onClose, onCreated }: { onClose: () => void; onC
   );
 }
 
-export function ContentModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function ContentModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [title, setTitle] = useState("");
   const [type, setType] = useState("BLOG_POST");
   const [channel, setChannel] = useState("");
@@ -233,7 +233,7 @@ export function ContentModal({ onClose, onCreated }: { onClose: () => void; onCr
       await fetch("/api/marketing/content", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, type, channel, scheduledFor: scheduledFor || undefined }),
+        body: JSON.stringify({ title, type, channel, scheduledFor: scheduledFor || undefined, workspaceId: workspaceId ?? undefined }),
       });
       onCreated();
     } finally { setSaving(false); }
@@ -265,7 +265,7 @@ export function ContentModal({ onClose, onCreated }: { onClose: () => void; onCr
   );
 }
 
-export function EventModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function EventModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [name, setName] = useState("");
   const [type, setType] = useState("");
   const [format, setFormat] = useState("In-person");
@@ -280,7 +280,7 @@ export function EventModal({ onClose, onCreated }: { onClose: () => void; onCrea
       await fetch("/api/marketing/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, type, format, startDate: startDate || undefined, location, capacity: capacity ? parseInt(capacity) : undefined }),
+        body: JSON.stringify({ name, type, format, startDate: startDate || undefined, location, capacity: capacity ? parseInt(capacity) : undefined, workspaceId: workspaceId ?? undefined }),
       });
       onCreated();
     } finally { setSaving(false); }

@@ -39,6 +39,7 @@ import { SkeletonCard as SharedSkeletonCard, Skeleton } from "@/components/ui/sk
 import { PageHeader } from "@/components/dashboard/page-header";
 import { ListPage } from "@/components/layout/page-shells";
 import { FolderManager } from "@/components/sops/folder-manager";
+import { DocEditorDialog } from "@/components/notes/doc-editor-dialog";
 
 interface SOPCompliance {
   stepsTotal: number;
@@ -312,6 +313,13 @@ export default function SOPsPage() {
   const [showArchive, setShowArchive] = useState(false);
   const [archivedSops, setArchivedSops] = useState<SOP[]>([]);
   const [loadingArchive, setLoadingArchive] = useState(false);
+  // Doc-popup overlay state — keyed to the SOP whose chrome the user
+  // most recently clicked. Clicking a row title now opens this popup
+  // instead of navigating to /sops/[id]; the route is still available
+  // for direct deep-links + the "Open in full page" action.
+  const [popupSop, setPopupSop] = useState<SOP | null>(null);
+  const [popupBody, setPopupBody] = useState<string>("");
+  const [popupLoading, setPopupLoading] = useState(false);
 
   // Categories from DB (with sopCount, includes unsaved/legacy names)
   const [savedCategories, setSavedCategories] = useState<any[]>([]);
@@ -762,6 +770,25 @@ export default function SOPsPage() {
         toastSuccess("SOP archived");
       } else { toastError("Failed to archive"); }
     } catch { toastError("Failed to archive"); }
+  }
+
+  // Open the doc-popup overlay for an SOP. Fetches the freshest body
+  // from the API so a stale list-row doesn't show old content. The
+  // overlay autosaves through /api/sops/[id] on title/body blur.
+  async function openSopPopup(sop: SOP) {
+    setPopupSop(sop);
+    setPopupBody("");
+    setPopupLoading(true);
+    try {
+      const r = await fetch(`/api/sops/${sop.id}`);
+      if (r.ok) {
+        const d = await r.json();
+        // Description holds the prose body. Steps live elsewhere and
+        // aren't editable from the popup — that's still the dedicated
+        // route's job. Once we migrate body-as-HTML, swap to d.body.
+        setPopupBody(d.description || "");
+      }
+    } finally { setPopupLoading(false); }
   }
 
   function handleCopyLink(sopId: string) {
@@ -1466,6 +1493,14 @@ export default function SOPsPage() {
                       e.dataTransfer.setData("application/x-sop-id", sop.id);
                       e.dataTransfer.effectAllowed = "move";
                     }}
+                    onClick={(e) => {
+                      // Plain left-click opens the doc-popup overlay.
+                      // ⌘/Ctrl/shift/middle-click still navigate to the
+                      // full route so users can open it in a new tab.
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                      e.preventDefault();
+                      openSopPopup(sop);
+                    }}
                     className="grid grid-cols-[1fr] md:grid-cols-[minmax(220px,2.4fr)_minmax(140px,1.2fr)_64px_64px_100px] items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-2 hover:border-[color:var(--b-line-2)]"
                   >
                     {/* Title + status. Title gets full width; status sits
@@ -1538,6 +1573,11 @@ export default function SOPsPage() {
                       e.dataTransfer.setData("application/x-sop-id", sop.id);
                       e.dataTransfer.effectAllowed = "move";
                     }}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                      e.preventDefault();
+                      openSopPopup(sop);
+                    }}
                   ><Card className="hover:border-muted-2 transition-all cursor-pointer group">
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between mb-2">
@@ -1609,6 +1649,27 @@ export default function SOPsPage() {
           onOpenChange={(o) => { setShowFolderManager(o); if (!o) fetchFolders(); }}
         />
       )}
+
+      {/* Doc-popup overlay — opens when a user clicks an SOP row. Edits
+          autosave through /api/sops/[id] on blur + ⌘S. */}
+      <DocEditorDialog
+        open={!!popupSop}
+        onClose={() => setPopupSop(null)}
+        breadcrumb={["SOPs", popupSop?.category ?? "Uncategorized"]}
+        title={popupSop?.title ?? ""}
+        body={popupLoading ? "" : popupBody}
+        shareUrl={popupSop ? `${typeof window !== "undefined" ? window.location.origin : ""}/sops/${popupSop.id}` : undefined}
+        readOnly={!canManageSOPs}
+        onSave={async ({ title, body }) => {
+          if (!popupSop) return;
+          await fetch(`/api/sops/${popupSop.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, description: body }),
+          });
+          setSops((prev) => prev.map((s) => s.id === popupSop.id ? { ...s, title, description: body } : s));
+        }}
+      />
     </ListPage>
   );
 }

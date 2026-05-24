@@ -7,6 +7,7 @@ import { Megaphone } from "lucide-react";
 import { BoardView } from "@/components/board-view/board-view";
 import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   CAMPAIGN_FIELDS, CampaignModal, Empty, Loading, type Campaign,
 } from "@/components/marketing/shared";
@@ -17,14 +18,17 @@ export default function MarketingCampaignsPage() {
   const [showNew, setShowNew] = useState(false);
   const [open, setOpen] = useState<Campaign | null>(null);
 
+  const workspaceId = useActiveWorkspace("workwrk-campaigns");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/marketing/campaigns");
+      const r = await fetch(`/api/marketing/campaigns${wsQuery}`);
       const d = r.ok ? await r.json() : { campaigns: [] };
       setItems(d.campaigns || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [wsQuery]);
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
@@ -77,6 +81,7 @@ export default function MarketingCampaignsPage() {
 
       {showNew && (
         <CampaignModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

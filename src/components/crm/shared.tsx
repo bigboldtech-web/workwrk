@@ -206,11 +206,15 @@ export function ModalActions({ onClose, onSubmit, saving, disabled }: { onClose:
 export function NewOpportunityModal({
   accounts,
   stages,
+  workspaceId,
   onClose,
   onCreated,
 }: {
   accounts: Account[];
   stages: Stage[];
+  /** When the CRM is scoped to a workspace, new deals land inside
+   *  that workspace so they're only visible there. */
+  workspaceId?: string | null;
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -234,6 +238,7 @@ export function NewOpportunityModal({
           pipelineStageId: stageId || undefined,
           amount: amount ? parseFloat(amount) : undefined,
           expectedCloseDate: closeDate || undefined,
+          workspaceId: workspaceId ?? undefined,
         }),
       });
       onCreated();
@@ -296,7 +301,7 @@ export function NewOpportunityModal({
   );
 }
 
-export function NewLeadModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function NewLeadModal({ workspaceId, onClose, onCreated }: { workspaceId?: string | null; onClose: () => void; onCreated: () => void }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -312,7 +317,10 @@ export function NewLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
       await fetch("/api/crm/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ firstName: firstName.trim(), lastName, email, company, title, source }),
+        body: JSON.stringify({
+          firstName: firstName.trim(), lastName, email, company, title, source,
+          workspaceId: workspaceId ?? undefined,
+        }),
       });
       onCreated();
     } finally { setSaving(false); }
@@ -354,7 +362,7 @@ export function NewLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
   );
 }
 
-export function NewAccountModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function NewAccountModal({ workspaceId, onClose, onCreated }: { workspaceId?: string | null; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [domain, setDomain] = useState("");
   const [industry, setIndustry] = useState("");
@@ -370,7 +378,10 @@ export function NewAccountModal({ onClose, onCreated }: { onClose: () => void; o
       const res = await fetch("/api/crm/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), domain, industry, size, type }),
+        body: JSON.stringify({
+          name: name.trim(), domain, industry, size, type,
+          workspaceId: workspaceId ?? undefined,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

@@ -160,7 +160,7 @@ export function DevActions({ onClose, onSubmit, saving, disabled }: { onClose: (
   );
 }
 
-export function SprintModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function SprintModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -177,6 +177,7 @@ export function SprintModal({ onClose, onCreated }: { onClose: () => void; onCre
         body: JSON.stringify({
           name, goal, startDate, endDate,
           capacityPoints: capacityPoints ? parseInt(capacityPoints) : undefined,
+          workspaceId: workspaceId ?? undefined,
         }),
       });
       onCreated();
@@ -202,7 +203,7 @@ export function SprintModal({ onClose, onCreated }: { onClose: () => void; onCre
   );
 }
 
-export function ReleaseModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function ReleaseModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [version, setVersion] = useState("");
   const [name, setName] = useState("");
   const [releaseType, setReleaseType] = useState("Minor");
@@ -218,7 +219,7 @@ export function ReleaseModal({ onClose, onCreated }: { onClose: () => void; onCr
       const res = await fetch("/api/dev/releases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version, name, releaseType, scheduledFor: scheduledFor || undefined, isPublic }),
+        body: JSON.stringify({ version, name, releaseType, scheduledFor: scheduledFor || undefined, isPublic, workspaceId: workspaceId ?? undefined }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -255,7 +256,7 @@ export function ReleaseModal({ onClose, onCreated }: { onClose: () => void; onCr
   );
 }
 
-export function RoadmapModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function RoadmapModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [theme, setTheme] = useState("");
@@ -277,6 +278,7 @@ export function RoadmapModal({ onClose, onCreated }: { onClose: () => void; onCr
           impactScore: impactScore ? parseInt(impactScore) : undefined,
           effortPoints: effortPoints ? parseInt(effortPoints) : undefined,
           publicVisible,
+          workspaceId: workspaceId ?? undefined,
         }),
       });
       onCreated();

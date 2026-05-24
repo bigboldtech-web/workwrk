@@ -33,6 +33,8 @@ export async function GET(req: NextRequest) {
   }
   if (departmentId) where.departmentId = departmentId;
   if (search) where.title = { contains: search, mode: "insensitive" };
+  const workspaceId = sp.get("workspace");
+  if (workspaceId) where.OR = [{ workspaceId }, { workspaceId: null }];
 
   const jobs = await prisma.job.findMany({
     where,
@@ -124,9 +126,11 @@ export async function POST(req: NextRequest) {
     if (!user) return jsonError("Hiring manager not found", 404);
   }
 
+  const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId : null;
   const job = await prisma.job.create({
     data: {
       organizationId: orgId,
+      workspaceId,
       title,
       description,
       status: "DRAFT",

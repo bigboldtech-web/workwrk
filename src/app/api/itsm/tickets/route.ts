@@ -15,12 +15,14 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
   const assigneeId = searchParams.get("assigneeId");
+  const workspaceId = searchParams.get("workspace");
 
   const tickets = await prisma.ticket.findMany({
     where: {
       organizationId: ctx.orgId,
       ...(status ? { status: status as "OPEN" | "TRIAGED" | "IN_PROGRESS" | "WAITING_ON_USER" | "WAITING_ON_VENDOR" | "RESOLVED" | "CLOSED" | "CANCELLED" } : {}),
       ...(assigneeId ? { assigneeId } : {}),
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
     },
     orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
     take: 300,
@@ -37,6 +39,7 @@ const createSchema = z.object({
   source: z.enum(["PORTAL", "EMAIL", "CHAT", "PHONE", "API", "AGENT"]).optional(),
   requesterId: z.string().optional(),
   assigneeId: z.string().optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -52,6 +55,7 @@ export async function POST(req: Request) {
   const ticket = await prisma.ticket.create({
     data: {
       organizationId: ctx.orgId,
+      workspaceId: parsed.data.workspaceId ?? null,
       title: parsed.data.title,
       description: parsed.data.description,
       priority: parsed.data.priority ?? "NORMAL",

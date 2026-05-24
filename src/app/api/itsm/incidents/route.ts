@@ -7,12 +7,16 @@ import { prisma } from "@/lib/prisma";
 import { resolveItsmContext } from "@/lib/itsm/auth";
 import { z } from "zod";
 
-export async function GET() {
+export async function GET(req: Request) {
   const ctx = await resolveItsmContext();
   if ("error" in ctx) return ctx.error;
 
+  const workspaceId = new URL(req.url).searchParams.get("workspace");
   const incidents = await prisma.incident.findMany({
-    where: { organizationId: ctx.orgId },
+    where: {
+      organizationId: ctx.orgId,
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+    },
     orderBy: [{ status: "asc" }, { startedAt: "desc" }],
     take: 200,
   });
@@ -26,6 +30,7 @@ const createSchema = z.object({
   severity: z.enum(["SEV1", "SEV2", "SEV3", "SEV4", "SEV5"]).optional(),
   commanderId: z.string().optional(),
   affectedServices: z.array(z.string()).optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -41,6 +46,7 @@ export async function POST(req: Request) {
   const incident = await prisma.incident.create({
     data: {
       organizationId: ctx.orgId,
+      workspaceId: parsed.data.workspaceId ?? null,
       title: parsed.data.title,
       summary: parsed.data.summary,
       severity: parsed.data.severity ?? "SEV3",

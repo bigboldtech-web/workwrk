@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Calendar } from "lucide-react";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   EventModal, EVENT_TONES, Empty, Loading, dateRange, type EventBrief,
 } from "@/components/marketing/shared";
@@ -14,14 +15,17 @@ export default function MarketingEventsPage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
 
+  const workspaceId = useActiveWorkspace("workwrk-campaigns");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/marketing/events");
+      const r = await fetch(`/api/marketing/events${wsQuery}`);
       const d = r.ok ? await r.json() : { events: [] };
       setItems(d.events || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [wsQuery]);
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
@@ -68,6 +72,7 @@ export default function MarketingEventsPage() {
 
       {showNew && (
         <EventModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

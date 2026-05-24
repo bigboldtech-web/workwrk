@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Building2, Plus } from "lucide-react";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   AccountTypeBadge, NewAccountModal, type Account,
 } from "@/components/crm/shared";
@@ -14,16 +15,19 @@ export default function CrmAccountsPage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
 
+  const workspaceId = useActiveWorkspace("workwrk-crm");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/crm/accounts");
+      const r = await fetch(`/api/crm/accounts${wsQuery}`);
       const data = r.ok ? await r.json() : { accounts: [] };
       setAccounts(data.accounts || []);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [wsQuery]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -80,6 +84,7 @@ export default function CrmAccountsPage() {
 
       {showNew && (
         <NewAccountModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

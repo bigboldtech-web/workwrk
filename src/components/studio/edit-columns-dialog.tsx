@@ -17,7 +17,7 @@
 
 import { useState } from "react";
 import {
-  X, Loader2, Plus, ArrowUp, ArrowDown, Trash2, Check, AlertCircle,
+  X, Loader2, Plus, GripVertical, Trash2, Check, AlertCircle,
 } from "lucide-react";
 import type { BoardField } from "@/components/board-view/board-view";
 
@@ -33,6 +33,12 @@ const FIELD_TYPE_LABEL: Record<BoardField["fieldType"], string> = {
   TEXT: "Text", TEXTAREA: "Long text", NUMBER: "Number", DATE: "Date",
   CHECKBOX: "Checkbox", SELECT: "Single select", MULTI_SELECT: "Multi select",
   URL: "URL", EMAIL: "Email",
+  USER: "Person", RELATION: "Linked record",
+  PRIORITY: "Priority", STATUS: "Status",
+  TIMELINE: "Timeline", RATING: "Rating", PROGRESS: "Progress",
+  FILES: "Files", PHONE: "Phone", LOCATION: "Location", COUNTRY: "Country",
+  TAGS: "Tags", DURATION: "Time tracker", FORMULA: "Formula",
+  CONNECT_BOARDS: "Connect boards",
 };
 
 function keyFromLabel(label: string): string {
@@ -95,12 +101,20 @@ export function EditColumnsDialog({ boardSlug, initialFields, onClose, onSaved }
   const patchField = (idx: number, patch: Partial<StudioFieldDraft>) => {
     setFields((prev) => prev.map((f, i) => i === idx ? { ...f, ...patch } : f));
   };
-  const swap = (idx: number, delta: -1 | 1) => {
+  // Drag-and-drop reorder. `dragFromIdx` is the row being dragged;
+  // `dragOverIdx` is the target landing slot. We render a thin
+  // highlight under the target row so the drop intent is visible.
+  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  const move = (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
     setFields((prev) => {
-      const target = idx + delta;
-      if (target < 0 || target >= prev.length) return prev;
+      if (fromIdx < 0 || fromIdx >= prev.length) return prev;
       const next = [...prev];
-      [next[idx], next[target]] = [next[target], next[idx]];
+      const [picked] = next.splice(fromIdx, 1);
+      const clampedTo = Math.max(0, Math.min(toIdx, next.length));
+      next.splice(clampedTo, 0, picked);
       return next;
     });
   };
@@ -169,28 +183,52 @@ export function EditColumnsDialog({ boardSlug, initialFields, onClose, onSaved }
 
         <div className="space-y-2">
           {fields.map((f, idx) => (
-            <div key={`${f.key}-${idx}`} className="rounded-lg border border-border bg-surface p-2 space-y-2">
+            <div
+              key={`${f.key}-${idx}`}
+              draggable
+              onDragStart={(e) => {
+                setDragFromIdx(idx);
+                e.dataTransfer.effectAllowed = "move";
+                // Required for Firefox to actually start a drag.
+                try { e.dataTransfer.setData("text/plain", String(idx)); } catch {}
+              }}
+              onDragOver={(e) => {
+                if (dragFromIdx === null) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dragOverIdx !== idx) setDragOverIdx(idx);
+              }}
+              onDragLeave={(e) => {
+                if (!(e.currentTarget as Node).contains(e.relatedTarget as Node | null)) {
+                  if (dragOverIdx === idx) setDragOverIdx(null);
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragFromIdx !== null && dragFromIdx !== idx) move(dragFromIdx, idx);
+                setDragFromIdx(null);
+                setDragOverIdx(null);
+              }}
+              onDragEnd={() => {
+                setDragFromIdx(null);
+                setDragOverIdx(null);
+              }}
+              className={
+                "rounded-lg border bg-surface p-2 space-y-2 transition-colors " +
+                (dragFromIdx === idx ? "opacity-40 " : "") +
+                (dragOverIdx === idx && dragFromIdx !== idx
+                  ? "border-violet-400 ring-1 ring-violet-300/40"
+                  : "border-border")
+              }
+            >
               <div className="flex items-center gap-1.5">
-                <div className="flex flex-col gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => swap(idx, -1)}
-                    disabled={idx === 0}
-                    className="p-0.5 rounded text-muted-2 hover:text-foreground hover:bg-surface-2 disabled:opacity-30"
-                    aria-label="Move up"
-                  >
-                    <ArrowUp size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => swap(idx, 1)}
-                    disabled={idx === fields.length - 1}
-                    className="p-0.5 rounded text-muted-2 hover:text-foreground hover:bg-surface-2 disabled:opacity-30"
-                    aria-label="Move down"
-                  >
-                    <ArrowDown size={11} />
-                  </button>
-                </div>
+                <span
+                  className="cursor-grab active:cursor-grabbing p-1 text-muted-2 hover:text-foreground"
+                  title="Drag to reorder"
+                  aria-label="Drag handle"
+                >
+                  <GripVertical size={12} />
+                </span>
                 <input
                   type="text"
                   value={f.label}

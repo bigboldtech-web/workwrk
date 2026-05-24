@@ -7,6 +7,7 @@ import { Map as MapIcon } from "lucide-react";
 import { BoardView } from "@/components/board-view/board-view";
 import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   Empty, Loading, RoadmapModal, ROADMAP_FIELDS, type RoadmapItem,
 } from "@/components/dev/shared";
@@ -17,14 +18,17 @@ export default function DevRoadmapPage() {
   const [showNew, setShowNew] = useState(false);
   const [openItem, setOpenItem] = useState<RoadmapItem | null>(null);
 
+  const workspaceId = useActiveWorkspace("workwrk-dev");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/dev/roadmap");
+      const r = await fetch(`/api/dev/roadmap${wsQuery}`);
       const d = r.ok ? await r.json() : { items: [] };
       setItems(d.items || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [wsQuery]);
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
@@ -82,6 +86,7 @@ export default function DevRoadmapPage() {
 
       {showNew && (
         <RoadmapModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

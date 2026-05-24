@@ -176,6 +176,10 @@ export function AppWorkspaceNav() {
     setSwitcherOpen(false);
     if (typeof window !== "undefined" && currentProductSlug) {
       window.localStorage.setItem(activeWsStorageKey(currentProductSlug), id);
+      // Same-tab signal so `useActiveWorkspace` picks up the change
+      // without waiting for a focus/storage event. Cross-tab is
+      // already handled by the native `storage` event.
+      window.dispatchEvent(new CustomEvent("workwrk:workspace-change"));
     }
   };
 
@@ -269,36 +273,34 @@ export function AppWorkspaceNav() {
 
   return (
     <aside className="app-subnav app-workspace" aria-label={`${shortName(current)} workspace`}>
-      {/* App header — product name + icon. Hue accent picked up from
-          the catalog so each app reads visually distinct. */}
-      <header className="app-workspace-header">
-        <p className="app-subnav-eyebrow">{suiteLabel}</p>
-        <div className="app-workspace-title-row">
-          <span className={`app-workspace-icon hue-${current.hue}`} aria-hidden>
-            <ProductIcon size={14} />
-          </span>
-          <h2 className="app-subnav-title">{shortName(current)}</h2>
-        </div>
-      </header>
-
-      {/* Workspace switcher — popover with the workspaces this user can
-          see inside this product, plus an inline "+ New workspace"
-          flow for managers. Active selection is persisted to
-          localStorage (per product) until full data-scoping ships. */}
+      {/* Combined app header + workspace switcher. Previously this was
+          three stacked stripes (suite eyebrow + product title row +
+          workspace switcher button). Collapsed into one row so the
+          column reads as one nav, not two. Suite label is invisible
+          (the slim AppRail's "Workspace" tab already conveys
+          "you are in the workspace area"). */}
       {(() => {
         const active = workspaces.find((w) => w.id === activeWsId) ?? null;
-        const label = active?.name ?? (wsLoading ? "Loading…" : "Main workspace");
+        const wsLabel = active?.name ?? (wsLoading ? "" : "Main workspace");
         return (
           <div ref={switcherRef} className="app-workspace-switcher-wrap">
             <button
               type="button"
-              className="app-workspace-switcher"
-              title="Switch workspace"
+              className="app-workspace-header-row"
+              title={`Switch workspace · ${suiteLabel}`}
+              aria-label={`${shortName(current)} · ${wsLabel} · switch workspace`}
               aria-expanded={switcherOpen}
               onClick={() => setSwitcherOpen((v) => !v)}
             >
-              <span className={`app-workspace-switcher-dot hue-${current.hue}`} aria-hidden />
-              <span className="app-workspace-switcher-name truncate">{label}</span>
+              <span className={`app-workspace-icon hue-${current.hue}`} aria-hidden>
+                <ProductIcon size={13} />
+              </span>
+              <span className="app-workspace-header-titles">
+                <span className="app-workspace-header-name truncate">{shortName(current)}</span>
+                <span className="app-workspace-header-ws truncate">
+                  {wsLoading && !active ? "Loading…" : wsLabel}
+                </span>
+              </span>
               <ChevronDown
                 size={12}
                 className={"app-workspace-switcher-caret" + (switcherOpen ? " is-open" : "")}
@@ -532,7 +534,10 @@ export function AppWorkspaceNav() {
         )}
 
         <div className="app-subnav-divider" />
-        <Link href="/dashboard" className="app-subnav-item app-workspace-home">
+        {/* `?stay=1` bypasses the department-aware landing redirect on
+            /dashboard so this link lands a Sales person on the actual
+            dashboard, not back on /crm. See app/(dashboard)/dashboard/page.tsx. */}
+        <Link href="/dashboard?stay=1" className="app-subnav-item app-workspace-home">
           <Home size={13} />
           <span>Workspace home</span>
         </Link>

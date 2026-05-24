@@ -37,7 +37,58 @@ import {
 
 export type BoardFieldType =
   | "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX"
-  | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL";
+  | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL"
+  // USER stores a user id; the renderer resolves it to a name +
+  // avatar by looking up the org's people list. The value persists
+  // as a string for portability across orgs.
+  | "USER"
+  // RELATION stores the id of a row in another Studio board (or a
+  // canonical entity). v1 stores it as a string; rendering shows it
+  // as a small badge with "(unresolved)" until the relation
+  // resolution UI ships. Lets users define linked records today and
+  // upgrade the visual later.
+  | "RELATION"
+  // PRIORITY stores a level token (Critical/High/Medium/Low/None).
+  // Rendered as a color-coded chip — red/orange/amber/sky/zinc.
+  | "PRIORITY"
+  // STATUS is like SELECT but with bigger color swatches and is the
+  // canonical "lifecycle" column for kanban-style boards. Tokens come
+  // from the per-field choices (with a color hex/name).
+  | "STATUS"
+  // TIMELINE stores a date-range as `{start, end}` (ISO strings).
+  // Rendered as a horizontal bar with the duration in days.
+  | "TIMELINE"
+  // RATING stores an integer 0..5. Rendered as filled/empty stars.
+  | "RATING"
+  // PROGRESS stores 0..100. Rendered as a thin filled bar + percent.
+  | "PROGRESS"
+  // FILES stores an array of `{name, url, mimeType, size}`. Rendered
+  // as a paperclip + count chip. Upload UI ships next.
+  | "FILES"
+  // PHONE stores a string with optional country prefix. Rendered as
+  // a tel: link.
+  | "PHONE"
+  // LOCATION stores a free-text address or `{lat, lng, label}` blob.
+  // Rendered as a pin icon + truncated label.
+  | "LOCATION"
+  // COUNTRY stores an ISO-2 code (e.g. "US"). Rendered as flag + name.
+  | "COUNTRY"
+  // TAGS stores a string[] of free-text tags (no predefined choices —
+  // distinguished from MULTI_SELECT, where choices are fixed).
+  | "TAGS"
+  // DURATION stores total seconds. Rendered as `H:MM:SS` (or `Mm Ss`
+  // for short durations). Future: a "start/stop" tracker UI sits on
+  // top of this column to power a time-tracking workflow.
+  | "DURATION"
+  // FORMULA stores an expression string (e.g. `{budget} - {spent}`).
+  // v1: just renders the expression in mono. v2: evaluates against
+  // the row's other fields and renders the result. Read-only.
+  | "FORMULA"
+  // CONNECT_BOARDS stores `{boardSlug, itemIds: string[]}`. Rendered
+  // as a list of chip badges referencing the linked board's items.
+  // v1: stores raw ids; full picker UI lands once the cross-board
+  // search wire is in place.
+  | "CONNECT_BOARDS";
 
 export interface BoardField {
   key: string;
@@ -1096,6 +1147,118 @@ function InlineEditor({
         </div>
       );
     }
+    case "PRIORITY": {
+      const levels = ["None", "Low", "Medium", "High", "Critical"];
+      return (
+        <select
+          autoFocus
+          defaultValue={(value as string) ?? "None"}
+          onClick={stop}
+          onChange={(e) => onCommit(e.target.value)}
+          onBlur={onCancel}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); }}
+          className={baseInputClass}
+        >
+          {levels.map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+      );
+    }
+    case "STATUS": {
+      const choices = field.options?.choices ?? [];
+      return (
+        <select
+          autoFocus
+          defaultValue={(value as string) ?? ""}
+          onClick={stop}
+          onChange={(e) => onCommit(e.target.value || null)}
+          onBlur={onCancel}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); }}
+          className={baseInputClass}
+        >
+          <option value="">— None —</option>
+          {choices.map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
+        </select>
+      );
+    }
+    case "RATING":
+      return (
+        <select
+          autoFocus
+          defaultValue={String(value ?? 0)}
+          onClick={stop}
+          onChange={(e) => onCommit(Number(e.target.value))}
+          onBlur={onCancel}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); }}
+          className={baseInputClass}
+        >
+          {[0,1,2,3,4,5].map((n) => <option key={n} value={n}>{"★".repeat(n) + "☆".repeat(5-n)}</option>)}
+        </select>
+      );
+    case "PROGRESS":
+      return (
+        <input
+          autoFocus
+          type="number"
+          min={0}
+          max={100}
+          defaultValue={value != null ? String(value) : ""}
+          onClick={stop}
+          onBlur={(e) => {
+            const n = Number(e.target.value);
+            onCommit(Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null);
+          }}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          className={baseInputClass}
+        />
+      );
+    case "PHONE":
+      return (
+        <input
+          autoFocus
+          type="tel"
+          defaultValue={(value as string) ?? ""}
+          onClick={stop}
+          onBlur={(e) => onCommit(e.target.value || null)}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          className={baseInputClass}
+        />
+      );
+    case "DURATION":
+      // Edit as minutes for ergonomics — internally we store seconds.
+      return (
+        <input
+          autoFocus
+          type="number"
+          min={0}
+          step="0.25"
+          defaultValue={value != null ? String(Math.round((Number(value) / 60) * 100) / 100) : ""}
+          placeholder="Minutes"
+          onClick={stop}
+          onBlur={(e) => {
+            const mins = Number(e.target.value);
+            onCommit(Number.isFinite(mins) ? Math.round(mins * 60) : null);
+          }}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          className={baseInputClass}
+        />
+      );
+    case "TAGS":
+      // Edit as comma-separated free text; split on commit.
+      return (
+        <input
+          autoFocus
+          type="text"
+          defaultValue={Array.isArray(value) ? (value as string[]).join(", ") : ""}
+          placeholder="tag1, tag2"
+          onClick={stop}
+          onBlur={(e) => {
+            const arr = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+            onCommit(arr.length ? arr : null);
+          }}
+          onKeyDown={(e) => { stop(e); if (e.key === "Escape") onCancel(); if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          className={baseInputClass}
+        />
+      );
     case "URL":
     case "EMAIL":
     case "TEXT":
@@ -1423,6 +1586,148 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       return <a href={`mailto:${String(value)}`} onClick={(e) => e.stopPropagation()} className="text-xs text-violet-600 hover:underline">{String(value)}</a>;
     case "TEXTAREA":
       return <span className="line-clamp-2 text-xs text-muted">{String(value)}</span>;
+    case "USER":
+      // v1: just show the stored id as a chip with an avatar initial.
+      // The full resolve-to-name lookup wires up when we add a shared
+      // people-by-id hook the table can call.
+      return (
+        <span className="inline-flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300">
+          <span className="inline-flex w-4 h-4 rounded-full bg-violet-500 text-white items-center justify-center text-[9px] font-semibold">
+            {String(value).charAt(0).toUpperCase()}
+          </span>
+          <span className="truncate max-w-[120px] font-mono">{String(value).slice(0, 12)}</span>
+        </span>
+      );
+    case "RELATION":
+      // v1: chip with the stored id. The "click to open linked record"
+      // behavior comes once a relation-resolution API exists.
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/30 text-sky-700 dark:text-sky-300">
+          ↗ <span className="font-mono truncate max-w-[140px]">{String(value).slice(0, 18)}</span>
+        </span>
+      );
+    case "PRIORITY": {
+      const v = String(value).toLowerCase();
+      const tone =
+        v.startsWith("crit") ? "bg-rose-600 text-white" :
+        v.startsWith("high") || v === "urgent" ? "bg-orange-500 text-white" :
+        v.startsWith("med") || v === "normal" ? "bg-amber-400 text-amber-950" :
+        v.startsWith("low") ? "bg-sky-400 text-white" :
+        "bg-zinc-200 dark:bg-zinc-700 text-foreground";
+      return <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${tone}`}>{String(value)}</span>;
+    }
+    case "STATUS": {
+      const choice = field.options?.choices?.find((c) => c.value === value);
+      const colorClass = choice?.color
+        // Treat color as a Tailwind hue token: `violet`, `emerald`, …
+        ? `bg-${choice.color}-500 text-white`
+        : "bg-zinc-500 text-white";
+      return <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${colorClass}`}>{choice?.label ?? String(value)}</span>;
+    }
+    case "TIMELINE": {
+      const tl = typeof value === "object" && value !== null ? value as { start?: string; end?: string } : null;
+      if (!tl?.start || !tl?.end) return <span className="text-muted-2">—</span>;
+      const start = new Date(tl.start);
+      const end = new Date(tl.end);
+      const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+      return (
+        <div className="inline-flex items-center gap-2 text-[11px]">
+          <div className="relative w-24 h-1.5 rounded-full bg-violet-200 dark:bg-violet-900/40">
+            <div className="absolute inset-0 rounded-full bg-violet-500" />
+          </div>
+          <span className="text-muted tabular-nums">{days}d</span>
+        </div>
+      );
+    }
+    case "RATING": {
+      const n = Math.max(0, Math.min(5, Number(value) || 0));
+      return (
+        <span className="inline-flex gap-0.5 text-amber-500 text-xs">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <span key={i} className={i < n ? "" : "text-zinc-300 dark:text-zinc-600"}>★</span>
+          ))}
+        </span>
+      );
+    }
+    case "PROGRESS": {
+      const pct = Math.max(0, Math.min(100, Number(value) || 0));
+      return (
+        <div className="inline-flex items-center gap-2 w-28">
+          <div className="flex-1 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+            <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+          </div>
+          <span className="text-[11px] text-muted-2 tabular-nums w-8 text-right">{pct}%</span>
+        </div>
+      );
+    }
+    case "FILES": {
+      const arr = Array.isArray(value) ? (value as unknown[]) : [];
+      if (arr.length === 0) return <span className="text-muted-2">—</span>;
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-muted">
+          📎 <span className="tabular-nums">{arr.length}</span>
+        </span>
+      );
+    }
+    case "PHONE":
+      return <a href={`tel:${String(value)}`} onClick={(e) => e.stopPropagation()} className="text-xs text-violet-600 hover:underline">{String(value)}</a>;
+    case "LOCATION": {
+      const label = typeof value === "object" && value !== null && "label" in (value as Record<string, unknown>)
+        ? String((value as Record<string, unknown>).label ?? "")
+        : String(value);
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-muted">
+          📍 <span className="truncate max-w-[160px]">{label}</span>
+        </span>
+      );
+    }
+    case "COUNTRY": {
+      const code = String(value).toUpperCase().slice(0, 2);
+      // Convert ISO-2 to Unicode flag emoji.
+      const flag = code.length === 2
+        ? String.fromCodePoint(...[...code].map((c) => 127397 + c.charCodeAt(0)))
+        : "🌐";
+      return <span className="inline-flex items-center gap-1 text-xs">{flag} <span className="text-muted">{code}</span></span>;
+    }
+    case "TAGS": {
+      const arr = Array.isArray(value) ? (value as string[]) : [];
+      if (arr.length === 0) return <span className="text-muted-2">—</span>;
+      return (
+        <div className="inline-flex flex-wrap gap-1">
+          {arr.slice(0, compact ? 2 : 6).map((t) => (
+            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">#{t}</span>
+          ))}
+          {arr.length > (compact ? 2 : 6) && <span className="text-[10px] text-muted-2">+{arr.length - (compact ? 2 : 6)}</span>}
+        </div>
+      );
+    }
+    case "DURATION": {
+      const secs = Math.max(0, Number(value) || 0);
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      const s = secs % 60;
+      const txt = h > 0
+        ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+        : `${m}:${String(s).padStart(2, "0")}`;
+      return <span className="inline-flex items-center gap-1 text-xs font-mono text-muted">⏱ {txt}</span>;
+    }
+    case "FORMULA":
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-mono text-muted-2">
+          ƒ <span className="truncate max-w-[160px]">{String(value)}</span>
+        </span>
+      );
+    case "CONNECT_BOARDS": {
+      const linked = typeof value === "object" && value !== null && "itemIds" in (value as Record<string, unknown>)
+        ? ((value as Record<string, unknown>).itemIds as unknown[])
+        : Array.isArray(value) ? value as unknown[] : [];
+      if (linked.length === 0) return <span className="text-muted-2">—</span>;
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300">
+          🔗 <span className="tabular-nums">{linked.length}</span> linked
+        </span>
+      );
+    }
     default:
       return <span className="truncate inline-block max-w-[280px]">{String(value)}</span>;
   }

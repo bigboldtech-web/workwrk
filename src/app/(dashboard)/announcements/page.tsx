@@ -29,6 +29,7 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorRetry } from "@/components/ui/error-retry";
+import { DocEditorDialog } from "@/components/notes/doc-editor-dialog";
 
 const TYPES = [
   { value: "INFO", label: "Information", icon: Megaphone },
@@ -81,6 +82,10 @@ export default function AnnouncementsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  // Doc-popup overlay state — opens when a user clicks an announcement
+  // card's body, letting them read (and managers edit) the full content
+  // in a monday-style focused overlay.
+  const [popupAnnouncement, setPopupAnnouncement] = useState<{ id: string; title: string; content: string } | null>(null);
   const [form, setForm] = useState({ title: "", content: "", type: "INFO", priority: "NORMAL", pinned: false, mustAcknowledge: false, expiresAt: "" });
   // Audience + scheduling are separate state slices so the form object
   // can stay a flat string-keyed bag (re-used by API).
@@ -292,7 +297,13 @@ export default function AnnouncementsPage() {
                       <Megaphone size={16} className="mt-1 text-[color:var(--accent-strong)] shrink-0" />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <h3 className="text-sm font-semibold">{a.title}</h3>
+                          <button
+                            type="button"
+                            onClick={() => setPopupAnnouncement({ id: a.id, title: a.title, content: a.content })}
+                            className="text-sm font-semibold hover:underline text-left"
+                          >
+                            {a.title}
+                          </button>
                           <Badge variant="outline" className="text-[10px]">{a.type}</Badge>
                           <Badge variant={a.priority === "URGENT" ? "destructive" : "secondary"} className="text-[10px]">{a.priority}</Badge>
                           {a.pinned && <Pin size={12} className="text-[color:var(--accent-strong)]" aria-label="Pinned" />}
@@ -538,6 +549,27 @@ export default function AnnouncementsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Doc-popup overlay — opens when a user clicks an announcement
+          title. Managers can edit + save; everyone else gets a focused
+          read view (readOnly). */}
+      <DocEditorDialog
+        open={!!popupAnnouncement}
+        onClose={() => setPopupAnnouncement(null)}
+        breadcrumb={["Announcements"]}
+        title={popupAnnouncement?.title ?? ""}
+        body={popupAnnouncement?.content ?? ""}
+        readOnly={!isManager}
+        onSave={async ({ title, body }) => {
+          if (!popupAnnouncement) return;
+          await fetch(`/api/announcements/${popupAnnouncement.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, content: body }),
+          });
+          setAnnouncements((prev) => prev.map((x) => x.id === popupAnnouncement.id ? { ...x, title, content: body } : x));
+        }}
+      />
     </div>
   );
 }

@@ -5,11 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 
-export async function GET() {
+export async function GET(req: Request) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;
+  const workspaceId = new URL(req.url).searchParams.get("workspace");
   const items = await prisma.roadmapItem.findMany({
-    where: { organizationId: ctx.orgId },
+    where: {
+      organizationId: ctx.orgId,
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+    },
     orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
     take: 300,
   });
@@ -26,6 +30,7 @@ const createSchema = z.object({
   effortPoints: z.number().int().nonnegative().optional(),
   impactScore: z.number().int().min(1).max(10).optional(),
   publicVisible: z.boolean().optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -38,6 +43,7 @@ export async function POST(req: Request) {
   const item = await prisma.roadmapItem.create({
     data: {
       organizationId: ctx.orgId,
+      workspaceId: parsed.data.workspaceId ?? null,
       title: parsed.data.title,
       description: parsed.data.description,
       theme: parsed.data.theme,

@@ -168,7 +168,7 @@ function ItsmActions({ onClose, onSubmit, saving, disabled, submitLabel = "Creat
   );
 }
 
-export function NewTicketModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function NewTicketModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("NORMAL");
@@ -181,7 +181,7 @@ export function NewTicketModal({ onClose, onCreated }: { onClose: () => void; on
       await fetch("/api/itsm/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), description, priority, category }),
+        body: JSON.stringify({ title: title.trim(), description, priority, category, workspaceId: workspaceId ?? undefined }),
       });
       onCreated();
     } finally { setSaving(false); }
@@ -213,7 +213,7 @@ export function NewTicketModal({ onClose, onCreated }: { onClose: () => void; on
   );
 }
 
-export function NewIncidentModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function NewIncidentModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [severity, setSeverity] = useState("SEV3");
@@ -231,6 +231,7 @@ export function NewIncidentModal({ onClose, onCreated }: { onClose: () => void; 
           summary,
           severity,
           affectedServices: services.split(",").map((s) => s.trim()).filter(Boolean),
+          workspaceId: workspaceId ?? undefined,
         }),
       });
       onCreated();
@@ -263,7 +264,7 @@ export function NewIncidentModal({ onClose, onCreated }: { onClose: () => void; 
   );
 }
 
-export function NewArticleModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function NewArticleModal({ onClose, onCreated, workspaceId }: { onClose: () => void; onCreated: () => void; workspaceId?: string | null }) {
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
   const [excerpt, setExcerpt] = useState("");
@@ -285,7 +286,7 @@ export function NewArticleModal({ onClose, onCreated }: { onClose: () => void; o
       const res = await fetch("/api/itsm/kb-articles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: slug.trim(), title: title.trim(), body: bodyText, excerpt, category, publish }),
+        body: JSON.stringify({ slug: slug.trim(), title: title.trim(), body: bodyText, excerpt, category, publish, workspaceId: workspaceId ?? undefined }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

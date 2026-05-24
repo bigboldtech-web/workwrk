@@ -2131,8 +2131,51 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
 .app-workspace.app-subnav {
   width: 248px;
 }
+
+/* Combined header + workspace switcher. One row instead of the
+ * earlier three-stripe stack. Acts as the popover trigger too. */
+.app-workspace-header-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 10px;
+  margin: 6px 0 4px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out);
+}
+.app-workspace-header-row:hover {
+  background: var(--surface-elevated);
+  border-color: var(--color-border);
+}
+.app-workspace-header-titles {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.1;
+  gap: 1px;
+}
+.app-workspace-header-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  letter-spacing: -0.01em;
+}
+.app-workspace-header-ws {
+  font-size: 11px;
+  color: var(--color-muted-2);
+}
+
+/* Legacy header (kept for any callers that still use them — unused
+ * in the trimmed app-workspace-nav). Hidden so they don't double up. */
 .app-workspace-header {
-  padding: 14px 14px 6px;
+  display: none;
 }
 .app-workspace-title-row {
   display: flex;

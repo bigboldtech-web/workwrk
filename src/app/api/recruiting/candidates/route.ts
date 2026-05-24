@@ -30,6 +30,18 @@ export async function GET(req: NextRequest) {
       { email: { contains: search, mode: "insensitive" } },
     ];
   }
+  // Workspace filter — see CRM pattern in /api/crm/leads. Legacy rows
+  // (workspaceId null) remain visible across every workspace.
+  const workspaceId = sp.get("workspace");
+  if (workspaceId) {
+    if (where.OR) {
+      // Combine search OR with workspace OR using AND.
+      where.AND = [{ OR: where.OR }, { OR: [{ workspaceId }, { workspaceId: null }] }];
+      delete where.OR;
+    } else {
+      where.OR = [{ workspaceId }, { workspaceId: null }];
+    }
+  }
 
   const candidates = await prisma.candidate.findMany({
     where,
@@ -79,9 +91,11 @@ export async function POST(req: NextRequest) {
     return jsonError("A candidate with that email already exists in this org", 409);
   }
 
+  const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId : null;
   const candidate = await prisma.candidate.create({
     data: {
       organizationId: orgId,
+      workspaceId,
       firstName,
       lastName,
       email: emailRaw,

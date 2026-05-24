@@ -5,11 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 
-export async function GET() {
+export async function GET(req: Request) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;
+  const workspaceId = new URL(req.url).searchParams.get("workspace");
   const contracts = await prisma.contract.findMany({
-    where: { organizationId: ctx.orgId },
+    where: {
+      organizationId: ctx.orgId,
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+    },
     orderBy: [{ status: "asc" }, { createdAt: "desc" }],
     take: 200,
   });
@@ -29,6 +33,7 @@ const createSchema = z.object({
   autoRenew: z.boolean().optional(),
   documentUrl: z.string().max(500).optional(),
   description: z.string().max(8000).optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -41,6 +46,7 @@ export async function POST(req: Request) {
   const contract = await prisma.contract.create({
     data: {
       organizationId: ctx.orgId,
+      workspaceId: parsed.data.workspaceId ?? null,
       title: parsed.data.title,
       counterparty: parsed.data.counterparty,
       counterpartyType: parsed.data.counterpartyType,

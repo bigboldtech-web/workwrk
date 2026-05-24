@@ -13,6 +13,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const category = searchParams.get("category");
   const onlyPublished = searchParams.get("published") === "true";
+  const workspaceId = searchParams.get("workspace");
 
   const articles = await prisma.kbArticle.findMany({
     where: {
@@ -20,6 +21,7 @@ export async function GET(req: Request) {
       archivedAt: null,
       ...(category ? { category } : {}),
       ...(onlyPublished ? { publishedAt: { not: null } } : {}),
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
     },
     orderBy: { updatedAt: "desc" },
     take: 200,
@@ -36,6 +38,7 @@ const createSchema = z.object({
   category: z.string().max(80).optional(),
   tags: z.array(z.string()).optional(),
   publish: z.boolean().optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -52,6 +55,7 @@ export async function POST(req: Request) {
     const article = await prisma.kbArticle.create({
       data: {
         organizationId: ctx.orgId,
+        workspaceId: parsed.data.workspaceId ?? null,
         slug: parsed.data.slug,
         title: parsed.data.title,
         body: parsed.data.body,

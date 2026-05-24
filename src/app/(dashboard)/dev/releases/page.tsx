@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Rocket } from "lucide-react";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   Empty, Loading, ReleaseModal, RELEASE_TONES, type Release,
 } from "@/components/dev/shared";
@@ -14,14 +15,17 @@ export default function DevReleasesPage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
 
+  const workspaceId = useActiveWorkspace("workwrk-dev");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/dev/releases");
+      const r = await fetch(`/api/dev/releases${wsQuery}`);
       const d = r.ok ? await r.json() : { releases: [] };
       setReleases(d.releases || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [wsQuery]);
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
@@ -83,6 +87,7 @@ export default function DevReleasesPage() {
 
       {showNew && (
         <ReleaseModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

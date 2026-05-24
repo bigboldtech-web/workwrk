@@ -5,11 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 
-export async function GET() {
+export async function GET(req: Request) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;
+  const workspaceId = new URL(req.url).searchParams.get("workspace");
   const campaigns = await prisma.campaign.findMany({
-    where: { organizationId: ctx.orgId },
+    where: {
+      organizationId: ctx.orgId,
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+    },
     orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
     take: 200,
   });
@@ -26,6 +30,7 @@ const createSchema = z.object({
   goalMetric: z.string().max(40).optional(),
   goalTarget: z.number().int().nonnegative().optional(),
   utmCampaign: z.string().max(80).optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -38,6 +43,7 @@ export async function POST(req: Request) {
   const campaign = await prisma.campaign.create({
     data: {
       organizationId: ctx.orgId,
+      workspaceId: parsed.data.workspaceId ?? null,
       name: parsed.data.name,
       description: parsed.data.description,
       channel: parsed.data.channel,

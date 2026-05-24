@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   DealCard, KpiCard, NewOpportunityModal, formatMoney,
   type Stage, type Opportunity, type Account,
@@ -17,13 +18,19 @@ export default function CrmPipelinePage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
 
+  // Workspace switcher selection — when set, the API filters deals +
+  // accounts to this workspace (plus legacy null-workspace rows).
+  // Pipeline stages stay org-wide (they're shared config, not data).
+  const workspaceId = useActiveWorkspace("workwrk-crm");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const [s, o, a] = await Promise.all([
         fetch("/api/crm/pipeline-stages").then((r) => r.ok ? r.json() : { stages: [] }),
-        fetch("/api/crm/opportunities").then((r) => r.ok ? r.json() : { opportunities: [] }),
-        fetch("/api/crm/accounts").then((r) => r.ok ? r.json() : { accounts: [] }),
+        fetch(`/api/crm/opportunities${wsQuery}`).then((r) => r.ok ? r.json() : { opportunities: [] }),
+        fetch(`/api/crm/accounts${wsQuery}`).then((r) => r.ok ? r.json() : { accounts: [] }),
       ]);
       setStages(s.stages || []);
       setOpps(o.opportunities || []);
@@ -31,7 +38,7 @@ export default function CrmPipelinePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [wsQuery]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -151,6 +158,7 @@ export default function CrmPipelinePage() {
         <NewOpportunityModal
           accounts={accounts}
           stages={stages}
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

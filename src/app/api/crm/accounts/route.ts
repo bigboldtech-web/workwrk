@@ -6,12 +6,18 @@ import { prisma } from "@/lib/prisma";
 import { resolveCrmContext } from "@/lib/crm/auth";
 import { z } from "zod";
 
-export async function GET() {
+export async function GET(req: Request) {
   const ctx = await resolveCrmContext();
   if ("error" in ctx) return ctx.error;
 
+  const { searchParams } = new URL(req.url);
+  const workspaceId = searchParams.get("workspace");
+
   const accounts = await prisma.account.findMany({
-    where: { organizationId: ctx.orgId },
+    where: {
+      organizationId: ctx.orgId,
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+    },
     orderBy: { createdAt: "desc" },
     include: {
       _count: { select: { opportunities: true } },
@@ -32,6 +38,7 @@ const createSchema = z.object({
   description: z.string().max(4000).optional(),
   type: z.enum(["PROSPECT", "CUSTOMER", "PARTNER", "CHURNED", "COMPETITOR"]).optional(),
   ownerId: z.string().optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -48,6 +55,7 @@ export async function POST(req: Request) {
     const account = await prisma.account.create({
       data: {
         organizationId: ctx.orgId,
+        workspaceId: parsed.data.workspaceId ?? null,
         name: parsed.data.name,
         domain: parsed.data.domain,
         industry: parsed.data.industry,

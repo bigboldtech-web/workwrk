@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BookOpen } from "lucide-react";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   NewArticleModal, EmptyState, timeAgo, type KbArticle,
 } from "@/components/itsm/shared";
@@ -14,14 +15,17 @@ export default function ItsmKbPage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
 
+  const workspaceId = useActiveWorkspace("workwrk-itsm");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/itsm/kb-articles");
+      const r = await fetch(`/api/itsm/kb-articles${wsQuery}`);
       const d = r.ok ? await r.json() : { articles: [] };
       setArticles(d.articles || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [wsQuery]);
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
@@ -68,6 +72,7 @@ export default function ItsmKbPage() {
 
       {showNew && (
         <NewArticleModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

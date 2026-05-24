@@ -2986,6 +2986,7 @@ model Job {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?      // nullable: legacy rows are workspace-agnostic
 
   title          String
   description    String?
@@ -3017,6 +3018,7 @@ model Job {
 
   @@index([organizationId, status])
   @@index([organizationId, departmentId])
+  @@index([organizationId, workspaceId])
   @@index([hiringManagerId])
 }
 
@@ -3024,6 +3026,7 @@ model Candidate {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?      // nullable: legacy rows are workspace-agnostic
 
   firstName String
   lastName  String
@@ -3045,6 +3048,7 @@ model Candidate {
 
   @@unique([organizationId, email])
   @@index([organizationId])
+  @@index([organizationId, workspaceId])
   @@index([hiredUserId])
 }
 
@@ -4724,6 +4728,11 @@ model Lead {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Workspace this lead belongs to — Sales Team A vs Sales Team B
+  // inside the same CRM. Nullable so legacy rows (pre-workspaces)
+  // show up under every workspace's view (org-wide visibility). New
+  // leads default to the active workspace at creation time.
+  workspaceId    String?
   firstName      String
   lastName       String?
   email          String?
@@ -4744,6 +4753,7 @@ model Lead {
 
   @@index([organizationId, status])
   @@index([organizationId, ownerId])
+  @@index([organizationId, workspaceId])
   @@index([email])
 }
 
@@ -4760,6 +4770,9 @@ model Account {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Workspace this account belongs to — see Lead.workspaceId for the
+  // nullable-for-back-compat rationale.
+  workspaceId    String?
   name           String
   domain         String?
   industry       String?
@@ -4778,6 +4791,7 @@ model Account {
   @@unique([organizationId, name])
   @@index([organizationId, type])
   @@index([organizationId, ownerId])
+  @@index([organizationId, workspaceId])
 }
 
 enum AccountType {
@@ -4814,6 +4828,9 @@ model Opportunity {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Workspace this deal belongs to — see Lead.workspaceId for the
+  // nullable-for-back-compat rationale.
+  workspaceId    String?
   name           String
   accountId      String?
   account        Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
@@ -4835,6 +4852,7 @@ model Opportunity {
   @@index([organizationId, pipelineStageId])
   @@index([organizationId, ownerId])
   @@index([organizationId, accountId])
+  @@index([organizationId, workspaceId])
   @@index([expectedCloseDate])
 }
 
@@ -4850,6 +4868,7 @@ model Ticket {
   id             String          @id @default(cuid())
   organizationId String
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?         // nullable: legacy rows are workspace-agnostic
   title          String
   description    String?         @db.Text
   status         TicketStatus    @default(OPEN)
@@ -4871,6 +4890,7 @@ model Ticket {
   @@index([organizationId, status])
   @@index([organizationId, assigneeId])
   @@index([organizationId, priority])
+  @@index([organizationId, workspaceId])
   @@index([requesterId])
   @@index([dueAt])
 }
@@ -4907,6 +4927,7 @@ model Incident {
   id              String           @id @default(cuid())
   organizationId  String
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId     String?          // nullable: legacy rows are workspace-agnostic
   title           String
   summary         String?          @db.Text
   severity        IncidentSeverity @default(SEV3)
@@ -4924,6 +4945,7 @@ model Incident {
 
   @@index([organizationId, status])
   @@index([organizationId, severity])
+  @@index([organizationId, workspaceId])
   @@index([startedAt])
 }
 
@@ -4949,6 +4971,7 @@ model KbArticle {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?      // nullable: legacy rows are workspace-agnostic
   slug           String
   title          String
   body           String       @db.Text
@@ -4966,6 +4989,7 @@ model KbArticle {
 
   @@unique([organizationId, slug])
   @@index([organizationId, category])
+  @@index([organizationId, workspaceId])
   @@index([publishedAt])
 }
 
@@ -4980,6 +5004,7 @@ model Campaign {
   id             String         @id @default(cuid())
   organizationId String
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?        // nullable: legacy rows are workspace-agnostic
   name           String
   description    String?        @db.Text
   status         CampaignStatus @default(PLANNING)
@@ -5000,6 +5025,7 @@ model Campaign {
 
   @@index([organizationId, status])
   @@index([organizationId, ownerId])
+  @@index([organizationId, workspaceId])
   @@index([startDate])
 }
 
@@ -5016,6 +5042,7 @@ model ContentItem {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?       // nullable: legacy rows are workspace-agnostic
   title          String
   type           ContentType   @default(BLOG_POST)
   status         ContentStatus @default(IDEA)
@@ -5035,6 +5062,7 @@ model ContentItem {
 
   @@index([organizationId, status])
   @@index([organizationId, type])
+  @@index([organizationId, workspaceId])
   @@index([scheduledFor])
 }
 
@@ -5068,6 +5096,7 @@ model EventBrief {
   id             String         @id @default(cuid())
   organizationId String
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?        // nullable: legacy rows are workspace-agnostic
   name           String
   description    String?        @db.Text
   type           String?        // "Conference" | "Trade Show" | "Webinar" | "Customer Event" | "Field Event"
@@ -5090,6 +5119,7 @@ model EventBrief {
   updatedAt      DateTime       @updatedAt
 
   @@index([organizationId, status])
+  @@index([organizationId, workspaceId])
   @@index([startDate])
 }
 
@@ -5115,6 +5145,7 @@ model Sprint {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?      // nullable: legacy rows are workspace-agnostic
   name           String       // "Sprint 23" | "Q1 W3"
   goal           String?      @db.Text
   startDate      DateTime
@@ -5132,6 +5163,7 @@ model Sprint {
 
   @@index([organizationId, status])
   @@index([organizationId, startDate])
+  @@index([organizationId, workspaceId])
 }
 
 enum SprintStatus {
@@ -5146,6 +5178,7 @@ model Release {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?       // nullable: legacy rows are workspace-agnostic
   version        String        // "2024.11.3" | "v3.0.0-beta.2"
   name           String?
   description    String?       @db.Text
@@ -5163,6 +5196,7 @@ model Release {
 
   @@unique([organizationId, version])
   @@index([organizationId, status])
+  @@index([organizationId, workspaceId])
   @@index([scheduledFor])
 }
 
@@ -5180,6 +5214,7 @@ model RoadmapItem {
   id             String          @id @default(cuid())
   organizationId String
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?         // nullable: legacy rows are workspace-agnostic
   title          String
   description    String?         @db.Text
   theme          String?         // "Performance" | "AI" | "Mobile" | "Enterprise" | ...
@@ -5199,6 +5234,7 @@ model RoadmapItem {
 
   @@index([organizationId, status])
   @@index([organizationId, quarter])
+  @@index([organizationId, workspaceId])
   @@index([parentId])
 }
 
@@ -5230,6 +5266,7 @@ model Contract {
   id              String         @id @default(cuid())
   organizationId  String
   organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId     String?        // nullable: legacy rows are workspace-agnostic
   title           String
   counterparty    String         // the other party's name
   counterpartyType String?       // "Customer" | "Vendor" | "Partner" | "Investor" | "Employee" | ...
@@ -5254,6 +5291,7 @@ model Contract {
 
   @@index([organizationId, status])
   @@index([organizationId, counterparty])
+  @@index([organizationId, workspaceId])
   @@index([expiresAt])
 }
 

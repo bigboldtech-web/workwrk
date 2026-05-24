@@ -5,11 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 
-export async function GET() {
+export async function GET(req: Request) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;
+  const workspaceId = new URL(req.url).searchParams.get("workspace");
   const releases = await prisma.release.findMany({
-    where: { organizationId: ctx.orgId },
+    where: {
+      organizationId: ctx.orgId,
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
+    },
     orderBy: [{ scheduledFor: "desc" }, { createdAt: "desc" }],
     take: 100,
   });
@@ -24,6 +28,7 @@ const createSchema = z.object({
   releaseType: z.string().max(20).optional(),
   scheduledFor: z.string().optional(),
   isPublic: z.boolean().optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -37,6 +42,7 @@ export async function POST(req: Request) {
     const release = await prisma.release.create({
       data: {
         organizationId: ctx.orgId,
+        workspaceId: parsed.data.workspaceId ?? null,
         version: parsed.data.version,
         name: parsed.data.name,
         description: parsed.data.description,

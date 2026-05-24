@@ -7,6 +7,7 @@ import { FileText } from "lucide-react";
 import { BoardView } from "@/components/board-view/board-view";
 import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   CONTENT_FIELDS, ContentModal, Empty, Loading, type ContentItem,
 } from "@/components/marketing/shared";
@@ -17,14 +18,17 @@ export default function MarketingContentPage() {
   const [showNew, setShowNew] = useState(false);
   const [open, setOpen] = useState<ContentItem | null>(null);
 
+  const workspaceId = useActiveWorkspace("workwrk-campaigns");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/marketing/content");
+      const r = await fetch(`/api/marketing/content${wsQuery}`);
       const d = r.ok ? await r.json() : { items: [] };
       setItems(d.items || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [wsQuery]);
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
@@ -63,6 +67,7 @@ export default function MarketingContentPage() {
 
       {showNew && (
         <ContentModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

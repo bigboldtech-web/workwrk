@@ -14,11 +14,16 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
+  // Workspace filter — passed by /crm/leads with the user's active
+  // workspace. Legacy rows (workspaceId null) are visible across all
+  // workspaces so the column-add migration doesn't hide anything.
+  const workspaceId = searchParams.get("workspace");
 
   const leads = await prisma.lead.findMany({
     where: {
       organizationId: ctx.orgId,
       ...(status ? { status: status as "NEW" | "CONTACTED" | "QUALIFIED" | "UNQUALIFIED" | "CONVERTED" | "DISQUALIFIED" } : {}),
+      ...(workspaceId ? { OR: [{ workspaceId }, { workspaceId: null }] } : {}),
     },
     orderBy: { createdAt: "desc" },
     take: 200,
@@ -37,6 +42,7 @@ const createSchema = z.object({
   source: z.string().max(40).optional(),
   notes: z.string().max(4000).optional(),
   ownerId: z.string().optional(),
+  workspaceId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -52,6 +58,7 @@ export async function POST(req: Request) {
   const lead = await prisma.lead.create({
     data: {
       organizationId: ctx.orgId,
+      workspaceId: parsed.data.workspaceId ?? null,
       firstName: parsed.data.firstName,
       lastName: parsed.data.lastName,
       email: parsed.data.email || undefined,

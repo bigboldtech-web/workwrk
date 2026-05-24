@@ -16,7 +16,17 @@ const ADMIN_LEVELS = new Set([
   "MANAGER", "TEAM_LEAD", "HR",
 ]);
 
-const FIELD_TYPES = ["TEXT", "TEXTAREA", "NUMBER", "DATE", "CHECKBOX", "SELECT", "MULTI_SELECT", "URL", "EMAIL"] as const;
+const FIELD_TYPES = [
+  "TEXT", "TEXTAREA", "NUMBER", "DATE", "CHECKBOX",
+  "SELECT", "MULTI_SELECT", "URL", "EMAIL",
+  "USER", "RELATION",
+  // Power columns. PRIORITY/STATUS share the SELECT shape; the
+  // renderer picks them up by fieldType for color + chip treatment.
+  "PRIORITY", "STATUS",
+  "TIMELINE", "RATING", "PROGRESS",
+  "FILES", "PHONE", "LOCATION", "COUNTRY",
+  "TAGS", "DURATION", "FORMULA", "CONNECT_BOARDS",
+] as const;
 
 const fieldSchema = z.object({
   key: z.string().min(1).max(40).regex(/^[a-z][a-zA-Z0-9_]*$/, "key must start with a letter and use only alphanumerics + underscore"),

@@ -66,84 +66,17 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     landingHref: "/tasks/board",
     seededTemplates: ["personal-todo", "team-sprint", "project-tracker"],
   },
-  {
-    slug: "workwrk-sops",
-    name: "WorkwrK SOPs",
-    tagline: "Process docs, versions, compliance",
-    description:
-      "Folder-tree SOPs, version history, role-based access, compliance assignments + acknowledgements, process runs (do-the-SOP step-by-step). Tip-tap rich editor with embeds.",
-    iconKey: "BookOpen",
-    hue: "teal",
-    suite: "CROSS",
-    tier: "CORE",
-    status: "LIVE",
-    defaultEnabled: true,
-    displayOrder: 20,
-    legacyModuleKey: "sops",
-    pathPrefix: "/sops",
-  },
-  {
-    slug: "workwrk-goals",
-    name: "WorkwrK Goals",
-    tagline: "OKRs + KRAs + KPIs aligned",
-    description:
-      "Company → team → individual OKRs with check-ins. KRA assignments + monthly KPI scorecards. Manager notes + performance scoring. Yearly goals for growth plans.",
-    iconKey: "Crosshair",
-    hue: "violet",
-    suite: "CROSS",
-    tier: "CORE",
-    status: "LIVE",
-    defaultEnabled: true,
-    displayOrder: 30,
-    legacyModuleKey: "kra-kpi",
-    pathPrefix: "/okrs",
-  },
-  {
-    slug: "workwrk-meetings",
-    name: "WorkwrK Meetings",
-    tagline: "1:1s, standups, retros, action items",
-    description:
-      "Agenda templates, collaborative notes (TipTap), attendees + action items that spawn into Tasks. AI-powered Notetaker captures transcripts and extracts decisions.",
-    iconKey: "MessageSquare",
-    hue: "amber",
-    suite: "CROSS",
-    tier: "CORE",
-    status: "LIVE",
-    defaultEnabled: true,
-    displayOrder: 40,
-    legacyModuleKey: "meetings",
-    pathPrefix: "/meetings",
-  },
-  {
-    slug: "workwrk-whiteboards",
-    name: "WorkwrK Whiteboards",
-    tagline: "Infinite canvas for mind maps + diagrams",
-    description:
-      "Excalidraw-powered whiteboards for mind maps, system diagrams, brainstorms, retros, flow charts. Hand-drawn aesthetic with shapes, arrows, freehand draw, text, images, frames. Saved per-org, listable from /whiteboards. Autosaves every 3 seconds.",
-    iconKey: "PenTool",
-    hue: "pink",
-    suite: "CROSS",
-    tier: "CORE",
-    status: "LIVE",
-    defaultEnabled: true,
-    displayOrder: 45,
-    pathPrefix: "/whiteboards",
-  },
-  {
-    slug: "workwrk-culture",
-    name: "WorkwrK Culture",
-    tagline: "Kudos, ideas, surveys, announcements",
-    description:
-      "Kudos feed with values + reactions, idea submission + voting, pulse surveys, broadcast announcements + acknowledgements, anonymous candor sessions, policy library.",
-    iconKey: "Heart",
-    hue: "pink",
-    suite: "CROSS",
-    tier: "CORE",
-    status: "LIVE",
-    defaultEnabled: true,
-    displayOrder: 50,
-    pathPrefix: "/kudos",
-  },
+  // SOPs / Goals / Meetings / Whiteboards / Culture are part of every
+  // org's universal workspace — features of `workwrk-work`, not
+  // separate "products". They were demoted out of PRODUCT_CATALOG so
+  // the Apps Panel + Product Store don't show them as standalone
+  // tiles. The routes (/sops, /okrs, /meetings, /whiteboards, /kudos)
+  // and sidebar entries remain — they're discovered by living inside
+  // the Workspace section of the sidebar, not by browsing a catalog.
+  // Agents that previously referenced these as productSlug (e.g.
+  // workwrk-sops → create_sop) still resolve via PRODUCT_TOOL_NAMES
+  // in src/lib/agents/tools.ts — that map is decoupled from the
+  // catalog by design.
 
   // ─────────────────────────────────────────────
   // PEOPLE SUITE
@@ -277,22 +210,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     seededTemplates: ["b2b-saas-pipeline", "renewal-tracker"],
     seededIntegrations: ["gmail", "outlook", "salesforce-migrate"],
   },
-  {
-    slug: "workwrk-success",
-    name: "WorkwrK Success",
-    tagline: "Renewals, health scores, QBRs",
-    description:
-      "Account health scoring, renewal pipeline, expansion plays, NPS surveys, QBR templates. Build on top of CRM accounts.",
-    iconKey: "Activity",
-    hue: "teal",
-    suite: "SALES",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 210,
-    pathPrefix: "/success",
-    seededAgents: ["cara-csm"],
-  },
 
   // ─────────────────────────────────────────────
   // OPERATIONS SUITE
@@ -329,38 +246,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     pathPrefix: "/assets",
     seededAgents: ["ava-asset-tracker"],
   },
-  {
-    slug: "workwrk-inventory",
-    name: "WorkwrK Inventory",
-    tagline: "SKUs, stock, warehouses, transfers",
-    description:
-      "SKUs + variants, multi-warehouse stock levels, inter-warehouse transfers, cycle counts, low-stock alerts. For physical-goods businesses.",
-    iconKey: "Package",
-    hue: "sky",
-    suite: "OPERATIONS",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 320,
-    pathPrefix: "/inventory",
-    seededAgents: ["inko-stock-watcher"],
-  },
-  {
-    slug: "workwrk-field-ops",
-    name: "WorkwrK Field Ops",
-    tagline: "Technicians, jobs, routes, dispatch",
-    description:
-      "Field technician scheduling, job assignment, route optimization, parts management, customer signatures. For services + repair businesses.",
-    iconKey: "Wrench",
-    hue: "slate",
-    suite: "OPERATIONS",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 330,
-    pathPrefix: "/field-ops",
-    seededAgents: ["fern-dispatcher"],
-  },
 
   // ─────────────────────────────────────────────
   // IT SUITE (NEW)
@@ -382,22 +267,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     seededAgents: ["aman-it-tech", "indu-incident-lead"],
     seededIntegrations: ["pagerduty", "jira", "slack"],
   },
-  {
-    slug: "workwrk-access",
-    name: "WorkwrK Access",
-    tagline: "Provisioning, SoD, access reviews",
-    description:
-      "Joiner-Mover-Leaver flows, provisioning + deprovisioning automations, separation-of-duties, periodic access reviews. SOC2-friendly.",
-    iconKey: "Shield",
-    hue: "rose",
-    suite: "IT",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 410,
-    pathPrefix: "/access",
-    seededAgents: ["axel-access-reviewer"],
-  },
 
   // ─────────────────────────────────────────────
   // MARKETING SUITE (NEW)
@@ -417,38 +286,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     displayOrder: 500,
     pathPrefix: "/marketing",
     seededAgents: ["mira-campaign-manager", "cora-editor", "eva-event-planner"],
-  },
-  {
-    slug: "workwrk-content",
-    name: "WorkwrK Content",
-    tagline: "Editorial calendar, briefs, approvals",
-    description:
-      "Content calendar across blog/social/email, brief templates, asset library, approval flows, scheduled publishing.",
-    iconKey: "FileText",
-    hue: "rose",
-    suite: "MARKETING",
-    tier: "PLUS",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 510,
-    pathPrefix: "/content",
-    seededAgents: ["cora-editor"],
-  },
-  {
-    slug: "workwrk-events",
-    name: "WorkwrK Events",
-    tagline: "Plan + run events, track ROI",
-    description:
-      "Event planning, sessions + speakers, registration forms, sponsor management, post-event ROI dashboards.",
-    iconKey: "CalendarDays",
-    hue: "violet",
-    suite: "MARKETING",
-    tier: "PLUS",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 520,
-    pathPrefix: "/events",
-    seededAgents: ["eva-event-planner"],
   },
 
   // ─────────────────────────────────────────────
@@ -471,42 +308,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     seededAgents: ["dev-sprint-coach", "rhea-roadmap-strategist"],
     seededTemplates: ["scrum-sprint", "kanban-flow", "bug-triage"],
     seededIntegrations: ["github", "gitlab", "linear"],
-  },
-  {
-    slug: "workwrk-incidents",
-    name: "WorkwrK Incidents",
-    tagline: "Oncall, incidents, postmortems",
-    description:
-      "On-call rotations, incident response timeline, runbook execution, blameless postmortems. PagerDuty + incident.io combined.",
-    iconKey: "AlertTriangle",
-    hue: "rose",
-    suite: "ENGINEERING",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 610,
-    pathPrefix: "/incidents",
-    seededAgents: ["ira-incident-commander"],
-    seededIntegrations: ["pagerduty", "slack", "datadog"],
-  },
-  {
-    slug: "workwrk-roadmap",
-    name: "WorkwrK Roadmap",
-    tagline: "Themes, initiatives, public changelog",
-    description:
-      "Product roadmap (themes + initiatives), tied to OKRs + epics, public changelog page for customer announcements.",
-    iconKey: "Map",
-    hue: "teal",
-    suite: "ENGINEERING",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 620,
-    // pathPrefix avoids /roadmap because the marketing route group
-    // owns the public /roadmap (the changelog-style page). The
-    // in-product roadmap surface lives at /product-roadmap.
-    pathPrefix: "/product-roadmap",
-    seededAgents: ["rhea-roadmap-strategist"],
   },
 
   // ─────────────────────────────────────────────
@@ -561,22 +362,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     pathPrefix: "/expenses",
     seededAgents: ["ex-expense-auditor"],
     seededIntegrations: ["ramp", "brex", "stripe-cards"],
-  },
-  {
-    slug: "workwrk-tax",
-    name: "WorkwrK Tax",
-    tagline: "Filings, jurisdictions, compliance",
-    description:
-      "Tax filing calendar, multi-jurisdiction tracking, compliance reminders, document hub. Lightweight bookkeeper-friendly module.",
-    iconKey: "FileText",
-    hue: "slate",
-    suite: "FINANCE",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 730,
-    pathPrefix: "/tax",
-    seededAgents: ["tex-tax-watcher"],
   },
 
   // ─────────────────────────────────────────────
@@ -659,17 +444,12 @@ export const DEPARTMENT_RECOMMENDED_PRODUCTS: Record<string, string[]> = {
     "workwrk-pay",
     "workwrk-benefits",
   ],
-  sales: ["workwrk-crm", "workwrk-success"],
-  operations: [
-    "workwrk-procurement",
-    "workwrk-assets",
-    "workwrk-inventory",
-    "workwrk-field-ops",
-  ],
-  it: ["workwrk-itsm", "workwrk-access", "workwrk-assets"],
-  marketing: ["workwrk-campaigns", "workwrk-content", "workwrk-events"],
-  finance: ["workwrk-books", "workwrk-fpa", "workwrk-expense", "workwrk-tax"],
-  engineering: ["workwrk-dev", "workwrk-incidents", "workwrk-roadmap"],
+  sales: ["workwrk-crm"],
+  operations: ["workwrk-procurement", "workwrk-assets"],
+  it: ["workwrk-itsm", "workwrk-assets"],
+  marketing: ["workwrk-campaigns"],
+  finance: ["workwrk-books", "workwrk-fpa", "workwrk-expense"],
+  engineering: ["workwrk-dev"],
   legal: ["workwrk-contracts", "workwrk-privacy"],
   support: ["workwrk-help"],
   "all-in-one": PRODUCT_CATALOG.filter((p) => p.status !== "COMING_SOON" && p.status !== "DEPRECATED").map(

@@ -7,6 +7,7 @@ import { Users as UsersIcon, Plus } from "lucide-react";
 import { BoardView } from "@/components/board-view/board-view";
 import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import { LEAD_FIELDS, NewLeadModal, type Lead } from "@/components/crm/shared";
 
 export default function CrmLeadsPage() {
@@ -15,16 +16,19 @@ export default function CrmLeadsPage() {
   const [showNew, setShowNew] = useState(false);
   const [openLead, setOpenLead] = useState<Lead | null>(null);
 
+  const workspaceId = useActiveWorkspace("workwrk-crm");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/crm/leads");
+      const r = await fetch(`/api/crm/leads${wsQuery}`);
       const data = r.ok ? await r.json() : { leads: [] };
       setLeads(data.leads || []);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [wsQuery]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -86,6 +90,7 @@ export default function CrmLeadsPage() {
 
       {showNew && (
         <NewLeadModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />

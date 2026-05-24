@@ -7,6 +7,7 @@ import { Headphones } from "lucide-react";
 import { BoardView } from "@/components/board-view/board-view";
 import { ItemDetailDrawer } from "@/components/board-view/item-detail-drawer";
 import { BoardShell } from "@/components/layout/board-shell";
+import { useActiveWorkspace } from "@/hooks/use-active-workspace";
 import {
   TICKET_FIELDS, NewTicketModal, EmptyState, type Ticket,
 } from "@/components/itsm/shared";
@@ -17,14 +18,17 @@ export default function ItsmTicketsPage() {
   const [showNew, setShowNew] = useState(false);
   const [open, setOpen] = useState<Ticket | null>(null);
 
+  const workspaceId = useActiveWorkspace("workwrk-itsm");
+  const wsQuery = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/itsm/tickets");
+      const r = await fetch(`/api/itsm/tickets${wsQuery}`);
       const d = r.ok ? await r.json() : { tickets: [] };
       setTickets(d.tickets || []);
     } finally { setLoading(false); }
-  }, []);
+  }, [wsQuery]);
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
@@ -79,6 +83,7 @@ export default function ItsmTicketsPage() {
 
       {showNew && (
         <NewTicketModal
+          workspaceId={workspaceId}
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); refresh(); }}
         />
