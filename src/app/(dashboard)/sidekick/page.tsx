@@ -373,7 +373,7 @@ export default function SidekickPage() {
   const recent = sessions.filter((s) => !s.pinned);
 
   return (
-    <div className="flex h-[calc(100vh-var(--app-topbar-height,56px))]">
+    <div className="flex w-full h-[calc(100vh-var(--app-topbar-height,56px))]">
       {/* Sessions rail */}
       <aside className="w-[260px] flex-shrink-0 border-r border-border bg-surface-2 flex flex-col">
         <div className="p-3 border-b border-border">

@@ -65,6 +65,14 @@ html[data-density="cozy"] .app-shell {
   background: var(--b-bg);
   color: var(--b-fg);
   min-height: 100vh;
+  /* Pin the shell to the viewport width. Without this the shell can
+   * collapse toward its content width on routes whose pages don't
+   * set an explicit width — that's what was making /inbox, /studio,
+   * /sidekick render in the left half of the screen with a giant
+   * empty band on the right. */
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
   --b-bg: #FFFFFF;
   --b-card: #F7F7F6;
   --b-card-2: #EFEFED;
@@ -807,6 +815,12 @@ html.dark .app-sidebar-soon-badge {
   position: sticky;
   top: 0;
   z-index: 30;
+  /* Stretch across the full width of .app-shell-main. Without an
+   * explicit width, the topbar's flex children (search wrap with
+   * max-width 460px + right cluster) were collapsing it toward
+   * content width — which left a big empty band on the right of
+   * every dashboard page. */
+  width: 100%;
   height: var(--d-topbar-h);
   display: flex;
   align-items: center;
@@ -1013,6 +1027,12 @@ html[data-density="cozy"] .app-shell .app-search-input { height: 36px; font-size
 
 /* ==== Content area ==== */
 .app-content {
+  /* Stretch to fill the column. Without `width: 100%` the <main> was
+   * sizing to its content on pages where the root wrapper used
+   * `space-y-*` instead of an explicit width class — which is most
+   * of them. That's what made /inbox, /studio, /sidekick look
+   * squeezed into the left half of the viewport. */
+  width: 100%;
   padding: var(--d-page-y) var(--d-page-x);
   min-height: calc(100vh - var(--d-topbar-h));
 }
@@ -2039,14 +2059,33 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
  * ────────────────────────────────────────────────────────────── */
 .app-shell-grid {
   display: grid;
-  grid-template-columns: 60px auto minmax(0, 1fr);
+  /* 3 columns: rail (60px) · workspace sub-nav (sizes to its own content
+   * or 0 when AppWorkspaceNav returns null) · main canvas (takes the
+   * remaining space).
+   *
+   * Why `minmax(0, max-content)` instead of `auto`?
+   * `auto` was leaving a phantom column in some browsers when the
+   * sub-nav rendered no DOM at all — the column would still claim
+   * intrinsic space tied to grid placement of out-of-flow siblings
+   * (CommandPalette / ScreenProtection portals), which crushed the
+   * main canvas to ~half-width on /sidekick, /inbox, /studio, etc.
+   * `minmax(0, max-content)` says: shrink to 0 when empty, otherwise
+   * grow to fit content. That guarantees the main canvas always
+   * fills the rest of the viewport. */
+  grid-template-columns: 60px minmax(0, max-content) minmax(0, 1fr);
   min-height: 100vh;
+  /* Anchor the grid to the viewport width so nothing inside can
+   * accidentally shrink the layout below the visible area. */
+  width: 100%;
 }
 .app-shell-grid > .app-shell-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 100vh;
+  /* Belt-and-braces: stretch main to fill its grid cell regardless of
+   * what's happening with align-items defaults. */
+  width: 100%;
 }
 
 /* Sub-nav column. */

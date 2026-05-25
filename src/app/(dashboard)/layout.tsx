@@ -79,12 +79,12 @@ export default function DashboardLayout({
     <ToastProvider>
       <DialogProvider>
         <TourProvider>
-          <div className="app-shell app-shell-grid">
+          <div className="app-shell app-shell-grid" style={{ width: "100vw", maxWidth: "100%" }}>
             <AppRail />
             <AppWorkspaceNav />
-            <div className="app-shell-main">
+            <div className="app-shell-main" style={{ minWidth: 0 }}>
               <Topbar />
-              <main className="app-content">{children}</main>
+              <main className="app-content w-full">{children}</main>
             </div>
             <CommandPalette />
             <ScreenProtection />
