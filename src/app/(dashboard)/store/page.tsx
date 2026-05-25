@@ -62,6 +62,37 @@ const SUITE_ORDER = [
 export default function ProductStorePage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [installs, setInstalls] = useState<Map<string, Installation>>(new Map());
+  // Per-row install state so the user gets a visible spinner on the
+  // exact card they clicked instead of an opaque list-wide loading.
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+
+  async function installProduct(productSlug: string) {
+    setInstalling(productSlug);
+    setInstallError(null);
+    try {
+      const r = await fetch("/api/products/installations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productSlug }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setInstallError(d.error || "Install failed");
+        return;
+      }
+      // Locally mark as ACTIVE so the card flips to "Open" without a
+      // full refetch. The server is authoritative — the next mount
+      // will re-sync via /api/products/installations.
+      setInstalls((prev) => {
+        const next = new Map(prev);
+        next.set(productSlug, { productSlug, status: "ACTIVE", installedAt: new Date().toISOString() });
+        return next;
+      });
+    } finally {
+      setInstalling(null);
+    }
+  }
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -99,6 +130,12 @@ export default function ProductStorePage() {
           AI agents, automations, and templates tuned for that team.
         </p>
       </div>
+
+      {installError && (
+        <div className="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
+          {installError}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-muted text-sm">
@@ -153,16 +190,15 @@ export default function ProductStorePage() {
                             <ExternalLink size={11} />
                           </a>
                         ) : isComingSoon ? (
-                          <button type="button" disabled className="opacity-50">
-                            Notify me
-                          </button>
+                          <span className="text-xs text-muted-2 italic">Not yet available</span>
                         ) : (
                           <button
                             type="button"
-                            disabled
-                            className="px-3 py-1 rounded-md border border-border text-muted disabled:opacity-60"
+                            onClick={() => installProduct(p.slug)}
+                            disabled={installing === p.slug}
+                            className="px-3 py-1 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium disabled:opacity-60"
                           >
-                            Install
+                            {installing === p.slug ? "Installing…" : "Install"}
                           </button>
                         )}
                       </div>

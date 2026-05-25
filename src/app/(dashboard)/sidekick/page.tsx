@@ -8,9 +8,10 @@
 // AI client (BYOK if Enterprise).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PRODUCT_CATALOG } from "@/lib/products/catalog";
 import { getBoard } from "@/lib/products/boards";
+import { DocEditorDialog } from "@/components/notes/doc-editor-dialog";
 import {
   Sparkles,
   Plus,
@@ -76,20 +77,56 @@ type Message = {
   createdAt: string;
 };
 
-const STARTERS = [
-  { label: "Create a board", icon: Wand2, prompt: "Help me design a board for tracking ", hue: "violet" },
-  { label: "Write a doc", icon: FileText, prompt: "Draft a doc about ", hue: "teal" },
-  { label: "Research", icon: Search, prompt: "Research this for me: ", hue: "amber" },
-  { label: "Analyze", icon: BarChart3, prompt: "Help me analyze ", hue: "rose" },
-  { label: "Brainstorm", icon: Lightbulb, prompt: "Brainstorm ideas for ", hue: "amber" },
-  { label: "Generate image", icon: ImageIcon, prompt: "Generate an image of ", hue: "green" },
-  { label: "Build app", icon: Sparkles, prompt: "Build a Vibe app that ", hue: "pink" },
-  { label: "Learn about", icon: BookOpen, prompt: "Teach me about ", hue: "sky" },
-] as const;
+// Each starter is one of three kinds:
+//   - "navigate" → push to a route in this app (board builder, app builder)
+//   - "doc"      → open the inline doc-popup so the user can start writing now
+//   - "ask"      → open the inline ask-popover seeded with this prompt; pressing
+//                  Send creates a new session and immediately fires the message
+// Switching from blind "prefill the textbox" to these concrete intents fixes
+// the "I clicked but nothing happened" landing experience.
+type Starter = {
+  label: string;
+  icon: typeof Wand2;
+  hue: "violet" | "teal" | "amber" | "rose" | "green" | "pink" | "sky";
+  kind: "navigate" | "doc" | "ask";
+  // "navigate" → route href; "ask" → prompt template; "doc" → unused.
+  target?: string;
+  // Placeholder text shown in the ask-popover textarea.
+  hint?: string;
+};
+
+const STARTERS: Starter[] = [
+  { label: "Create a board", icon: Wand2, hue: "violet", kind: "navigate", target: "/studio" },
+  { label: "Write a doc", icon: FileText, hue: "teal", kind: "doc" },
+  { label: "Research", icon: Search, hue: "amber", kind: "ask",
+    target: "Research this for me:",
+    hint: "e.g. our top 3 competitors and how they price" },
+  { label: "Analyze", icon: BarChart3, hue: "rose", kind: "ask",
+    target: "Analyze this for me:",
+    hint: "e.g. last quarter's pipeline — what's stuck and why" },
+  { label: "Brainstorm", icon: Lightbulb, hue: "amber", kind: "ask",
+    target: "Brainstorm ideas for:",
+    hint: "e.g. our Q3 marketing campaign theme" },
+  { label: "Generate image", icon: ImageIcon, hue: "green", kind: "ask",
+    target: "Generate an image of:",
+    hint: "e.g. a hero banner for our onboarding email" },
+  { label: "Build app", icon: Sparkles, hue: "pink", kind: "navigate", target: "/build" },
+  { label: "Learn about", icon: BookOpen, hue: "sky", kind: "ask",
+    target: "Teach me about:",
+    hint: "e.g. how OKRs differ from KPIs" },
+];
 
 export default function SidekickPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const initialSessionId = searchParams.get("session");
+  // Quick-action overlays — clicking a starter card opens one of these
+  // instead of silently prefilling the composer. Much clearer signal
+  // that something happened.
+  const [askStarter, setAskStarter] = useState<{ prompt: string; hint: string } | null>(null);
+  const [askText, setAskText] = useState("");
+  const [docOpen, setDocOpen] = useState(false);
+  const [docDraft, setDocDraft] = useState<{ title: string; body: string }>({ title: "", body: "" });
   // Board-context params from the launch URL — set by BoardShell and
   // AppWorkspaceNav when the user clicks Sidekick from inside an app.
   const initialProductContext = searchParams.get("context");
@@ -299,13 +336,37 @@ export default function SidekickPage() {
     await loadSessions();
   }
 
-  function applyStarter(prompt: string) {
-    setInput(prompt);
-    // Focus the textarea
-    requestAnimationFrame(() => {
-      const ta = document.getElementById("sidekick-input") as HTMLTextAreaElement | null;
-      if (ta) { ta.focus(); ta.setSelectionRange(prompt.length, prompt.length); }
-    });
+  // Top-level dispatcher for the 8 starter cards. Each starter type
+  // (navigate / doc / ask) gets a tangible, visible action instead of
+  // silently prefilling the composer.
+  function runStarter(s: Starter) {
+    if (s.kind === "navigate" && s.target) {
+      router.push(s.target);
+      return;
+    }
+    if (s.kind === "doc") {
+      setDocDraft({ title: "", body: "" });
+      setDocOpen(true);
+      return;
+    }
+    if (s.kind === "ask" && s.target) {
+      setAskStarter({ prompt: s.target, hint: s.hint ?? "" });
+      setAskText("");
+    }
+  }
+
+  // Compose the full prompt from the ask-popover and send it as the
+  // first message of a new session. Closes the popover before send so
+  // the user sees the optimistic bubble appear.
+  async function sendAskStarter() {
+    if (!askStarter || !askText.trim()) return;
+    const full = `${askStarter.prompt} ${askText.trim()}`;
+    setAskStarter(null);
+    setAskText("");
+    setInput(full);
+    // Defer send by a tick so React has flushed the input state — send()
+    // reads from `input`, so we need it set before calling.
+    requestAnimationFrame(() => { void send(); });
   }
 
   const pinned = sessions.filter((s) => s.pinned);
@@ -387,8 +448,8 @@ export default function SidekickPage() {
                   <button
                     key={s.label}
                     type="button"
-                    onClick={() => applyStarter(s.prompt)}
-                    className="flex flex-col items-center gap-2 p-3 rounded-xl border border-border hover:border-violet-300 transition-colors"
+                    onClick={() => runStarter(s)}
+                    className="flex flex-col items-center gap-2 p-3 rounded-xl border border-border hover:border-violet-300 hover:bg-violet-50/40 dark:hover:bg-violet-950/20 transition-colors cursor-pointer"
                   >
                     <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full bg-${s.hue}-100 text-${s.hue}-600`}>
                       <Icon size={16} />
@@ -458,6 +519,95 @@ export default function SidekickPage() {
           </div>
         </div>
       </div>
+
+      {/* Ask-popover — opens when the user clicks a "Research / Analyze
+          / Brainstorm / Generate image / Learn about" card. Asks the
+          missing "about what?" piece, then ships the whole prompt as
+          the first message of a new session. */}
+      {askStarter && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setAskStarter(null)}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl bg-surface border border-border shadow-xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold inline-flex items-center gap-2">
+                <Sparkles size={14} className="text-violet-500" />
+                {askStarter.prompt}
+              </div>
+              <button
+                type="button"
+                onClick={() => setAskStarter(null)}
+                className="p-1 rounded hover:bg-surface-2 text-muted-2"
+                aria-label="Close"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <textarea
+              autoFocus
+              value={askText}
+              onChange={(e) => setAskText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void sendAskStarter();
+                } else if (e.key === "Escape") {
+                  setAskStarter(null);
+                }
+              }}
+              rows={3}
+              placeholder={askStarter.hint}
+              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-[11px] text-muted-2">Enter to send · Shift+Enter for newline</p>
+              <button
+                type="button"
+                onClick={() => void sendAskStarter()}
+                disabled={!askText.trim()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium disabled:opacity-40"
+              >
+                <ArrowUp size={13} /> Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Doc-editor — opens when the user clicks "Write a doc". On save
+          we route them to /sops with the draft prefilled. v1: drops the
+          draft (no persistence) and lets them re-create from /sops; v2:
+          create a draft SOP straight from the dialog so the doc sticks. */}
+      <DocEditorDialog
+        open={docOpen}
+        onClose={() => setDocOpen(false)}
+        breadcrumb={["Sidekick", "New doc"]}
+        title={docDraft.title}
+        body={docDraft.body}
+        onSave={async ({ title, body }) => {
+          setDocDraft({ title, body });
+          // Persist as a draft SOP so the user can find it again.
+          try {
+            await fetch("/api/sops", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                title: title || "Untitled doc",
+                description: body || "",
+                category: "Notes",
+                type: "WRITTEN",
+              }),
+            });
+          } catch {
+            // No-op — the title/body still live in local state until
+            // the user dismisses the dialog.
+          }
+        }}
+      />
     </div>
   );
 }

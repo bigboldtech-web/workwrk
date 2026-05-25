@@ -15,13 +15,13 @@ import {
   Plus,
   Sparkles,
   MessageSquare,
-  Lock,
   CheckCircle2,
   Lightbulb,
   Clock,
   Zap,
 } from "lucide-react";
 import { AutonomousDialog } from "@/components/agents/autonomous-dialog";
+import { X, Loader2, AlertCircle } from "lucide-react";
 
 type InstalledAgent = {
   id: string;
@@ -61,6 +61,9 @@ export default function AgentsPage() {
   const [installing, setInstalling] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState<InstalledAgent | null>(null);
+  // Custom-agent create dialog. Lives at the page level so the open
+  // state survives any re-render of the list below.
+  const [showCreate, setShowCreate] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -128,13 +131,11 @@ export default function AgentsPage() {
         </div>
         <button
           type="button"
-          disabled
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium disabled:opacity-50"
-          title="Custom agent builder ships in Phase D3"
+          onClick={() => setShowCreate(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium hover:opacity-90"
         >
           <Plus size={14} />
           Create custom agent
-          <Lock size={11} className="ml-1" />
         </button>
       </div>
 
@@ -224,6 +225,116 @@ export default function AgentsPage() {
           onSaved={async () => { await refresh(); }}
         />
       )}
+
+      {showCreate && (
+        <CreateAgentDialog
+          onClose={() => setShowCreate(false)}
+          onCreated={async () => { setShowCreate(false); await refresh(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Inline create-custom-agent dialog. Posts to /api/agents and lets the
+// new agent appear in the list above with its own Chat / Autonomous
+// CTAs alongside the prebuilt catalog entries.
+function CreateAgentDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [name, setName] = useState("");
+  const [persona, setPersona] = useState("");
+  const [description, setDescription] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [productSlug, setProductSlug] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!name.trim() || !description.trim() || !systemPrompt.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          persona: persona.trim() || undefined,
+          description: description.trim(),
+          systemPrompt: systemPrompt.trim(),
+          productSlug: productSlug.trim() || undefined,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(d.error || "Create failed");
+        return;
+      }
+      onCreated();
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={() => { if (!saving) onClose(); }}
+    >
+      <div
+        className="w-full max-w-xl rounded-2xl bg-surface border border-border shadow-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Create custom agent</h2>
+          <button type="button" onClick={onClose} disabled={saving} className="p-1 rounded hover:bg-surface-2 text-muted" aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+        <p className="text-xs text-muted-2">Named specialist with a persistent persona. The system prompt shapes every reply — be specific about voice, scope, and what the agent should refuse.</p>
+
+        <Row label="Name">
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Pricing Analyst" className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm" />
+        </Row>
+        <Row label="Persona (one line)">
+          <input value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="Pricing expert. Pragmatic, numbers-first." className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm" />
+        </Row>
+        <Row label="Description">
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What does this agent do? (shown on the agent card)" className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm" />
+        </Row>
+        <Row label="System prompt">
+          <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={6} placeholder="You are a Pricing Analyst at WorkwrK. You help the team set list prices, model discounts, and stress-test deals. Always cite the math. Refuse to give legal advice." className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm resize-none font-mono text-xs" />
+        </Row>
+        <Row label="Default app scope (optional)">
+          <input value={productSlug} onChange={(e) => setProductSlug(e.target.value)} placeholder="workwrk-crm" className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm font-mono text-xs" />
+        </Row>
+
+        {error && (
+          <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-700 dark:text-rose-300 inline-flex items-start gap-2">
+            <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          <button type="button" onClick={onClose} disabled={saving} className="px-3 py-1.5 rounded-md text-sm text-muted hover:bg-surface-2">Cancel</button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving || !name.trim() || !description.trim() || !systemPrompt.trim()}
+            className="px-4 py-1.5 rounded-md text-sm font-medium bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+            Create agent
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-muted mb-1">{label}</label>
+      {children}
     </div>
   );
 }
