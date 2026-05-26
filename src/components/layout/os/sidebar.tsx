@@ -3,108 +3,46 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ChevronDown,
   Search,
-  ChevronsUpDown,
   Plus,
-  Inbox,
-  CheckSquare,
-  CalendarDays,
-  Target,
-  FileText,
-  Megaphone,
-  Lightbulb,
-  Activity,
-  Sparkles,
-  Store,
-  PlugZap,
+  Settings,
+  Trash2,
   UserPlus,
-  ChevronRight,
-  Layers,
-  Briefcase,
-  Code2,
-  Users2,
-  CircleDollarSign,
-  Headphones,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
 
-type NavItem = {
+type BoardItem = {
   href: string;
   label: string;
-  Icon: React.ComponentType<{ className?: string }>;
-  count?: number | string;
-  badge?: string;
+  mark: string; // single letter shown inside colored square
+  color: string; // CSS color value
+  count?: number;
+  pulse?: boolean;
 };
 
-type Group = {
-  title: string;
-  items: NavItem[];
-  collapsible?: boolean;
-};
-
-const TODAY_GROUPS: Group[] = [
-  {
-    title: "Inbox",
-    items: [
-      { href: "/today", label: "Today", Icon: Inbox, count: 7 },
-      { href: "/inbox", label: "Notifications", Icon: Megaphone, count: 12 },
-      { href: "/tasks", label: "My tasks", Icon: CheckSquare, count: 23 },
-      { href: "/meetings", label: "Meetings", Icon: CalendarDays, count: 3 },
-    ],
-  },
-  {
-    title: "Personal",
-    items: [
-      { href: "/okrs", label: "My OKRs", Icon: Target },
-      { href: "/docs", label: "Notes & docs", Icon: FileText },
-      { href: "/activity", label: "Activity", Icon: Activity },
-      { href: "/ideas", label: "Ideas", Icon: Lightbulb },
-    ],
-  },
+const FAVORITES: BoardItem[] = [
+  { href: "/today",        label: "Today — your day", mark: "T", color: "var(--os-c-orange)", pulse: true },
+  { href: "/tasks",        label: "Sprint Q3 — Eng",  mark: "S", color: "var(--os-c-purple)", count: 47 },
+  { href: "/crm/pipeline", label: "Pipeline",         mark: "P", color: "var(--os-c-green)",  count: 23 },
 ];
 
-const SPACES = [
-  { slug: "sales", name: "Sales", Icon: Briefcase, color: "var(--os-success)" },
-  { slug: "engineering", name: "Engineering", Icon: Code2, color: "var(--os-info)" },
-  { slug: "people", name: "People & HR", Icon: Users2, color: "var(--os-hue-rose-fg)" },
-  { slug: "finance", name: "Finance", Icon: CircleDollarSign, color: "var(--os-hue-teal-fg)" },
-  { slug: "support", name: "Support", Icon: Headphones, color: "var(--os-accent)" },
+const BOARDS: BoardItem[] = [
+  { href: "/tasks",         label: "My tasks",      mark: "M", color: "var(--os-c-blue)" },
+  { href: "/meetings",      label: "Meetings",      mark: "M", color: "var(--os-c-pink)" },
+  { href: "/okrs",          label: "OKRs Q3",       mark: "O", color: "var(--os-c-indigo)" },
+  { href: "/docs",          label: "Docs & notes",  mark: "D", color: "var(--os-c-teal)" },
+  { href: "/announcements", label: "Announcements", mark: "A", color: "var(--os-c-red)", pulse: true },
+  { href: "/ideas",         label: "Ideas board",   mark: "I", color: "var(--os-c-lime)" },
+  { href: "/activity",      label: "Activity feed", mark: "A", color: "var(--os-c-brown)" },
 ];
 
-const AGENTS_GROUPS: Group[] = [
-  {
-    title: "Your agents",
-    items: [
-      { href: "/agents/ria", label: "Ria — SDR", Icon: Sparkles, badge: "12" },
-      { href: "/agents/priya", label: "Priya — HR Ops", Icon: Sparkles, badge: "4" },
-      { href: "/agents/maya", label: "Maya — Recruiter", Icon: Sparkles },
-      { href: "/agents/aman", label: "Aman — IT", Icon: Sparkles },
-    ],
-  },
-  {
-    title: "Chats",
-    items: [
-      { href: "/sidekick", label: "Sidekick (you)", Icon: Inbox },
-    ],
-  },
-];
-
-const STORE_GROUPS: Group[] = [
-  {
-    title: "Discover",
-    items: [
-      { href: "/store", label: "Marketplace", Icon: Store },
-      { href: "/store?cat=apps", label: "Apps", Icon: Layers },
-      { href: "/store?cat=agents", label: "Agents", Icon: Sparkles },
-      { href: "/integrations", label: "Integrations", Icon: PlugZap },
-    ],
-  },
-  {
-    title: "Installed",
-    items: [
-      { href: "/tools", label: "My tools", Icon: CheckSquare, count: 14 },
-    ],
-  },
+const SPACES: BoardItem[] = [
+  { href: "/crm",        label: "Sales",       mark: "S", color: "var(--os-c-green)" },
+  { href: "/dev",        label: "Engineering", mark: "E", color: "var(--os-c-blue)" },
+  { href: "/people",     label: "People & HR", mark: "H", color: "var(--os-c-pink)" },
+  { href: "/financials", label: "Finance",     mark: "F", color: "var(--os-c-teal)" },
+  { href: "/helpdesk",   label: "Support",     mark: "C", color: "var(--os-c-orange)" },
 ];
 
 function navMatch(pathname: string, href: string) {
@@ -113,113 +51,96 @@ function navMatch(pathname: string, href: string) {
   return false;
 }
 
+function NavItem({ item, pathname }: { item: BoardItem; pathname: string }) {
+  const active = navMatch(pathname, item.href);
+  return (
+    <Link
+      href={item.href}
+      className={`os-side__item ${active ? "is-active" : ""}`}
+    >
+      <span className="os-side__item-mark" style={{ background: item.color }}>
+        {item.mark}
+      </span>
+      <span className="os-side__item-text">{item.label}</span>
+      {item.pulse ? <span className="os-side__item-pulse" aria-hidden /> : null}
+      {item.count !== undefined ? <span className="os-side__item-count">{item.count}</span> : null}
+    </Link>
+  );
+}
+
 export function OsSidebar() {
   const pathname = usePathname() || "";
   const { openPalette } = useOsShell();
 
-  let groups: Group[] = TODAY_GROUPS;
-  let showSpaces = false;
-  let title = "Your day";
-
-  if (pathname.startsWith("/spaces")) {
-    showSpaces = true;
-    title = "Spaces";
-    groups = [];
-  } else if (pathname.startsWith("/agents") || pathname.startsWith("/sidekick")) {
-    groups = AGENTS_GROUPS;
-    title = "Agents";
-  } else if (pathname.startsWith("/store") || pathname.startsWith("/tools") || pathname.startsWith("/integrations")) {
-    groups = STORE_GROUPS;
-    title = "Library";
-  }
-
   return (
-    <nav className="os-side" aria-label={title}>
-      <div className="os-side__header">
-        <button type="button" className="os-side__org">
-          <span className="os-side__org-mark">CK</span>
-          <span className="os-side__org-name">Cashkr</span>
-          <ChevronsUpDown className="os-side__org-chev" />
+    <aside className="os-side" aria-label="Workspace navigation">
+      <div className="os-side__head">
+        <button type="button" className="os-side__ws">
+          <span className="os-side__ws-mark">C</span>
+          <span className="os-side__ws-info">
+            <span className="os-side__ws-name">Cashkr</span>
+            <span className="os-side__ws-tier">Enterprise · 247 users</span>
+          </span>
+          <span className="os-side__ws-chev"><ChevronDown /></span>
         </button>
-      </div>
 
-      <div className="os-side__search">
-        <button
-          type="button"
-          className="os-side__search-box"
-          onClick={() => openPalette()}
-        >
+        <button type="button" className="os-side__search" onClick={openPalette}>
           <Search />
-          <span className="os-side__search-box-label">Search or jump to…</span>
-          <kbd>⌘K</kbd>
+          <span className="os-side__search-label">Search everything…</span>
+          <span className="os-side__search-kbd">⌘K</span>
         </button>
       </div>
 
-      <div className="os-side__nav">
-        {showSpaces ? (
-          <>
-            <div className="os-side__group">
-              <div className="os-side__group-title">
-                <span>Your spaces</span>
-                <button type="button" className="os-side__group-title-btn" aria-label="New space">
-                  <Plus />
-                </button>
-              </div>
-              {SPACES.map((s) => {
-                const href = `/spaces/${s.slug}`;
-                const active = pathname.startsWith(href);
-                return (
-                  <Link
-                    key={s.slug}
-                    href={href}
-                    className={`os-nav-item ${active ? "is-active" : ""}`}
-                  >
-                    <span className="os-nav-item__hue" style={{ background: s.color }} aria-hidden />
-                    <span>{s.name}</span>
-                    <ChevronRight className="os-nav-item__count" />
-                  </Link>
-                );
-              })}
-            </div>
-          </>
-        ) : (
-          groups.map((group) => (
-            <div key={group.title} className="os-side__group">
-              <div className="os-side__group-title">
-                <span>{group.title}</span>
-              </div>
-              {group.items.map((it) => {
-                const active = navMatch(pathname, it.href);
-                const Icon = it.Icon;
-                return (
-                  <Link
-                    key={it.href}
-                    href={it.href}
-                    className={`os-nav-item ${active ? "is-active" : ""}`}
-                  >
-                    <Icon />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {it.label}
-                    </span>
-                    {it.badge ? (
-                      <span className="os-nav-item__badge">{it.badge}</span>
-                    ) : it.count !== undefined ? (
-                      <span className="os-nav-item__count">{it.count}</span>
-                    ) : null}
-                  </Link>
-                );
-              })}
-            </div>
-          ))
-        )}
+      <div className="os-side__scroll">
+        <section className="os-side__section">
+          <div className="os-side__section-head">
+            <span>★ Favorites</span>
+            <button type="button" className="os-side__section-head-btn" aria-label="Add favorite">
+              <Plus />
+            </button>
+          </div>
+          {FAVORITES.map((it) => <NavItem key={it.href + it.label} item={it} pathname={pathname} />)}
+        </section>
+
+        <section className="os-side__section">
+          <div className="os-side__section-head">
+            <span>Boards</span>
+            <button type="button" className="os-side__section-head-btn" aria-label="New board">
+              <Plus />
+            </button>
+          </div>
+          {BOARDS.map((it) => <NavItem key={it.href + it.label} item={it} pathname={pathname} />)}
+          <button type="button" className="os-side__add">
+            <Plus />
+            <span>New board</span>
+          </button>
+        </section>
+
+        <section className="os-side__section">
+          <div className="os-side__section-head">
+            <span>Spaces</span>
+            <button type="button" className="os-side__section-head-btn" aria-label="New space">
+              <Plus />
+            </button>
+          </div>
+          {SPACES.map((it) => <NavItem key={it.href + it.label} item={it} pathname={pathname} />)}
+        </section>
       </div>
 
-      <div className="os-side__bottom">
-        <button type="button" className="os-side__invite">
+      <div className="os-side__foot">
+        <button type="button" className="os-side__foot-btn">
+          <Settings />
+          <span>Workspace settings</span>
+        </button>
+        <button type="button" className="os-side__foot-btn">
+          <Trash2 />
+          <span>Trash</span>
+        </button>
+        <button type="button" className="os-side__foot-btn os-side__foot-btn--invite">
           <UserPlus />
           <span>Invite teammates</span>
         </button>
       </div>
-    </nav>
+    </aside>
   );
 }
