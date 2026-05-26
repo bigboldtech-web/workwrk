@@ -441,7 +441,7 @@ export function OsMainTable({
                   {g.rows.map((r) => (
                     <tr
                       key={r.id}
-                      onClick={() => openItemDrawer({ moduleId, itemId: r.id.toUpperCase(), name: r.name, groupColor: g.color })}
+                      onClick={() => openItemDrawer({ moduleId, itemId: r.id, name: r.name, groupColor: g.color, payload: r.cells })}
                       style={{ cursor: "pointer" }}
                     >
                       <td onClick={(e) => e.stopPropagation()}>
@@ -460,7 +460,7 @@ export function OsMainTable({
                           <button
                             type="button"
                             className="os-row-open"
-                            onClick={() => openItemDrawer({ moduleId, itemId: r.id.toUpperCase(), name: r.name, groupColor: g.color })}
+                            onClick={() => openItemDrawer({ moduleId, itemId: r.id, name: r.name, groupColor: g.color, payload: r.cells })}
                           >
                             Open <ArrowRight />
                           </button>

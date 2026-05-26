@@ -17,13 +17,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckSquare, ClipboardList, Boxes, Calendar as CalendarIcon, BarChart, ChartPie, Plus } from "lucide-react";
+import { CheckSquare, ClipboardList, Boxes, Calendar as CalendarIcon, BarChart, ChartPie } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
 import { OsFilterBar } from "@/components/layout/os/filter-bar";
 import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue, type PrioValue } from "@/components/layout/os/main-table";
+import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { useOsShell } from "@/components/layout/os/shell-context";
 import type { PickerOption } from "@/components/layout/os/picker-popover";
 
 // ─── Type for the Task shape returned by /api/tasks ──────────
@@ -220,7 +222,31 @@ export default function TasksPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Subscribe to row-version bumps so we re-fetch when something else
+  // (drawer, Sidekick tool call, etc.) mutates a task elsewhere.
+  const { rowVersion } = useOsShell();
+  const tasksVersion = rowVersion("tasks");
+  useEffect(() => {
+    if (tasksVersion > 0) void load();
+  }, [tasksVersion, load]);
+
   const groups = useMemo(() => buildGroups(tasks ?? []), [tasks]);
+
+  // Calendar events — one per task, colored by status
+  const calendarEvents = useMemo<CalendarEvent[]>(
+    () => (tasks ?? []).map((t) => ({
+      id: t.id,
+      title: t.title,
+      date: t.date,
+      color:
+        t.status === "COMPLETED" ? C.green
+        : t.status === "IN_PROGRESS" ? C.orange
+        : C.indigo,
+      done: t.status === "COMPLETED",
+      payload: taskToRow(t).cells,
+    })),
+    [tasks],
+  );
 
   // ─── Persistence handlers ─────────────────────────────────
   async function patchTask(id: string, body: Record<string, unknown>) {
@@ -333,7 +359,11 @@ export default function TasksPage() {
         </>
       )}
 
-      {activeTab !== "table" && (
+      {activeTab === "calendar" && (
+        <OsCalendar moduleId="tasks" events={calendarEvents} newLabel="New task" />
+      )}
+
+      {activeTab !== "table" && activeTab !== "calendar" && (
         <OsEmptyView
           Icon={CheckSquare}
           iconGradient={GRAD.bluePurple}

@@ -114,7 +114,20 @@ export function OsKanban({ columns: initial, moduleId = "tasks" }: { columns: KC
                   e.dataTransfer.setData("text/plain", c.id);
                 }}
                 onDragEnd={() => { setDragging(null); setDropTarget(null); }}
-                onClick={() => openItemDrawer({ moduleId, itemId: c.refId ?? c.id.toUpperCase(), name: c.title, groupColor: col.color })}
+                onClick={() => openItemDrawer({
+                  moduleId,
+                  itemId: c.refId ?? c.id,
+                  name: c.title,
+                  groupColor: col.color,
+                  payload: {
+                    // Synthesize a payload that matches the table's cell shape
+                    // so the drawer renders the same inline fields for kanban-
+                    // originated opens.
+                    tags: c.labels,
+                    owner: c.people,
+                    due: c.date,
+                  },
+                })}
               >
                 <div className="os-kcard__top">
                   <h4 className="os-kcard__title">{c.title}</h4>
