@@ -55,6 +55,7 @@ export const C = {
   brown:  "var(--os-c-brown)",
   yellow: "var(--os-c-yellow)",
   sage:   "var(--os-c-sage)",
+  gray:   "var(--os-c-gray)",
 };
 
 export const GRAD = {
