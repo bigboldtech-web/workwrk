@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
+import { logItemActivity } from "@/lib/activity/log";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -102,5 +103,22 @@ export async function PATCH(req: Request) {
       ...(parsed.data.goalActual !== undefined ? { goalActual: parsed.data.goalActual } : {}),
     },
   });
+
+  // Per-item activity feed
+  if (parsed.data.status !== undefined && parsed.data.status !== existing.status) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "campaign", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "status_changed",
+      meta: { from: existing.status, to: parsed.data.status },
+    });
+  }
+  if (parsed.data.name !== undefined && parsed.data.name !== existing.name) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "campaign", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "renamed",
+      meta: { from: existing.name, to: parsed.data.name },
+    });
+  }
+
   return NextResponse.json({ campaign });
 }

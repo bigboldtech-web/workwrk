@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { logItemActivity } from "@/lib/activity/log";
 
 // GET: Get meeting detail with attendees, action items, notes
 export async function GET(
@@ -66,6 +67,29 @@ export async function PUT(
       decisions: decisions !== undefined ? decisions : undefined,
     },
   });
+
+  // Per-item activity feed
+  const actorId = getUserId(session);
+  if (typeof title === "string" && title !== meeting.title) {
+    logItemActivity({
+      organizationId: orgId, entityType: "meeting", entityId: id,
+      actorId, action: "renamed", meta: { from: meeting.title, to: title },
+    });
+  }
+  if (typeof type === "string" && type !== meeting.type) {
+    logItemActivity({
+      organizationId: orgId, entityType: "meeting", entityId: id,
+      actorId, action: "field_changed",
+      meta: { field: "type", previousValue: meeting.type, value: type },
+    });
+  }
+  if (scheduledAt && new Date(scheduledAt).getTime() !== new Date(meeting.scheduledAt).getTime()) {
+    logItemActivity({
+      organizationId: orgId, entityType: "meeting", entityId: id,
+      actorId, action: "field_changed",
+      meta: { field: "scheduledAt", previousValue: meeting.scheduledAt.toISOString(), value: new Date(scheduledAt).toISOString() },
+    });
+  }
 
   // Update attendees if provided
   if (attendeeIds) {

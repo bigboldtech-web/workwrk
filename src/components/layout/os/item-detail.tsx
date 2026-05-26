@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { OsPickerPopover, type PickerOption } from "./picker-popover";
+import { OsActivityFeed } from "./activity-feed";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { C } from "./catalog";
@@ -349,9 +350,7 @@ export function OsItemDetail({
             ) : null}
           </>
         ) : (
-          <div style={{ padding: "32px 0", color: "var(--os-ink-3)", fontSize: 13, textAlign: "center" }}>
-            Activity log API coming next. Until then, the Updates tab shows every conversation on this item.
-          </div>
+          <OsActivityFeed moduleId={moduleId} itemId={itemId} />
         )}
       </div>
 

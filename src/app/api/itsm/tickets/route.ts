@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveItsmContext } from "@/lib/itsm/auth";
 import { triggerEvent } from "@/lib/workflows/runtime";
+import { logItemActivity } from "@/lib/activity/log";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -68,6 +69,11 @@ export async function POST(req: Request) {
 
   triggerEvent(ctx.orgId, "ticket.created", ticket as unknown as Record<string, unknown>);
 
+  logItemActivity({
+    organizationId: ctx.orgId, entityType: "ticket", entityId: ticket.id,
+    actorId: ctx.userId, action: "created", meta: { title: ticket.title },
+  });
+
   return NextResponse.json({ ticket });
 }
 
@@ -122,6 +128,36 @@ export async function PATCH(req: Request) {
     where: { id: parsed.data.id },
     data: updates,
   });
+
+  // Per-item activity feed
+  if (parsed.data.status !== undefined && parsed.data.status !== existing.status) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "ticket", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "status_changed",
+      meta: { from: existing.status, to: parsed.data.status },
+    });
+  }
+  if (parsed.data.priority !== undefined && parsed.data.priority !== existing.priority) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "ticket", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "priority_changed",
+      meta: { from: existing.priority, to: parsed.data.priority },
+    });
+  }
+  if (parsed.data.title !== undefined && parsed.data.title !== existing.title) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "ticket", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "renamed",
+      meta: { from: existing.title, to: parsed.data.title },
+    });
+  }
+  if (parsed.data.assigneeId !== undefined && parsed.data.assigneeId !== existing.assigneeId) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "ticket", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "assigned",
+      meta: { from: existing.assigneeId, to: parsed.data.assigneeId },
+    });
+  }
 
   return NextResponse.json({ ticket });
 }

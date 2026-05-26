@@ -14,6 +14,7 @@ import {
   isManager,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { logItemActivity } from "@/lib/activity/log";
 
 const VALID_STAGES = new Set([
   "APPLIED",
@@ -117,6 +118,22 @@ export async function PATCH(
   }
 
   const updated = await prisma.application.update({ where: { id }, data });
+
+  // Per-item activity feed
+  if (typeof data.stage === "string" && data.stage !== app.stage) {
+    logItemActivity({
+      organizationId: orgId, entityType: "application", entityId: id,
+      actorId: userId, action: "stage_changed",
+      meta: { from: app.stage, to: data.stage as string },
+    });
+  }
+  if ("recruiterId" in data && data.recruiterId !== app.recruiterId) {
+    logItemActivity({
+      organizationId: orgId, entityType: "application", entityId: id,
+      actorId: userId, action: "assigned",
+      meta: { field: "recruiter", from: app.recruiterId, to: (data.recruiterId as string | null) ?? null },
+    });
+  }
 
   // Side-effect: HIRED transition — if this fills all openings on the
   // job, auto-flip the job to FILLED. Counted as APPLIED–HIRED is the

@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { triggerEvent } from "@/lib/workflows/runtime";
+import { logItemActivity } from "@/lib/activity/log";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -133,5 +134,36 @@ export async function PATCH(req: Request) {
     data: updates,
     include: { customer: { select: { id: true, name: true, email: true, companyName: true } } },
   });
+
+  // Per-item activity feed
+  if (parsed.data.status !== undefined && parsed.data.status !== existing.status) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "support_ticket", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "status_changed",
+      meta: { from: existing.status, to: parsed.data.status },
+    });
+  }
+  if (parsed.data.priority !== undefined && parsed.data.priority !== existing.priority) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "support_ticket", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "priority_changed",
+      meta: { from: existing.priority, to: parsed.data.priority },
+    });
+  }
+  if (parsed.data.subject !== undefined && parsed.data.subject !== existing.subject) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "support_ticket", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "renamed",
+      meta: { from: existing.subject, to: parsed.data.subject },
+    });
+  }
+  if (parsed.data.assigneeId !== undefined && parsed.data.assigneeId !== existing.assigneeId) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "support_ticket", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "assigned",
+      meta: { from: existing.assigneeId, to: parsed.data.assigneeId },
+    });
+  }
+
   return NextResponse.json({ ticket });
 }

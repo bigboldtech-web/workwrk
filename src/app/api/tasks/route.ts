@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { logItemActivity } from "@/lib/activity/log";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { getTeamUserIds } from "@/lib/team";
@@ -186,6 +187,12 @@ export async function POST(req: NextRequest) {
     targetType: "task",
   });
 
+  // Per-item activity row — feeds the drawer + detail page Activity tab.
+  logItemActivity({
+    organizationId: orgId, entityType: "task", entityId: task.id,
+    actorId: currentUserId, action: "created", meta: { title: task.title },
+  });
+
   // Notify assignee if task was delegated to someone else
   if (task.assigneeId !== currentUserId) try {
     const dateStr = new Date(task.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -318,6 +325,38 @@ export async function PATCH(req: NextRequest) {
       description: `Completed task "${updated.title}"`,
       targetId: id,
       targetType: "task",
+    });
+  }
+
+  // Per-item activity feed (read by the drawer + detail page).
+  // Fire-and-forget — failures don't block the user.
+  const actorId = getUserId(session);
+  if (updates.status !== undefined && updates.status !== task.status) {
+    logItemActivity({
+      organizationId: orgId, entityType: "task", entityId: id,
+      actorId, action: "status_changed",
+      meta: { from: task.status, to: updates.status as string },
+    });
+  }
+  if (updates.priority !== undefined && updates.priority !== task.priority) {
+    logItemActivity({
+      organizationId: orgId, entityType: "task", entityId: id,
+      actorId, action: "priority_changed",
+      meta: { from: task.priority, to: updates.priority as string },
+    });
+  }
+  if (updates.title !== undefined && updates.title !== task.title) {
+    logItemActivity({
+      organizationId: orgId, entityType: "task", entityId: id,
+      actorId, action: "renamed",
+      meta: { from: task.title, to: updates.title as string },
+    });
+  }
+  if (updates.assigneeId !== undefined && updates.assigneeId !== task.assigneeId) {
+    logItemActivity({
+      organizationId: orgId, entityType: "task", entityId: id,
+      actorId, action: "assigned",
+      meta: { from: task.assigneeId, to: updates.assigneeId as string | null },
     });
   }
 

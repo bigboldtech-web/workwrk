@@ -18,6 +18,7 @@ import {
   isManager,
 } from "@/lib/api-helpers";
 import { logActivity, logAuditEvent } from "@/lib/activity";
+import { logItemActivity } from "@/lib/activity/log";
 
 export async function GET(
   _req: NextRequest,
@@ -115,6 +116,23 @@ export async function PATCH(
 
     if (Object.keys(data).length === 0) return jsonError("No changes");
     const updated = await prisma.purchaseOrder.update({ where: { id }, data });
+
+    // Per-item activity feed — DRAFT field edits
+    if (typeof data.description === "string" && data.description !== po.description) {
+      logItemActivity({
+        organizationId: orgId, entityType: "purchase_order", entityId: id,
+        actorId: userId, action: "renamed",
+        meta: { from: po.description, to: data.description },
+      });
+    }
+    if (data.amount !== undefined && Number(data.amount) !== Number(po.amount)) {
+      logItemActivity({
+        organizationId: orgId, entityType: "purchase_order", entityId: id,
+        actorId: userId, action: "field_changed",
+        meta: { field: "amount", previousValue: String(po.amount), value: String(data.amount) },
+      });
+    }
+
     return jsonSuccess({ ...updated, amount: Number(updated.amount) });
   }
 
@@ -167,6 +185,13 @@ export async function PATCH(
   const updated = await prisma.purchaseOrder.update({
     where: { id },
     data: updateData,
+  });
+
+  // Per-item activity feed — status transition
+  logItemActivity({
+    organizationId: orgId, entityType: "purchase_order", entityId: id,
+    actorId: userId, action: "status_changed",
+    meta: { from: po.status, to: (updateData as { status?: string }).status, action, note: note ?? null },
   });
 
   const amt = `${po.currency} ${Number(po.amount).toFixed(2)}`;

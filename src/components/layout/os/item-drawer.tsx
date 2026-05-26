@@ -28,6 +28,7 @@ import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { getModule, C } from "./catalog";
 import { OsPickerPopover, type PickerOption } from "./picker-popover";
+import { OsActivityFeed } from "./activity-feed";
 import type { StatusValue, PrioValue, LabelColor } from "./main-table";
 import type { Person } from "./title-bar";
 
@@ -650,28 +651,8 @@ export function OsItemDrawer() {
                 </>
               )}
 
-              {tab === "activity" && (
-                <>
-                  <h3 className="os-drawer__section-title">
-                    <History />
-                    Recent activity
-                  </h3>
-                  {[
-                    { who: "Sarah Cohen", what: <>changed <strong>Status</strong> from <strong>Planning</strong> to <strong>Working on it</strong></>, color: C.orange, when: "12 min ago" },
-                    { who: "BigBold (You)", what: <>assigned <strong>Sarah Cohen</strong></>, color: C.purple, when: "1 hr ago" },
-                    { who: "BigBold (You)", what: <>set <strong>Due date</strong> to Fri, Sep 12</>, color: C.blue, when: "1 hr ago" },
-                    { who: "BigBold (You)", what: <>created this item</>, color: C.indigo, when: "yesterday" },
-                  ].map((a, i) => (
-                    <div key={i} className="os-drawer__activity">
-                      <span className="os-drawer__activity-dot" style={{ background: a.color }} />
-                      <span><strong>{a.who}</strong> {a.what}</span>
-                      <span className="os-drawer__activity-time">{a.when}</span>
-                    </div>
-                  ))}
-                  <div style={{ padding: "16px 0 4px", color: "var(--os-ink-3)", fontSize: 12, fontStyle: "italic", textAlign: "center" }}>
-                    (sample activity — real activity log API coming next)
-                  </div>
-                </>
+              {tab === "activity" && openItem && (
+                <OsActivityFeed moduleId={openItem.moduleId} itemId={openItem.itemId} />
               )}
 
               {tab === "files" && (

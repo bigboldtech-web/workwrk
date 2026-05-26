@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveCrmContext } from "@/lib/crm/auth";
 import { triggerEvent } from "@/lib/workflows/runtime";
+import { logItemActivity } from "@/lib/activity/log";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -165,6 +166,29 @@ export async function PATCH(req: Request) {
     } else if (opportunity.pipelineStage?.isLost) {
       triggerEvent(ctx.orgId, "opportunity.lost", { ...opportunity, stageName } as unknown as Record<string, unknown>);
     }
+  }
+
+  // Per-item activity feed
+  if (parsed.data.pipelineStageId !== undefined && parsed.data.pipelineStageId !== existing.pipelineStageId) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "opportunity", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "stage_changed",
+      meta: { from: existing.pipelineStageId, to: parsed.data.pipelineStageId, stageName: opportunity.pipelineStage?.name ?? null },
+    });
+  }
+  if (parsed.data.name !== undefined && parsed.data.name !== existing.name) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "opportunity", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "renamed",
+      meta: { from: existing.name, to: parsed.data.name },
+    });
+  }
+  if (parsed.data.amount !== undefined && Number(existing.amount) !== parsed.data.amount) {
+    logItemActivity({
+      organizationId: ctx.orgId, entityType: "opportunity", entityId: parsed.data.id,
+      actorId: ctx.userId, action: "field_changed",
+      meta: { field: "amount", previousValue: String(existing.amount), value: String(parsed.data.amount) },
+    });
   }
 
   return NextResponse.json({ opportunity });
