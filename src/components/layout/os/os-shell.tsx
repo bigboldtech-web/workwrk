@@ -7,23 +7,26 @@ import { OsTopbar } from "./topbar";
 import { OsSidekickPanel } from "./sidekick-panel";
 import { OsCommandPalette } from "./command-palette";
 import { OsItemDrawer } from "./item-drawer";
+import { OsToastProvider } from "./toast";
 
 export function OsShell({ children }: { children: React.ReactNode }) {
   return (
     <OsShellProvider>
-      <div className="workwrk-os">
-        <div className="os-shell">
-          <OsAppRail />
-          <OsSidebar />
-          <main className="os-main">
-            <OsTopbar />
-            <div className="os-canvas">{children}</div>
-          </main>
-          <OsSidekickPanel />
+      <OsToastProvider>
+        <div className="workwrk-os">
+          <div className="os-shell">
+            <OsAppRail />
+            <OsSidebar />
+            <main className="os-main">
+              <OsTopbar />
+              <div className="os-canvas">{children}</div>
+            </main>
+            <OsSidekickPanel />
+          </div>
+          <OsCommandPalette />
+          <OsItemDrawer />
         </div>
-        <OsCommandPalette />
-        <OsItemDrawer />
-      </div>
+      </OsToastProvider>
     </OsShellProvider>
   );
 }

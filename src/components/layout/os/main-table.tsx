@@ -1,8 +1,12 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, MoreHorizontal, MessageCircle, ArrowRight, Plus } from "lucide-react";
 import type { Person } from "./title-bar";
 import { useOsShell } from "./shell-context";
+import { OsPickerPopover, type PickerOption } from "./picker-popover";
+import { useOsToast } from "./toast";
+import { C } from "./catalog";
 
 export type StatusValue =
   | "done" | "working" | "stuck" | "progress" | "review" | "hold"
@@ -33,28 +37,71 @@ export type Row = {
 export type TableGroup = {
   id: string;
   title: string;
-  color: string; // CSS color value
+  color: string;
   rows: Row[];
 };
 
-// Cell renderers ─────────────────────────────────────────────
-function CellStatus({ v }: { v?: { value: StatusValue; label?: string } }) {
-  if (!v) return <div className="os-cell-status s-empty">—</div>;
-  const labels: Record<StatusValue, string> = {
-    done: "Done", working: "Working on it", stuck: "Stuck",
-    progress: "In progress", review: "Review", hold: "On hold",
-    planning: "Planning", shipped: "Shipped", pending: "Pending",
-    critical: "Critical", empty: "—",
-  };
-  return <div className={`os-cell-status s-${v.value}`}>{v.label ?? labels[v.value]}</div>;
+// ─── Picker options ─────────────────────────────────────────
+const DEFAULT_STATUS_OPTIONS: PickerOption[] = [
+  { value: "done",     label: "Done",          color: C.green },
+  { value: "working",  label: "Working on it", color: C.orange },
+  { value: "stuck",    label: "Stuck",         color: C.red },
+  { value: "progress", label: "In progress",   color: C.blue },
+  { value: "review",   label: "Review",        color: C.purple },
+  { value: "planning", label: "Planning",      color: C.indigo },
+  { value: "hold",     label: "On hold",       color: C.brown },
+  { value: "shipped",  label: "Shipped",       color: C.sage },
+  { value: "pending",  label: "Pending",       color: C.yellow },
+  { value: "critical", label: "Critical",      color: C.pink },
+];
+
+const DEFAULT_PRIO_OPTIONS: PickerOption[] = [
+  { value: "critical", label: "Critical", color: C.pink },
+  { value: "high",     label: "High",     color: C.red },
+  { value: "medium",   label: "Medium",   color: C.yellow },
+  { value: "low",      label: "Low",      color: C.teal },
+];
+
+const STATUS_LABELS: Record<StatusValue, string> = {
+  done: "Done", working: "Working on it", stuck: "Stuck",
+  progress: "In progress", review: "Review", hold: "On hold",
+  planning: "Planning", shipped: "Shipped", pending: "Pending",
+  critical: "Critical", empty: "—",
+};
+
+const PRIO_LABELS: Record<PrioValue, string> = {
+  critical: "Critical", high: "High", medium: "Medium", low: "Low", empty: "—",
+};
+
+// ─── Cell renderers ─────────────────────────────────────────
+function CellStatus({
+  v, onPick,
+}: { v?: { value: StatusValue; label?: string }; onPick: (e: React.MouseEvent) => void }) {
+  if (!v || v.value === "empty") {
+    return (
+      <button type="button" className="os-cell-status s-empty" onClick={onPick}>—</button>
+    );
+  }
+  return (
+    <button type="button" className={`os-cell-status s-${v.value}`} onClick={onPick}>
+      {v.label ?? STATUS_LABELS[v.value]}
+    </button>
+  );
 }
 
-function CellPrio({ v }: { v?: { value: PrioValue; label?: string } }) {
-  if (!v) return <div className="os-cell-prio p-empty">—</div>;
-  const labels: Record<PrioValue, string> = {
-    critical: "Critical", high: "High", medium: "Medium", low: "Low", empty: "—",
-  };
-  return <div className={`os-cell-prio p-${v.value}`}>{v.label ?? labels[v.value]}</div>;
+function CellPrio({
+  v, onPick,
+}: { v?: { value: PrioValue; label?: string }; onPick: (e: React.MouseEvent) => void }) {
+  if (!v || v.value === "empty") {
+    return (
+      <button type="button" className="os-cell-prio p-empty" onClick={onPick}>—</button>
+    );
+  }
+  return (
+    <button type="button" className={`os-cell-prio p-${v.value}`} onClick={onPick}>
+      {v.label ?? PRIO_LABELS[v.value]}
+    </button>
+  );
 }
 
 function CellPerson({ v }: { v?: Person[] }) {
@@ -132,9 +179,226 @@ function CellText({ v, muted }: { v?: string; muted?: boolean }) {
   return <div className={`os-cell-text ${muted ? "os-cell-text--muted" : ""}`}>{v ?? "—"}</div>;
 }
 
-// ─────────────────────────────────────────────────────────────
-export function OsMainTable({ columns, groups, moduleId = "tasks" }: { columns: Column[]; groups: TableGroup[]; moduleId?: string }) {
+// ─── Inline-editable row name ───────────────────────────────
+function RowName({
+  name,
+  done,
+  onSave,
+}: {
+  name: string;
+  done?: boolean;
+  onSave: (next: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(name);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setValue(name); }, [name]);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="os-row-text-edit"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => { setEditing(false); if (value.trim() && value !== name) onSave(value.trim()); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          if (e.key === "Escape") { setValue(name); setEditing(false); }
+        }}
+        onClick={(e) => e.stopPropagation()}
+      />
+    );
+  }
+  return (
+    <span
+      className={`os-row-text ${done ? "is-done" : ""}`}
+      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      title="Click to edit"
+    >
+      {name}
+    </span>
+  );
+}
+
+// ─── Picker state ───────────────────────────────────────────
+type PickerState = {
+  rect: DOMRect;
+  rowId: string;
+  groupId: string;
+  columnId: string;
+  type: "status" | "priority";
+  active?: string;
+} | null;
+
+// ─── Mutation handlers (parent-supplied, for persistence) ───
+export type MainTableHandlers = {
+  onStatusChange?: (rowId: string, groupId: string, value: string) => Promise<void> | void;
+  onPrioChange?:   (rowId: string, groupId: string, value: string) => Promise<void> | void;
+  onToggleDone?:   (rowId: string, groupId: string, done: boolean) => Promise<void> | void;
+  onRename?:       (rowId: string, groupId: string, name: string)  => Promise<void> | void;
+  onAdd?:          (groupId: string) => Promise<{ id: string; name?: string }> | { id: string; name?: string } | void;
+};
+
+// ─── Main table ─────────────────────────────────────────────
+export function OsMainTable({
+  columns,
+  groups: initialGroups,
+  moduleId = "tasks",
+  statusOptions = DEFAULT_STATUS_OPTIONS,
+  prioOptions = DEFAULT_PRIO_OPTIONS,
+  handlers,
+}: {
+  columns: Column[];
+  groups: TableGroup[];
+  moduleId?: string;
+  statusOptions?: PickerOption[];
+  prioOptions?: PickerOption[];
+  handlers?: MainTableHandlers;
+}) {
   const { openItemDrawer } = useOsShell();
+  const { toast } = useOsToast();
+  const [groups, setGroups] = useState<TableGroup[]>(initialGroups);
+  const [picker, setPicker] = useState<PickerState>(null);
+
+  // sync if upstream changes (e.g. module switch OR parent re-fetches)
+  useEffect(() => { setGroups(initialGroups); }, [initialGroups]);
+
+  // Generic optimistic-mutate helper. Snapshots the prior state so we can
+  // roll back if the parent handler rejects.
+  function mutateWithSync(
+    mutate: (gs: TableGroup[]) => TableGroup[],
+    sync?: () => Promise<void> | void,
+    onError?: () => void,
+  ) {
+    setGroups((prev) => {
+      const next = mutate(prev);
+      if (sync) {
+        const result = sync();
+        if (result && typeof (result as Promise<void>).then === "function") {
+          (result as Promise<void>).catch(() => {
+            setGroups(prev); // roll back
+            onError?.();
+            toast("Couldn't save — reverted");
+          });
+        }
+      }
+      return next;
+    });
+  }
+
+  function rowMutator(groupId: string, rowId: string, mutate: (r: Row) => Row) {
+    return (gs: TableGroup[]) => gs.map((g) =>
+      g.id !== groupId ? g : { ...g, rows: g.rows.map((r) => r.id === rowId ? mutate(r) : r) },
+    );
+  }
+
+  function handleStatusChange(value: string) {
+    if (!picker) return;
+    const col = picker.columnId;
+    const { rowId, groupId } = picker;
+    mutateWithSync(
+      rowMutator(groupId, rowId, (r) => {
+        const next: Row = { ...r, cells: { ...r.cells, [col]: { value } } };
+        if (col === "status") next.done = value === "done" || value === "shipped";
+        return next;
+      }),
+      col === "status" ? () => handlers?.onStatusChange?.(rowId, groupId, value) : undefined,
+    );
+    const label = statusOptions.find((o) => o.value === value)?.label ?? STATUS_LABELS[value as StatusValue] ?? value;
+    toast(`Status set to "${label}"`);
+  }
+
+  function handlePrioChange(value: string) {
+    if (!picker) return;
+    const { rowId, groupId, columnId } = picker;
+    mutateWithSync(
+      rowMutator(groupId, rowId, (r) => ({
+        ...r, cells: { ...r.cells, [columnId]: { value } },
+      })),
+      () => handlers?.onPrioChange?.(rowId, groupId, value),
+    );
+    const label = prioOptions.find((o) => o.value === value)?.label ?? PRIO_LABELS[value as PrioValue] ?? value;
+    toast(`Priority set to "${label}"`);
+  }
+
+  function handleClear() {
+    if (!picker) return;
+    const { rowId, groupId, columnId } = picker;
+    mutateWithSync(
+      rowMutator(groupId, rowId, (r) => ({
+        ...r, cells: { ...r.cells, [columnId]: { value: "empty" } },
+      })),
+    );
+    toast("Cleared");
+  }
+
+  function handleCheckbox(groupId: string, rowId: string, r: Row, e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = !r.done;
+    mutateWithSync(
+      rowMutator(groupId, rowId, (row) => ({
+        ...row,
+        done: next,
+        cells: { ...row.cells, status: next ? { value: "done" } : { value: "working" } },
+      })),
+      () => handlers?.onToggleDone?.(rowId, groupId, next),
+    );
+    toast(next ? "Marked done" : "Reopened");
+  }
+
+  function handleNameSave(groupId: string, rowId: string, name: string) {
+    mutateWithSync(
+      rowMutator(groupId, rowId, (r) => ({ ...r, name })),
+      () => handlers?.onRename?.(rowId, groupId, name),
+    );
+    toast("Renamed");
+  }
+
+  async function handleAddItem(groupId: string) {
+    const tempId = `temp-${Date.now()}`;
+    const placeholder: Row = {
+      id: tempId,
+      name: "Untitled item",
+      cells: { status: { value: "working" } },
+    };
+    setGroups((gs) => gs.map((g) =>
+      g.id !== groupId ? g : { ...g, rows: [...g.rows, placeholder] },
+    ));
+    toast("Item added");
+
+    if (!handlers?.onAdd) return;
+    try {
+      const result = await handlers.onAdd(groupId);
+      if (result && result.id) {
+        // swap temp id with real id from server
+        setGroups((gs) => gs.map((g) =>
+          g.id !== groupId ? g : {
+            ...g,
+            rows: g.rows.map((r) => r.id === tempId
+              ? { ...r, id: result.id, ...(result.name ? { name: result.name } : {}) }
+              : r,
+            ),
+          },
+        ));
+      }
+    } catch {
+      // remove temp row + error toast
+      setGroups((gs) => gs.map((g) =>
+        g.id !== groupId ? g : { ...g, rows: g.rows.filter((r) => r.id !== tempId) },
+      ));
+      toast("Couldn't add item — reverted");
+    }
+  }
+
   return (
     <div className="os-maintable">
       {groups.map((g) => {
@@ -186,13 +450,13 @@ export function OsMainTable({ columns, groups, moduleId = "tasks" }: { columns: 
                             type="button"
                             className={`os-row-check ${r.done ? "is-done" : ""}`}
                             aria-label={r.done ? "Mark incomplete" : "Mark done"}
+                            onClick={(e) => handleCheckbox(g.id, r.id, r, e)}
                           />
-                          <span
-                            className={`os-row-text ${r.done ? "is-done" : ""}`}
-                            onClick={() => openItemDrawer({ moduleId, itemId: r.id.toUpperCase(), name: r.name, groupColor: g.color })}
-                          >
-                            {r.name}
-                          </span>
+                          <RowName
+                            name={r.name}
+                            done={r.done}
+                            onSave={(name) => handleNameSave(g.id, r.id, name)}
+                          />
                           <button
                             type="button"
                             className="os-row-open"
@@ -203,9 +467,35 @@ export function OsMainTable({ columns, groups, moduleId = "tasks" }: { columns: 
                         </div>
                       </td>
                       {columns.map((c) => (
-                        <td key={c.id}>
-                          {c.type === "status" && <CellStatus v={r.cells[c.id] as { value: StatusValue; label?: string }} />}
-                          {c.type === "priority" && <CellPrio v={r.cells[c.id] as { value: PrioValue; label?: string }} />}
+                        <td
+                          key={c.id}
+                          onClick={(e) => {
+                            if (c.type === "status" || c.type === "priority") {
+                              e.stopPropagation();
+                              const cur = r.cells[c.id] as { value: string } | undefined;
+                              setPicker({
+                                rect: (e.currentTarget as HTMLElement).getBoundingClientRect(),
+                                rowId: r.id,
+                                groupId: g.id,
+                                columnId: c.id,
+                                type: c.type,
+                                active: cur?.value,
+                              });
+                            }
+                          }}
+                        >
+                          {c.type === "status" && (
+                            <CellStatus
+                              v={r.cells[c.id] as { value: StatusValue; label?: string }}
+                              onPick={() => {}}
+                            />
+                          )}
+                          {c.type === "priority" && (
+                            <CellPrio
+                              v={r.cells[c.id] as { value: PrioValue; label?: string }}
+                              onPick={() => {}}
+                            />
+                          )}
                           {c.type === "person" && <CellPerson v={r.cells[c.id] as Person[]} />}
                           {c.type === "date" && <CellDate v={r.cells[c.id] as { iso: string; state?: "today" | "overdue" | "done" | "empty" }} />}
                           {c.type === "tags" && <CellTags v={r.cells[c.id] as { label: string; color: LabelColor }[]} />}
@@ -220,7 +510,11 @@ export function OsMainTable({ columns, groups, moduleId = "tasks" }: { columns: 
                   ))}
                 </tbody>
               </table>
-              <button type="button" className="os-tbl-add">
+              <button
+                type="button"
+                className="os-tbl-add"
+                onClick={() => handleAddItem(g.id)}
+              >
                 <Plus />
                 <span>Add item</span>
               </button>
@@ -228,6 +522,18 @@ export function OsMainTable({ columns, groups, moduleId = "tasks" }: { columns: 
           </section>
         );
       })}
+
+      {picker ? (
+        <OsPickerPopover
+          anchorRect={picker.rect}
+          title={picker.type === "status" ? "Set status" : "Set priority"}
+          options={picker.type === "status" ? statusOptions : prioOptions}
+          activeValue={picker.active}
+          onSelect={picker.type === "status" ? handleStatusChange : handlePrioChange}
+          onClear={handleClear}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
     </div>
   );
 }
