@@ -1907,7 +1907,17 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   z-index: 30;
-  overflow-y: auto;
+  /* Must stay `visible` on both axes. The "More" popover renders as a
+   * position:absolute child at left: calc(100% + 8px) — outside the
+   * 60px rail box — so any non-visible overflow value (auto / scroll /
+   * hidden) clips the menu out of existence. Per spec, setting just
+   * `overflow-y: auto` silently coerces `overflow-x` to `auto` too, so
+   * we can't constrain the y-axis without losing the popover. The
+   * rail's 8 icons (brand + 7) fit comfortably in 100vh on any sane
+   * viewport, so vertical scrolling isn't needed. If the rail ever
+   * grows past viewport height, portal the popover to <body> instead
+   * of re-introducing overflow here. */
+  overflow: visible;
 }
 
 .app-rail-brand {
