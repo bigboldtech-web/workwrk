@@ -1,10 +1,7 @@
-// /benefits now redirects to the default board (Plans). See
-// src/lib/products/boards.ts for the workwrk-benefits board list.
+"use client";
 
-import { redirect } from "next/navigation";
-import { getDefaultBoardKey } from "@/lib/products/boards";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function BenefitsIndexPage() {
-  const board = getDefaultBoardKey("workwrk-benefits") ?? "plans";
-  redirect(`/benefits/${board}`);
+export default function Page() {
+  return <OsModuleView moduleId="benefits" />;
 }

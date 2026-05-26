@@ -1,10 +1,7 @@
-// /itsm now redirects to the default board (Tickets). See
-// src/lib/products/boards.ts for the workwrk-itsm board list.
+"use client";
 
-import { redirect } from "next/navigation";
-import { getDefaultBoardKey } from "@/lib/products/boards";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function ItsmIndexPage() {
-  const board = getDefaultBoardKey("workwrk-itsm") ?? "tickets";
-  redirect(`/itsm/${board}`);
+export default function Page() {
+  return <OsModuleView moduleId="itsm" />;
 }

@@ -1,12 +1,7 @@
 "use client";
 
-import { BoardShell } from "@/components/layout/board-shell";
-import { InvoicesTab } from "@/components/procurement/tabs";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function ProcurementInvoicesPage() {
-  return (
-    <BoardShell productSlug="workwrk-procurement" boardKey="invoices" viewMode="table">
-      <InvoicesTab />
-    </BoardShell>
-  );
+export default function Page() {
+  return <OsModuleView moduleId="procurement/invoices" />;
 }

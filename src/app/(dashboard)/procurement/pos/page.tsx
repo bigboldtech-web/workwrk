@@ -1,12 +1,7 @@
 "use client";
 
-import { BoardShell } from "@/components/layout/board-shell";
-import { POsTab } from "@/components/procurement/tabs";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function ProcurementPosPage() {
-  return (
-    <BoardShell productSlug="workwrk-procurement" boardKey="pos" viewMode="table">
-      <POsTab />
-    </BoardShell>
-  );
+export default function Page() {
+  return <OsModuleView moduleId="procurement/pos" />;
 }

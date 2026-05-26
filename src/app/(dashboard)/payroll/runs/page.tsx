@@ -1,12 +1,7 @@
 "use client";
 
-import { BoardShell } from "@/components/layout/board-shell";
-import { PayRunsTab } from "@/components/payroll/tabs";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function PayrollRunsPage() {
-  return (
-    <BoardShell productSlug="workwrk-pay" boardKey="runs" viewMode="table">
-      <PayRunsTab />
-    </BoardShell>
-  );
+export default function Page() {
+  return <OsModuleView moduleId="payroll/runs" />;
 }

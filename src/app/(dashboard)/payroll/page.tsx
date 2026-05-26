@@ -1,10 +1,7 @@
-// /payroll now redirects to the default board (Pay runs). See
-// src/lib/products/boards.ts for the workwrk-pay board list.
+"use client";
 
-import { redirect } from "next/navigation";
-import { getDefaultBoardKey } from "@/lib/products/boards";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function PayrollIndexPage() {
-  const board = getDefaultBoardKey("workwrk-pay") ?? "runs";
-  redirect(`/payroll/${board}`);
+export default function Page() {
+  return <OsModuleView moduleId="payroll" />;
 }

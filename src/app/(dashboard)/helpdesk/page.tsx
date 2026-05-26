@@ -1,10 +1,7 @@
-// /helpdesk now redirects to the default board (Tickets). See
-// src/lib/products/boards.ts for the workwrk-help board list.
+"use client";
 
-import { redirect } from "next/navigation";
-import { getDefaultBoardKey } from "@/lib/products/boards";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function HelpdeskIndexPage() {
-  const board = getDefaultBoardKey("workwrk-help") ?? "tickets";
-  redirect(`/helpdesk/${board}`);
+export default function Page() {
+  return <OsModuleView moduleId="helpdesk" />;
 }

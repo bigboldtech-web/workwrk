@@ -1,10 +1,7 @@
-// /marketing now redirects to the default board (Campaigns). See
-// src/lib/products/boards.ts for the workwrk-campaigns board list.
+"use client";
 
-import { redirect } from "next/navigation";
-import { getDefaultBoardKey } from "@/lib/products/boards";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function MarketingIndexPage() {
-  const board = getDefaultBoardKey("workwrk-campaigns") ?? "campaigns";
-  redirect(`/marketing/${board}`);
+export default function Page() {
+  return <OsModuleView moduleId="marketing" />;
 }

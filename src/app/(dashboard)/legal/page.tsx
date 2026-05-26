@@ -1,10 +1,7 @@
-// /legal now redirects to the default board (Contracts). See
-// src/lib/products/boards.ts for the workwrk-contracts board list.
+"use client";
 
-import { redirect } from "next/navigation";
-import { getDefaultBoardKey } from "@/lib/products/boards";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function LegalIndexPage() {
-  const board = getDefaultBoardKey("workwrk-contracts") ?? "contracts";
-  redirect(`/legal/${board}`);
+export default function Page() {
+  return <OsModuleView moduleId="legal" />;
 }

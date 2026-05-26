@@ -1,12 +1,7 @@
 "use client";
 
-import { BoardShell } from "@/components/layout/board-shell";
-import { VarianceTab } from "@/components/planning/tabs";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function PlanningVariancePage() {
-  return (
-    <BoardShell productSlug="workwrk-fpa" boardKey="variance" viewMode="table">
-      <VarianceTab />
-    </BoardShell>
-  );
+export default function Page() {
+  return <OsModuleView moduleId="planning/variance" />;
 }

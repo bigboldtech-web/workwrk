@@ -1,12 +1,7 @@
 "use client";
 
-import { BoardShell } from "@/components/layout/board-shell";
-import { MyCoursesTab } from "@/components/learning/tabs";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function LearningMinePage() {
-  return (
-    <BoardShell productSlug="workwrk-learn" boardKey="mine" viewMode="table">
-      <MyCoursesTab />
-    </BoardShell>
-  );
+export default function Page() {
+  return <OsModuleView moduleId="learning/mine" />;
 }

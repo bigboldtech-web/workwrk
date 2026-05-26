@@ -1,12 +1,7 @@
 "use client";
 
-import { BoardShell } from "@/components/layout/board-shell";
-import { PlansTab } from "@/components/planning/tabs";
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-export default function PlanningPlansPage() {
-  return (
-    <BoardShell productSlug="workwrk-fpa" boardKey="plans" viewMode="table">
-      <PlansTab />
-    </BoardShell>
-  );
+export default function Page() {
+  return <OsModuleView moduleId="planning/plans" />;
 }

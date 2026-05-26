@@ -1,14 +1,7 @@
 "use client";
 
-// Recruiting → Jobs board.
+import { OsModuleView } from "@/components/layout/os/module-view";
 
-import { BoardShell } from "@/components/layout/board-shell";
-import { JobsTab } from "@/components/recruiting/tabs";
-
-export default function RecruitingJobsPage() {
-  return (
-    <BoardShell productSlug="workwrk-recruit" boardKey="jobs" viewMode="table">
-      <JobsTab />
-    </BoardShell>
-  );
+export default function Page() {
+  return <OsModuleView moduleId="recruiting/jobs" />;
 }
