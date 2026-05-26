@@ -1,0 +1,27 @@
+"use client";
+
+import { OsShellProvider } from "./shell-context";
+import { OsAppRail } from "./app-rail";
+import { OsSidebar } from "./sidebar";
+import { OsTopbar } from "./topbar";
+import { OsSidekickPanel } from "./sidekick-panel";
+import { OsCommandPalette } from "./command-palette";
+
+export function OsShell({ children }: { children: React.ReactNode }) {
+  return (
+    <OsShellProvider>
+      <div className="workwrk-os">
+        <div className="os-shell">
+          <OsAppRail />
+          <OsSidebar />
+          <main className="os-main">
+            <OsTopbar />
+            <div className="os-canvas">{children}</div>
+          </main>
+          <OsSidekickPanel />
+        </div>
+        <OsCommandPalette />
+      </div>
+    </OsShellProvider>
+  );
+}

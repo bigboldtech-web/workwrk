@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Outfit, JetBrains_Mono, Syne, Geist, Geist_Mono } from "next/font/google";
+import { Outfit, JetBrains_Mono, Syne, Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { Providers } from "@/components/layout/providers";
@@ -35,6 +35,13 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
+});
+
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-instrument-serif",
+  subsets: ["latin"],
+  weight: ["400"],
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -109,7 +116,7 @@ export default async function RootLayout({
     <html
       lang={locale}
       dir={dir}
-      className={`${outfit.variable} ${jetbrainsMono.variable} ${syne.variable} ${geist.variable} ${geistMono.variable}`}
+      className={`${outfit.variable} ${jetbrainsMono.variable} ${syne.variable} ${geist.variable} ${geistMono.variable} ${instrumentSerif.variable}`}
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
