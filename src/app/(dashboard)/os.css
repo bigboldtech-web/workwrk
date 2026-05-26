@@ -397,6 +397,62 @@
 }
 .os-side__add svg { width: 12px; height: 12px; }
 
+/* Collapsible space row — header that toggles a child list. */
+.os-side__space { margin: 2px 0; }
+.os-side__space-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 4px;
+  border-radius: var(--os-r-sm);
+  color: var(--os-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: background 100ms;
+  text-align: left;
+}
+.os-side__space-head:hover { background: var(--os-surface-1); }
+.os-side__space-head.is-current {
+  background: var(--os-brand-soft);
+  color: var(--os-brand);
+}
+.os-side__space-chev {
+  width: 14px; height: 14px;
+  display: grid; place-items: center;
+  color: var(--os-ink-3);
+  flex-shrink: 0;
+}
+.os-side__space-chev svg { width: 12px; height: 12px; }
+.os-side__space-icon {
+  width: 20px; height: 20px;
+  border-radius: 5px;
+  display: grid; place-items: center;
+  color: white;
+  flex-shrink: 0;
+}
+.os-side__space-icon svg { width: 12px; height: 12px; }
+.os-side__space-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.os-side__space-count {
+  font-size: 10px;
+  color: var(--os-ink-3);
+  font-weight: 600;
+  background: var(--os-surface-2);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.os-side__space-children {
+  padding: 2px 0 4px 18px;
+  border-left: 1px solid var(--os-line);
+  margin-left: 14px;
+}
+
 .os-side__foot {
   padding: 12px 14px;
   border-top: 1px solid var(--os-line);
