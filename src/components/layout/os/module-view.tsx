@@ -57,11 +57,11 @@ export function OsModuleView({ moduleId }: { moduleId: string }) {
       {hasData ? <OsFilterBar newLabel={mod.newLabel} activeFilters={1} /> : null}
 
       {hasData && activeTab === "table" && mod.columns && mod.groups ? (
-        <OsMainTable columns={mod.columns} groups={mod.groups} />
+        <OsMainTable columns={mod.columns} groups={mod.groups} moduleId={mod.id} />
       ) : null}
 
       {hasData && activeTab === "kanban" && mod.kanban ? (
-        <OsKanban columns={mod.kanban} />
+        <OsKanban columns={mod.kanban} moduleId={mod.id} />
       ) : null}
 
       {!hasData && activeTab === "dashboard" ? (

@@ -6,6 +6,7 @@ import { OsSidebar } from "./sidebar";
 import { OsTopbar } from "./topbar";
 import { OsSidekickPanel } from "./sidekick-panel";
 import { OsCommandPalette } from "./command-palette";
+import { OsItemDrawer } from "./item-drawer";
 
 export function OsShell({ children }: { children: React.ReactNode }) {
   return (
@@ -21,6 +22,7 @@ export function OsShell({ children }: { children: React.ReactNode }) {
           <OsSidekickPanel />
         </div>
         <OsCommandPalette />
+        <OsItemDrawer />
       </div>
     </OsShellProvider>
   );

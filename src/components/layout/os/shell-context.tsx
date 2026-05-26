@@ -4,6 +4,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 export type Lens = "me" | "we";
 
+export type OpenItem = {
+  moduleId: string;
+  itemId: string;
+  name: string;
+  groupColor?: string;
+};
+
 type ShellState = {
   paletteOpen: boolean;
   openPalette: () => void;
@@ -16,6 +23,10 @@ type ShellState = {
 
   lens: Lens;
   setLens: (l: Lens) => void;
+
+  openItem: OpenItem | null;
+  openItemDrawer: (it: OpenItem) => void;
+  closeItemDrawer: () => void;
 };
 
 const Ctx = createContext<ShellState | null>(null);
@@ -26,6 +37,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidekickOpen, setSidekickOpen] = useState(false);
   const [lens, setLensState] = useState<Lens>("me");
+  const [openItem, setOpenItem] = useState<OpenItem | null>(null);
 
   useEffect(() => {
     try {
@@ -44,6 +56,8 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const openSidekick = useCallback(() => setSidekickOpen(true), []);
   const closeSidekick = useCallback(() => setSidekickOpen(false), []);
   const toggleSidekick = useCallback(() => setSidekickOpen((v) => !v), []);
+  const openItemDrawer = useCallback((it: OpenItem) => setOpenItem(it), []);
+  const closeItemDrawer = useCallback(() => setOpenItem(null), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -55,6 +69,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
         setSidekickOpen((v) => !v);
       } else if (e.key === "Escape") {
         setPaletteOpen(false);
+        setOpenItem(null);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -66,8 +81,9 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       paletteOpen, openPalette, closePalette,
       sidekickOpen, openSidekick, closeSidekick, toggleSidekick,
       lens, setLens,
+      openItem, openItemDrawer, closeItemDrawer,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, lens, setLens],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, lens, setLens, openItem, openItemDrawer, closeItemDrawer],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -2,6 +2,7 @@
 
 import { ChevronDown, MoreHorizontal, MessageCircle, ArrowRight, Plus } from "lucide-react";
 import type { Person } from "./title-bar";
+import { useOsShell } from "./shell-context";
 
 export type StatusValue =
   | "done" | "working" | "stuck" | "progress" | "review" | "hold"
@@ -132,7 +133,8 @@ function CellText({ v, muted }: { v?: string; muted?: boolean }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-export function OsMainTable({ columns, groups }: { columns: Column[]; groups: TableGroup[] }) {
+export function OsMainTable({ columns, groups, moduleId = "tasks" }: { columns: Column[]; groups: TableGroup[]; moduleId?: string }) {
+  const { openItemDrawer } = useOsShell();
   return (
     <div className="os-maintable">
       {groups.map((g) => {
@@ -173,16 +175,29 @@ export function OsMainTable({ columns, groups }: { columns: Column[]; groups: Ta
                 </thead>
                 <tbody>
                   {g.rows.map((r) => (
-                    <tr key={r.id}>
-                      <td>
+                    <tr
+                      key={r.id}
+                      onClick={() => openItemDrawer({ moduleId, itemId: r.id.toUpperCase(), name: r.name, groupColor: g.color })}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td onClick={(e) => e.stopPropagation()}>
                         <div className="os-row-item">
                           <button
                             type="button"
                             className={`os-row-check ${r.done ? "is-done" : ""}`}
                             aria-label={r.done ? "Mark incomplete" : "Mark done"}
                           />
-                          <span className={`os-row-text ${r.done ? "is-done" : ""}`}>{r.name}</span>
-                          <button type="button" className="os-row-open">
+                          <span
+                            className={`os-row-text ${r.done ? "is-done" : ""}`}
+                            onClick={() => openItemDrawer({ moduleId, itemId: r.id.toUpperCase(), name: r.name, groupColor: g.color })}
+                          >
+                            {r.name}
+                          </span>
+                          <button
+                            type="button"
+                            className="os-row-open"
+                            onClick={() => openItemDrawer({ moduleId, itemId: r.id.toUpperCase(), name: r.name, groupColor: g.color })}
+                          >
                             Open <ArrowRight />
                           </button>
                         </div>

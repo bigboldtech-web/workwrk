@@ -3,6 +3,7 @@
 import { MoreHorizontal, Plus, Calendar as CalendarIcon } from "lucide-react";
 import type { Person } from "./title-bar";
 import type { LabelColor } from "./main-table";
+import { useOsShell } from "./shell-context";
 
 export type KCard = {
   id: string;
@@ -24,7 +25,8 @@ function fmtShort(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function OsKanban({ columns }: { columns: KColumn[] }) {
+export function OsKanban({ columns, moduleId = "tasks" }: { columns: KColumn[]; moduleId?: string }) {
+  const { openItemDrawer } = useOsShell();
   return (
     <div className="os-kanban">
       {columns.map((col) => (
@@ -45,6 +47,7 @@ export function OsKanban({ columns }: { columns: KColumn[] }) {
                 key={c.id}
                 className="os-kcard"
                 style={{ "--os-kcard-color": col.color } as React.CSSProperties}
+                onClick={() => openItemDrawer({ moduleId, itemId: c.refId ?? c.id.toUpperCase(), name: c.title, groupColor: col.color })}
               >
                 <div className="os-kcard__top">
                   <h4 className="os-kcard__title">{c.title}</h4>
