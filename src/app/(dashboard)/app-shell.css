@@ -2088,6 +2088,18 @@ html:not(.dark) .app-shell [class*="text-\[#d4ff2e\]"] { color: #0a0a0a !importa
   width: 100%;
 }
 
+/* Pin each shell child to its column explicitly. Without this, when
+ * AppWorkspaceNav returns null (routes outside the product catalog —
+ * /sidekick, /inbox, /studio, etc.) React renders no DOM node for the
+ * middle column. CSS Grid auto-placement then drops .app-shell-main
+ * into column 2 (minmax(0, max-content)) instead of column 3 (1fr),
+ * which collapses the main canvas to its intrinsic width and leaves
+ * a huge empty band on the right. Explicit grid-column assignments
+ * keep each child in its lane regardless of which siblings render. */
+.app-shell-grid > .app-rail { grid-column: 1; grid-row: 1; }
+.app-shell-grid > .app-subnav { grid-column: 2; grid-row: 1; }
+.app-shell-grid > .app-shell-main { grid-column: 3; grid-row: 1; }
+
 /* Sub-nav column. */
 .app-subnav {
   width: 240px;
