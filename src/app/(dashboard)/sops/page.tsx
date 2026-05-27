@@ -151,15 +151,10 @@ export default function SopsPage() {
       if (!ok) throw new Error("save failed");
     },
     onAdd: async (_g: string) => {
-      const res = await fetch("/api/sops", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled SOP", content: {} }),
-      });
-      if (!res.ok) throw new Error(`POST ${res.status}`);
-      const data = await res.json();
-      const s: ApiSop = data.data ?? data;
-      setTimeout(() => void load(), 200);
-      return { id: s.id, name: s.title };
+      // SOPs have three first-class types — route to the type picker
+      // instead of inline-creating a blank one with no shape.
+      window.location.href = "/sops/new";
+      throw new Error("redirected");
     },
   };
 
