@@ -153,6 +153,7 @@ const SPACES: Space[] = [
       { href: "/talent",                label: "Talent (9-box)",   mark: "T", color: "var(--os-c-purple)" },
       { href: "/candor",                label: "Candor",           mark: "C", color: "var(--os-c-pink)" },
       { href: "/kra-kpi",               label: "KRA & KPI",        mark: "K", color: "var(--os-c-indigo)" },
+      { href: "/kra-kpi/review",        label: "People reviews",   mark: "R", color: "var(--os-c-purple)" },
       { href: "/workforce-planning",    label: "Workforce plan",   mark: "W", color: "var(--os-c-indigo)" },
       { href: "/announcements",         label: "Announcements",    mark: "A", color: "var(--os-c-red)", pulse: true },
       { href: "/kudos",                 label: "Kudos",            mark: "K", color: "var(--os-c-yellow)" },
