@@ -1,215 +1,106 @@
 "use client";
 
-/* Real, persistent Tasks page.
+/* My tasks — personal focus queue.
  *
- * - GET /api/tasks on mount → groups by date (Today/This week/Later/Done)
- * - PATCH /api/tasks on status / priority / checkbox / inline rename
- * - POST /api/tasks on "+ Add item"
- * All mutations are optimistic with rollback on failure (handled inside
- * OsMainTable via the `handlers` prop).
+ * Not a board. Not a table. A calm vertical queue with 4 buckets:
+ *   Overdue · Today · This week · Later  (+ a Done-today recap pinned bottom)
  *
- * Status mapping:
- *   OS "planning" ↔ Prisma PLANNED
- *   OS "working"  ↔ Prisma IN_PROGRESS
- *   OS "done"     ↔ Prisma COMPLETED
- * Priority mapping:
- *   OS "low"|"medium"|"high"|"critical" ↔ Prisma LOW|NORMAL|HIGH|URGENT
+ * Each task is a single line: round check · title · priority dot · due chip ·
+ * (optional) assigner avatar. Click the circle to complete, double-click title
+ * to rename, type at the bottom of any column to add.
+ *
+ * GET  /api/tasks?assigneeId=me&startDate=…&endDate=…
+ * PATCH /api/tasks   { id, status?, title?, date?, priority? }
+ * POST  /api/tasks   { title, date, allDay }
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckSquare, ClipboardList, Boxes, Calendar as CalendarIcon, BarChart, ChartPie } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue, type PrioValue } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckSquare, AlertCircle, Sun, CalendarDays, Clock, Plus, Sparkles, ChevronRight, Flame } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import type { PickerOption } from "@/components/layout/os/picker-popover";
+import { useOsToast } from "@/components/layout/os/toast";
 
-// ─── Type for the Task shape returned by /api/tasks ──────────
+type ApiPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
+type ApiStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETED";
+
 type ApiTask = {
   id: string;
   title: string;
   date: string;
-  status: "PLANNED" | "IN_PROGRESS" | "COMPLETED";
-  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  status: ApiStatus;
+  priority: ApiPrio;
   completedAt?: string | null;
-  assignee?: { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null } | null;
+  assignee?: { id: string; firstName?: string | null; lastName?: string | null } | null;
   labels?: { label: { id: string; name: string; color?: string | null } }[];
-  _count?: { comments?: number };
 };
 
-// ─── Mappings ────────────────────────────────────────────────
-const STATUS_API_TO_OS: Record<ApiTask["status"], StatusValue> = {
-  PLANNED: "planning",
-  IN_PROGRESS: "working",
-  COMPLETED: "done",
+const MS_DAY = 86_400_000;
+const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+
+const PRIO_COLOR: Record<ApiPrio, string> = {
+  URGENT: "var(--os-c-red)", HIGH: "var(--os-c-orange)",
+  NORMAL: "var(--os-c-blue)", LOW: "var(--os-c-darkgray)",
 };
-const STATUS_OS_TO_API: Partial<Record<StatusValue, ApiTask["status"]>> = {
-  planning: "PLANNED",
-  working: "IN_PROGRESS",
-  done: "COMPLETED",
-};
-const PRIO_API_TO_OS: Record<ApiTask["priority"], PrioValue> = {
-  LOW: "low",
-  NORMAL: "medium",
-  HIGH: "high",
-  URGENT: "critical",
-};
-const PRIO_OS_TO_API: Partial<Record<PrioValue, ApiTask["priority"]>> = {
-  low: "LOW",
-  medium: "NORMAL",
-  high: "HIGH",
-  critical: "URGENT",
+const PRIO_LABEL: Record<ApiPrio, string> = {
+  URGENT: "Urgent", HIGH: "High", NORMAL: "Normal", LOW: "Low",
 };
 
-const TASK_STATUS_OPTIONS: PickerOption[] = [
-  { value: "planning", label: "Planned",     color: C.indigo },
-  { value: "working",  label: "In progress", color: C.orange },
-  { value: "done",     label: "Done",        color: C.green },
-];
+type Bucket = "overdue" | "today" | "week" | "later" | "done";
+const BUCKET_LABEL: Record<Bucket, string> = {
+  overdue: "Overdue", today: "Today", week: "This week", later: "Later", done: "Done today",
+};
+const BUCKET_ICON: Record<Bucket, React.ComponentType<{ className?: string }>> = {
+  overdue: AlertCircle, today: Sun, week: CalendarDays, later: Clock, done: CheckSquare,
+};
+const BUCKET_HUE: Record<Bucket, string> = {
+  overdue: "var(--os-c-red)", today: "var(--os-c-orange)", week: "var(--os-c-blue)", later: "var(--os-c-indigo)", done: "var(--os-c-green)",
+};
 
-// Stable hash → palette color so each unique assignee gets a consistent avatar color
-const AVATAR_COLORS = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
-function avatarColorFor(seed: string) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length];
-}
-function initialsFor(first?: string | null, last?: string | null) {
-  const f = (first ?? "").trim()[0] ?? "";
-  const l = (last ?? "").trim()[0] ?? "";
-  return ((f + l) || "?").toUpperCase();
-}
-
-// Map a Task row's label color hex → nearest os palette name
-const LABEL_COLORS = ["green", "orange", "red", "blue", "purple", "pink", "indigo", "teal", "lime", "brown", "yellow"] as const;
-function labelColorFor(hex?: string | null, fallbackSeed = "") {
-  if (hex) {
-    // very simple bucketing — pick by 1st char of hex hash
-    const h = hex.toLowerCase().replace("#", "");
-    const code = parseInt(h.slice(0, 2), 16) || 0;
-    return LABEL_COLORS[code % LABEL_COLORS.length];
-  }
-  let h = 0;
-  for (let i = 0; i < fallbackSeed.length; i++) h = (h * 31 + fallbackSeed.charCodeAt(i)) >>> 0;
-  return LABEL_COLORS[h % LABEL_COLORS.length];
-}
-
-// ─── Grouping ────────────────────────────────────────────────
-const MS_DAY = 24 * 60 * 60 * 1000;
-
-function startOfDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function buildGroups(tasks: ApiTask[]): TableGroup[] {
-  const today = startOfDay(new Date()).getTime();
-  const weekEnd = today + 7 * MS_DAY;
-  const monthAgo = today - 30 * MS_DAY;
-
-  const buckets: { id: string; title: string; color: string; rows: Row[] }[] = [
-    { id: "today",     title: "Today",       color: C.orange, rows: [] },
-    { id: "this-week", title: "This week",   color: C.blue,   rows: [] },
-    { id: "later",     title: "Later",       color: C.indigo, rows: [] },
-    { id: "overdue",   title: "Overdue",     color: C.red,    rows: [] },
-    { id: "done",      title: "Done — last 30 days", color: C.green, rows: [] },
-  ];
-
-  for (const t of tasks) {
-    const due = startOfDay(new Date(t.date)).getTime();
-    const isDone = t.status === "COMPLETED";
-    const row = taskToRow(t);
-
-    if (isDone) {
-      const completedAt = t.completedAt ? new Date(t.completedAt).getTime() : due;
-      if (completedAt >= monthAgo) buckets[4].rows.push(row);
-    } else if (due < today) {
-      buckets[3].rows.push(row);
-    } else if (due === today) {
-      buckets[0].rows.push(row);
-    } else if (due <= weekEnd) {
-      buckets[1].rows.push(row);
-    } else {
-      buckets[2].rows.push(row);
-    }
-  }
-
-  // Don't show empty Overdue group unless there are any
-  return buckets.filter((b) => b.rows.length > 0 || b.id === "today" || b.id === "this-week");
-}
-
-function taskToRow(t: ApiTask): Row {
-  const due = new Date(t.date);
+function bucketFor(t: ApiTask): Bucket {
   const today0 = startOfDay(new Date()).getTime();
-  const due0 = startOfDay(due).getTime();
-  const dateState: "today" | "overdue" | "done" | undefined =
-    t.status === "COMPLETED" ? "done"
-    : due0 < today0 ? "overdue"
-    : due0 === today0 ? "today"
-    : undefined;
-
-  const owner = t.assignee
-    ? [{
-        initials: initialsFor(t.assignee.firstName, t.assignee.lastName),
-        color: avatarColorFor(t.assignee.id),
-      }]
-    : [];
-
-  const tags = (t.labels ?? []).map((l) => ({
-    label: l.label.name,
-    color: labelColorFor(l.label.color, l.label.id),
-  }));
-
-  return {
-    id: t.id,
-    name: t.title,
-    done: t.status === "COMPLETED",
-    cells: {
-      status: { value: STATUS_API_TO_OS[t.status] },
-      prio:   { value: PRIO_API_TO_OS[t.priority] },
-      owner,
-      due:    { iso: t.date, state: dateState },
-      tags,
-      updates: { count: t._count?.comments ?? 0 },
-    },
-  };
+  const due0 = startOfDay(new Date(t.date)).getTime();
+  if (t.status === "COMPLETED") {
+    const completedAt = t.completedAt ? new Date(t.completedAt).getTime() : due0;
+    return completedAt >= today0 ? "done" : "later"; // older completes drop out via filter
+  }
+  if (due0 < today0) return "overdue";
+  if (due0 === today0) return "today";
+  if (due0 <= today0 + 6 * MS_DAY) return "week";
+  return "later";
 }
 
-// ─── Columns ────────────────────────────────────────────────
-const COLUMNS: Column[] = [
-  { id: "status", label: "Status",   type: "status" },
-  { id: "owner",  label: "Owner",    type: "person" },
-  { id: "due",    label: "Due",      type: "date" },
-  { id: "prio",   label: "Priority", type: "priority" },
-  { id: "tags",   label: "Labels",   type: "tags" },
-  { id: "updates",label: "Updates",  type: "updates" },
-];
+function dueChip(t: ApiTask): { label: string; tone: "danger" | "today" | "muted" | "good" } {
+  const today0 = startOfDay(new Date()).getTime();
+  const due0 = startOfDay(new Date(t.date)).getTime();
+  if (t.status === "COMPLETED") return { label: "Done", tone: "good" };
+  const days = Math.round((due0 - today0) / MS_DAY);
+  if (days < 0) return { label: `${-days}d late`, tone: "danger" };
+  if (days === 0) return { label: "Today", tone: "today" };
+  if (days === 1) return { label: "Tomorrow", tone: "muted" };
+  if (days <= 6) return { label: new Date(due0).toLocaleDateString("en-US", { weekday: "short" }), tone: "muted" };
+  return { label: new Date(due0).toLocaleDateString("en-US", { month: "short", day: "numeric" }), tone: "muted" };
+}
 
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "kanban",    label: "Kanban",     Icon: Boxes },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
+const greeting = () => {
+  const h = new Date().getHours();
+  if (h < 5)  return "Late night";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  if (h < 21) return "Good evening";
+  return "Wrapping up";
+};
 
-// ─── Page ────────────────────────────────────────────────────
-export default function TasksPage() {
+export default function MyTasksPage() {
   const [tasks, setTasks] = useState<ApiTask[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [drafts, setDrafts] = useState<Record<Bucket, string>>({ overdue: "", today: "", week: "", later: "", done: "" });
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const { rowVersion } = useOsShell();
+  const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
-      // Pull a wide window — last 30d through next 90d — so all 5 buckets
-      // have data to draw from.
-      const from = new Date(Date.now() - 30 * MS_DAY).toISOString().slice(0, 10);
-      const to   = new Date(Date.now() + 90 * MS_DAY).toISOString().slice(0, 10);
+      const from = new Date(Date.now() - 14 * MS_DAY).toISOString().slice(0, 10);
+      const to   = new Date(Date.now() + 60 * MS_DAY).toISOString().slice(0, 10);
       const res = await fetch(`/api/tasks?startDate=${from}&endDate=${to}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -219,160 +110,254 @@ export default function TasksPage() {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
   }, []);
-
   useEffect(() => { void load(); }, [load]);
+  const v = rowVersion("tasks");
+  useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  // Subscribe to row-version bumps so we re-fetch when something else
-  // (drawer, Sidekick tool call, etc.) mutates a task elsewhere.
-  const { rowVersion } = useOsShell();
-  const tasksVersion = rowVersion("tasks");
-  useEffect(() => {
-    if (tasksVersion > 0) void load();
-  }, [tasksVersion, load]);
+  const grouped = useMemo(() => {
+    const buckets: Record<Bucket, ApiTask[]> = { overdue: [], today: [], week: [], later: [], done: [] };
+    for (const t of tasks ?? []) {
+      const b = bucketFor(t);
+      // hide completed tasks unless they were completed today
+      if (t.status === "COMPLETED" && b !== "done") continue;
+      buckets[b].push(t);
+    }
+    // sort each bucket: priority desc, then due asc
+    const prioRank: Record<ApiPrio, number> = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
+    for (const k of Object.keys(buckets) as Bucket[]) {
+      buckets[k].sort((a, b) => {
+        const p = prioRank[a.priority] - prioRank[b.priority];
+        if (p !== 0) return p;
+        return new Date(a.date).getTime() - new Date(b.date).getTime();
+      });
+    }
+    return buckets;
+  }, [tasks]);
 
-  const groups = useMemo(() => buildGroups(tasks ?? []), [tasks]);
-
-  // Calendar events — one per task, colored by status
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (tasks ?? []).map((t) => ({
-      id: t.id,
-      title: t.title,
-      date: t.date,
-      color:
-        t.status === "COMPLETED" ? C.green
-        : t.status === "IN_PROGRESS" ? C.orange
-        : C.indigo,
-      done: t.status === "COMPLETED",
-      payload: taskToRow(t).cells,
-    })),
-    [tasks],
-  );
-
-  // ─── Persistence handlers ─────────────────────────────────
-  async function patchTask(id: string, body: Record<string, unknown>) {
-    const res = await fetch("/api/tasks", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...body }),
-    });
-    if (!res.ok) throw new Error(`PATCH failed: ${res.status}`);
-    return res.json();
+  async function patch(id: string, body: Record<string, unknown>) {
+    // optimistic
+    setTasks((prev) => prev?.map((t) => t.id === id ? { ...t, ...body, status: (body.status as ApiStatus) ?? t.status, completedAt: body.status === "COMPLETED" ? new Date().toISOString() : t.completedAt } as ApiTask : t) ?? prev);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...body }),
+      });
+      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+    } catch (e) {
+      toast("Couldn't save — refreshing");
+      void load();
+    }
   }
 
-  const handlers = {
-    onStatusChange: async (rowId: string, _groupId: string, value: string) => {
-      const apiStatus = STATUS_OS_TO_API[value as StatusValue];
-      if (!apiStatus) return; // OS status not mapped to a Task status; skip
-      await patchTask(rowId, { status: apiStatus });
-      void load(); // re-fetch so the row migrates to the right group
-    },
-    onPrioChange: async (rowId: string, _groupId: string, value: string) => {
-      const apiPrio = PRIO_OS_TO_API[value as PrioValue];
-      if (!apiPrio) return;
-      await patchTask(rowId, { priority: apiPrio });
-    },
-    onToggleDone: async (rowId: string, _groupId: string, done: boolean) => {
-      await patchTask(rowId, { status: done ? "COMPLETED" : "IN_PROGRESS" });
-      void load();
-    },
-    onRename: async (rowId: string, _groupId: string, name: string) => {
-      await patchTask(rowId, { title: name });
-    },
-    onAdd: async (groupId: string) => {
-      // pick a due date that matches the group bucket
-      const today = startOfDay(new Date());
-      let date = today;
-      if (groupId === "this-week") date = new Date(today.getTime() + 2 * MS_DAY);
-      else if (groupId === "later") date = new Date(today.getTime() + 10 * MS_DAY);
-      else if (groupId === "overdue") date = today; // can't really add to past
-      else if (groupId === "done") date = today;
+  async function completeTask(t: ApiTask) {
+    if (t.status === "COMPLETED") {
+      await patch(t.id, { status: "IN_PROGRESS" });
+    } else {
+      await patch(t.id, { status: "COMPLETED" });
+    }
+  }
 
+  async function addTask(bucket: Bucket, title: string) {
+    if (!title.trim()) return;
+    const today = startOfDay(new Date()).getTime();
+    let date = today;
+    if (bucket === "week") date = today + 3 * MS_DAY;
+    else if (bucket === "later") date = today + 14 * MS_DAY;
+    try {
       const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "Untitled task",
-          date: date.toISOString(),
-          allDay: true,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim(), date: new Date(date).toISOString(), allDay: true }),
       });
-      if (!res.ok) throw new Error(`POST failed: ${res.status}`);
-      const created = await res.json();
-      const task = created.data ?? created;
-      // Re-fetch in the background so the row appears in its proper bucket
-      // (the helper-added temp row stays visible until the fetch returns).
-      setTimeout(() => void load(), 200);
-      return { id: task.id, name: task.title };
-    },
-  };
+      if (!res.ok) throw new Error(`POST ${res.status}`);
+      setDrafts((d) => ({ ...d, [bucket]: "" }));
+      void load();
+    } catch {
+      toast("Couldn't add task");
+    }
+  }
+
+  async function rename(id: string, title: string) {
+    if (!title.trim()) return setRenamingId(null);
+    setRenamingId(null);
+    await patch(id, { title: title.trim() });
+  }
+
+  async function snoozeToTomorrow(t: ApiTask) {
+    const tomorrow = startOfDay(new Date(Date.now() + MS_DAY)).toISOString();
+    await patch(t.id, { date: tomorrow });
+    void load();
+  }
+
+  const overdueCount = grouped.overdue.length;
+  const todayCount = grouped.today.length;
+  const doneToday = grouped.done.length;
+
+  // Workload: count tasks by bucket for the right-rail summary
+  const upcomingThisWeek = grouped.today.length + grouped.week.length;
+  const focusScore = todayCount === 0 ? 100 : Math.round((doneToday / (todayCount + doneToday)) * 100);
+
+  if (loadError) {
+    return (
+      <div className="my-tasks">
+        <div className="my-tasks__error">
+          <AlertCircle />
+          <div>
+            <strong>Couldn&apos;t load your tasks</strong>
+            <p>{loadError}</p>
+            <button type="button" onClick={() => { setLoadError(null); void load(); }} className="my-tasks__retry">Retry</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <OsTitleBar
-        title="My tasks"
-        Icon={CheckSquare}
-        iconGradient={GRAD.bluePurple}
-        description={
-          tasks === null
-            ? "Loading your tasks…"
-            : `${tasks.length} task${tasks.length === 1 ? "" : "s"} · live-synced with /api/tasks`
-        }
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.ak]}
-        morePeople={9}
-      />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
+    <div className="my-tasks">
+      <header className="my-tasks__head">
+        <div className="my-tasks__hello">
+          <div className="my-tasks__hello-greet">{greeting()}.</div>
+          <h1 className="my-tasks__hello-title">
+            {tasks === null ? "Loading your day…" :
+              todayCount === 0 && overdueCount === 0
+                ? "Nothing on your plate today."
+                : overdueCount > 0
+                  ? <>You have <strong>{overdueCount} overdue</strong> and <strong>{todayCount} due today</strong>.</>
+                  : <>You have <strong>{todayCount}</strong> task{todayCount === 1 ? "" : "s"} for today.</>}
+          </h1>
+        </div>
+        <div className="my-tasks__stats">
+          <div className="my-tasks__stat">
+            <span className="my-tasks__stat-label">Overdue</span>
+            <span className="my-tasks__stat-val" style={{ color: overdueCount > 0 ? "var(--os-c-red)" : "var(--os-ink-3)" }}>{overdueCount}</span>
+          </div>
+          <div className="my-tasks__stat">
+            <span className="my-tasks__stat-label">Today</span>
+            <span className="my-tasks__stat-val">{todayCount}</span>
+          </div>
+          <div className="my-tasks__stat">
+            <span className="my-tasks__stat-label">This week</span>
+            <span className="my-tasks__stat-val">{upcomingThisWeek}</span>
+          </div>
+          <div className="my-tasks__stat">
+            <span className="my-tasks__stat-label">Focus</span>
+            <span className="my-tasks__stat-val" style={{ color: focusScore >= 70 ? "var(--os-c-green)" : focusScore >= 40 ? "var(--os-c-orange)" : "var(--os-c-red)" }}>{focusScore}%</span>
+          </div>
+        </div>
+      </header>
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New task" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView
-              Icon={CheckSquare}
-              iconGradient={GRAD.redPink}
-              title="Couldn't load tasks"
-              subtitle={`API error: ${loadError}. Check your connection and try again.`}
-              chips={["Retry", "Check /api/tasks"]}
-              cta="Retry"
-            />
-          ) : tasks === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>
-              Loading your tasks…
-            </div>
-          ) : tasks.length === 0 ? (
-            <OsEmptyView
-              Icon={CheckSquare}
-              iconGradient={GRAD.bluePurple}
-              title="No tasks yet"
-              subtitle="Click '+ Add item' below in any group, or use Sidekick (⌘J) to create your first task."
-              chips={["⌘J for Sidekick", "+ Add item"]}
-              cta="Add your first task"
-            />
-          ) : (
-            <OsMainTable
-              moduleId="tasks"
-              columns={COLUMNS}
-              groups={groups}
-              statusOptions={TASK_STATUS_OPTIONS}
-              handlers={handlers}
-            />
-          )}
-        </>
-      )}
+      <div className="my-tasks__cols">
+        {(["overdue", "today", "week", "later", "done"] as Bucket[]).map((bucket) => {
+          const items = grouped[bucket];
+          if (bucket === "overdue" && items.length === 0) return null;
+          if (bucket === "done" && items.length === 0) return null;
+          const Icon = BUCKET_ICON[bucket];
+          const hue = BUCKET_HUE[bucket];
+          return (
+            <section key={bucket} className={`my-tasks__col my-tasks__col--${bucket}`}>
+              <header className="my-tasks__col-head" style={{ borderTop: `3px solid ${hue}` }}>
+                <div className="my-tasks__col-head-l">
+                  <Icon />
+                  <span>{BUCKET_LABEL[bucket]}</span>
+                  <span className="my-tasks__col-count">{items.length}</span>
+                </div>
+              </header>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="tasks" events={calendarEvents} newLabel="New task" />
-      )}
+              <div className="my-tasks__col-body">
+                {items.length === 0 ? (
+                  <div className="my-tasks__col-empty">{bucket === "today" ? "Clear inbox. Nice." : "Nothing here."}</div>
+                ) : (
+                  items.map((t) => {
+                    const chip = dueChip(t);
+                    const isRenaming = renamingId === t.id;
+                    return (
+                      <article key={t.id} className={`task ${t.status === "COMPLETED" ? "task--done" : ""}`}>
+                        <button
+                          type="button"
+                          aria-label={t.status === "COMPLETED" ? "Mark incomplete" : "Mark complete"}
+                          className="task__check"
+                          onClick={() => completeTask(t)}
+                        >
+                          <span className="task__check-dot" style={{ borderColor: PRIO_COLOR[t.priority] }}>
+                            {t.status === "COMPLETED" && <span className="task__check-tick">✓</span>}
+                          </span>
+                        </button>
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView
-          Icon={CheckSquare}
-          iconGradient={GRAD.bluePurple}
-          title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`}
-          subtitle="This view will share the same live data as Main table — just visualized differently. Persistence already works on the Main table; switch back to it to try."
-          chips={["Live data", "Persistent edits", "Drag-and-drop"]}
-          cta="Back to Main table"
-        />
-      )}
-    </>
+                        <div className="task__main">
+                          {isRenaming ? (
+                            <input
+                              defaultValue={t.title}
+                              autoFocus
+                              onBlur={(e) => void rename(t.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") void rename(t.id, e.currentTarget.value);
+                                if (e.key === "Escape") setRenamingId(null);
+                              }}
+                              className="task__title-input"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="task__title"
+                              onDoubleClick={() => setRenamingId(t.id)}
+                              title="Double-click to rename"
+                            >
+                              {t.title || <em style={{ color: "var(--os-ink-3)" }}>Untitled</em>}
+                            </button>
+                          )}
+
+                          <div className="task__meta">
+                            {t.priority === "URGENT" || t.priority === "HIGH" ? (
+                              <span className="task__prio" style={{ color: PRIO_COLOR[t.priority] }}>
+                                <Flame /> {PRIO_LABEL[t.priority]}
+                              </span>
+                            ) : null}
+                            <span className={`task__chip task__chip--${chip.tone}`}>{chip.label}</span>
+                            {(t.labels ?? []).slice(0, 2).map((l) => (
+                              <span key={l.label.id} className="task__tag">{l.label.name}</span>
+                            ))}
+                            {(t.labels?.length ?? 0) > 2 ? <span className="task__tag">+{(t.labels?.length ?? 0) - 2}</span> : null}
+                          </div>
+                        </div>
+
+                        {bucket === "overdue" || bucket === "today" ? (
+                          <button
+                            type="button"
+                            className="task__snooze"
+                            onClick={() => snoozeToTomorrow(t)}
+                            title="Snooze to tomorrow"
+                          >
+                            <ChevronRight />
+                          </button>
+                        ) : null}
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+
+              {bucket !== "done" && bucket !== "overdue" ? (
+                <div className="my-tasks__add">
+                  <Plus />
+                  <input
+                    type="text"
+                    value={drafts[bucket]}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [bucket]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") void addTask(bucket, drafts[bucket]); }}
+                    placeholder={`Add to ${BUCKET_LABEL[bucket].toLowerCase()}…`}
+                  />
+                </div>
+              ) : null}
+            </section>
+          );
+        })}
+      </div>
+
+      <footer className="my-tasks__foot">
+        <div className="my-tasks__hint">
+          <Sparkles />
+          <span>Double-click a title to rename · Click the circle to complete · Type below any column to add</span>
+        </div>
+      </footer>
+    </div>
   );
 }
