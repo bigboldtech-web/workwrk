@@ -1,351 +1,364 @@
 "use client";
 
+/* Today — personal dashboard. Pulls from real Prisma data.
+ *
+ * Composition (all live):
+ *   - Greeting line with your name + a one-line status banner
+ *   - 4 stat cards: Tasks today, Overdue, Meetings today, KPIs to score
+ *   - "Up next" — next 3 meetings + next 4 tasks by time
+ *   - "Action items from meetings" — open ActionItems assigned to you
+ *   - "Kudos this week" — counts given/received + 2 latest received
+ *   - "Pinned announcements" — top 3 active pinned posts
+ *
+ * Reads (all parallel):
+ *   /api/me, /api/tasks, /api/meetings, /api/kudos, /api/kpi-records,
+ *   /api/action-items, /api/announcements
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
-  Home,
-  Star,
-  Plus,
-  Search as SearchIcon,
-  Users,
-  Filter,
-  ArrowUpDown,
-  EyeOff,
-  Group,
-  Sparkles,
-  Zap,
-  UserPlus,
-  LayoutDashboard,
-  Table2,
-  KanbanSquare,
-  Calendar,
-  GanttChart,
-  MoreHorizontal,
-  TrendingUp,
-  TrendingDown,
-  ChevronDown,
+  Sun, Sunrise, Moon, AlertCircle, CheckCircle2, CalendarClock,
+  Heart, ChartLine, Megaphone, ChevronRight, Sparkles, Coffee,
 } from "lucide-react";
+import { useOsShell } from "@/components/layout/os/shell-context";
+
+type Me = { user?: { id: string; firstName?: string | null; lastName?: string | null; email?: string } };
+type ApiTask = {
+  id: string; title: string; date: string;
+  status: "PLANNED" | "IN_PROGRESS" | "COMPLETED";
+  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  assignee?: { id: string } | null;
+};
+type ApiMeeting = {
+  id: string; title: string; type: string; scheduledAt: string; duration: number;
+  attendees?: { userId: string }[];
+};
+type ApiKudo = {
+  id: string; message: string; createdAt: string;
+  giver?: { id: string; firstName?: string | null; lastName?: string | null } | null;
+  receiver?: { id: string; firstName?: string | null; lastName?: string | null } | null;
+};
+type ApiActionItem = {
+  id: string; title: string; status: string; dueDate?: string | null;
+  meeting?: { id: string; title: string };
+};
+type ApiAnnouncement = {
+  id: string; title: string; body?: string | null;
+  type: "INFO" | "WARNING" | "CELEBRATION" | "POLICY" | "EVENT";
+  pinned?: boolean; mustAcknowledge?: boolean; acknowledged?: boolean;
+  publishedAt?: string | null; createdAt: string;
+};
+type ApiKpiRec = { id: string; kpiId: string; period: string; actualValue?: number | null; targetValue?: number | null };
+
+const MS_DAY = 86_400_000;
+const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+const sameDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+function greetingFor() {
+  const h = new Date().getHours();
+  if (h < 5)  return { word: "Late night", Icon: Moon };
+  if (h < 12) return { word: "Good morning", Icon: Sunrise };
+  if (h < 17) return { word: "Good afternoon", Icon: Sun };
+  if (h < 21) return { word: "Good evening", Icon: Sun };
+  return { word: "Wrapping up", Icon: Moon };
+}
+
+function currentMonthKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function fmtTime(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
 
 export default function TodayPage() {
+  const [me, setMe] = useState<Me | null>(null);
+  const [tasks, setTasks] = useState<ApiTask[] | null>(null);
+  const [meetings, setMeetings] = useState<ApiMeeting[] | null>(null);
+  const [kudos, setKudos] = useState<ApiKudo[] | null>(null);
+  const [kpiRecs, setKpiRecs] = useState<ApiKpiRec[] | null>(null);
+  const [actionItems, setActionItems] = useState<ApiActionItem[] | null>(null);
+  const [announcements, setAnnouncements] = useState<ApiAnnouncement[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { rowVersion } = useOsShell();
+
+  const load = useCallback(async () => {
+    try {
+      const meRes = await fetch("/api/me");
+      const meJson: Me = meRes.ok ? await meRes.json() : { user: undefined };
+      setMe(meJson);
+      const myId = meJson?.user?.id;
+      if (!myId) { setError("Couldn't resolve your account."); return; }
+
+      const from = new Date(Date.now() - 7 * MS_DAY).toISOString().slice(0, 10);
+      const to   = new Date(Date.now() + 14 * MS_DAY).toISOString().slice(0, 10);
+      const period = currentMonthKey();
+
+      const [tRes, mRes, kRes, kpiRes, aiRes, annRes] = await Promise.all([
+        fetch(`/api/tasks?startDate=${from}&endDate=${to}`),
+        fetch(`/api/meetings?limit=20`),
+        fetch(`/api/kudos?limit=20`),
+        fetch(`/api/kpi-records?userId=${encodeURIComponent(myId)}&limit=50`),
+        fetch(`/api/action-items?assigneeId=${encodeURIComponent(myId)}&limit=20`).catch(() => null),
+        fetch(`/api/announcements`),
+      ]);
+
+      if (tRes.ok) {
+        const d = await tRes.json();
+        const list: ApiTask[] = Array.isArray(d) ? d : (d.data ?? []);
+        setTasks(list.filter((t) => t.assignee?.id === myId));
+      } else setTasks([]);
+      if (mRes.ok) {
+        const d = await mRes.json();
+        const list: ApiMeeting[] = d?.data?.items ?? d?.data ?? [];
+        setMeetings(list);
+      } else setMeetings([]);
+      if (kRes.ok) {
+        const d = await kRes.json();
+        setKudos(d?.data?.items ?? d?.data ?? []);
+      } else setKudos([]);
+      if (kpiRes.ok) {
+        const d = await kpiRes.json();
+        const recs: ApiKpiRec[] = d?.data?.records ?? d?.data ?? [];
+        setKpiRecs(recs.filter((r) => r.period === period));
+      } else setKpiRecs([]);
+      if (aiRes && aiRes.ok) {
+        const d = await aiRes.json();
+        setActionItems(d?.data?.items ?? d?.data ?? (Array.isArray(d) ? d : []));
+      } else setActionItems([]);
+      if (annRes.ok) {
+        const d = await annRes.json();
+        setAnnouncements(d?.data ?? (Array.isArray(d) ? d : []));
+      } else setAnnouncements([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "load failed");
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+  const v = rowVersion("today");
+  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+
+  const myId = me?.user?.id;
+  const today0 = startOfDay(new Date()).getTime();
+
+  const todayTasks = useMemo(() => (tasks ?? []).filter((t) => t.status !== "COMPLETED" && startOfDay(new Date(t.date)).getTime() === today0), [tasks, today0]);
+  const overdueTasks = useMemo(() => (tasks ?? []).filter((t) => t.status !== "COMPLETED" && startOfDay(new Date(t.date)).getTime() < today0), [tasks, today0]);
+  const upcomingTasks = useMemo(() => {
+    return [...(tasks ?? [])]
+      .filter((t) => t.status !== "COMPLETED" && new Date(t.date).getTime() >= today0)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .slice(0, 4);
+  }, [tasks, today0]);
+  const todayMeetings = useMemo(() => (meetings ?? [])
+    .filter((m) => myId && (m.attendees ?? []).some((a) => a.userId === myId))
+    .filter((m) => sameDay(new Date(m.scheduledAt), new Date()))
+    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()), [meetings, myId]);
+  const upcomingMeetings = useMemo(() => (meetings ?? [])
+    .filter((m) => new Date(m.scheduledAt).getTime() >= Date.now())
+    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
+    .slice(0, 4), [meetings]);
+
+  const kudosReceivedThisWeek = useMemo(() => {
+    const weekAgo = Date.now() - 7 * MS_DAY;
+    return (kudos ?? []).filter((k) => k.receiver?.id === myId && new Date(k.createdAt).getTime() >= weekAgo);
+  }, [kudos, myId]);
+  const kudosGivenThisWeek = useMemo(() => {
+    const weekAgo = Date.now() - 7 * MS_DAY;
+    return (kudos ?? []).filter((k) => k.giver?.id === myId && new Date(k.createdAt).getTime() >= weekAgo);
+  }, [kudos, myId]);
+
+  const kpisScored = (kpiRecs ?? []).filter((r) => r.actualValue != null).length;
+  const kpisTotal = (kpiRecs ?? []).length;
+  const myActions = (actionItems ?? []).filter((a) => a.status !== "COMPLETED");
+
+  const pinnedAnnouncements = (announcements ?? []).filter((a) => a.pinned).slice(0, 3);
+  const ackPending = (announcements ?? []).filter((a) => a.mustAcknowledge && !a.acknowledged);
+
+  const { word: greetingWord, Icon: GreetingIcon } = greetingFor();
+  const name = me?.user?.firstName ?? "there";
+
+  // Status banner: which is the most pressing thing?
+  let banner: { tone: "danger" | "warn" | "info" | "good"; msg: React.ReactNode } | null = null;
+  if (error) banner = { tone: "danger", msg: <>Couldn&apos;t load: {error}</> };
+  else if (overdueTasks.length > 2) banner = { tone: "danger", msg: <>You have <strong>{overdueTasks.length} overdue task{overdueTasks.length === 1 ? "" : "s"}</strong> piling up.</> };
+  else if (ackPending.length > 0) banner = { tone: "warn", msg: <>{ackPending.length} announcement{ackPending.length === 1 ? "" : "s"} need{ackPending.length === 1 ? "s" : ""} your acknowledgement.</> };
+  else if (kpisTotal > 0 && kpisScored < kpisTotal && new Date().getDay() === 5) banner = { tone: "info", msg: <>It&apos;s Friday — log your weekly KPI numbers before EOD.</> };
+  else if (todayTasks.length === 0 && todayMeetings.length === 0 && overdueTasks.length === 0) banner = { tone: "good", msg: <>Calm day. <strong>Inbox zero</strong>. Maybe pick up a backlog item or ship something small.</> };
+
   return (
-    <>
-      {/* ─── Title bar ─── */}
-      <div className="os-title-bar">
-        <div className="os-title-bar__icon" style={{ background: "linear-gradient(135deg, var(--os-c-orange), var(--os-c-pink))" }}>
-          <Home />
+    <div className="today2">
+      <header className="today2__hello">
+        <div className="today2__hello-icon"><GreetingIcon /></div>
+        <div className="today2__hello-text">
+          <div className="today2__hello-greet">{greetingWord},</div>
+          <h1 className="today2__hello-name">{name}.</h1>
         </div>
-        <div className="os-title-bar__main">
-          <span className="os-title-bar__name">Today</span>
-          <button type="button" className="os-title-bar__star" aria-label="Unstar">
-            <Star />
-          </button>
-        </div>
-        <span className="os-title-bar__desc">Your day at a glance · synced with all boards</span>
-        <div className="os-title-bar__spacer" />
-        <div className="os-title-bar__people">
-          <span className="os-title-bar__people-av" style={{ background: "var(--os-c-purple)" }}>BB</span>
-          <span className="os-title-bar__people-av" style={{ background: "var(--os-c-green)" }}>SC</span>
-          <span className="os-title-bar__people-av" style={{ background: "var(--os-c-orange)" }}>AK</span>
-          <span className="os-title-bar__people-more">+9</span>
-        </div>
-        <button type="button" className="os-title-bar__btn os-title-bar__btn--integrate">
-          <Zap />
-          <span>Integrate</span>
-        </button>
-        <button type="button" className="os-title-bar__btn os-title-bar__btn--automate">
-          <Sparkles />
-          <span>Automate</span>
-        </button>
-        <button type="button" className="os-title-bar__btn os-title-bar__btn--invite">
-          <UserPlus />
-          <span>Invite / 1</span>
-        </button>
-      </div>
+        {banner && (
+          <div className={`today2__banner today2__banner--${banner.tone}`}>
+            {banner.tone === "danger" && <AlertCircle />}
+            {banner.tone === "warn" && <Megaphone />}
+            {banner.tone === "info" && <Sparkles />}
+            {banner.tone === "good" && <Coffee />}
+            <span>{banner.msg}</span>
+          </div>
+        )}
+      </header>
 
-      {/* ─── Tabs ─── */}
-      <div className="os-tabs">
-        <button type="button" className="os-tab is-active">
-          <LayoutDashboard />
-          <span>Dashboard</span>
-        </button>
-        <button type="button" className="os-tab">
-          <Table2 />
-          <span>Main table</span>
-        </button>
-        <button type="button" className="os-tab">
-          <KanbanSquare />
-          <span>Kanban</span>
-        </button>
-        <button type="button" className="os-tab">
-          <Calendar />
-          <span>Calendar</span>
-        </button>
-        <button type="button" className="os-tab">
-          <GanttChart />
-          <span>Gantt</span>
-        </button>
-        <button type="button" className="os-tab os-tab--add">
-          <Plus />
-          <span>Add view</span>
-        </button>
-      </div>
-
-      {/* ─── Filter strip ─── */}
-      <div className="os-filter">
-        <div className="os-btn-new">
-          <button type="button" className="os-btn-new__main">
-            <Plus />
-            <span>New item</span>
-          </button>
-          <button type="button" className="os-btn-new__chev" aria-label="More create options">
-            <ChevronDown />
-          </button>
+      {/* Stat strip */}
+      <section className="today2__stats">
+        <div className="today2-stat today2-stat--today">
+          <div className="today2-stat__head"><Sun /> Today</div>
+          <div className="today2-stat__val">{todayTasks.length}</div>
+          <div className="today2-stat__sub">task{todayTasks.length === 1 ? "" : "s"} due</div>
         </div>
-        <button type="button" className="os-filter-chip">
-          <SearchIcon />
-          <span>Search</span>
-        </button>
-        <button type="button" className="os-filter-chip">
-          <Users />
-          <span>Person</span>
-        </button>
-        <button type="button" className="os-filter-chip is-on">
-          <Filter />
-          <span>Filter</span>
-          <span className="os-filter-chip__count">2</span>
-        </button>
-        <button type="button" className="os-filter-chip">
-          <ArrowUpDown />
-          <span>Sort</span>
-        </button>
-        <button type="button" className="os-filter-chip">
-          <EyeOff />
-          <span>Hide</span>
-        </button>
-        <button type="button" className="os-filter-chip">
-          <Group />
-          <span>Group by</span>
-        </button>
-        <div className="os-filter__spacer" />
-        <button type="button" className="os-filter-chip">
-          <MoreHorizontal />
-        </button>
-      </div>
-
-      {/* ─── Dashboard widgets ─── */}
-      <div className="os-dash">
-        {/* Battery — sprint completion */}
-        <div className="os-widget os-widget--battery">
-          <div className="os-widget__head">
-            <span className="os-widget__head-dot" style={{ background: "white" }} />
-            <span>Sprint Q3 — Battery</span>
-            <MoreHorizontal />
-          </div>
-          <div className="os-widget__big">
-            64<small>%</small>
-          </div>
-          <div className="os-widget__sub">Sprint completion · 12 of 19 items done</div>
-          <div className="os-widget__progress">
-            <div className="os-widget__progress-fill" style={{ width: "64%" }} />
-          </div>
-          <div className="os-widget__legend">
-            <span>● 12 Done</span>
-            <span>● 4 Working</span>
-            <span>● 3 Stuck</span>
-          </div>
+        <div className={`today2-stat ${overdueTasks.length > 0 ? "today2-stat--alert" : ""}`}>
+          <div className="today2-stat__head"><AlertCircle /> Overdue</div>
+          <div className="today2-stat__val">{overdueTasks.length}</div>
+          <div className="today2-stat__sub">{overdueTasks.length === 0 ? "all clear" : "need attention"}</div>
         </div>
-
-        {/* Numbers */}
-        <div className="os-widget os-widget--num">
-          <div className="os-widget__head">
-            <span className="os-widget__head-dot os-c-green" />
-            <span>Pipeline</span>
-            <MoreHorizontal />
-          </div>
-          <div className="os-widget__big">₹42.8L</div>
-          <div className="os-widget__delta os-widget__delta--up">
-            <TrendingUp />
-            <span>+12%</span>
-          </div>
-          <div className="os-widget__numsub">vs. last week</div>
+        <div className="today2-stat">
+          <div className="today2-stat__head"><CalendarClock /> Meetings</div>
+          <div className="today2-stat__val">{todayMeetings.length}</div>
+          <div className="today2-stat__sub">on your calendar</div>
         </div>
-
-        <div className="os-widget os-widget--num">
-          <div className="os-widget__head">
-            <span className="os-widget__head-dot os-c-red" />
-            <span>SLAs at risk</span>
-            <MoreHorizontal />
-          </div>
-          <div className="os-widget__big">2</div>
-          <div className="os-widget__delta os-widget__delta--down">
-            <TrendingDown />
-            <span>+2</span>
-          </div>
-          <div className="os-widget__numsub">2 active incidents</div>
+        <div className="today2-stat">
+          <div className="today2-stat__head"><ChartLine /> KPIs</div>
+          <div className="today2-stat__val">{kpisScored}<small>/{kpisTotal || "—"}</small></div>
+          <div className="today2-stat__sub">scored this month</div>
         </div>
+      </section>
 
-        {/* Spark line — weekly velocity */}
-        <div className="os-widget os-widget--spark">
-          <div className="os-widget__head">
-            <span className="os-widget__head-dot os-c-blue" />
-            <span>Weekly velocity</span>
-            <MoreHorizontal />
+      <div className="today2__grid">
+        {/* Up next */}
+        <section className="today2__card today2__card--upnext">
+          <header className="today2__card-head">
+            <h2>Up next</h2>
+            <span>{todayTasks.length + todayMeetings.length} item{(todayTasks.length + todayMeetings.length) === 1 ? "" : "s"} today</span>
+          </header>
+          <div className="today2__upnext">
+            {upcomingMeetings.length === 0 && upcomingTasks.length === 0 ? (
+              <div className="today2__empty">
+                <CheckCircle2 />
+                <p>Nothing scheduled. Use this calm.</p>
+              </div>
+            ) : (
+              <>
+                {upcomingMeetings.slice(0, 3).map((m) => (
+                  <Link key={m.id} href={`/meetings/${m.id}`} className="today2__upnext-row today2__upnext-row--meeting">
+                    <span className="today2__upnext-time">{fmtTime(m.scheduledAt)}</span>
+                    <span className="today2__upnext-icon today2__upnext-icon--meeting"><CalendarClock /></span>
+                    <span className="today2__upnext-main">
+                      <span className="today2__upnext-title">{m.title}</span>
+                      <span className="today2__upnext-meta">{m.duration}min · {m.type.replace(/_/g, " ").toLowerCase()}</span>
+                    </span>
+                  </Link>
+                ))}
+                {upcomingTasks.slice(0, 4 - Math.min(3, upcomingMeetings.length)).map((t) => {
+                  const due = new Date(t.date);
+                  const overdue = startOfDay(due).getTime() < today0;
+                  const today = startOfDay(due).getTime() === today0;
+                  return (
+                    <Link key={t.id} href="/tasks" className="today2__upnext-row today2__upnext-row--task">
+                      <span className={`today2__upnext-time ${overdue ? "is-overdue" : today ? "is-today" : ""}`}>
+                        {overdue ? `${Math.floor((today0 - startOfDay(due).getTime()) / MS_DAY)}d late` : today ? "Today" : due.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </span>
+                      <span className={`today2__upnext-icon today2__upnext-icon--task ${t.priority === "URGENT" ? "is-urgent" : t.priority === "HIGH" ? "is-high" : ""}`}>
+                        <CheckCircle2 />
+                      </span>
+                      <span className="today2__upnext-main">
+                        <span className="today2__upnext-title">{t.title}</span>
+                      </span>
+                    </Link>
+                  );
+                })}
+              </>
+            )}
           </div>
-          <svg viewBox="0 0 400 84" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0073EA" stopOpacity="0.25" />
-                <stop offset="100%" stopColor="#0073EA" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            <path
-              d="M0,58 L57,46 L114,52 L171,30 L228,38 L285,20 L342,28 L400,8 L400,84 L0,84 Z"
-              fill="url(#sparkGrad)"
-            />
-            <path
-              d="M0,58 L57,46 L114,52 L171,30 L228,38 L285,20 L342,28 L400,8"
-              fill="none"
-              stroke="#0073EA"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            {[
-              { x: 0, y: 58 }, { x: 57, y: 46 }, { x: 114, y: 52 }, { x: 171, y: 30 },
-              { x: 228, y: 38 }, { x: 285, y: 20 }, { x: 342, y: 28 }, { x: 400, y: 8 },
-            ].map((p, i) => (
-              <circle key={i} cx={p.x} cy={p.y} r="3" fill="#0073EA" />
+          <footer className="today2__card-foot">
+            <Link href="/tasks">All tasks <ChevronRight /></Link>
+            <Link href="/meetings">All meetings <ChevronRight /></Link>
+          </footer>
+        </section>
+
+        {/* Action items from meetings */}
+        <section className="today2__card today2__card--actions">
+          <header className="today2__card-head">
+            <h2>Your action items</h2>
+            <span>{myActions.length} open</span>
+          </header>
+          <div className="today2__actions">
+            {myActions.length === 0 ? (
+              <div className="today2__empty">
+                <CheckCircle2 />
+                <p>No outstanding action items from meetings.</p>
+              </div>
+            ) : myActions.slice(0, 6).map((a) => (
+              <div key={a.id} className="today2-action">
+                <span className="today2-action__dot" />
+                <div className="today2-action__main">
+                  <div className="today2-action__title">{a.title}</div>
+                  <div className="today2-action__meta">
+                    {a.meeting?.title && <span>from &ldquo;{a.meeting.title}&rdquo;</span>}
+                    {a.dueDate && <span>· due {new Date(a.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>}
+                  </div>
+                </div>
+              </div>
             ))}
-          </svg>
-        </div>
-
-        {/* Donut — task status breakdown */}
-        <div className="os-widget os-widget--donut">
-          <div className="os-widget__head">
-            <span className="os-widget__head-dot os-c-purple" />
-            <span>Tasks by status</span>
-            <MoreHorizontal />
           </div>
-          <div className="os-widget__wrap">
-            <svg className="os-donut-svg" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="14" fill="none" stroke="var(--os-surface-2)" strokeWidth="6" />
-              {/* Done: 0-50% */}
-              <circle cx="18" cy="18" r="14" fill="none" stroke="var(--os-c-green)" strokeWidth="6"
-                strokeDasharray="44 88" strokeDashoffset="0" transform="rotate(-90 18 18)" />
-              {/* Working: 50-72% */}
-              <circle cx="18" cy="18" r="14" fill="none" stroke="var(--os-c-orange)" strokeWidth="6"
-                strokeDasharray="20 88" strokeDashoffset="-44" transform="rotate(-90 18 18)" />
-              {/* Stuck: 72-85% */}
-              <circle cx="18" cy="18" r="14" fill="none" stroke="var(--os-c-red)" strokeWidth="6"
-                strokeDasharray="12 88" strokeDashoffset="-64" transform="rotate(-90 18 18)" />
-              {/* Review: 85-100% */}
-              <circle cx="18" cy="18" r="14" fill="none" stroke="var(--os-c-purple)" strokeWidth="6"
-                strokeDasharray="13 88" strokeDashoffset="-76" transform="rotate(-90 18 18)" />
-            </svg>
-            <div className="os-donut__legend">
-              <div className="os-donut__legend-item">
-                <span className="os-donut__legend-dot os-c-green" />
-                Done <strong>50%</strong>
-              </div>
-              <div className="os-donut__legend-item">
-                <span className="os-donut__legend-dot os-c-orange" />
-                Working <strong>22%</strong>
-              </div>
-              <div className="os-donut__legend-item">
-                <span className="os-donut__legend-dot os-c-red" />
-                Stuck <strong>13%</strong>
-              </div>
-              <div className="os-donut__legend-item">
-                <span className="os-donut__legend-dot os-c-purple" />
-                Review <strong>15%</strong>
-              </div>
+        </section>
+
+        {/* Kudos */}
+        <section className="today2__card today2__card--kudos">
+          <header className="today2__card-head">
+            <h2><Heart /> Kudos this week</h2>
+          </header>
+          <div className="today2__kudos">
+            <div className="today2-kudos-stat">
+              <div className="today2-kudos-stat__val">{kudosReceivedThisWeek.length}</div>
+              <div className="today2-kudos-stat__lbl">received</div>
+            </div>
+            <div className="today2-kudos-stat">
+              <div className="today2-kudos-stat__val">{kudosGivenThisWeek.length}</div>
+              <div className="today2-kudos-stat__lbl">given</div>
             </div>
           </div>
-        </div>
-
-        {/* Bars — items shipped per week */}
-        <div className="os-widget os-widget--bars">
-          <div className="os-widget__head">
-            <span className="os-widget__head-dot os-c-pink" />
-            <span>Items shipped — last 6 weeks</span>
-            <MoreHorizontal />
-          </div>
-          <div className="os-bars">
-            {[
-              { v: 12, h: 38 },
-              { v: 18, h: 56 },
-              { v: 15, h: 48 },
-              { v: 22, h: 70 },
-              { v: 28, h: 88 },
-              { v: 24, h: 78 },
-            ].map((b, i) => (
-              <div key={i} className="os-bar" style={{ height: `${b.h}%` }}>
-                <span className="os-bar__value">{b.v}</span>
-                <span className="os-bar__label">W{i + 1}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* People workload */}
-        <div className="os-widget os-widget--people">
-          <div className="os-widget__head">
-            <span className="os-widget__head-dot os-c-indigo" />
-            <span>Workload by person</span>
-            <MoreHorizontal />
-          </div>
-          <div className="os-people-list">
-            {[
-              { initials: "BB", name: "BigBold (You)", count: 12, pct: 86, color: "var(--os-c-purple)", barColor: "var(--os-c-red)" },
-              { initials: "SC", name: "Sarah Cohen",   count: 8,  pct: 60, color: "var(--os-c-green)",  barColor: "var(--os-c-orange)" },
-              { initials: "AK", name: "Arjun Kumar",   count: 6,  pct: 42, color: "var(--os-c-orange)", barColor: "var(--os-c-blue)" },
-              { initials: "PR", name: "Priya Rao",     count: 5,  pct: 36, color: "var(--os-c-pink)",   barColor: "var(--os-c-green)" },
-              { initials: "MK", name: "Maya Kapoor",   count: 3,  pct: 22, color: "var(--os-c-teal)",   barColor: "var(--os-c-green)" },
-            ].map((p) => (
-              <div key={p.initials} className="os-people-row">
-                <span className="os-people-row__av" style={{ background: p.color }}>{p.initials}</span>
-                <span className="os-people-row__name">{p.name}</span>
-                <span className="os-people-row__bar">
-                  <span className="os-people-row__bar-fill" style={{ width: `${p.pct}%`, background: p.barColor }} />
-                </span>
-                <span className="os-people-row__count">{p.count}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Feed */}
-        <div className="os-widget os-widget--feed">
-          <div className="os-widget__head">
-            <span className="os-widget__head-dot os-c-teal" />
-            <span>Live updates</span>
-            <MoreHorizontal />
-          </div>
-          {[
-            { who: "Sarah Cohen", av: "SC", color: "var(--os-c-green)",
-              body: <>moved <strong>Acme renewal proposal</strong> to <span className="os-feed-item__chip os-c-purple">Review</span></>,
-              time: "2m" },
-            { who: "Ria (agent)",  av: "R", color: "var(--os-c-orange)",
-              body: <>drafted <strong>4 follow-up emails</strong> for stalled deals · awaiting your review</>,
-              time: "12m" },
-            { who: "Arjun Kumar",  av: "AK", color: "var(--os-c-blue)",
-              body: <>completed <strong>Sprint Q3 retro doc</strong> <em>· Engineering</em></>,
-              time: "1h" },
-            { who: "Priya Rao",    av: "PR", color: "var(--os-c-pink)",
-              body: <>opened a <strong>support ticket</strong> for the auth bug — marked <span className="os-feed-item__chip os-c-red">Stuck</span></>,
-              time: "2h" },
-            { who: "Maya Kapoor",  av: "MK", color: "var(--os-c-teal)",
-              body: <>scheduled <strong>3 candidate interviews</strong> for the Senior PM role</>,
-              time: "3h" },
-          ].map((it, i) => (
-            <div key={i} className="os-feed-item">
-              <span className="os-feed-item__av" style={{ background: it.color }}>{it.av}</span>
-              <span className="os-feed-item__body">
-                <strong>{it.who}</strong> {it.body}
-              </span>
-              <span className="os-feed-item__time">{it.time}</span>
+          {kudosReceivedThisWeek.slice(0, 2).map((k) => (
+            <div key={k.id} className="today2-kudo">
+              <strong>{[k.giver?.firstName, k.giver?.lastName].filter(Boolean).join(" ") || "Someone"}</strong>
+              <p>{k.message.length > 120 ? k.message.slice(0, 120) + "…" : k.message}</p>
             </div>
           ))}
-        </div>
+          <footer className="today2__card-foot">
+            <Link href="/kudos">See all kudos <ChevronRight /></Link>
+          </footer>
+        </section>
+
+        {/* Pinned announcements */}
+        <section className="today2__card today2__card--ann">
+          <header className="today2__card-head">
+            <h2><Megaphone /> Pinned</h2>
+            <span>{pinnedAnnouncements.length}</span>
+          </header>
+          <div className="today2__ann">
+            {pinnedAnnouncements.length === 0 ? (
+              <div className="today2__empty">
+                <Megaphone />
+                <p>No pinned announcements right now.</p>
+              </div>
+            ) : pinnedAnnouncements.map((a) => (
+              <Link key={a.id} href="/announcements" className={`today2-ann ${a.mustAcknowledge && !a.acknowledged ? "is-pending" : ""}`}>
+                <div className="today2-ann__title">{a.title}</div>
+                {a.body && <p className="today2-ann__body">{a.body.length > 120 ? a.body.slice(0, 120) + "…" : a.body}</p>}
+                {a.mustAcknowledge && !a.acknowledged && <span className="today2-ann__ack">Needs ack</span>}
+              </Link>
+            ))}
+          </div>
+        </section>
       </div>
-    </>
+    </div>
   );
 }
