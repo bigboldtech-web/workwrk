@@ -124,8 +124,11 @@ const SPACES: Space[] = [
       { href: "/itsm",               label: "ITSM",             mark: "I", color: "var(--os-c-red)" },
       { href: "/itsm/incidents",     label: "Incidents",        mark: "!", color: "var(--os-c-red)" },
       { href: "/itsm/tickets",       label: "Service tickets",  mark: "T", color: "var(--os-c-orange)" },
+      { href: "/itsm/problems",      label: "Problems",         mark: "P", color: "var(--os-c-red)" },
+      { href: "/itsm/changes",       label: "Changes",          mark: "C", color: "var(--os-c-orange)" },
+      { href: "/itsm/cmdb",          label: "CMDB",             mark: "M", color: "var(--os-c-purple)" },
       { href: "/itsm/kb",            label: "Knowledge base",   mark: "K", color: "var(--os-c-teal)" },
-      { href: "/process-runs",       label: "Process runs",     mark: "P", color: "var(--os-c-orange)" },
+      { href: "/process-runs",       label: "Process runs",     mark: "R", color: "var(--os-c-orange)" },
     ],
   },
   {
