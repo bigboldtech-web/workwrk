@@ -154,8 +154,56 @@ model Organization {
   studioBoards          StudioBoard[]
   // 🆕 Templates this org has published to the marketplace.
   boardTemplates        BoardTemplate[]
+  // 🆕 Files primitive — generic drive surface where users compose
+  // their own structure (folders + uploaded files). Used by /files
+  // and embeddable in any block-based doc / page.
+  fileFolders           FileFolder[]
+  fileEntries           FileEntry[]
 
   @@index([slug])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Files primitive — Lego block for any team that wants a drive.
+// Folders nest. Files live in a folder or at the root. Sharing v1
+// is org-wide read; per-folder ACLs are v2 (and follow the
+// SOPFolderAccess pattern when needed).
+// ─────────────────────────────────────────────────────────────────
+model FileFolder {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  parentId       String?
+  parent         FileFolder?  @relation("FileFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       FileFolder[] @relation("FileFolderTree")
+  files          FileEntry[]
+  createdById    String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, parentId])
+}
+
+model FileEntry {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String       // display name (original filename)
+  mimeType       String
+  size           Int          // bytes
+  url            String       // resolvable URL: /api/uploads/<key> or S3
+  folderId       String?
+  folder         FileFolder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedById   String
+  // Light, optional metadata — text caption, color tag for sorting.
+  description    String?
+  starred        Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, folderId])
+  @@index([uploadedById])
 }
 
 enum Plan {
