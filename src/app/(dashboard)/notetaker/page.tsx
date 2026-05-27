@@ -1,198 +1,249 @@
 "use client";
 
-/* Real Notetaker page (AI meeting notes archive).
+/* Notetaker — paste-transcript-first workflow.
  *
- *  Notetaker itself is a one-shot processor:
- *    POST /api/notetaker/process  — Claude extracts JSON from raw transcript
- *    POST /api/notetaker/save     — persists as Meeting + ActionItem rows
+ * Left: big textarea where you drop a meeting transcript.
+ * Right: result panel that streams extracted decisions, action items,
+ *        attendees as soon as you click Extract. Save commits a Meeting
+ *        row + ActionItem rows + optional Task auto-spawn.
  *
- *  The board view here surfaces processed meetings (read-only). Adding new
- *  notes means uploading a transcript, which lives in the dedicated drawer
- *  flow — toast directs there.
+ * Below: recent extractions as a thin recap list (last 8). No table.
+ *
+ * Reads:  GET  /api/meetings?limit=8
+ * Writes: POST /api/notetaker/process { transcript }
+ *         POST /api/notetaker/save    { title, type, decisions, attendees, actionItems, … }
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Mic, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { Mic, Sparkles, Save, FileText, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
-type MeetingType = "DAILY_STANDUP" | "WEEKLY_REVIEW" | "ONE_ON_ONE" | "QUARTERLY_REVIEW" | "ANNUAL_PLANNING" | "ADHOC";
-
+type Extracted = {
+  title?: string;
+  type?: string;
+  summary?: string;
+  decisions?: string[];
+  actionItems?: { title: string; assigneeName?: string; assigneeEmail?: string | null; deadlineDays?: number | null }[];
+  attendees?: { name: string; email?: string | null }[];
+};
 type ApiMeeting = {
   id: string;
   title: string;
-  type: MeetingType;
+  type: string;
   scheduledAt: string;
-  duration: number;
-  notes?: string | null;
-  attendees?: Array<{ user?: { id: string; firstName?: string | null; lastName?: string | null } | null }>;
-  stats?: {
-    hasNotes: boolean;
-    decisionCount: number;
-    actionItemsTotal: number;
-    actionItemsDone: number;
-  };
-  createdAt: string;
-  updatedAt: string;
+  stats?: { decisionCount: number; actionItemsTotal: number; actionItemsDone: number; hasNotes: boolean };
 };
 
-const TYPE_LABELS: Record<MeetingType, string> = {
-  DAILY_STANDUP: "Daily standup", WEEKLY_REVIEW: "Weekly review",
-  ONE_ON_ONE: "1:1", QUARTERLY_REVIEW: "Quarterly", ANNUAL_PLANNING: "Annual planning", ADHOC: "Ad-hoc",
-};
-const TYPE_COLORS: Record<MeetingType, string> = {
-  DAILY_STANDUP: C.blue, WEEKLY_REVIEW: C.indigo, ONE_ON_ONE: C.purple,
-  QUARTERLY_REVIEW: C.teal, ANNUAL_PLANNING: C.green, ADHOC: C.gray,
-};
-const TYPE_ORDER: MeetingType[] = ["DAILY_STANDUP", "WEEKLY_REVIEW", "ONE_ON_ONE", "QUARTERLY_REVIEW", "ANNUAL_PLANNING", "ADHOC"];
-
-const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
-function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
-function initials(f?: string | null, l?: string | null) {
-  const fa = (f ?? "")[0] ?? "";
-  const la = (l ?? "")[0] ?? "";
-  return ((fa + la) || "?").toUpperCase();
+function timeAgo(iso: string) {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24); if (d < 30) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
-
-function meetingToRow(m: ApiMeeting): Row {
-  const people = (m.attendees ?? []).slice(0, 4).flatMap((a) => a.user ? [{ initials: initials(a.user.firstName, a.user.lastName), color: avColor(a.user.id) }] : []);
-  const aiTotal = m.stats?.actionItemsTotal ?? 0;
-  const aiDone = m.stats?.actionItemsDone ?? 0;
-  const actionPct = aiTotal === 0 ? 0 : Math.round((aiDone / aiTotal) * 100);
-  return {
-    id: m.id,
-    name: m.title,
-    done: aiTotal > 0 && aiDone === aiTotal,
-    cells: {
-      attendees: people,
-      duration: `${m.duration} min`,
-      decisions: `${m.stats?.decisionCount ?? 0}`,
-      actions: aiTotal > 0
-        ? { pct: actionPct, color: actionPct >= 100 ? "green" : actionPct >= 50 ? "blue" : "warning" }
-        : undefined,
-      hasNotes: m.stats?.hasNotes ? "✓" : "—",
-      scheduled: { iso: m.scheduledAt },
-    },
-  };
-}
-
-function buildGroups(rows: ApiMeeting[]): TableGroup[] {
-  const buckets = new Map<MeetingType, ApiMeeting[]>();
-  for (const t of TYPE_ORDER) buckets.set(t, []);
-  for (const m of rows) {
-    const b = buckets.get(m.type);
-    if (b) b.push(m);
-  }
-  return TYPE_ORDER
-    .map((t) => ({
-      id: t, title: TYPE_LABELS[t], color: TYPE_COLORS[t],
-      rows: (buckets.get(t) ?? []).map(meetingToRow),
-    }))
-    .filter((g) => g.rows.length > 0);
-}
-
-const COLUMNS: Column[] = [
-  { id: "attendees", label: "Attendees", type: "person" },
-  { id: "duration",  label: "Duration",  type: "text" },
-  { id: "decisions", label: "Decisions", type: "text" },
-  { id: "actions",   label: "Actions",   type: "progress" },
-  { id: "hasNotes",  label: "Notes",     type: "text" },
-  { id: "scheduled", label: "Scheduled", type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function NotetakerPage() {
-  const [rows, setRows] = useState<ApiMeeting[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [transcript, setTranscript] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [extracted, setExtracted] = useState<Extracted | null>(null);
+  const [spawnTasks, setSpawnTasks] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [recents, setRecents] = useState<ApiMeeting[] | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
-  const load = useCallback(async () => {
+  const loadRecents = useCallback(async () => {
     try {
-      const res = await fetch("/api/meetings?limit=200");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch("/api/meetings?limit=8");
+      if (!res.ok) return setRecents([]);
       const data = await res.json();
       const list: ApiMeeting[] = data?.data?.items ?? data?.data ?? (Array.isArray(data) ? data : []);
-      setRows(list.filter((m) => m.stats?.hasNotes || (m.stats?.decisionCount ?? 0) > 0 || (m.stats?.actionItemsTotal ?? 0) > 0));
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
+      setRecents(list.filter((m) => m.stats?.hasNotes || (m.stats?.actionItemsTotal ?? 0) > 0));
+    } catch { setRecents([]); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadRecents(); }, [loadRecents]);
   const v = rowVersion("notetaker");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+  useEffect(() => { if (v > 0) void loadRecents(); }, [v, loadRecents]);
 
-  const groups = useMemo(() => buildGroups(rows ?? []), [rows]);
+  async function extract() {
+    if (transcript.trim().length < 20) { toast("Paste at least a short transcript first"); return; }
+    setExtracting(true); setExtracted(null);
+    try {
+      const res = await fetch("/api/notetaker/process", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript }),
+      });
+      if (!res.ok) throw new Error(`process ${res.status}`);
+      const data = await res.json();
+      setExtracted(data.data ?? data);
+    } catch { toast("Couldn't extract — Claude may be busy. Try again."); }
+    finally { setExtracting(false); }
+  }
 
-  const handlers = {
-    onAdd: async (_g: string) => {
-      toast("Open the notetaker drawer and paste your transcript — AI will extract decisions + actions");
-      throw new Error("not supported");
-    },
-  };
-
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (rows ?? []).map((m): CalendarEvent => ({
-      id: m.id,
-      title: m.title,
-      date: m.scheduledAt,
-      color: TYPE_COLORS[m.type],
-      payload: meetingToRow(m).cells,
-    })),
-    [rows],
-  );
-
-  const totalActions = (rows ?? []).reduce((acc, m) => acc + (m.stats?.actionItemsTotal ?? 0), 0);
-  const totalDecisions = (rows ?? []).reduce((acc, m) => acc + (m.stats?.decisionCount ?? 0), 0);
+  async function save() {
+    if (!extracted?.title) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/notetaker/save", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: extracted.title,
+          type: (extracted.type as string) || "ADHOC",
+          summary: extracted.summary,
+          decisions: extracted.decisions ?? [],
+          attendees: extracted.attendees ?? [],
+          actionItems: extracted.actionItems ?? [],
+          transcript,
+          spawnTasks,
+        }),
+      });
+      if (!res.ok) throw new Error(`save ${res.status}`);
+      toast(`Saved meeting "${extracted.title}"${spawnTasks && extracted.actionItems?.length ? ` + spawned ${extracted.actionItems.length} task(s)` : ""}`);
+      setTranscript(""); setExtracted(null);
+      void loadRecents();
+    } catch { toast("Couldn't save"); }
+    finally { setSaving(false); }
+  }
 
   return (
-    <>
-      <OsTitleBar
-        title="Notetaker"
-        Icon={Mic}
-        iconGradient={GRAD.purpleIndigo}
-        description={rows === null ? "Loading notes…" : `${rows.length} meeting${rows.length === 1 ? "" : "s"} processed · ${totalDecisions} decision${totalDecisions === 1 ? "" : "s"} · ${totalActions} action item${totalActions === 1 ? "" : "s"}`}
-        people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.sc]}
-        morePeople={4}
-      />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
+    <div className="ntk">
+      <header className="ntk__head">
+        <div className="ntk__head-l">
+          <div className="ntk__icon"><Mic /></div>
+          <div>
+            <h1 className="ntk__title">Notetaker</h1>
+            <div className="ntk__sub">Paste a transcript. Claude extracts decisions, action items, and attendees in seconds.</div>
+          </div>
+        </div>
+      </header>
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="Process transcript" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={Mic} iconGradient={GRAD.redPink} title="Couldn't load notes" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : rows === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : rows.length === 0 ? (
-            <OsEmptyView Icon={Mic} iconGradient={GRAD.purpleIndigo} title="No processed transcripts yet" subtitle="Paste a meeting transcript — Claude extracts decisions, action items, and attendees. Optionally spawn tasks for each action." chips={["Transcript", "Decisions", "Actions", "Auto-tasks"]} cta="Process transcript" />
+      <div className="ntk__grid">
+        <section className="ntk__input">
+          <header><FileText /> Transcript</header>
+          <textarea
+            value={transcript}
+            onChange={(e) => setTranscript(e.target.value)}
+            placeholder={"Paste the meeting transcript here…\n\nWorks with Zoom, Google Meet, Otter, raw notes — anything.\n\nExample:\n[10:02] Bigbold: Let's ship the new pricing page by Friday\n[10:03] Sarah: I can take the copy, who's doing engineering?\n[10:03] Arjun: I'll handle eng — can finish by Wednesday."}
+            rows={20}
+          />
+          <footer>
+            <span className="ntk__char">{transcript.length} chars</span>
+            <button type="button" onClick={extract} disabled={extracting || transcript.trim().length < 20} className="ntk__btn ntk__btn--primary">
+              {extracting ? <><Loader2 className="ntk__spin" /> Extracting…</> : <><Sparkles /> Extract</>}
+            </button>
+          </footer>
+        </section>
+
+        <section className="ntk__output">
+          <header><Sparkles /> Result</header>
+          {extracting ? (
+            <div className="ntk__output-busy">
+              <Loader2 className="ntk__spin" />
+              <span>Claude is reading…</span>
+            </div>
+          ) : !extracted ? (
+            <div className="ntk__output-empty">
+              <p>Paste a transcript on the left and hit <strong>Extract</strong>. The structured output lands here.</p>
+            </div>
           ) : (
-            <OsMainTable moduleId="notetaker" columns={COLUMNS} groups={groups} handlers={handlers} />
+            <div className="ntk__result">
+              <div className="ntk__result-field">
+                <label>Meeting title</label>
+                <input
+                  type="text"
+                  value={extracted.title ?? ""}
+                  onChange={(e) => setExtracted({ ...extracted, title: e.target.value })}
+                />
+              </div>
+              <div className="ntk__result-row">
+                <div className="ntk__result-field">
+                  <label>Type</label>
+                  <select value={extracted.type ?? "ADHOC"} onChange={(e) => setExtracted({ ...extracted, type: e.target.value })}>
+                    <option value="DAILY_STANDUP">Daily standup</option>
+                    <option value="WEEKLY_REVIEW">Weekly review</option>
+                    <option value="ONE_ON_ONE">1:1</option>
+                    <option value="QUARTERLY_REVIEW">Quarterly</option>
+                    <option value="ANNUAL_PLANNING">Annual planning</option>
+                    <option value="ADHOC">Ad-hoc</option>
+                  </select>
+                </div>
+              </div>
+              <div className="ntk__result-field">
+                <label>Summary</label>
+                <textarea
+                  value={extracted.summary ?? ""}
+                  onChange={(e) => setExtracted({ ...extracted, summary: e.target.value })}
+                  rows={3}
+                />
+              </div>
+
+              <h3>Decisions · {extracted.decisions?.length ?? 0}</h3>
+              <ul className="ntk__list">
+                {(extracted.decisions ?? []).map((d, i) => (
+                  <li key={i}><CheckCircle2 style={{ width: 14, height: 14, color: "var(--os-c-green)" }} /> {d}</li>
+                ))}
+                {(extracted.decisions?.length ?? 0) === 0 && <li className="ntk__list-empty">No decisions captured.</li>}
+              </ul>
+
+              <h3>Action items · {extracted.actionItems?.length ?? 0}</h3>
+              <ul className="ntk__list ntk__list--actions">
+                {(extracted.actionItems ?? []).map((a, i) => (
+                  <li key={i}>
+                    <span>{a.title}</span>
+                    <span className="ntk__action-who">
+                      {a.assigneeName ?? "—"}
+                      {a.deadlineDays != null && <em> · due in {a.deadlineDays}d</em>}
+                    </span>
+                  </li>
+                ))}
+                {(extracted.actionItems?.length ?? 0) === 0 && <li className="ntk__list-empty">No action items.</li>}
+              </ul>
+
+              <h3>Attendees · {extracted.attendees?.length ?? 0}</h3>
+              <div className="ntk__attendees">
+                {(extracted.attendees ?? []).map((a, i) => (
+                  <span key={i} className="ntk__attendee">{a.name}{a.email ? ` · ${a.email}` : ""}</span>
+                ))}
+              </div>
+
+              <footer className="ntk__result-foot">
+                <label className="ntk__spawn">
+                  <input type="checkbox" checked={spawnTasks} onChange={(e) => setSpawnTasks(e.target.checked)} />
+                  Spawn a task for each action item
+                </label>
+                <button type="button" onClick={save} className="ntk__btn ntk__btn--primary" disabled={saving || !extracted.title}>
+                  {saving ? "Saving…" : <><Save /> Save meeting</>}
+                </button>
+              </footer>
+            </div>
           )}
-        </>
-      )}
+        </section>
+      </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="notetaker" events={calendarEvents} newLabel="Process transcript" />
-      )}
-
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={Mic} iconGradient={GRAD.purpleIndigo} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
-      )}
-    </>
+      <section className="ntk__recents">
+        <h2>Recent extractions</h2>
+        {recents === null ? (
+          <div className="ntk__recents-empty">Loading…</div>
+        ) : recents.length === 0 ? (
+          <div className="ntk__recents-empty">No processed meetings yet.</div>
+        ) : (
+          <div className="ntk__recents-list">
+            {recents.map((m) => (
+              <Link key={m.id} href={`/meetings/${m.id}`} className="ntk__recent">
+                <span className="ntk__recent-title">{m.title}</span>
+                <span className="ntk__recent-stats">
+                  {(m.stats?.decisionCount ?? 0) > 0 && <span>{m.stats?.decisionCount} decision{m.stats?.decisionCount === 1 ? "" : "s"}</span>}
+                  {(m.stats?.actionItemsTotal ?? 0) > 0 && <span>{m.stats?.actionItemsTotal} action{m.stats?.actionItemsTotal === 1 ? "" : "s"}</span>}
+                </span>
+                <span className="ntk__recent-time">{timeAgo(m.scheduledAt)}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
