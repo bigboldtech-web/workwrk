@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Bell, HelpCircle, Sparkles } from "lucide-react";
+import { Bell, HelpCircle, Sparkles, Heart, MessageSquare, Megaphone } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { OsNotificationsPopover } from "./notifications-popover";
+import { OsKudosPopover } from "./kudos-popover";
+import { OsCandorPopover } from "./candor-popover";
+import { OsAnnouncementsPopover } from "./announcements-popover";
 
 function humanize(seg: string) {
   return seg.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -27,29 +30,45 @@ function buildCrumbs(pathname: string) {
   return crumbs;
 }
 
+type PopId = "notif" | "kudos" | "candor" | "announce" | null;
+
 export function OsTopbar() {
   const pathname = usePathname() || "/";
   const { openSidekick } = useOsShell();
   const crumbs = useMemo(() => buildCrumbs(pathname), [pathname]);
-  const [notifOpen, setNotifOpen] = useState(false);
+  const [openPop, setOpenPop] = useState<PopId>(null);
   const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [candorActive, setCandorActive] = useState<number>(0);
+  const [annAckPending, setAnnAckPending] = useState<number>(0);
 
-  // Lightweight unread-count poll for the bell badge. 60s is more than
-  // fast enough — the popover always loads fresh on open.
+  // Poll all three lightweight badge counts every 60s.
   useEffect(() => {
     let alive = true;
     async function refresh() {
       try {
-        const res = await fetch("/api/notifications");
-        if (!alive || !res.ok) return;
-        const json = await res.json();
-        setUnreadCount(json.unreadCount ?? 0);
+        const [n, c, a] = await Promise.all([
+          fetch("/api/notifications").then((r) => r.ok ? r.json() : null).catch(() => null),
+          fetch("/api/candor").then((r) => r.ok ? r.json() : null).catch(() => null),
+          fetch("/api/announcements").then((r) => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        if (!alive) return;
+        if (n) setUnreadCount(n.unreadCount ?? 0);
+        if (c) {
+          const list = c.data ?? (Array.isArray(c) ? c : []);
+          setCandorActive(list.filter((s: { status?: string }) => s.status === "ACTIVE").length);
+        }
+        if (a) {
+          const list = a.data ?? (Array.isArray(a) ? a : []);
+          setAnnAckPending(list.filter((x: { mustAcknowledge?: boolean; acknowledged?: boolean }) => x.mustAcknowledge && !x.acknowledged).length);
+        }
       } catch { /* ignore */ }
     }
     void refresh();
     const t = setInterval(refresh, 60_000);
     return () => { alive = false; clearInterval(t); };
-  }, [notifOpen]);
+  }, [openPop]);
+
+  const toggle = (id: PopId) => setOpenPop((cur) => cur === id ? null : id);
 
   return (
     <header className="os-top" role="banner">
@@ -73,11 +92,36 @@ export function OsTopbar() {
         <span>Sidekick</span>
         <span className="os-top__ai-kbd">⌘J</span>
       </button>
+
+      <button type="button" className="os-top__icon-btn" aria-label="Give kudos" onClick={() => toggle("kudos")}>
+        <Heart />
+      </button>
+
+      <button
+        type="button"
+        className="os-top__icon-btn"
+        aria-label={`Candor${candorActive > 0 ? ` (${candorActive} active)` : ""}`}
+        onClick={() => toggle("candor")}
+      >
+        <MessageSquare />
+        {candorActive > 0 ? <span className="os-top__icon-btn-dot" aria-hidden /> : null}
+      </button>
+
+      <button
+        type="button"
+        className="os-top__icon-btn"
+        aria-label={`Announcements${annAckPending > 0 ? ` (${annAckPending} need ack)` : ""}`}
+        onClick={() => toggle("announce")}
+      >
+        <Megaphone />
+        {annAckPending > 0 ? <span className="os-top__icon-btn-dot" aria-hidden /> : null}
+      </button>
+
       <button
         type="button"
         className="os-top__icon-btn"
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
-        onClick={() => setNotifOpen((v) => !v)}
+        onClick={() => toggle("notif")}
       >
         <Bell />
         {unreadCount > 0 ? <span className="os-top__icon-btn-dot" aria-hidden /> : null}
@@ -85,7 +129,11 @@ export function OsTopbar() {
       <Link href="/help" className="os-top__icon-btn" aria-label="Help">
         <HelpCircle />
       </Link>
-      {notifOpen ? <OsNotificationsPopover onClose={() => setNotifOpen(false)} /> : null}
+
+      {openPop === "notif"    ? <OsNotificationsPopover  onClose={() => setOpenPop(null)} /> : null}
+      {openPop === "kudos"    ? <OsKudosPopover          onClose={() => setOpenPop(null)} /> : null}
+      {openPop === "candor"   ? <OsCandorPopover         onClose={() => setOpenPop(null)} /> : null}
+      {openPop === "announce" ? <OsAnnouncementsPopover  onClose={() => setOpenPop(null)} /> : null}
     </header>
   );
 }
