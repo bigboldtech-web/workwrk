@@ -22,11 +22,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, GripVertical, Trash2, Type, Hash, Heading2, ListChecks,
   Minus, Link2, FileText as FileIcon, AlertCircle, Sparkles, Loader2, Check,
+  CheckSquare, LayoutGrid, BookCopy, CalendarClock, FormInput, ChevronRight,
 } from "lucide-react";
+import Link from "next/link";
 import { useOsToast } from "@/components/layout/os/toast";
 
 // ───────── Block shape ─────────
-export type BlockKind = "h1" | "h2" | "h3" | "paragraph" | "todo" | "divider" | "embed" | "file" | "callout";
+export type BlockKind =
+  | "h1" | "h2" | "h3" | "paragraph"
+  | "todo" | "divider" | "embed" | "file" | "callout"
+  | "tasks_view" | "studio_board" | "sops_list" | "meetings_view" | "form";
 
 export type Block =
   | { id: string; kind: "h1" | "h2" | "h3" | "paragraph"; text: string }
@@ -34,7 +39,12 @@ export type Block =
   | { id: string; kind: "divider" }
   | { id: string; kind: "embed"; url: string; title?: string }
   | { id: string; kind: "file"; name: string; url: string; size?: number; mimeType?: string }
-  | { id: string; kind: "callout"; text: string; tone: "info" | "warn" | "success" };
+  | { id: string; kind: "callout"; text: string; tone: "info" | "warn" | "success" }
+  | { id: string; kind: "tasks_view"; window: "today" | "week" | "overdue"; title?: string }
+  | { id: string; kind: "studio_board"; boardId: string; boardName?: string }
+  | { id: string; kind: "sops_list"; category?: string }
+  | { id: string; kind: "meetings_view"; window: "upcoming" | "past" }
+  | { id: string; kind: "form"; formId: string; formName?: string };
 
 type ApiFile = { id: string; name: string; mimeType: string; size: number; url: string };
 
@@ -52,6 +62,11 @@ const MENU: { kind: BlockKind; label: string; Icon: React.ComponentType<{ classN
   { kind: "divider",   label: "Divider",       Icon: Minus,         build: () => ({ id: newId(), kind: "divider" }) },
   { kind: "embed",     label: "Embed URL",     Icon: Link2,         build: () => ({ id: newId(), kind: "embed", url: "", title: "" }) },
   { kind: "file",      label: "File attachment", Icon: FileIcon,    build: () => ({ id: newId(), kind: "file", name: "", url: "" }) },
+  { kind: "tasks_view",    label: "Tasks view",    Icon: CheckSquare,    build: () => ({ id: newId(), kind: "tasks_view", window: "today" }) },
+  { kind: "studio_board",  label: "Studio board",  Icon: LayoutGrid,     build: () => ({ id: newId(), kind: "studio_board", boardId: "" }) },
+  { kind: "sops_list",     label: "SOPs",          Icon: BookCopy,       build: () => ({ id: newId(), kind: "sops_list" }) },
+  { kind: "meetings_view", label: "Meetings",      Icon: CalendarClock,  build: () => ({ id: newId(), kind: "meetings_view", window: "upcoming" }) },
+  { kind: "form",          label: "Form",          Icon: FormInput,      build: () => ({ id: newId(), kind: "form", formId: "" }) },
 ];
 
 // ───────── Editor ─────────
@@ -213,6 +228,11 @@ function BlockContent({
     divider: "",
     embed: "https://…",
     file: "",
+    tasks_view: "",
+    studio_board: "",
+    sops_list: "",
+    meetings_view: "",
+    form: "",
   };
 
   // Text-style blocks
@@ -321,6 +341,22 @@ function BlockContent({
     return <FileBlock block={block} readonly={readonly} onUpdate={onUpdate} />;
   }
 
+  if (block.kind === "tasks_view") {
+    return <TasksViewBlock block={block} readonly={readonly} onUpdate={onUpdate} />;
+  }
+  if (block.kind === "studio_board") {
+    return <StudioBoardBlock block={block} readonly={readonly} onUpdate={onUpdate} />;
+  }
+  if (block.kind === "sops_list") {
+    return <SopsListBlock block={block} readonly={readonly} onUpdate={onUpdate} />;
+  }
+  if (block.kind === "meetings_view") {
+    return <MeetingsViewBlock block={block} readonly={readonly} onUpdate={onUpdate} />;
+  }
+  if (block.kind === "form") {
+    return <FormBlock block={block} readonly={readonly} onUpdate={onUpdate} />;
+  }
+
   return null;
 }
 
@@ -398,4 +434,313 @@ function escapeHTML(s: string): string {
   // We render via dangerouslySetInnerHTML so the editor can show the
   // current text content, but we escape so user input can't inject.
   return (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+// ───────── Tasks-view embed ─────────
+type ApiTask = { id: string; title: string; date: string; status: string; priority: string };
+
+function TasksViewBlock({ block, readonly, onUpdate }: { block: Extract<Block, { kind: "tasks_view" }>; readonly: boolean; onUpdate: (p: Partial<Block>) => void }) {
+  const [tasks, setTasks] = useState<ApiTask[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const MS = 86_400_000;
+        const from = new Date(Date.now() - 14 * MS).toISOString().slice(0, 10);
+        const to   = new Date(Date.now() + 30 * MS).toISOString().slice(0, 10);
+        const res = await fetch(`/api/tasks?startDate=${from}&endDate=${to}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled) return;
+        setTasks(Array.isArray(d) ? d : (d.data ?? []));
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+  const list = (tasks ?? []).filter((t) => {
+    if (t.status === "COMPLETED") return false;
+    const due = new Date(t.date); due.setHours(0, 0, 0, 0);
+    const diffDays = (due.getTime() - today0.getTime()) / 86_400_000;
+    if (block.window === "today") return diffDays === 0;
+    if (block.window === "overdue") return diffDays < 0;
+    return diffDays >= 0 && diffDays <= 7;
+  }).slice(0, 12);
+
+  return (
+    <div className="bembed bembed--tasks">
+      <header className="bembed__head">
+        <CheckSquare />
+        <strong>Tasks · {block.window === "today" ? "Today" : block.window === "overdue" ? "Overdue" : "Next 7 days"}</strong>
+        {!readonly && (
+          <select className="bembed__select" value={block.window} onChange={(e) => onUpdate({ window: e.target.value as "today" | "week" | "overdue" })} onClick={(e) => e.stopPropagation()}>
+            <option value="today">Today</option>
+            <option value="week">Next 7 days</option>
+            <option value="overdue">Overdue</option>
+          </select>
+        )}
+        <Link href="/tasks" className="bembed__open">Open <ChevronRight /></Link>
+      </header>
+      {tasks === null ? (
+        <div className="bembed__loading">Loading…</div>
+      ) : list.length === 0 ? (
+        <div className="bembed__empty">Nothing in this window.</div>
+      ) : (
+        <ul className="bembed__list">
+          {list.map((t) => (
+            <li key={t.id}>
+              <span className={`bembed__dot bembed__dot--${t.priority.toLowerCase()}`} />
+              <span className="bembed__title">{t.title}</span>
+              <span className="bembed__chip">{new Date(t.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ───────── Studio board embed ─────────
+type ApiStudioBoard = { id: string; name: string; slug: string; layout: string; _count?: { items?: number } };
+
+function StudioBoardBlock({ block, readonly, onUpdate }: { block: Extract<Block, { kind: "studio_board" }>; readonly: boolean; onUpdate: (p: Partial<Block>) => void }) {
+  const [boards, setBoards] = useState<ApiStudioBoard[] | null>(null);
+  const [picking, setPicking] = useState(!block.boardId);
+
+  useEffect(() => {
+    if (!picking) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/studio/boards");
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled) return;
+        setBoards(d.boards ?? d.data ?? []);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [picking]);
+
+  if (!block.boardId || picking) {
+    return (
+      <div className="bembed bembed--pick">
+        <header className="bembed__head">
+          <LayoutGrid />
+          <strong>Embed a Studio board</strong>
+          {block.boardId && (
+            <button type="button" className="bembed__cancel" onClick={() => setPicking(false)}>Cancel</button>
+          )}
+        </header>
+        {boards === null ? (
+          <div className="bembed__loading">Loading boards…</div>
+        ) : boards.length === 0 ? (
+          <div className="bembed__empty">No Studio boards yet. Create one at <Link href="/studio">/studio</Link>.</div>
+        ) : (
+          <div className="bembed__pick-list">
+            {boards.map((b) => (
+              <button key={b.id} type="button" onClick={() => { onUpdate({ boardId: b.id, boardName: b.name }); setPicking(false); }}>
+                <LayoutGrid />
+                <span>{b.name}</span>
+                <em>{b.layout.toLowerCase()} · {b._count?.items ?? 0} items</em>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bembed bembed--studio">
+      <header className="bembed__head">
+        <LayoutGrid />
+        <strong>{block.boardName ?? "Studio board"}</strong>
+        {!readonly && (
+          <button type="button" className="bembed__cancel" onClick={() => setPicking(true)}>Change</button>
+        )}
+        <Link href={`/studio/boards/${block.boardId}`} className="bembed__open">Open <ChevronRight /></Link>
+      </header>
+      <div className="bembed__placeholder">
+        <span>Live board view embeds when opened in full.</span>
+      </div>
+    </div>
+  );
+}
+
+// ───────── SOPs list embed ─────────
+type ApiSop = { id: string; title: string; category?: string | null; status: string };
+
+function SopsListBlock({ block, readonly, onUpdate }: { block: Extract<Block, { kind: "sops_list" }>; readonly: boolean; onUpdate: (p: Partial<Block>) => void }) {
+  const [sops, setSops] = useState<ApiSop[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/sops?limit=200");
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled) return;
+        const list: ApiSop[] = d?.data?.items ?? d?.data ?? [];
+        setSops(list);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const filtered = (sops ?? []).filter((s) => block.category ? (s.category ?? "") === block.category : true).slice(0, 12);
+  const categories = Array.from(new Set((sops ?? []).map((s) => s.category).filter(Boolean) as string[]));
+
+  return (
+    <div className="bembed bembed--sops">
+      <header className="bembed__head">
+        <BookCopy />
+        <strong>SOPs{block.category ? ` · ${block.category}` : ""}</strong>
+        {!readonly && categories.length > 0 && (
+          <select className="bembed__select" value={block.category ?? ""} onChange={(e) => onUpdate({ category: e.target.value || undefined })} onClick={(e) => e.stopPropagation()}>
+            <option value="">All categories</option>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        <Link href="/sops" className="bembed__open">Open <ChevronRight /></Link>
+      </header>
+      {sops === null ? (
+        <div className="bembed__loading">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="bembed__empty">No SOPs in this view.</div>
+      ) : (
+        <ul className="bembed__list">
+          {filtered.map((s) => (
+            <li key={s.id}>
+              <BookCopy style={{ width: 12, height: 12, color: "var(--os-c-teal)" }} />
+              <Link href={`/sops/${s.id}`} className="bembed__title bembed__title--link">{s.title}</Link>
+              {s.category && <span className="bembed__chip">{s.category}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ───────── Meetings view embed ─────────
+type ApiMeeting = { id: string; title: string; type: string; scheduledAt: string };
+
+function MeetingsViewBlock({ block, readonly, onUpdate }: { block: Extract<Block, { kind: "meetings_view" }>; readonly: boolean; onUpdate: (p: Partial<Block>) => void }) {
+  const [meetings, setMeetings] = useState<ApiMeeting[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/meetings?limit=30");
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled) return;
+        setMeetings(d?.data?.items ?? d?.data ?? []);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const now = Date.now();
+  const filtered = (meetings ?? []).filter((m) => {
+    const t = new Date(m.scheduledAt).getTime();
+    return block.window === "upcoming" ? t >= now : t < now;
+  }).slice(0, 8);
+
+  return (
+    <div className="bembed bembed--meetings">
+      <header className="bembed__head">
+        <CalendarClock />
+        <strong>Meetings · {block.window}</strong>
+        {!readonly && (
+          <select className="bembed__select" value={block.window} onChange={(e) => onUpdate({ window: e.target.value as "upcoming" | "past" })} onClick={(e) => e.stopPropagation()}>
+            <option value="upcoming">Upcoming</option>
+            <option value="past">Past</option>
+          </select>
+        )}
+        <Link href="/meetings" className="bembed__open">Open <ChevronRight /></Link>
+      </header>
+      {meetings === null ? (
+        <div className="bembed__loading">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="bembed__empty">Nothing scheduled.</div>
+      ) : (
+        <ul className="bembed__list">
+          {filtered.map((m) => (
+            <li key={m.id}>
+              <CalendarClock style={{ width: 12, height: 12, color: "var(--os-c-pink)" }} />
+              <Link href={`/meetings/${m.id}`} className="bembed__title bembed__title--link">{m.title}</Link>
+              <span className="bembed__chip">{new Date(m.scheduledAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ───────── Form embed ─────────
+type ApiForm = { id: string; name: string; fields?: unknown; submissionCount?: number };
+
+function FormBlock({ block, readonly, onUpdate }: { block: Extract<Block, { kind: "form" }>; readonly: boolean; onUpdate: (p: Partial<Block>) => void }) {
+  const [forms, setForms] = useState<ApiForm[] | null>(null);
+  const [picking, setPicking] = useState(!block.formId);
+
+  useEffect(() => {
+    if (!picking) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/forms");
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled) return;
+        setForms(d.data ?? (Array.isArray(d) ? d : []));
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [picking]);
+
+  if (!block.formId || picking) {
+    return (
+      <div className="bembed bembed--pick">
+        <header className="bembed__head">
+          <FormInput />
+          <strong>Embed a Form</strong>
+          {block.formId && <button type="button" className="bembed__cancel" onClick={() => setPicking(false)}>Cancel</button>}
+        </header>
+        {forms === null ? (
+          <div className="bembed__loading">Loading forms…</div>
+        ) : forms.length === 0 ? (
+          <div className="bembed__empty">No forms yet. Build one at <Link href="/forms">/forms</Link>.</div>
+        ) : (
+          <div className="bembed__pick-list">
+            {forms.map((f) => (
+              <button key={f.id} type="button" onClick={() => { onUpdate({ formId: f.id, formName: f.name }); setPicking(false); }}>
+                <FormInput />
+                <span>{f.name}</span>
+                <em>{f.submissionCount ?? 0} submissions</em>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bembed bembed--form">
+      <header className="bembed__head">
+        <FormInput />
+        <strong>{block.formName ?? "Form"}</strong>
+        {!readonly && <button type="button" className="bembed__cancel" onClick={() => setPicking(true)}>Change</button>}
+        <Link href={`/forms/${block.formId}`} className="bembed__open">Open <ChevronRight /></Link>
+      </header>
+      <Link href={`/forms/${block.formId}/respond`} className="bembed__form-cta">
+        <FormInput /> Click to fill this form →
+      </Link>
+    </div>
+  );
 }

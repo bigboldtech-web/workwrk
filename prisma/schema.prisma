@@ -159,6 +159,10 @@ model Organization {
   // and embeddable in any block-based doc / page.
   fileFolders           FileFolder[]
   fileEntries           FileEntry[]
+  // 🆕 Forms primitive — user-built forms (any team), submissions
+  // pile up in an inbox + can target a Studio board for row inserts.
+  formDefinitions       FormDefinition[]
+  formSubmissions       FormSubmission[]
 
   @@index([slug])
 }
@@ -204,6 +208,50 @@ model FileEntry {
 
   @@index([organizationId, folderId])
   @@index([uploadedById])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Forms primitive — composable data collection.
+// `fields` is a JSON array of question definitions (type, label,
+// required, options...). Submissions store one Json blob keyed by
+// field id. Same Lego philosophy as Files: a form is a thing users
+// build, embed anywhere via the Form block.
+// ─────────────────────────────────────────────────────────────────
+model FormDefinition {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  fields         Json             @default("[]")
+  // Public form = anyone with the link can submit (no login needed).
+  isPublic       Boolean          @default(false)
+  // Optional Studio-board target — submissions add a row there.
+  targetBoardId  String?
+  createdById    String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  submissions    FormSubmission[]
+
+  @@index([organizationId])
+  @@index([createdById])
+}
+
+model FormSubmission {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  formId         String
+  form           FormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
+  // { fieldId: value, ... } — schema enforced at write time against
+  // the form's current `fields` definition.
+  data           Json           @default("{}")
+  // Submitter is nullable for public forms.
+  submittedById  String?
+  submittedAt    DateTime       @default(now())
+
+  @@index([organizationId, formId])
+  @@index([formId, submittedAt])
 }
 
 enum Plan {
