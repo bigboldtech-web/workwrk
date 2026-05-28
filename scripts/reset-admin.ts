@@ -2,13 +2,13 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 import { PrismaClient } from "../src/generated/prisma";
-import { PrismaNeon } from "@prisma/adapter-neon";
+import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 
 const connStr = process.env.DATABASE_URL;
 if (!connStr) throw new Error("DATABASE_URL is not set");
 
-const adapter = new PrismaNeon({ connectionString: connStr });
+const adapter = new PrismaPg({ connectionString: connStr });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
