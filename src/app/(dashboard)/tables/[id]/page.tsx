@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
+  LayoutGrid, Columns,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -44,6 +45,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [rows, setRows] = useState<ApiRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingCols, setSavingCols] = useState(false);
+  const [view, setView] = useState<"grid" | "kanban">("grid");
+  const [kanbanCol, setKanbanCol] = useState<string>("");
 
   useEffect(() => { void params.then((p) => setTableId(p.id)); }, [params]);
 
@@ -142,8 +145,20 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   const columnTypes = useMemo(() => Object.keys(COL_LABEL) as ColType[], []);
 
+  const kanbanColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "select"), [table?.columns]);
+
+  // Auto-pick the first select column for kanban when switching to that view.
+  useEffect(() => {
+    if (view !== "kanban") return;
+    if (kanbanCol && kanbanColumns.find((c) => c.id === kanbanCol)) return;
+    setKanbanCol(kanbanColumns[0]?.id ?? "");
+  }, [view, kanbanCol, kanbanColumns]);
+
   if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
   if (!table || rows === null) return <div className="frmb__loading"><Loader2 className="frmb__spin" /> Loading…</div>;
+
+  const activeCol = kanbanColumns.find((c) => c.id === kanbanCol);
+  const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
 
   return (
     <div className="dtbl">
@@ -162,6 +177,38 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         <div className="dtbl__meta">{rows.length} row{rows.length === 1 ? "" : "s"} · {table.columns.length} column{table.columns.length === 1 ? "" : "s"} {savingCols && <em>· saving…</em>}</div>
       </header>
 
+      <nav className="dtbl__viewtabs">
+        <button type="button" className={view === "grid" ? "is-active" : ""} onClick={() => setView("grid")}><LayoutGrid /> Grid</button>
+        <button type="button" className={view === "kanban" ? "is-active" : ""} onClick={() => setView("kanban")} disabled={kanbanColumns.length === 0} title={kanbanColumns.length === 0 ? "Add a Single-choice column to enable Kanban" : ""}><Columns /> Kanban</button>
+        {view === "kanban" && kanbanColumns.length > 1 && (
+          <select className="dtbl__viewgroup" value={kanbanCol} onChange={(e) => setKanbanCol(e.target.value)}>
+            {kanbanColumns.map((c) => <option key={c.id} value={c.id}>Group by: {c.label}</option>)}
+          </select>
+        )}
+      </nav>
+
+      {view === "kanban" && activeCol ? (
+        <KanbanView
+          table={table}
+          rows={rows}
+          groupCol={activeCol}
+          titleCol={titleCol}
+          onAddRow={async (groupValue: string) => {
+            if (!tableId) return;
+            try {
+              const res = await fetch(`/api/tables/${tableId}/rows`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ values: { [activeCol.id]: groupValue } }),
+              });
+              if (!res.ok) throw new Error();
+              const d = await res.json();
+              setRows((prev) => [...(prev ?? []), d.data ?? d]);
+            } catch { toast("Couldn't add card"); }
+          }}
+          onMove={(rowId, newGroup) => void patchRow(rowId, { [activeCol.id]: newGroup })}
+        />
+      ) : (
+      <>
       <div className="dtbl__scroll">
         <table className="dtbl__grid">
           <thead>
@@ -216,6 +263,66 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <button type="button" className="dtbl__addrow" onClick={addRow}><Plus /> New row</button>
+      </>)}
+    </div>
+  );
+}
+
+function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove }: {
+  table: ApiTable; rows: ApiRow[]; groupCol: Column; titleCol: Column | undefined;
+  onAddRow: (groupValue: string) => Promise<void>;
+  onMove: (rowId: string, newGroup: string) => void;
+}) {
+  const options = groupCol.options ?? [];
+  const lanes = [...options, "—"]; // trailing "—" lane for rows with no value
+  const grouped = useMemo(() => {
+    const m = new Map<string, ApiRow[]>();
+    for (const lane of lanes) m.set(lane, []);
+    for (const r of rows) {
+      const v = String(r.values[groupCol.id] ?? "—");
+      const lane = lanes.includes(v) ? v : "—";
+      m.get(lane)!.push(r);
+    }
+    return m;
+  }, [rows, groupCol.id, lanes]);
+
+  return (
+    <div className="dtbl__kanban">
+      {lanes.map((lane) => (
+        <section key={lane} className="dtbl__lane">
+          <header className="dtbl__lane-head">
+            <h3>{lane}</h3>
+            <span>{grouped.get(lane)?.length ?? 0}</span>
+          </header>
+          <div className="dtbl__lane-body"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              const rowId = e.dataTransfer.getData("text/plain");
+              if (rowId && lane !== "—") onMove(rowId, lane);
+              else if (rowId && lane === "—") onMove(rowId, "");
+            }}
+          >
+            {(grouped.get(lane) ?? []).map((r) => (
+              <article key={r.id} className="dtbl__card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)}>
+                <div className="dtbl__card-title">{titleCol ? String(r.values[titleCol.id] ?? "Untitled") : "Untitled"}</div>
+                <div className="dtbl__card-meta">
+                  {table.columns
+                    .filter((c) => c.id !== titleCol?.id && c.id !== groupCol.id)
+                    .slice(0, 3)
+                    .map((c) => {
+                      const v = r.values[c.id];
+                      if (v === undefined || v === null || v === "") return null;
+                      return <span key={c.id} className="dtbl__card-chip"><em>{c.label}:</em> {String(Array.isArray(v) ? v.join(", ") : v)}</span>;
+                    })}
+                </div>
+              </article>
+            ))}
+            {lane !== "—" && (
+              <button type="button" className="dtbl__lane-add" onClick={() => void onAddRow(lane)}><Plus /> Add card</button>
+            )}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

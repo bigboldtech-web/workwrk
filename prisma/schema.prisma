@@ -237,6 +237,9 @@ model FormDefinition {
   isPublic       Boolean          @default(false)
   // Optional Studio-board target — submissions add a row there.
   targetBoardId  String?
+  // Optional DataTable target — submissions add a row there (independent
+  // of targetBoardId; both can be set, in which case both get a row).
+  targetTableId  String?
   createdById    String
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
@@ -5812,6 +5815,12 @@ model Doc {
 
   createdById    String?
   archivedAt     DateTime?    // soft-archive only; never hard-delete
+
+  // 🆕 AI-generated summary (Claude) — populated on demand from
+  // /api/docs/[id]/summarize. Useful in list views to show what a
+  // doc is about without opening it.
+  summary        String?      @db.Text
+  summarizedAt   DateTime?
 
   versions       DocVersion[]
 

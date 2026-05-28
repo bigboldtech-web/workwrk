@@ -79,7 +79,55 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  if (form.targetTableId) {
+    try {
+      await pushToTable(form.targetTableId, form, data);
+    } catch (err) {
+      console.error(`form-submission: failed to push to table ${form.targetTableId}`, err);
+    }
+  }
+
   return jsonSuccess(sub, 201);
+}
+
+async function pushToTable(tableId: string, form: { fields: unknown; organizationId: string }, data: Record<string, unknown>) {
+  type TableColumn = { id: string; label: string; type: string };
+  const table = await prisma.dataTable.findFirst({
+    where: { id: tableId, organizationId: form.organizationId },
+    select: { id: true, columns: true },
+  });
+  if (!table) return;
+
+  const formFields = Array.isArray(form.fields) ? (form.fields as FormField[]) : [];
+  const tableColumns = Array.isArray(table.columns) ? (table.columns as TableColumn[]) : [];
+
+  const byLabel = new Map<string, string>();
+  for (const c of tableColumns) {
+    if (c?.label && c?.id) byLabel.set(c.label.trim().toLowerCase(), c.id);
+  }
+
+  const values: Record<string, unknown> = {};
+  for (const ff of formFields) {
+    const answer = data[ff.id];
+    if (answer === undefined || answer === null || answer === "") continue;
+    const colId = byLabel.get(ff.label.trim().toLowerCase());
+    if (colId) values[colId] = answer;
+  }
+
+  const max = await prisma.dataTableRow.findFirst({
+    where: { tableId: table.id },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+
+  await prisma.dataTableRow.create({
+    data: {
+      organizationId: form.organizationId,
+      tableId: table.id,
+      values: values as unknown as Prisma.InputJsonValue,
+      position: (max?.position ?? 0) + 1,
+    },
+  });
 }
 
 async function pushToBoard(boardId: string, form: { fields: unknown; organizationId: string }, data: Record<string, unknown>) {

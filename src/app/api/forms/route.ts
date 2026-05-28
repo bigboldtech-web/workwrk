@@ -36,11 +36,12 @@ export async function POST(req: NextRequest) {
   const fields = Array.isArray(body.fields) ? body.fields : [];
   const isPublic = body.isPublic === true;
   const targetBoardId = typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null;
+  const targetTableId = typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null;
 
   if (!name) return jsonError("name required");
 
   const form = await prisma.formDefinition.create({
-    data: { organizationId: orgId, name, description, fields, isPublic, targetBoardId, createdById: userId },
+    data: { organizationId: orgId, name, description, fields, isPublic, targetBoardId, targetTableId, createdById: userId },
   });
 
   return jsonSuccess(form, 201);

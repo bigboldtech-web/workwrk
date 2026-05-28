@@ -8555,3 +8555,28 @@ table.os-tbl {
 .tmpl__hint { font-size: 12px; color: var(--os-ink-3); text-align: center; margin: 32px 0 0; }
 .tmpl__hint a { color: var(--os-c-blue); text-decoration: none; }
 .tmpl__hint a:hover { text-decoration: underline; }
+
+/* ─── Tables · view tabs + kanban ─── */
+.dtbl__viewtabs { display: flex; align-items: center; gap: 6px; padding: 8px 20px; border-bottom: 1px solid var(--os-line); background: var(--os-surface); }
+.dtbl__viewtabs button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: transparent; border: 1px solid transparent; border-radius: 6px; font-size: 12px; color: var(--os-ink-3); cursor: pointer; }
+.dtbl__viewtabs button:hover:not(:disabled) { color: var(--os-ink); background: var(--os-bg-2); }
+.dtbl__viewtabs button.is-active { color: var(--os-ink); border-color: var(--os-line); background: var(--os-bg-2); }
+.dtbl__viewtabs button:disabled { opacity: .5; cursor: not-allowed; }
+.dtbl__viewtabs button > svg { width: 13px; height: 13px; }
+.dtbl__viewgroup { margin-left: auto; padding: 4px 8px; border: 1px solid var(--os-line); border-radius: 6px; background: var(--os-bg); font-size: 12px; color: var(--os-ink-2); }
+.dtbl__kanban { display: flex; gap: 14px; padding: 16px 20px; overflow-x: auto; flex: 1; align-items: flex-start; }
+.dtbl__lane { background: var(--os-bg-2); border-radius: 10px; min-width: 260px; max-width: 280px; flex: 0 0 auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 220px); }
+.dtbl__lane-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 8px; border-bottom: 1px solid var(--os-line); }
+.dtbl__lane-head h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--os-ink); }
+.dtbl__lane-head span { font-size: 11px; color: var(--os-ink-3); background: var(--os-surface); padding: 2px 6px; border-radius: 10px; }
+.dtbl__lane-body { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1; padding-right: 2px; }
+.dtbl__card { background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 8px; padding: 10px 12px; cursor: grab; transition: box-shadow .12s; }
+.dtbl__card:active { cursor: grabbing; }
+.dtbl__card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.dtbl__card-title { font-size: 13px; font-weight: 500; color: var(--os-ink); margin-bottom: 6px; }
+.dtbl__card-meta { display: flex; flex-direction: column; gap: 3px; }
+.dtbl__card-chip { font-size: 11px; color: var(--os-ink-3); }
+.dtbl__card-chip em { font-style: normal; color: var(--os-ink-4, var(--os-ink-3)); margin-right: 4px; }
+.dtbl__lane-add { background: transparent; border: 1px dashed var(--os-line); padding: 6px 10px; border-radius: 6px; font-size: 12px; color: var(--os-ink-3); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.dtbl__lane-add:hover { background: var(--os-bg); color: var(--os-ink-2); border-color: var(--os-c-teal); }
+.dtbl__lane-add > svg { width: 12px; height: 12px; }

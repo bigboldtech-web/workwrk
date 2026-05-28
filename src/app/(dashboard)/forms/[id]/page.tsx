@@ -16,10 +16,12 @@ import { useRouter } from "next/navigation";
 import {
   FormInput, Save, Globe, Lock, Link as LinkIcon, ArrowLeft,
   Trash2, ChevronUp, ChevronDown, Inbox, FileText, Loader2, LayoutGrid,
+  Table as TableIcon,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type ApiStudioBoardLite = { id: string; name: string; slug: string };
+type ApiDataTableLite = { id: string; name: string };
 
 type FieldType = "short_text" | "long_text" | "number" | "email" | "url" | "date" | "select" | "multi_select" | "checkbox";
 
@@ -34,7 +36,9 @@ type Field = {
 
 type ApiForm = {
   id: string; name: string; description?: string | null;
-  fields: Field[]; isPublic: boolean; targetBoardId?: string | null;
+  fields: Field[]; isPublic: boolean;
+  targetBoardId?: string | null;
+  targetTableId?: string | null;
   submissionCount: number;
   updatedAt: string;
 };
@@ -62,6 +66,7 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [boards, setBoards] = useState<ApiStudioBoardLite[]>([]);
+  const [tables, setTables] = useState<ApiDataTableLite[]>([]);
 
   useEffect(() => { void params.then((p) => setFormId(p.id)); }, [params]);
 
@@ -102,6 +107,14 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
         setBoards(d.boards ?? []);
       } catch { /* ignore */ }
     })();
+    void (async () => {
+      try {
+        const res = await fetch("/api/tables");
+        if (!res.ok) return;
+        const d = await res.json();
+        setTables(d.data ?? (Array.isArray(d) ? d : []));
+      } catch { /* ignore */ }
+    })();
   }, []);
 
   async function save() {
@@ -116,6 +129,7 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
           fields: form.fields,
           isPublic: form.isPublic,
           targetBoardId: form.targetBoardId ?? null,
+          targetTableId: form.targetTableId ?? null,
         }),
       });
       if (!res.ok) throw new Error(`PATCH ${res.status}`);
@@ -154,6 +168,13 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
     navigator.clipboard.writeText(url).then(() => toast("Responder link copied"));
   }
 
+  function copyEmbedSnippet() {
+    if (!formId) return;
+    const url = `${window.location.origin}/embed/forms/${formId}`;
+    const snippet = `<iframe src="${url}" width="100%" height="640" frameborder="0" style="border:1px solid #e5e7eb;border-radius:8px"></iframe>`;
+    navigator.clipboard.writeText(snippet).then(() => toast(form?.isPublic ? "Embed snippet copied" : "Snippet copied — set the form to Public so external sites can submit"));
+  }
+
   const fieldMap = useMemo(() => new Map((form?.fields ?? []).map((f) => [f.id, f])), [form?.fields]);
 
   if (loadError) return <div className="frmb__error">Couldn&apos;t load form: {loadError}</div>;
@@ -178,6 +199,7 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
             {form.isPublic ? <><Globe /> Public</> : <><Lock /> Org-only</>}
           </label>
           <button type="button" className="frmb__btn" onClick={copyResponderLink}><LinkIcon /> Share link</button>
+          <button type="button" className="frmb__btn" onClick={copyEmbedSnippet} title="Copy <iframe> snippet for your website"><FileText /> Embed code</button>
           <button type="button" className="frmb__btn frmb__btn--primary" onClick={save} disabled={saving}>
             <Save /> {saving ? "Saving…" : "Save"}
           </button>
@@ -245,16 +267,31 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
 
             <h3 style={{ marginTop: 24 }}><LayoutGrid style={{ verticalAlign: -3, marginRight: 6 }} /> Send to board</h3>
             <p style={{ fontSize: 12, color: "var(--os-ink-3)", margin: "4px 0 10px" }}>
-              Every submission auto-creates a row on the chosen board. Match form field labels to board column labels to populate columns.
+              Every submission auto-creates a row on the chosen Studio board. Match form field labels to board column labels.
             </p>
             <select
               value={form.targetBoardId ?? ""}
               onChange={(e) => setForm({ ...form, targetBoardId: e.target.value || null })}
               style={{ width: "100%", padding: "6px 8px", border: "1px solid var(--os-line)", borderRadius: 6, fontSize: 13, background: "var(--os-bg)" }}
             >
-              <option value="">— None (just collect submissions) —</option>
+              <option value="">— None —</option>
               {boards.map((b) => (
                 <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+
+            <h3 style={{ marginTop: 18 }}><TableIcon style={{ verticalAlign: -3, marginRight: 6 }} /> Send to table</h3>
+            <p style={{ fontSize: 12, color: "var(--os-ink-3)", margin: "4px 0 10px" }}>
+              Or feed a Data Table. Both can be set — submissions go to both targets.
+            </p>
+            <select
+              value={form.targetTableId ?? ""}
+              onChange={(e) => setForm({ ...form, targetTableId: e.target.value || null })}
+              style={{ width: "100%", padding: "6px 8px", border: "1px solid var(--os-line)", borderRadius: 6, fontSize: 13, background: "var(--os-bg)" }}
+            >
+              <option value="">— None —</option>
+              {tables.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
           </aside>

@@ -39,6 +39,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (Array.isArray(body.fields)) data.fields = body.fields;
   if (typeof body.isPublic === "boolean") data.isPublic = body.isPublic;
   if ("targetBoardId" in body) data.targetBoardId = typeof body.targetBoardId === "string" && body.targetBoardId ? body.targetBoardId : null;
+  if ("targetTableId" in body) data.targetTableId = typeof body.targetTableId === "string" && body.targetTableId ? body.targetTableId : null;
 
   const updated = await prisma.formDefinition.update({ where: { id }, data });
   return jsonSuccess(updated);
