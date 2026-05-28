@@ -41,11 +41,24 @@ function initials(f?: string | null, l?: string | null) {
 }
 
 function typeColor(t: string): string {
-  if (t.includes("create") || t.includes("start") || t.includes("add")) return C.green;
+  if (t.includes("create") || t.includes("start") || t.includes("add") || t.includes("submission")) return C.green;
   if (t.includes("delete") || t.includes("cancel") || t.includes("remove")) return C.red;
   if (t.includes("update") || t.includes("edit") || t.includes("rename")) return C.blue;
-  if (t.includes("complete") || t.includes("done") || t.includes("publish")) return C.teal;
+  if (t.includes("complete") || t.includes("done") || t.includes("publish") || t.includes("applied")) return C.teal;
   return C.indigo;
+}
+
+// Humanize internal targetType identifiers for display.
+const TARGET_LABELS: Record<string, string> = {
+  FormDefinition: "Form",
+  DataTable: "Table",
+  StudioBoard: "Board",
+  Doc: "Doc",
+  FileEntry: "File",
+};
+function humanTarget(t?: string | null): string {
+  if (!t) return "—";
+  return TARGET_LABELS[t] ?? t.replace(/_/g, " ");
 }
 
 function dayKey(iso: string): string {
@@ -65,8 +78,8 @@ function actToRow(a: ApiActivity): Row {
     name: a.description,
     cells: {
       actor: a.actor ? [{ initials: initials(a.actor.firstName, a.actor.lastName), color: avColor(a.actor.id) }] : [],
-      type: a.type.replace(/_/g, " "),
-      target: a.targetType ? a.targetType.replace(/_/g, " ") : "—",
+      type: a.type.replace(/[._]/g, " "),
+      target: humanTarget(a.targetType),
       when: { iso: a.createdAt },
     },
   };

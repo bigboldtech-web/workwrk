@@ -1805,10 +1805,216 @@ const invitePersonWithRole: ToolDefinition = {
 };
 
 // ─────────────────────────────────────────────────────────
+// Lego primitives — Forms, DataTables, Docs
+// ─────────────────────────────────────────────────────────
+
+const FORM_FIELD_TYPES = ["short_text", "long_text", "number", "email", "url", "date", "select", "multi_select", "checkbox"] as const;
+const TABLE_COL_TYPES = ["short_text", "long_text", "number", "select", "multi_select", "date", "checkbox", "url", "email"] as const;
+const DOC_BLOCK_KINDS = ["h1", "h2", "h3", "paragraph", "todo", "callout", "divider"] as const;
+
+function rid() { return Math.random().toString(36).slice(2, 10); }
+
+const createForm: ToolDefinition = {
+  name: "create_form",
+  description:
+    "Create a Form (data-collection primitive) in WorkwrK. Use this when the user wants to collect structured data from people — feedback, applications, requests, signups. Returns the form id + URL to the responder.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Short name of the form (e.g. 'Customer feedback')" },
+      description: { type: "string", description: "Optional one-liner shown to respondents" },
+      isPublic: { type: "boolean", description: "If true, anyone with the link can submit (no login). Default false." },
+      fields: {
+        type: "array",
+        description: "Form fields, 1-20 items. Each field has type, label, required.",
+        items: {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: [...FORM_FIELD_TYPES] },
+            label: { type: "string" },
+            required: { type: "boolean" },
+            options: { type: "array", items: { type: "string" }, description: "Required for select/multi_select" },
+          },
+          required: ["type", "label"],
+        },
+      },
+    },
+    required: ["name", "fields"],
+  },
+  handler: async (ctx, input) => {
+    const fields = Array.isArray(input.fields) ? input.fields : [];
+    const safe = fields
+      .filter((f): f is Record<string, unknown> => !!f && typeof f === "object" && FORM_FIELD_TYPES.includes((f as { type: string }).type as typeof FORM_FIELD_TYPES[number]))
+      .slice(0, 20)
+      .map((f) => ({
+        id: rid(),
+        type: (f as { type: string }).type,
+        label: String((f as { label: string }).label ?? "Untitled").slice(0, 80),
+        required: Boolean((f as { required?: boolean }).required),
+        ...(((f as { type: string }).type === "select" || (f as { type: string }).type === "multi_select")
+          ? { options: Array.isArray((f as { options?: unknown[] }).options) ? ((f as { options: unknown[] }).options.map(String).slice(0, 20)) : ["Option 1"] }
+          : {}),
+      }));
+
+    const form = await prisma.formDefinition.create({
+      data: {
+        organizationId: ctx.orgId,
+        name: String(input.name).slice(0, 200),
+        description: input.description ? String(input.description).slice(0, 2000) : null,
+        isPublic: Boolean(input.isPublic),
+        fields: safe,
+        createdById: ctx.userId,
+      },
+      select: { id: true, name: true },
+    });
+    return { ok: true, form: { id: form.id, name: form.name, responderUrl: `/forms/${form.id}/respond`, editorUrl: `/forms/${form.id}` } };
+  },
+};
+
+const listForms: ToolDefinition = {
+  name: "list_forms",
+  description: "List Forms in the user's org with submission counts. Use this when the user asks about existing forms or wants to find one.",
+  input_schema: { type: "object", properties: {} },
+  handler: async (ctx) => {
+    const forms = await prisma.formDefinition.findMany({
+      where: { organizationId: ctx.orgId },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+      select: { id: true, name: true, isPublic: true, _count: { select: { submissions: true } } },
+    });
+    return { forms: forms.map((f: typeof forms[number]) => ({ id: f.id, name: f.name, isPublic: f.isPublic, submissionCount: f._count.submissions })) };
+  },
+};
+
+const createDataTable: ToolDefinition = {
+  name: "create_data_table",
+  description:
+    "Create a flexible DataTable (Airtable-style) in WorkwrK. Use this when the user wants to track a list of things with shared attributes — vendors, competitors, leads, equipment. Returns the table id + URL.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      description: { type: "string" },
+      columns: {
+        type: "array",
+        description: "Columns, 1-20 items.",
+        items: {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: [...TABLE_COL_TYPES] },
+            label: { type: "string" },
+            options: { type: "array", items: { type: "string" }, description: "Required for select/multi_select" },
+          },
+          required: ["type", "label"],
+        },
+      },
+    },
+    required: ["name", "columns"],
+  },
+  handler: async (ctx, input) => {
+    const cols = Array.isArray(input.columns) ? input.columns : [];
+    const safe = cols
+      .filter((c): c is Record<string, unknown> => !!c && typeof c === "object" && TABLE_COL_TYPES.includes((c as { type: string }).type as typeof TABLE_COL_TYPES[number]))
+      .slice(0, 20)
+      .map((c) => ({
+        id: rid(),
+        type: (c as { type: string }).type,
+        label: String((c as { label: string }).label ?? "Untitled").slice(0, 60),
+        ...(((c as { type: string }).type === "select" || (c as { type: string }).type === "multi_select")
+          ? { options: Array.isArray((c as { options?: unknown[] }).options) ? ((c as { options: unknown[] }).options.map(String).slice(0, 20)) : ["Option 1"] }
+          : {}),
+      }));
+
+    const table = await prisma.dataTable.create({
+      data: {
+        organizationId: ctx.orgId,
+        name: String(input.name).slice(0, 200),
+        description: input.description ? String(input.description).slice(0, 2000) : null,
+        columns: safe,
+        createdById: ctx.userId,
+      },
+      select: { id: true, name: true },
+    });
+    return { ok: true, table: { id: table.id, name: table.name, url: `/tables/${table.id}` } };
+  },
+};
+
+const listDataTables: ToolDefinition = {
+  name: "list_data_tables",
+  description: "List DataTables in the user's org with row counts.",
+  input_schema: { type: "object", properties: {} },
+  handler: async (ctx) => {
+    const tables = await prisma.dataTable.findMany({
+      where: { organizationId: ctx.orgId },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+      select: { id: true, name: true, _count: { select: { rows: true } } },
+    });
+    return { tables: tables.map((t: typeof tables[number]) => ({ id: t.id, name: t.name, rowCount: t._count.rows })) };
+  },
+};
+
+const createDocWithBlocks: ToolDefinition = {
+  name: "create_doc",
+  description:
+    "Create a block-based Doc in WorkwrK with a title and a sequence of blocks. Use this for runbooks, plans, briefs, summaries. Each block has a `kind` (h1/h2/h3/paragraph/todo/callout/divider) and a `text` string (except divider).",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      blocks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            kind: { type: "string", enum: [...DOC_BLOCK_KINDS] },
+            text: { type: "string" },
+          },
+          required: ["kind"],
+        },
+      },
+    },
+    required: ["title", "blocks"],
+  },
+  handler: async (ctx, input) => {
+    const raw = Array.isArray(input.blocks) ? input.blocks : [];
+    const blocks = raw
+      .filter((b): b is Record<string, unknown> => !!b && typeof b === "object" && DOC_BLOCK_KINDS.includes((b as { kind: string }).kind as typeof DOC_BLOCK_KINDS[number]))
+      .slice(0, 200)
+      .map((b) => {
+        const kind = (b as { kind: string }).kind;
+        if (kind === "divider") return { id: rid(), kind };
+        if (kind === "todo") return { id: rid(), kind, text: String((b as { text?: string }).text ?? ""), done: false };
+        if (kind === "callout") return { id: rid(), kind, text: String((b as { text?: string }).text ?? ""), tone: "info" };
+        return { id: rid(), kind, text: String((b as { text?: string }).text ?? "") };
+      });
+
+    const title = String(input.title).slice(0, 200);
+    const doc = await prisma.doc.create({
+      data: {
+        organizationId: ctx.orgId,
+        title,
+        content: { blocks } as never,
+        createdById: ctx.userId,
+        versions: { create: { version: 1, title, content: { blocks } as never, authorId: ctx.userId } },
+      },
+      select: { id: true, title: true },
+    });
+    return { ok: true, doc: { id: doc.id, title: doc.title, url: `/docs/${doc.id}` } };
+  },
+};
+
+// ─────────────────────────────────────────────────────────
 // Registry — all tools by name
 // ─────────────────────────────────────────────────────────
 
 export const TOOLS: Record<string, ToolDefinition> = {
+  // Lego primitives
+  create_form: createForm,
+  list_forms: listForms,
+  create_data_table: createDataTable,
+  list_data_tables: listDataTables,
+  create_doc: createDocWithBlocks,
   // Cross-product
   create_task: createTask,
   search_tasks: searchTasks,
@@ -1869,6 +2075,10 @@ export const CROSS_TOOL_NAMES = [
   "list_studio_boards", "search_studio_items", "create_studio_item", "update_studio_item",
   // System-building tools — let the AI author workspaces + boards + hires
   "create_studio_board", "create_workspace", "invite_person_with_role",
+  // Lego primitives — Forms, DataTables, Docs (composable building blocks)
+  "create_form", "list_forms",
+  "create_data_table", "list_data_tables",
+  "create_doc",
 ];
 
 // Tools per agent product. When a chat session is scoped to an agent,

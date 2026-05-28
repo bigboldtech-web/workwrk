@@ -8657,3 +8657,20 @@ table.os-tbl {
 .dtbl__modal-field > * + * { border: 1px solid var(--os-line) !important; border-radius: 6px; }
 
 .dtbl__card { cursor: pointer; }
+
+/* ─── Files · bulk selection ─── */
+.filesp__bulkbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--os-ink); color: white; border-radius: 8px; margin: 0 16px 12px; }
+.filesp__bulkbar > span { font-size: 12px; font-weight: 500; }
+.filesp__bulkbar button { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,.1); border: none; color: white; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px; }
+.filesp__bulkbar button:hover { background: rgba(255,255,255,.18); }
+.filesp__bulkbar button > svg { width: 12px; height: 12px; }
+.filesp__bulkbar-del:hover { background: var(--os-c-red) !important; }
+.filesp__bulkbar button:last-child { margin-left: auto; background: transparent; }
+.ftile { position: relative; }
+.ftile__check { position: absolute; top: 8px; left: 8px; z-index: 2; opacity: 0; cursor: pointer; }
+.ftile:hover .ftile__check, .ftile__check:checked { opacity: 1; }
+.ftile--selected { outline: 2px solid var(--os-c-blue); outline-offset: -2px; }
+
+/* ─── Tables · public toggle ─── */
+.dtbl__head-btn.is-on { background: var(--os-c-green); color: white; border-color: var(--os-c-green); }
+.dtbl__head-btn.is-on:hover { color: white; opacity: .9; }

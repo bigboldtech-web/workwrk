@@ -14,13 +14,14 @@ import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
   LayoutGrid, Columns, ChevronLeft, ChevronRight, Upload, Download, Search, Filter,
+  Globe, Lock,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type ColType = "short_text" | "long_text" | "number" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email";
 
 type Column = { id: string; type: ColType; label: string; options?: string[] };
-type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; rowCount: number };
+type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; rowCount: number; isPublic?: boolean };
 type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
 const COL_LABEL: Record<ColType, string> = {
@@ -256,6 +257,28 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         </div>
         <div className="dtbl__meta">{rows.length} row{rows.length === 1 ? "" : "s"} · {table.columns.length} column{table.columns.length === 1 ? "" : "s"} {savingCols && <em>· saving…</em>}</div>
         <div className="dtbl__head-actions">
+          <button
+            type="button"
+            className={`dtbl__head-btn ${table.isPublic ? "is-on" : ""}`}
+            onClick={() => { const next = !table.isPublic; setTable({ ...table, isPublic: next }); void patchTable({ isPublic: next }); }}
+            title={table.isPublic ? "Public — anyone with the link can view" : "Private — toggle to share publicly"}
+          >
+            {table.isPublic ? <Globe /> : <Lock />}
+          </button>
+          {table.isPublic && (
+            <button
+              type="button"
+              className="dtbl__head-btn"
+              onClick={() => {
+                const url = `${window.location.origin}/embed/tables/${tableId}`;
+                const snippet = `<iframe src="${url}" width="100%" height="500" frameborder="0" style="border:1px solid #e5e7eb;border-radius:8px"></iframe>`;
+                navigator.clipboard.writeText(snippet).then(() => toast("Embed snippet copied"));
+              }}
+              title="Copy public embed snippet"
+            >
+              <LinkIcon />
+            </button>
+          )}
           <label className="dtbl__head-btn" title="Import CSV">
             <Upload />
             <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importCsv(f); e.target.value = ""; }} />

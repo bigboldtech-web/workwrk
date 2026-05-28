@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Link as LinkIcon, Sparkles, Loader2 } from "lucide-react";
+import { ArrowLeft, Link as LinkIcon, Sparkles, Loader2, Table as TableIcon } from "lucide-react";
 import { BlockEditor, type Block } from "./block-editor";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -153,6 +153,25 @@ export function BlockDocEditor({ docId }: Props) {
     finally { setSummarizing(false); }
   }
 
+  const [extracting, setExtracting] = useState(false);
+  async function extractTable() {
+    if (!confirm("Use AI to extract a table from this doc? A new table will be created in your org.")) return;
+    setExtracting(true);
+    try {
+      const res = await fetch(`/api/docs/${docId}/extract-table`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        toast(`Couldn't extract: ${err.error ?? "unknown"}`);
+        return;
+      }
+      const d = await res.json();
+      const r = d.data ?? d;
+      toast(`Created table "${r.name}" with ${r.rowsCreated} row${r.rowsCreated === 1 ? "" : "s"}`);
+      router.push(`/tables/${r.tableId}`);
+    } catch { toast("Extract failed"); }
+    finally { setExtracting(false); }
+  }
+
   if (loadError) {
     return (
       <div className="bdoc__error">
@@ -180,6 +199,9 @@ export function BlockDocEditor({ docId }: Props) {
         </button>
         <button type="button" className="bdoc__copy" onClick={summarize} disabled={summarizing} title={summary ? "Re-summarize" : "Summarize with AI"}>
           {summarizing ? <Loader2 className="bdoc__spin" /> : <Sparkles />} {summary ? "Re-summarize" : "Summarize"}
+        </button>
+        <button type="button" className="bdoc__copy" onClick={extractTable} disabled={extracting} title="Extract a table from this doc">
+          {extracting ? <Loader2 className="bdoc__spin" /> : <TableIcon />} Extract table
         </button>
       </header>
 

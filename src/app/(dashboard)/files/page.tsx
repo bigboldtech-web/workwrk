@@ -225,6 +225,37 @@ export default function FilesPage() {
     } catch { toast("Couldn't delete"); void loadFiles(); }
   }
 
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  function toggleSelected(id: string) {
+    setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  }
+  function clearSelection() { setSelected(new Set()); }
+
+  async function bulkDelete() {
+    if (selected.size === 0) return;
+    if (!window.confirm(`Delete ${selected.size} file${selected.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    const ids = Array.from(selected);
+    setFiles((prev) => prev?.filter((f) => !selected.has(f.id)) ?? prev);
+    clearSelection();
+    await Promise.allSettled(ids.map((id) => fetch(`/api/files/${id}`, { method: "DELETE" })));
+    void loadFiles();
+    toast(`Deleted ${ids.length} file${ids.length === 1 ? "" : "s"}`);
+  }
+
+  async function bulkSummarize() {
+    if (selected.size === 0) return;
+    const ids = Array.from(selected).filter((id) => {
+      const f = files?.find((x) => x.id === id);
+      if (!f) return false;
+      return f.mimeType === "application/pdf" || f.mimeType.startsWith("text/") || f.mimeType.includes("json");
+    });
+    if (ids.length === 0) { toast("No summarizable files in selection"); return; }
+    toast(`Summarizing ${ids.length} file${ids.length === 1 ? "" : "s"}…`);
+    await Promise.allSettled(ids.map((id) => summarize(id)));
+    clearSelection();
+    void loadFiles();
+  }
+
   function submitSearch() {
     const q = searchInput.trim();
     if (q) setView({ kind: "search", q });
@@ -341,14 +372,25 @@ export default function FilesPage() {
               </div>
             </div>
           ) : (
+            <>
+            {selected.size > 0 && (
+              <div className="filesp__bulkbar">
+                <span>{selected.size} selected</span>
+                <button type="button" onClick={bulkSummarize}><Sparkles /> Summarize</button>
+                <button type="button" className="filesp__bulkbar-del" onClick={bulkDelete}><Trash2 /> Delete</button>
+                <button type="button" onClick={clearSelection}>Clear</button>
+              </div>
+            )}
             <div className="filesp__items">
               {files.map((f) => {
                 const Icon = fileIcon(f.mimeType);
                 const isImg = f.mimeType.startsWith("image/");
                 const isSummarizable = f.mimeType === "application/pdf" || f.mimeType.startsWith("text/") || f.mimeType.includes("json");
                 const isSumming = summarizing.has(f.id);
+                const isSelected = selected.has(f.id);
                 return (
-                  <article key={f.id} className={`ftile ${f.summary ? "ftile--has-summary" : ""}`}>
+                  <article key={f.id} className={`ftile ${f.summary ? "ftile--has-summary" : ""} ${isSelected ? "ftile--selected" : ""}`}>
+                    <input type="checkbox" className="ftile__check" checked={isSelected} onChange={() => toggleSelected(f.id)} aria-label="Select file" />
                     <a href={f.url} target="_blank" rel="noopener" className="ftile__preview" style={{ background: fileHue(f.mimeType) }}>
                       {isImg ? <img src={f.url} alt={f.name} /> : <Icon />}
                     </a>
@@ -384,6 +426,7 @@ export default function FilesPage() {
                 );
               })}
             </div>
+            </>
           )}
         </section>
       </div>
