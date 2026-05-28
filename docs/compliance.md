@@ -73,7 +73,7 @@ npx prisma generate
 npx prisma migrate dev --name add_consent_records
 ```
 
-If you're on a managed deploy (Neon main branch you can't migrate interactively):
+On production (where you can't migrate interactively):
 ```bash
 npx prisma migrate deploy
 ```
@@ -104,9 +104,10 @@ The technical plumbing is ready. **You must not ship to ads without** the
 following legal work, which no amount of code can do for you:
 
 ### Required before launch in any EU/EEA country
-1. **Data Processing Agreements** (Art. 28) with every sub-processor: Vercel,
-   Neon, Stripe, your email provider, analytics vendor, AI providers (Anthropic),
-   error monitoring. Each has a standard DPA you can sign online.
+1. **Data Processing Agreements** (Art. 28) with every sub-processor:
+   your hosting provider, Stripe, your email provider, analytics vendor,
+   AI providers (Anthropic), error monitoring. Each has a standard DPA
+   you can sign online.
 2. **Record of Processing Activities (ROPA)** under Art. 30. A document
    listing every processing purpose, legal basis, categories of data subjects,
    retention period, recipients, and international transfers.
@@ -160,7 +161,7 @@ following legal work, which no amount of code can do for you:
 - [ ] Replace `dpo@workwrk.com` with a monitored inbox
 - [ ] Fill in postal address + EU/UK reps in `/cookies/page.tsx`
 - [ ] Have counsel review `/privacy`, `/terms`, `/cookies`, `/do-not-sell`
-- [ ] Sign DPAs with Vercel, Neon, Stripe, Anthropic, analytics provider
+- [ ] Sign DPAs with hosting provider, Stripe, Anthropic, analytics provider
 - [ ] Gate every analytics/marketing script behind `useConsent().consent`
 - [ ] Add `Sec-GPC` header respect (California)
 - [ ] Add Brazilian Portuguese + Indian language translations to existing i18n

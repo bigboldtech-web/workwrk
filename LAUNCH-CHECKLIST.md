@@ -28,9 +28,9 @@ Each item is one of:
 
 ## 🔴 Blockers — must do before public launch
 
-### 1. Rotate the Neon DB password (5 min) — *do later, you said*
-- Neon dashboard → **Project: Theywrk** → **Settings** → **Reset password**
-- Update `DATABASE_URL` in your `.env.production` (or aaPanel Node config)
+### 1. Rotate the Postgres DB password (5 min) — *do later, you said*
+- aaPanel → **PostgreSQL Manager** → **DB List** → **workwrk** → reset password
+- Update `DATABASE_URL` in `.env` (or aaPanel Node config)
 - `pm2 restart workwrk`
 
 ### 2. Set production environment variables (10 min)
@@ -148,7 +148,7 @@ The redemption flow is built. You need:
 - Founder analytics dashboard (MRR, signup funnel, churn) at `/admin/analytics`.
 - Lighthouse performance budget ≥ 80.
 - Mobile responsiveness audit.
-- Backup script for Neon (Neon has built-in PITR; document the restore procedure).
+- Verify the daily `pg_dump` cron is producing backups in `/backups/pg/`; document the restore procedure.
 - More integrations.
 
 ---

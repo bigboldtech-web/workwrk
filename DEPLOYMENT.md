@@ -1,7 +1,7 @@
 # Deployment
 
-One-time launch checklist for WorkwrK. Targets Vercel + Neon Postgres,
-but the same steps apply to any Next.js + Postgres host.
+One-time launch checklist for WorkwrK. Targets a self-hosted Postgres
+on the app server, but the same steps apply to any Next.js + Postgres host.
 
 ## 1 · Database
 

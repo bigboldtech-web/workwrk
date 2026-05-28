@@ -4,8 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/warm-neon.mjs && node scripts/deploy-migrations.mjs && prisma generate && NODE_OPTIONS=--max-old-space-size=4096 next build",
-    "db:warm": "node scripts/warm-neon.mjs",
+    "build": "node scripts/deploy-migrations.mjs && prisma generate && NODE_OPTIONS=--max-old-space-size=4096 next build",
     "db:unstick": "node scripts/unstick-migrate-lock.mjs",
     "db:fix-task-calendar": "node scripts/apply-task-calendar-migration.mjs",
     "db:audit-migrations": "node scripts/audit-baselined-migrations.mjs",
@@ -28,7 +27,6 @@
     "@aws-sdk/client-s3": "^3.1033.0",
     "@aws-sdk/s3-request-presigner": "^3.1033.0",
     "@excalidraw/excalidraw": "^0.18.1",
-    "@neondatabase/serverless": "^1.0.2",
     "@next-auth/prisma-adapter": "^1.0.7",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",

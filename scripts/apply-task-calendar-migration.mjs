@@ -22,8 +22,7 @@ import "dotenv/config";
 const MIGRATION_PATH = "prisma/migrations/20260421000000_task_calendar_phase1/migration.sql";
 const IGNORABLE = new Set(["42P07", "42701", "42710", "42P16"]);
 
-const pooled = process.env.DATABASE_URL;
-const url = process.env.DIRECT_URL || (pooled ? pooled.replace("-pooler.", ".") : undefined);
+const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
 
 if (!url) {
   console.error("apply-task-calendar-migration: no DATABASE_URL / DIRECT_URL set");

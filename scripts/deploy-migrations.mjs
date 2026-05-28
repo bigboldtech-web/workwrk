@@ -1,20 +1,16 @@
 // Only run `prisma migrate deploy` when there's actual work to do.
 //
 // Prisma's `migrate deploy` takes a Postgres advisory lock with a
-// hardcoded 10s timeout. On Neon, that lock acquisition is flaky
-// even when nothing holds it, so every build can fail with P1002.
-// Since migrations rarely change between deploys, we check what's
-// pending ourselves (direct SQL diff of the migrations folder vs.
-// the `_prisma_migrations` table) and only invoke Prisma when we
-// actually have migrations to apply.
+// hardcoded 10s timeout. Since migrations rarely change between
+// deploys, we check what's pending ourselves (direct SQL diff of
+// the migrations folder vs. the `_prisma_migrations` table) and
+// only invoke Prisma when we actually have migrations to apply.
 //
-// When there ARE pending migrations, we still call `prisma migrate
-// deploy`, with a retry loop for transient P1002 errors. Between
-// retries we also clear orphaned advisory-lock holders — a killed
-// previous deploy can leave its session alive on the server, holding
-// lock 72707369 forever, in which case naive retries all fail the
-// same way. We used to fix this by running `npm run db:unstick` by
-// hand. Now the deploy script does it automatically.
+// When there ARE pending migrations, we call `prisma migrate
+// deploy` with a retry loop. Between retries we also clear orphaned
+// advisory-lock holders — a killed previous deploy can leave its
+// session alive on the server, holding lock 72707369 forever, in
+// which case naive retries all fail the same way.
 //
 // Run with: node scripts/deploy-migrations.mjs
 import { Client } from "pg";
@@ -24,8 +20,7 @@ import "dotenv/config";
 
 const PRISMA_LOCK_ID = 72707369;
 
-const pooled = process.env.DATABASE_URL;
-const url = process.env.DIRECT_URL || (pooled ? pooled.replace("-pooler.", ".") : undefined);
+const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
 
 if (!url) {
   console.error("deploy-migrations: no DATABASE_URL / DIRECT_URL set");

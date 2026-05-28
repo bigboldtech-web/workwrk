@@ -7,8 +7,7 @@
 import { Client } from "pg";
 import "dotenv/config";
 
-const pooled = process.env.DATABASE_URL;
-const url = process.env.DIRECT_URL || (pooled ? pooled.replace("-pooler.", ".") : undefined);
+const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
 
 if (!url) {
   console.error("audit: no DATABASE_URL / DIRECT_URL set");
