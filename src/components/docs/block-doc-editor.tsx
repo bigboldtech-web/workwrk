@@ -18,6 +18,8 @@ type DocPayload = {
   id: string;
   title: string;
   content: { blocks?: Block[]; html?: string } | null;
+  summary?: string | null;
+  summarizedAt?: string | null;
   updatedAt: string;
   createdAt: string;
 };
@@ -131,6 +133,26 @@ export function BlockDocEditor({ docId }: Props) {
     navigator.clipboard.writeText(url).then(() => toast("Link copied"));
   }
 
+  const [summarizing, setSummarizing] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  useEffect(() => { if (doc) setSummary(doc.summary ?? null); }, [doc]);
+
+  async function summarize() {
+    setSummarizing(true);
+    try {
+      const res = await fetch(`/api/docs/${docId}/summarize`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        toast(`Couldn't summarize: ${err.error ?? "unknown"}`);
+        return;
+      }
+      const d = await res.json();
+      setSummary(d.data?.summary ?? d.summary);
+      toast("Summary ready");
+    } catch { toast("Summarize failed"); }
+    finally { setSummarizing(false); }
+  }
+
   if (loadError) {
     return (
       <div className="bdoc__error">
@@ -156,6 +178,9 @@ export function BlockDocEditor({ docId }: Props) {
         <button type="button" className="bdoc__copy" onClick={copyLink}>
           <LinkIcon /> Copy link
         </button>
+        <button type="button" className="bdoc__copy" onClick={summarize} disabled={summarizing} title={summary ? "Re-summarize" : "Summarize with AI"}>
+          {summarizing ? <Loader2 className="bdoc__spin" /> : <Sparkles />} {summary ? "Re-summarize" : "Summarize"}
+        </button>
       </header>
 
       <div className="bdoc__page">
@@ -166,6 +191,13 @@ export function BlockDocEditor({ docId }: Props) {
           onChange={(e) => saveTitle(e.target.value)}
           placeholder="Untitled doc"
         />
+
+        {summary && (
+          <details className="bdoc__summary" open>
+            <summary><Sparkles /> AI summary</summary>
+            <p>{summary}</p>
+          </details>
+        )}
 
         {legacy !== null ? (
           <div className="bdoc__legacy">

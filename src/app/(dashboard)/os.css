@@ -8580,3 +8580,44 @@ table.os-tbl {
 .dtbl__lane-add { background: transparent; border: 1px dashed var(--os-line); padding: 6px 10px; border-radius: 6px; font-size: 12px; color: var(--os-ink-3); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .dtbl__lane-add:hover { background: var(--os-bg); color: var(--os-ink-2); border-color: var(--os-c-teal); }
 .dtbl__lane-add > svg { width: 12px; height: 12px; }
+
+/* ─── Doc · AI summary banner ─── */
+.bdoc__summary { margin: 12px 0 20px; padding: 12px 14px; border: 1px solid var(--os-c-purple); background: color-mix(in srgb, var(--os-c-purple) 6%, var(--os-surface)); border-radius: 8px; }
+.bdoc__summary summary { cursor: pointer; color: var(--os-c-purple); font-weight: 500; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; list-style: none; }
+.bdoc__summary summary::-webkit-details-marker { display: none; }
+.bdoc__summary summary > svg { width: 14px; height: 14px; }
+.bdoc__summary p { margin: 8px 0 0; font-size: 13px; line-height: 1.55; color: var(--os-ink-2); }
+
+/* ─── Form builder · field mapping ─── */
+.frmb__mapping { margin-top: 18px; padding: 12px; background: var(--os-bg-2); border-radius: 8px; }
+.frmb__mapping h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--os-ink); }
+.frmb__mapping p { margin: 0 0 8px; font-size: 11px; color: var(--os-ink-3); }
+.frmb__mapping-grid { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 8px; align-items: center; }
+.frmb__mapping-head { font-size: 10px; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: .04em; font-weight: 500; }
+.frmb__mapping-label { font-size: 12px; color: var(--os-ink-2); padding: 4px 0; }
+.frmb__mapping-grid select { padding: 4px 6px; border: 1px solid var(--os-line); border-radius: 4px; font-size: 11px; background: var(--os-bg); color: var(--os-ink); max-width: 140px; }
+
+/* ─── Tables · calendar view ─── */
+.dtbl__cal { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; flex: 1; overflow: hidden; }
+.dtbl__cal-head { display: flex; align-items: center; gap: 8px; }
+.dtbl__cal-head h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--os-ink); min-width: 180px; text-align: center; }
+.dtbl__cal-head button { background: transparent; border: 1px solid var(--os-line); padding: 4px 8px; border-radius: 6px; cursor: pointer; color: var(--os-ink-2); display: inline-flex; align-items: center; }
+.dtbl__cal-head button:hover { background: var(--os-bg-2); }
+.dtbl__cal-head button > svg { width: 14px; height: 14px; }
+.dtbl__cal-today { font-size: 12px; padding: 4px 10px !important; margin-left: auto; }
+.dtbl__cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; font-size: 11px; font-weight: 500; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: .04em; }
+.dtbl__cal-weekdays > div { padding: 4px 8px; text-align: center; }
+.dtbl__cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; flex: 1; background: var(--os-line); border: 1px solid var(--os-line); border-radius: 8px; overflow: hidden; }
+.dtbl__cal-cell { background: var(--os-surface); min-height: 90px; padding: 4px 6px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.dtbl__cal-cell.is-empty { background: var(--os-bg-2); }
+.dtbl__cal-cell.is-today { background: color-mix(in srgb, var(--os-c-teal) 8%, var(--os-surface)); }
+.dtbl__cal-cell header { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 500; color: var(--os-ink-2); }
+.dtbl__cal-cell.is-today header span { color: var(--os-c-teal); font-weight: 700; }
+.dtbl__cal-cell header button { background: transparent; border: none; padding: 2px; color: var(--os-ink-3); cursor: pointer; border-radius: 3px; opacity: 0; }
+.dtbl__cal-cell:hover header button { opacity: 1; }
+.dtbl__cal-cell header button:hover { background: var(--os-bg); color: var(--os-c-teal); }
+.dtbl__cal-cell header button > svg { width: 11px; height: 11px; }
+.dtbl__cal-cards { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; }
+.dtbl__cal-card { background: var(--os-bg-2); border-left: 2px solid var(--os-c-teal); padding: 3px 6px; font-size: 11px; color: var(--os-ink); border-radius: 3px; cursor: grab; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dtbl__cal-card:active { cursor: grabbing; }
+.dtbl__cal-card:hover { background: var(--os-bg); }

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -38,6 +39,16 @@ export async function POST(req: NextRequest) {
   const table = await prisma.dataTable.create({
     data: { organizationId: orgId, name, description, columns, createdById: userId },
   });
+
+  void logActivity({
+    type: "table.create",
+    actorId: userId,
+    organizationId: orgId,
+    description: `Created table "${table.name}"`,
+    targetId: table.id,
+    targetType: "DataTable",
+  });
+
   return jsonSuccess(table, 201);
 }
 

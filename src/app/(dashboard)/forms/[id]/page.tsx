@@ -39,9 +39,13 @@ type ApiForm = {
   fields: Field[]; isPublic: boolean;
   targetBoardId?: string | null;
   targetTableId?: string | null;
+  fieldMappings?: { board?: Record<string, string>; table?: Record<string, string> } | null;
   submissionCount: number;
   updatedAt: string;
 };
+
+type BoardColumn = { key: string; label: string };
+type TableColumn = { id: string; label: string };
 
 type ApiSub = {
   id: string; data: Record<string, unknown>;
@@ -67,6 +71,8 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
   const [loadError, setLoadError] = useState<string | null>(null);
   const [boards, setBoards] = useState<ApiStudioBoardLite[]>([]);
   const [tables, setTables] = useState<ApiDataTableLite[]>([]);
+  const [boardColumns, setBoardColumns] = useState<BoardColumn[]>([]);
+  const [tableColumns, setTableColumns] = useState<TableColumn[]>([]);
 
   useEffect(() => { void params.then((p) => setFormId(p.id)); }, [params]);
 
@@ -97,6 +103,35 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
   }, [formId]);
 
   useEffect(() => { if (tab === "submissions") void loadSubs(); }, [tab, loadSubs]);
+
+  // Whenever target IDs change, pull the target's column definitions so the mapping UI can show labels.
+  useEffect(() => {
+    if (!form?.targetBoardId) { setBoardColumns([]); return; }
+    const board = boards.find((b) => b.id === form.targetBoardId);
+    if (!board) return;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/studio/boards/${board.slug}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        const fields = (d.board?.fields ?? d.fields ?? []) as BoardColumn[];
+        setBoardColumns(fields);
+      } catch { /* ignore */ }
+    })();
+  }, [form?.targetBoardId, boards]);
+
+  useEffect(() => {
+    if (!form?.targetTableId) { setTableColumns([]); return; }
+    void (async () => {
+      try {
+        const res = await fetch(`/api/tables/${form.targetTableId}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        const cols = (d.data?.columns ?? d.columns ?? []) as TableColumn[];
+        setTableColumns(cols);
+      } catch { /* ignore */ }
+    })();
+  }, [form?.targetTableId]);
 
   useEffect(() => {
     void (async () => {
@@ -130,6 +165,7 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
           isPublic: form.isPublic,
           targetBoardId: form.targetBoardId ?? null,
           targetTableId: form.targetTableId ?? null,
+          fieldMappings: form.fieldMappings ?? {},
         }),
       });
       if (!res.ok) throw new Error(`PATCH ${res.status}`);
@@ -294,6 +330,35 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
+
+            {(form.targetBoardId || form.targetTableId) && form.fields.length > 0 && (
+              <div className="frmb__mapping">
+                <h3 style={{ marginTop: 18 }}>Field mapping</h3>
+                <p>Explicit mapping — empty = match by label (case-insensitive).</p>
+                <div className="frmb__mapping-grid">
+                  <div className="frmb__mapping-head">Form field</div>
+                  {form.targetBoardId && <div className="frmb__mapping-head">→ Board column</div>}
+                  {form.targetTableId && <div className="frmb__mapping-head">→ Table column</div>}
+                  {form.fields.map((f) => {
+                    const mappings = form.fieldMappings ?? {};
+                    return (
+                      <FieldMappingRow
+                        key={f.id}
+                        field={f}
+                        boardSelected={mappings.board?.[f.id] ?? ""}
+                        tableSelected={mappings.table?.[f.id] ?? ""}
+                        showBoard={!!form.targetBoardId}
+                        showTable={!!form.targetTableId}
+                        boardColumns={boardColumns}
+                        tableColumns={tableColumns}
+                        onBoardChange={(k) => setForm({ ...form, fieldMappings: { ...mappings, board: { ...(mappings.board ?? {}), [f.id]: k } } })}
+                        onTableChange={(k) => setForm({ ...form, fieldMappings: { ...mappings, table: { ...(mappings.table ?? {}), [f.id]: k } } })}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </aside>
         </div>
       ) : (
@@ -332,5 +397,32 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
         </div>
       )}
     </div>
+  );
+}
+
+function FieldMappingRow({ field, boardSelected, tableSelected, showBoard, showTable, boardColumns, tableColumns, onBoardChange, onTableChange }: {
+  field: Field;
+  boardSelected: string; tableSelected: string;
+  showBoard: boolean; showTable: boolean;
+  boardColumns: BoardColumn[]; tableColumns: TableColumn[];
+  onBoardChange: (key: string) => void;
+  onTableChange: (key: string) => void;
+}) {
+  return (
+    <>
+      <div className="frmb__mapping-label">{field.label}</div>
+      {showBoard && (
+        <select value={boardSelected} onChange={(e) => onBoardChange(e.target.value)}>
+          <option value="">(auto-match)</option>
+          {boardColumns.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+        </select>
+      )}
+      {showTable && (
+        <select value={tableSelected} onChange={(e) => onTableChange(e.target.value)}>
+          <option value="">(auto-match)</option>
+          {tableColumns.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+        </select>
+      )}
+    </>
   );
 }

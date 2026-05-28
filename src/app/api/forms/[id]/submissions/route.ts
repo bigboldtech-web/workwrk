@@ -16,9 +16,11 @@ import type { Prisma } from "@/generated/prisma";
 import {
   getSessionOrFail, getOrgId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 
 type FormField = { id: string; type: string; label: string };
 type BoardField = { key: string; label: string; type: string };
+type FieldMappings = { board?: Record<string, string>; table?: Record<string, string> };
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -71,9 +73,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
 
+  const mappings = (typeof form.fieldMappings === "object" && form.fieldMappings !== null
+    ? form.fieldMappings
+    : {}) as FieldMappings;
+
   if (form.targetBoardId) {
     try {
-      await pushToBoard(form.targetBoardId, form, data);
+      await pushToBoard(form.targetBoardId, form, data, mappings.board);
     } catch (err) {
       console.error(`form-submission: failed to push to board ${form.targetBoardId}`, err);
     }
@@ -81,16 +87,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (form.targetTableId) {
     try {
-      await pushToTable(form.targetTableId, form, data);
+      await pushToTable(form.targetTableId, form, data, mappings.table);
     } catch (err) {
       console.error(`form-submission: failed to push to table ${form.targetTableId}`, err);
     }
   }
 
+  // Activity log — credit the submitter when signed-in, otherwise the
+  // form owner (so anonymous submissions still appear in the feed).
+  void logActivity({
+    type: "form.submission",
+    actorId: userId ?? form.createdById,
+    organizationId: form.organizationId,
+    description: userId ? `Submitted form "${form.name}"` : `Form "${form.name}" received an anonymous submission`,
+    targetId: form.id,
+    targetType: "FormDefinition",
+    metadata: { submissionId: sub.id, anonymous: !userId },
+  });
+
   return jsonSuccess(sub, 201);
 }
 
-async function pushToTable(tableId: string, form: { fields: unknown; organizationId: string }, data: Record<string, unknown>) {
+async function pushToTable(tableId: string, form: { fields: unknown; organizationId: string }, data: Record<string, unknown>, explicit?: Record<string, string>) {
   type TableColumn = { id: string; label: string; type: string };
   const table = await prisma.dataTable.findFirst({
     where: { id: tableId, organizationId: form.organizationId },
@@ -110,7 +128,7 @@ async function pushToTable(tableId: string, form: { fields: unknown; organizatio
   for (const ff of formFields) {
     const answer = data[ff.id];
     if (answer === undefined || answer === null || answer === "") continue;
-    const colId = byLabel.get(ff.label.trim().toLowerCase());
+    const colId = explicit?.[ff.id] ?? byLabel.get(ff.label.trim().toLowerCase());
     if (colId) values[colId] = answer;
   }
 
@@ -130,7 +148,7 @@ async function pushToTable(tableId: string, form: { fields: unknown; organizatio
   });
 }
 
-async function pushToBoard(boardId: string, form: { fields: unknown; organizationId: string }, data: Record<string, unknown>) {
+async function pushToBoard(boardId: string, form: { fields: unknown; organizationId: string }, data: Record<string, unknown>, explicit?: Record<string, string>) {
   const board = await prisma.studioBoard.findFirst({
     where: { id: boardId, organizationId: form.organizationId },
     select: { id: true, fields: true },
@@ -153,7 +171,8 @@ async function pushToBoard(boardId: string, form: { fields: unknown; organizatio
     if (!title && (ff.type === "short_text" || ff.type === "email")) {
       title = String(answer).slice(0, 200);
     }
-    const key = byLabel.get(ff.label.trim().toLowerCase());
+    // Explicit mapping wins over label match.
+    const key = explicit?.[ff.id] ?? byLabel.get(ff.label.trim().toLowerCase());
     if (key) values[key] = answer;
   }
   if (!title) {

@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
-  LayoutGrid, Columns,
+  LayoutGrid, Columns, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -45,8 +45,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [rows, setRows] = useState<ApiRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingCols, setSavingCols] = useState(false);
-  const [view, setView] = useState<"grid" | "kanban">("grid");
+  const [view, setView] = useState<"grid" | "kanban" | "calendar">("grid");
   const [kanbanCol, setKanbanCol] = useState<string>("");
+  const [calCol, setCalCol] = useState<string>("");
+  const [calMonth, setCalMonth] = useState<Date>(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
 
   useEffect(() => { void params.then((p) => setTableId(p.id)); }, [params]);
 
@@ -146,6 +148,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const columnTypes = useMemo(() => Object.keys(COL_LABEL) as ColType[], []);
 
   const kanbanColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "select"), [table?.columns]);
+  const dateColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "date"), [table?.columns]);
 
   // Auto-pick the first select column for kanban when switching to that view.
   useEffect(() => {
@@ -153,11 +156,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (kanbanCol && kanbanColumns.find((c) => c.id === kanbanCol)) return;
     setKanbanCol(kanbanColumns[0]?.id ?? "");
   }, [view, kanbanCol, kanbanColumns]);
+  useEffect(() => {
+    if (view !== "calendar") return;
+    if (calCol && dateColumns.find((c) => c.id === calCol)) return;
+    setCalCol(dateColumns[0]?.id ?? "");
+  }, [view, calCol, dateColumns]);
 
   if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
   if (!table || rows === null) return <div className="frmb__loading"><Loader2 className="frmb__spin" /> Loading…</div>;
 
   const activeCol = kanbanColumns.find((c) => c.id === kanbanCol);
+  const activeDateCol = dateColumns.find((c) => c.id === calCol);
   const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
 
   return (
@@ -180,9 +189,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       <nav className="dtbl__viewtabs">
         <button type="button" className={view === "grid" ? "is-active" : ""} onClick={() => setView("grid")}><LayoutGrid /> Grid</button>
         <button type="button" className={view === "kanban" ? "is-active" : ""} onClick={() => setView("kanban")} disabled={kanbanColumns.length === 0} title={kanbanColumns.length === 0 ? "Add a Single-choice column to enable Kanban" : ""}><Columns /> Kanban</button>
+        <button type="button" className={view === "calendar" ? "is-active" : ""} onClick={() => setView("calendar")} disabled={dateColumns.length === 0} title={dateColumns.length === 0 ? "Add a Date column to enable Calendar" : ""}><CalIcon /> Calendar</button>
         {view === "kanban" && kanbanColumns.length > 1 && (
           <select className="dtbl__viewgroup" value={kanbanCol} onChange={(e) => setKanbanCol(e.target.value)}>
             {kanbanColumns.map((c) => <option key={c.id} value={c.id}>Group by: {c.label}</option>)}
+          </select>
+        )}
+        {view === "calendar" && dateColumns.length > 1 && (
+          <select className="dtbl__viewgroup" value={calCol} onChange={(e) => setCalCol(e.target.value)}>
+            {dateColumns.map((c) => <option key={c.id} value={c.id}>By: {c.label}</option>)}
           </select>
         )}
       </nav>
@@ -206,6 +221,29 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             } catch { toast("Couldn't add card"); }
           }}
           onMove={(rowId, newGroup) => void patchRow(rowId, { [activeCol.id]: newGroup })}
+        />
+      ) : view === "calendar" && activeDateCol ? (
+        <CalendarView
+          rows={rows}
+          dateCol={activeDateCol}
+          titleCol={titleCol}
+          month={calMonth}
+          onPrev={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1))}
+          onNext={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1))}
+          onToday={() => { const d = new Date(); setCalMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }}
+          onMove={(rowId, isoDate) => void patchRow(rowId, { [activeDateCol.id]: isoDate })}
+          onAddRow={async (isoDate) => {
+            if (!tableId) return;
+            try {
+              const res = await fetch(`/api/tables/${tableId}/rows`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ values: { [activeDateCol.id]: isoDate } }),
+              });
+              if (!res.ok) throw new Error();
+              const d = await res.json();
+              setRows((prev) => [...(prev ?? []), d.data ?? d]);
+            } catch { toast("Couldn't add card"); }
+          }}
         />
       ) : (
       <>
@@ -403,4 +441,93 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
     );
   }
   return null;
+}
+
+function CalendarView({ rows, dateCol, titleCol, month, onPrev, onNext, onToday, onMove, onAddRow }: {
+  rows: ApiRow[];
+  dateCol: Column;
+  titleCol: Column | undefined;
+  month: Date;
+  onPrev: () => void;
+  onNext: () => void;
+  onToday: () => void;
+  onMove: (rowId: string, isoDate: string) => void;
+  onAddRow: (isoDate: string) => Promise<void>;
+}) {
+  const year = month.getFullYear();
+  const m = month.getMonth();
+  const first = new Date(year, m, 1);
+  const last = new Date(year, m + 1, 0);
+  const startWeekday = first.getDay(); // 0 = Sunday
+  const totalDays = last.getDate();
+  const cells: Array<{ date: Date | null; iso: string }> = [];
+  for (let i = 0; i < startWeekday; i++) cells.push({ date: null, iso: "" });
+  for (let d = 1; d <= totalDays; d++) {
+    const dt = new Date(year, m, d);
+    const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    cells.push({ date: dt, iso });
+  }
+  while (cells.length % 7 !== 0) cells.push({ date: null, iso: "" });
+
+  const byDate = useMemo(() => {
+    const m = new Map<string, ApiRow[]>();
+    for (const r of rows) {
+      const v = r.values[dateCol.id];
+      if (typeof v !== "string" || !v) continue;
+      const iso = v.slice(0, 10);
+      if (!m.has(iso)) m.set(iso, []);
+      m.get(iso)!.push(r);
+    }
+    return m;
+  }, [rows, dateCol.id]);
+
+  const todayIso = (() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; })();
+  const monthLabel = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  return (
+    <div className="dtbl__cal">
+      <header className="dtbl__cal-head">
+        <button type="button" onClick={onPrev}><ChevronLeft /></button>
+        <h3>{monthLabel}</h3>
+        <button type="button" onClick={onNext}><ChevronRight /></button>
+        <button type="button" className="dtbl__cal-today" onClick={onToday}>Today</button>
+      </header>
+      <div className="dtbl__cal-weekdays">
+        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d) => <div key={d}>{d}</div>)}
+      </div>
+      <div className="dtbl__cal-grid">
+        {cells.map((cell, i) => {
+          const isToday = cell.iso === todayIso;
+          const dayRows = cell.iso ? byDate.get(cell.iso) ?? [] : [];
+          return (
+            <div
+              key={i}
+              className={`dtbl__cal-cell ${cell.date ? "" : "is-empty"} ${isToday ? "is-today" : ""}`}
+              onDragOver={(e) => { if (cell.iso) e.preventDefault(); }}
+              onDrop={(e) => {
+                const rowId = e.dataTransfer.getData("text/plain");
+                if (rowId && cell.iso) onMove(rowId, cell.iso);
+              }}
+            >
+              {cell.date && (
+                <>
+                  <header>
+                    <span>{cell.date.getDate()}</span>
+                    <button type="button" onClick={() => void onAddRow(cell.iso)} title="Add card"><Plus /></button>
+                  </header>
+                  <div className="dtbl__cal-cards">
+                    {dayRows.map((r) => (
+                      <div key={r.id} className="dtbl__cal-card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)}>
+                        {titleCol ? String(r.values[titleCol.id] ?? "Untitled") : "Untitled"}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }

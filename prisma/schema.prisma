@@ -240,6 +240,12 @@ model FormDefinition {
   // Optional DataTable target — submissions add a row there (independent
   // of targetBoardId; both can be set, in which case both get a row).
   targetTableId  String?
+  // Explicit per-form-field → target-column mapping. Shape:
+  //   { board?: { [formFieldId]: boardFieldKey },
+  //     table?: { [formFieldId]: tableColumnId } }
+  // When absent for a given form field, the submission handler falls
+  // back to case-insensitive label matching.
+  fieldMappings  Json           @default("{}")
   createdById    String
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
