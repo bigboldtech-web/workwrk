@@ -14,10 +14,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  FormInput, Save, Globe, Lock, Link as LinkIcon, ArrowLeft, Plus,
-  Trash2, ChevronUp, ChevronDown, Inbox, FileText, Loader2,
+  FormInput, Save, Globe, Lock, Link as LinkIcon, ArrowLeft,
+  Trash2, ChevronUp, ChevronDown, Inbox, FileText, Loader2, LayoutGrid,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+
+type ApiStudioBoardLite = { id: string; name: string; slug: string };
 
 type FieldType = "short_text" | "long_text" | "number" | "email" | "url" | "date" | "select" | "multi_select" | "checkbox";
 
@@ -59,6 +61,7 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
   const [subs, setSubs] = useState<ApiSub[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [boards, setBoards] = useState<ApiStudioBoardLite[]>([]);
 
   useEffect(() => { void params.then((p) => setFormId(p.id)); }, [params]);
 
@@ -90,13 +93,30 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
 
   useEffect(() => { if (tab === "submissions") void loadSubs(); }, [tab, loadSubs]);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/studio/boards");
+        if (!res.ok) return;
+        const d = await res.json();
+        setBoards(d.boards ?? []);
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
   async function save() {
     if (!form || !formId) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/forms/${formId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: form.name.trim() || "Untitled form", description: form.description, fields: form.fields, isPublic: form.isPublic }),
+        body: JSON.stringify({
+          name: form.name.trim() || "Untitled form",
+          description: form.description,
+          fields: form.fields,
+          isPublic: form.isPublic,
+          targetBoardId: form.targetBoardId ?? null,
+        }),
       });
       if (!res.ok) throw new Error(`PATCH ${res.status}`);
       toast("Saved");
@@ -222,6 +242,21 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
                 <button key={t} type="button" onClick={() => addField(t)}>{FIELD_LABEL[t]}</button>
               ))}
             </div>
+
+            <h3 style={{ marginTop: 24 }}><LayoutGrid style={{ verticalAlign: -3, marginRight: 6 }} /> Send to board</h3>
+            <p style={{ fontSize: 12, color: "var(--os-ink-3)", margin: "4px 0 10px" }}>
+              Every submission auto-creates a row on the chosen board. Match form field labels to board column labels to populate columns.
+            </p>
+            <select
+              value={form.targetBoardId ?? ""}
+              onChange={(e) => setForm({ ...form, targetBoardId: e.target.value || null })}
+              style={{ width: "100%", padding: "6px 8px", border: "1px solid var(--os-line)", borderRadius: 6, fontSize: 13, background: "var(--os-bg)" }}
+            >
+              <option value="">— None (just collect submissions) —</option>
+              {boards.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
           </aside>
         </div>
       ) : (

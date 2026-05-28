@@ -163,6 +163,10 @@ model Organization {
   // pile up in an inbox + can target a Studio board for row inserts.
   formDefinitions       FormDefinition[]
   formSubmissions       FormSubmission[]
+  // 🆕 Tables primitive — lightweight Airtable-style data tables.
+  // No workspace/permission friction, embeddable in any doc.
+  dataTables            DataTable[]
+  dataTableRows         DataTableRow[]
 
   @@index([slug])
 }
@@ -203,6 +207,11 @@ model FileEntry {
   // Light, optional metadata — text caption, color tag for sorting.
   description    String?
   starred        Boolean      @default(false)
+  // 🆕 AI-generated summary (Claude) — populated on demand from
+  // /api/files/[id]/summarize. Null until first run. Pairs with
+  // `summarizedAt` so callers can show "summarized 2 days ago".
+  summary        String?
+  summarizedAt   DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -252,6 +261,46 @@ model FormSubmission {
 
   @@index([organizationId, formId])
   @@index([formId, submittedAt])
+}
+
+// DataTable — lightweight Airtable-style flexible table. Anyone in
+// the org can create one; no workspace / permission scoping. Embeds
+// cleanly into any block-based doc via the data_table block kind.
+//
+// `columns` shape: { id, type, label, options?: string[] }[]
+// Types: short_text, long_text, number, select, multi_select, date,
+//        checkbox, url, email
+model DataTable {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  columns        Json           @default("[]")
+  createdById    String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  rows           DataTableRow[]
+
+  @@index([organizationId])
+  @@index([createdById])
+}
+
+model DataTableRow {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tableId        String
+  table          DataTable    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  // { columnId: value } — value type matches the column's declared type.
+  values         Json         @default("{}")
+  position       Int          @default(0)
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([tableId, position])
+  @@index([organizationId])
 }
 
 enum Plan {

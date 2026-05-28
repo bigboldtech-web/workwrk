@@ -23,6 +23,7 @@ import {
   Plus, GripVertical, Trash2, Type, Hash, Heading2, ListChecks,
   Minus, Link2, FileText as FileIcon, AlertCircle, Sparkles, Loader2, Check,
   CheckSquare, LayoutGrid, BookCopy, CalendarClock, FormInput, ChevronRight,
+  Table as TableIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -31,7 +32,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 export type BlockKind =
   | "h1" | "h2" | "h3" | "paragraph"
   | "todo" | "divider" | "embed" | "file" | "callout"
-  | "tasks_view" | "studio_board" | "sops_list" | "meetings_view" | "form";
+  | "tasks_view" | "studio_board" | "sops_list" | "meetings_view" | "form" | "data_table";
 
 export type Block =
   | { id: string; kind: "h1" | "h2" | "h3" | "paragraph"; text: string }
@@ -44,7 +45,8 @@ export type Block =
   | { id: string; kind: "studio_board"; boardId: string; boardName?: string }
   | { id: string; kind: "sops_list"; category?: string }
   | { id: string; kind: "meetings_view"; window: "upcoming" | "past" }
-  | { id: string; kind: "form"; formId: string; formName?: string };
+  | { id: string; kind: "form"; formId: string; formName?: string }
+  | { id: string; kind: "data_table"; tableId: string; tableName?: string };
 
 type ApiFile = { id: string; name: string; mimeType: string; size: number; url: string };
 
@@ -67,6 +69,7 @@ const MENU: { kind: BlockKind; label: string; Icon: React.ComponentType<{ classN
   { kind: "sops_list",     label: "SOPs",          Icon: BookCopy,       build: () => ({ id: newId(), kind: "sops_list" }) },
   { kind: "meetings_view", label: "Meetings",      Icon: CalendarClock,  build: () => ({ id: newId(), kind: "meetings_view", window: "upcoming" }) },
   { kind: "form",          label: "Form",          Icon: FormInput,      build: () => ({ id: newId(), kind: "form", formId: "" }) },
+  { kind: "data_table",    label: "Table",         Icon: TableIcon,      build: () => ({ id: newId(), kind: "data_table", tableId: "" }) },
 ];
 
 // ───────── Editor ─────────
@@ -233,6 +236,7 @@ function BlockContent({
     sops_list: "",
     meetings_view: "",
     form: "",
+    data_table: "",
   };
 
   // Text-style blocks
@@ -355,6 +359,9 @@ function BlockContent({
   }
   if (block.kind === "form") {
     return <FormBlock block={block} readonly={readonly} onUpdate={onUpdate} />;
+  }
+  if (block.kind === "data_table") {
+    return <DataTableBlock block={block} readonly={readonly} onUpdate={onUpdate} />;
   }
 
   return null;
@@ -740,6 +747,70 @@ function FormBlock({ block, readonly, onUpdate }: { block: Extract<Block, { kind
       </header>
       <Link href={`/forms/${block.formId}/respond`} className="bembed__form-cta">
         <FormInput /> Click to fill this form →
+      </Link>
+    </div>
+  );
+}
+
+// ───────── Data Table embed ─────────
+type ApiDataTable = { id: string; name: string; rowCount?: number; columns?: unknown };
+
+function DataTableBlock({ block, readonly, onUpdate }: { block: Extract<Block, { kind: "data_table" }>; readonly: boolean; onUpdate: (p: Partial<Block>) => void }) {
+  const [tables, setTables] = useState<ApiDataTable[] | null>(null);
+  const [picking, setPicking] = useState(!block.tableId);
+
+  useEffect(() => {
+    if (!picking) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/tables");
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled) return;
+        setTables(d.data ?? (Array.isArray(d) ? d : []));
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [picking]);
+
+  if (!block.tableId || picking) {
+    return (
+      <div className="bembed bembed--pick">
+        <header className="bembed__head">
+          <TableIcon />
+          <strong>Embed a Table</strong>
+          {block.tableId && <button type="button" className="bembed__cancel" onClick={() => setPicking(false)}>Cancel</button>}
+        </header>
+        {tables === null ? (
+          <div className="bembed__loading">Loading tables…</div>
+        ) : tables.length === 0 ? (
+          <div className="bembed__empty">No tables yet. Create one at <Link href="/tables">/tables</Link>.</div>
+        ) : (
+          <div className="bembed__pick-list">
+            {tables.map((t) => (
+              <button key={t.id} type="button" onClick={() => { onUpdate({ tableId: t.id, tableName: t.name }); setPicking(false); }}>
+                <TableIcon />
+                <span>{t.name}</span>
+                <em>{t.rowCount ?? 0} rows</em>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bembed bembed--form">
+      <header className="bembed__head">
+        <TableIcon />
+        <strong>{block.tableName ?? "Table"}</strong>
+        {!readonly && <button type="button" className="bembed__cancel" onClick={() => setPicking(true)}>Change</button>}
+        <Link href={`/tables/${block.tableId}`} className="bembed__open">Open <ChevronRight /></Link>
+      </header>
+      <Link href={`/tables/${block.tableId}`} className="bembed__form-cta">
+        <TableIcon /> Open this table →
       </Link>
     </div>
   );

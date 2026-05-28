@@ -1,13 +1,24 @@
 // GET  /api/forms/[id]/submissions   list submissions for a form (org member only)
 // POST /api/forms/[id]/submissions   submit; org members always; anonymous only when isPublic
+//
+// When the form has `targetBoardId` set, every submission also creates
+// a StudioItem on that board. Form-field values are mapped to board
+// columns by case-insensitive label match — board columns whose label
+// matches a form field's label receive the answer keyed by the board
+// column's `key`. Unmatched form fields are dropped (users can rename
+// either side to wire them up).
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import type { Prisma } from "@/generated/prisma";
 import {
-  getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
+  getSessionOrFail, getOrgId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
+
+type FormField = { id: string; type: string; label: string };
+type BoardField = { key: string; label: string; type: string };
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -60,5 +71,59 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
 
+  if (form.targetBoardId) {
+    try {
+      await pushToBoard(form.targetBoardId, form, data);
+    } catch (err) {
+      console.error(`form-submission: failed to push to board ${form.targetBoardId}`, err);
+    }
+  }
+
   return jsonSuccess(sub, 201);
+}
+
+async function pushToBoard(boardId: string, form: { fields: unknown; organizationId: string }, data: Record<string, unknown>) {
+  const board = await prisma.studioBoard.findFirst({
+    where: { id: boardId, organizationId: form.organizationId },
+    select: { id: true, fields: true },
+  });
+  if (!board) return;
+
+  const formFields = Array.isArray(form.fields) ? (form.fields as FormField[]) : [];
+  const boardFields = Array.isArray(board.fields) ? (board.fields as BoardField[]) : [];
+
+  const byLabel = new Map<string, string>();
+  for (const bf of boardFields) {
+    if (bf?.label && bf?.key) byLabel.set(bf.label.trim().toLowerCase(), bf.key);
+  }
+
+  const values: Record<string, unknown> = {};
+  let title = "";
+  for (const ff of formFields) {
+    const answer = data[ff.id];
+    if (answer === undefined || answer === null || answer === "") continue;
+    if (!title && (ff.type === "short_text" || ff.type === "email")) {
+      title = String(answer).slice(0, 200);
+    }
+    const key = byLabel.get(ff.label.trim().toLowerCase());
+    if (key) values[key] = answer;
+  }
+  if (!title) {
+    title = `Form submission · ${new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+  }
+
+  const max = await prisma.studioItem.findFirst({
+    where: { boardId: board.id },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+
+  await prisma.studioItem.create({
+    data: {
+      boardId: board.id,
+      title,
+      values: values as unknown as Prisma.InputJsonValue,
+      position: (max?.position ?? 0) + 1,
+    },
+  });
 }

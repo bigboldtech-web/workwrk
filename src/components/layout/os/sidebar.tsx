@@ -59,6 +59,7 @@ const PINNED: Leaf[] = [
   { href: "/sidekick",  label: "Sidekick AI",      mark: "S", color: "var(--os-c-pink)" },
   { href: "/files",     label: "Files",            mark: "F", color: "var(--os-c-blue)" },
   { href: "/forms",     label: "Forms",            mark: "F", color: "var(--os-c-purple)" },
+  { href: "/tables",    label: "Tables",           mark: "T", color: "var(--os-c-teal)" },
 ];
 
 /* ─────────────── Spaces (collapsible clusters) ─────────────── */

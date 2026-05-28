@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   HardDrive, Folder, FolderPlus, Upload, Search, Star, Trash2,
   ExternalLink, Image as ImageIcon, FileText, File as FileIcon,
-  Film, Music, Archive, Code2, ChevronRight,
+  Film, Music, Archive, Code2, ChevronRight, Sparkles, Loader2,
 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -33,6 +33,7 @@ type ApiFile = {
   id: string; name: string; mimeType: string; size: number;
   url: string; folderId: string | null;
   starred: boolean; description?: string | null;
+  summary?: string | null; summarizedAt?: string | null;
   createdAt: string; updatedAt: string;
 };
 
@@ -186,6 +187,24 @@ export default function FilesPage() {
       });
     } catch { void loadFiles(); }
   }
+
+  const [summarizing, setSummarizing] = useState<Set<string>>(new Set());
+  async function summarize(id: string) {
+    setSummarizing((prev) => { const next = new Set(prev); next.add(id); return next; });
+    try {
+      const res = await fetch(`/api/files/${id}/summarize`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        toast(`Couldn't summarize: ${err.error ?? "unknown"}`);
+        return;
+      }
+      const d = await res.json();
+      const summary = d.data?.summary ?? d.summary;
+      setFiles((prev) => prev?.map((f) => f.id === id ? { ...f, summary, summarizedAt: new Date().toISOString() } : f) ?? prev);
+      toast("Summary ready");
+    } catch { toast("Summarize failed"); }
+    finally { setSummarizing((prev) => { const next = new Set(prev); next.delete(id); return next; }); }
+  }
   async function rename(file: ApiFile) {
     const name = window.prompt("New name?", file.name)?.trim();
     if (!name || name === file.name) return;
@@ -326,8 +345,10 @@ export default function FilesPage() {
               {files.map((f) => {
                 const Icon = fileIcon(f.mimeType);
                 const isImg = f.mimeType.startsWith("image/");
+                const isSummarizable = f.mimeType === "application/pdf" || f.mimeType.startsWith("text/") || f.mimeType.includes("json");
+                const isSumming = summarizing.has(f.id);
                 return (
-                  <article key={f.id} className="ftile">
+                  <article key={f.id} className={`ftile ${f.summary ? "ftile--has-summary" : ""}`}>
                     <a href={f.url} target="_blank" rel="noopener" className="ftile__preview" style={{ background: fileHue(f.mimeType) }}>
                       {isImg ? <img src={f.url} alt={f.name} /> : <Icon />}
                     </a>
@@ -337,11 +358,22 @@ export default function FilesPage() {
                         <span>{fmtSize(f.size)}</span>
                         <span>· {new Date(f.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
                       </div>
+                      {f.summary && (
+                        <details className="ftile__summary">
+                          <summary><Sparkles /> AI summary</summary>
+                          <p>{f.summary}</p>
+                        </details>
+                      )}
                     </div>
                     <div className="ftile__actions">
                       <button type="button" className={`ftile__act ${f.starred ? "is-on" : ""}`} title={f.starred ? "Unstar" : "Star"} onClick={() => toggleStar(f.id, !f.starred)}>
                         <Star />
                       </button>
+                      {isSummarizable && (
+                        <button type="button" className="ftile__act" title={f.summary ? "Re-summarize" : "AI summarize"} onClick={() => summarize(f.id)} disabled={isSumming}>
+                          {isSumming ? <Loader2 style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles />}
+                        </button>
+                      )}
                       <a href={f.url} target="_blank" rel="noopener" className="ftile__act" title="Open"><ExternalLink /></a>
                       <button type="button" className="ftile__act" title="Rename" onClick={() => rename(f)}>✎</button>
                       <button type="button" className="ftile__act ftile__act--danger" title="Delete" onClick={() => remove(f.id)}>
