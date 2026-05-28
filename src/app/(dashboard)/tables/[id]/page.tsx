@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
-  LayoutGrid, Columns, ChevronLeft, ChevronRight,
+  LayoutGrid, Columns, ChevronLeft, ChevronRight, Upload, Download, Search, Filter,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -49,6 +49,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [kanbanCol, setKanbanCol] = useState<string>("");
   const [calCol, setCalCol] = useState<string>("");
   const [calMonth, setCalMonth] = useState<Date>(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [search, setSearch] = useState("");
+  const [filterCol, setFilterCol] = useState<string>("");
+  const [filterValue, setFilterValue] = useState<string>("");
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
 
   useEffect(() => { void params.then((p) => setTableId(p.id)); }, [params]);
 
@@ -145,6 +149,48 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     } catch { toast("Couldn't delete row"); void load(); }
   }
 
+  async function importCsv(file: File) {
+    if (!tableId) return;
+    try {
+      const csv = await file.text();
+      const res = await fetch(`/api/tables/${tableId}/import`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        toast(`Import failed: ${err.error}`);
+        return;
+      }
+      const d = await res.json();
+      const r = d.data ?? d;
+      toast(`Imported ${r.rowsCreated} row${r.rowsCreated === 1 ? "" : "s"}${r.columnsAdded ? `, added ${r.columnsAdded} column${r.columnsAdded === 1 ? "" : "s"}` : ""}`);
+      void load();
+    } catch { toast("Couldn't import CSV"); }
+  }
+
+  function exportCsv() {
+    if (!table || rows === null) return;
+    const headers = table.columns.map((c) => csvEscape(c.label)).join(",");
+    const bodyRows = rows.map((r) =>
+      table.columns.map((c) => {
+        const v = r.values[c.id];
+        const str = v === undefined || v === null ? "" : Array.isArray(v) ? v.join("; ") : String(v);
+        return csvEscape(str);
+      }).join(","),
+    );
+    const csv = [headers, ...bodyRows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${table.name.replace(/[^a-z0-9_-]+/gi, "_").toLowerCase() || "table"}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   const columnTypes = useMemo(() => Object.keys(COL_LABEL) as ColType[], []);
 
   const kanbanColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "select"), [table?.columns]);
@@ -169,6 +215,31 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const activeDateCol = dateColumns.find((c) => c.id === calCol);
   const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
 
+  const filteredRows = (() => {
+    let list = rows;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter((r) =>
+        table.columns.some((c) => {
+          const v = r.values[c.id];
+          if (v === undefined || v === null) return false;
+          return String(Array.isArray(v) ? v.join(" ") : v).toLowerCase().includes(q);
+        }),
+      );
+    }
+    if (filterCol && filterValue) {
+      list = list.filter((r) => {
+        const v = r.values[filterCol];
+        if (Array.isArray(v)) return v.includes(filterValue);
+        return String(v ?? "") === filterValue;
+      });
+    }
+    return list;
+  })();
+
+  const filterColDef = table.columns.find((c) => c.id === filterCol);
+  const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;
+
   return (
     <div className="dtbl">
       <header className="dtbl__head">
@@ -184,6 +255,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           />
         </div>
         <div className="dtbl__meta">{rows.length} row{rows.length === 1 ? "" : "s"} · {table.columns.length} column{table.columns.length === 1 ? "" : "s"} {savingCols && <em>· saving…</em>}</div>
+        <div className="dtbl__head-actions">
+          <label className="dtbl__head-btn" title="Import CSV">
+            <Upload />
+            <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importCsv(f); e.target.value = ""; }} />
+          </label>
+          <button type="button" className="dtbl__head-btn" onClick={exportCsv} title="Export CSV"><Download /></button>
+        </div>
       </header>
 
       <nav className="dtbl__viewtabs">
@@ -200,14 +278,39 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             {dateColumns.map((c) => <option key={c.id} value={c.id}>By: {c.label}</option>)}
           </select>
         )}
+        <div className="dtbl__filterbar">
+          <div className="dtbl__searchwrap">
+            <Search />
+            <input type="search" placeholder="Search rows…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <div className="dtbl__filterwrap">
+            <Filter />
+            <select value={filterCol} onChange={(e) => { setFilterCol(e.target.value); setFilterValue(""); }}>
+              <option value="">No filter</option>
+              {table.columns.filter((c) => c.type === "select" || c.type === "multi_select").map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+            {filterColDef && (
+              <select value={filterValue} onChange={(e) => setFilterValue(e.target.value)}>
+                <option value="">Any value</option>
+                {(filterColDef.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            )}
+          </div>
+          {(search || filterValue) && (
+            <span className="dtbl__filterhint">{filteredRows.length} of {rows.length}</span>
+          )}
+        </div>
       </nav>
 
       {view === "kanban" && activeCol ? (
         <KanbanView
           table={table}
-          rows={rows}
+          rows={filteredRows}
           groupCol={activeCol}
           titleCol={titleCol}
+          onCardClick={(rowId) => setActiveRowId(rowId)}
           onAddRow={async (groupValue: string) => {
             if (!tableId) return;
             try {
@@ -224,9 +327,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         />
       ) : view === "calendar" && activeDateCol ? (
         <CalendarView
-          rows={rows}
+          rows={filteredRows}
           dateCol={activeDateCol}
           titleCol={titleCol}
+          onCardClick={(rowId) => setActiveRowId(rowId)}
           month={calMonth}
           onPrev={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1))}
           onNext={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1))}
@@ -252,6 +356,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           <thead>
             <tr>
               <th className="dtbl__rowhandle" />
+              <th className="dtbl__rowexpand" />
               {table.columns.map((c) => (
                 <th key={c.id} className="dtbl__col">
                   <div className="dtbl__col-head">
@@ -281,12 +386,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={table.columns.length + 2} className="dtbl__empty">No rows yet. Add one below.</td></tr>
-            ) : rows.map((r) => (
+            {filteredRows.length === 0 ? (
+              <tr><td colSpan={table.columns.length + 3} className="dtbl__empty">{rows.length === 0 ? "No rows yet. Add one below." : "No rows match the current search/filter."}</td></tr>
+            ) : filteredRows.map((r) => (
               <tr key={r.id}>
                 <td className="dtbl__rowhandle">
                   <button type="button" onClick={() => deleteRow(r.id)} title="Delete row"><Trash2 /></button>
+                </td>
+                <td className="dtbl__rowexpand">
+                  <button type="button" onClick={() => setActiveRowId(r.id)} title="Open row"><ChevronRight /></button>
                 </td>
                 {table.columns.map((c) => (
                   <td key={c.id} className="dtbl__cell">
@@ -302,14 +410,63 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
       <button type="button" className="dtbl__addrow" onClick={addRow}><Plus /> New row</button>
       </>)}
+
+      {activeRow && (
+        <RowDetailModal
+          table={table}
+          row={activeRow}
+          onClose={() => setActiveRowId(null)}
+          onChange={(values) => void patchRow(activeRow.id, values)}
+          onDelete={() => { void deleteRow(activeRow.id); setActiveRowId(null); }}
+        />
+      )}
     </div>
   );
 }
 
-function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove }: {
+function RowDetailModal({ table, row, onClose, onChange, onDelete }: {
+  table: ApiTable; row: ApiRow;
+  onClose: () => void;
+  onChange: (values: Record<string, unknown>) => void;
+  onDelete: () => void;
+}) {
+  const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
+  const title = titleCol ? String(row.values[titleCol.id] ?? "Untitled") : "Untitled";
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="dtbl__modal-back" onClick={onClose}>
+      <aside className="dtbl__modal" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h2>{title}</h2>
+          <div>
+            <button type="button" onClick={onDelete} className="dtbl__modal-del" title="Delete row"><Trash2 /></button>
+            <button type="button" onClick={onClose}>×</button>
+          </div>
+        </header>
+        <div className="dtbl__modal-body">
+          {table.columns.map((c) => (
+            <div key={c.id} className="dtbl__modal-field">
+              <label>{c.label}</label>
+              <CellEditor column={c} value={row.values[c.id]} onChange={(v) => onChange({ [c.id]: v })} />
+            </div>
+          ))}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove, onCardClick }: {
   table: ApiTable; rows: ApiRow[]; groupCol: Column; titleCol: Column | undefined;
   onAddRow: (groupValue: string) => Promise<void>;
   onMove: (rowId: string, newGroup: string) => void;
+  onCardClick: (rowId: string) => void;
 }) {
   const options = groupCol.options ?? [];
   const lanes = [...options, "—"]; // trailing "—" lane for rows with no value
@@ -341,7 +498,7 @@ function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove }: {
             }}
           >
             {(grouped.get(lane) ?? []).map((r) => (
-              <article key={r.id} className="dtbl__card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)}>
+              <article key={r.id} className="dtbl__card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)} onClick={() => onCardClick(r.id)}>
                 <div className="dtbl__card-title">{titleCol ? String(r.values[titleCol.id] ?? "Untitled") : "Untitled"}</div>
                 <div className="dtbl__card-meta">
                   {table.columns
@@ -443,7 +600,7 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
   return null;
 }
 
-function CalendarView({ rows, dateCol, titleCol, month, onPrev, onNext, onToday, onMove, onAddRow }: {
+function CalendarView({ rows, dateCol, titleCol, month, onPrev, onNext, onToday, onMove, onAddRow, onCardClick }: {
   rows: ApiRow[];
   dateCol: Column;
   titleCol: Column | undefined;
@@ -453,6 +610,7 @@ function CalendarView({ rows, dateCol, titleCol, month, onPrev, onNext, onToday,
   onToday: () => void;
   onMove: (rowId: string, isoDate: string) => void;
   onAddRow: (isoDate: string) => Promise<void>;
+  onCardClick: (rowId: string) => void;
 }) {
   const year = month.getFullYear();
   const m = month.getMonth();
@@ -517,7 +675,7 @@ function CalendarView({ rows, dateCol, titleCol, month, onPrev, onNext, onToday,
                   </header>
                   <div className="dtbl__cal-cards">
                     {dayRows.map((r) => (
-                      <div key={r.id} className="dtbl__cal-card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)}>
+                      <div key={r.id} className="dtbl__cal-card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)} onClick={() => onCardClick(r.id)}>
                         {titleCol ? String(r.values[titleCol.id] ?? "Untitled") : "Untitled"}
                       </div>
                     ))}
@@ -530,4 +688,11 @@ function CalendarView({ rows, dateCol, titleCol, month, onPrev, onNext, onToday,
       </div>
     </div>
   );
+}
+
+function csvEscape(v: string): string {
+  if (v.includes(",") || v.includes('"') || v.includes("\n")) {
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+  return v;
 }

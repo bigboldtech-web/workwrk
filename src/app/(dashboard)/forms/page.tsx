@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { FormInput, Plus, Globe, Lock, Inbox, ChevronRight } from "lucide-react";
+import { FormInput, Plus, Globe, Lock, Inbox, ChevronRight, Sparkles, Loader2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -57,6 +57,34 @@ export default function FormsPage() {
     } catch { toast("Couldn't create form"); }
   }
 
+  const [generating, setGenerating] = useState(false);
+  async function aiGenerate() {
+    const prompt = window.prompt("Describe the form you want (e.g. 'Customer support ticket', 'Event RSVP', 'Vendor onboarding'):")?.trim();
+    if (!prompt) return;
+    setGenerating(true);
+    try {
+      const gen = await fetch("/api/forms/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      if (!gen.ok) { const err = await gen.json().catch(() => ({ error: `HTTP ${gen.status}` })); toast(`AI failed: ${err.error}`); return; }
+      const g = await gen.json();
+      const spec = g.data ?? g;
+      // Assign IDs to each field (API expects unique IDs on each field).
+      const fields = (spec.fields ?? []).map((f: Record<string, unknown>) => ({ ...f, id: Math.random().toString(36).slice(2, 10) }));
+      const create = await fetch("/api/forms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: spec.name, description: spec.description, fields }),
+      });
+      if (!create.ok) throw new Error();
+      const d = await create.json();
+      const f = d.data ?? d;
+      toast(`Generated "${spec.name}" with ${fields.length} fields`);
+      router.push(`/forms/${f.id}`);
+    } catch { toast("Couldn't generate form"); }
+    finally { setGenerating(false); }
+  }
+
   const total = forms?.length ?? 0;
   const publicCount = (forms ?? []).filter((f) => f.isPublic).length;
   const totalSubs = (forms ?? []).reduce((acc, f) => acc + (f.submissionCount ?? 0), 0);
@@ -73,7 +101,12 @@ export default function FormsPage() {
             </div>
           </div>
         </div>
-        <button type="button" className="frmlist__new" onClick={quickAdd}><Plus /> New form</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="frmlist__new" onClick={aiGenerate} disabled={generating} style={{ background: "linear-gradient(135deg, var(--os-c-purple), var(--os-c-pink))" }}>
+            {generating ? <><Loader2 style={{ animation: "spin 1s linear infinite" }} /> Generating…</> : <><Sparkles /> AI generate</>}
+          </button>
+          <button type="button" className="frmlist__new" onClick={quickAdd}><Plus /> New form</button>
+        </div>
       </header>
 
       {loadError ? (
