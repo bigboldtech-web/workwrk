@@ -65,7 +65,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /crm/[id] — opportunity detail with deal scoreboard
 - [x] /crm/pipeline — drag-drop with weighted ARR
 - [x] /crm/accounts — account cards with logo
-- [ ] /crm/leads — lead routing list with score badges
+- [x] /crm/leads — lead routing list with score badges
 - [ ] /crm/activities — activity stream
 - [ ] /crm/reports — bespoke charts
 
