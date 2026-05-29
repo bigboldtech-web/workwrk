@@ -1,32 +1,30 @@
 "use client";
 
-/* Real, persistent CRM Pipeline page.
+/* CRM — pipeline kanban-first.
  *
- * - GET /api/crm/pipeline-stages → group definitions (color-coded)
- * - GET /api/crm/opportunities   → row data
- * - PATCH /api/crm/opportunities → stage change (from picker, drag, etc), name edit
- * - POST /api/crm/opportunities  → "+ Add deal"
+ * - GET  /api/crm/pipeline-stages → stage definitions (color-coded)
+ * - GET  /api/crm/opportunities   → deal data
+ * - PATCH /api/crm/opportunities  → stage change on drag, rename
+ * - POST  /api/crm/opportunities  → add deal in a stage column
  *
- * Two views share the same data:
- *   Main table  — groups by stage with per-group totals
- *   Kanban      — columns by stage, drag-and-drop changes pipelineStageId
+ * Layout:
+ *   OsTitleBar with New deal CTA + view links (Accounts / Leads / Reports) in actions slot.
+ *   Hero KPI strip: Open value · Weighted forecast · Open deals · Closing this month.
+ *   Pipeline kanban: bespoke column header with stage color, total value, count, drop zone.
+ *   Cards: gradient accent stripe matching stage, deal name, account, value, owner, close chip.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
-  BarChart3, ClipboardList, Boxes, Calendar as CalendarIcon, BarChart, ChartPie,
+  BarChart3, Plus, DollarSign, TrendingUp, Layers, CalendarDays,
+  Users, FileText, GripVertical,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row } from "@/components/layout/os/main-table";
-import { OsKanban, type KColumn } from "@/components/layout/os/kanban";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import type { PickerOption } from "@/components/layout/os/picker-popover";
 
 // ─── API shapes ──────────────────────────────────────────────
 type ApiStage = {
@@ -52,28 +50,29 @@ type ApiOpportunity = {
   ownerId?: string | null;
 };
 
-// ─── Hex → palette bucket (so stage colors render consistently) ──
-const PALETTE_BUCKETS: { hex: string; label: "green" | "orange" | "red" | "blue" | "purple" | "pink" | "indigo" | "teal" | "yellow" | "gray" | "brown" }[] = [
-  { hex: "#10b981", label: "green" },
-  { hex: "#f59e0b", label: "orange" },
-  { hex: "#ef4444", label: "red" },
-  { hex: "#60a5fa", label: "blue" },
-  { hex: "#a78bfa", label: "purple" },
-  { hex: "#ec4899", label: "pink" },
-  { hex: "#6366f1", label: "indigo" },
-  { hex: "#14b8a6", label: "teal" },
-  { hex: "#eab308", label: "yellow" },
-  { hex: "#94a3b8", label: "gray" },
-  { hex: "#92400e", label: "brown" },
+// ─── Color resolution ─────────────────────────────────────────
+const PALETTE_BUCKETS = [
+  { hex: "#10b981", color: C.green },
+  { hex: "#f59e0b", color: C.orange },
+  { hex: "#ef4444", color: C.red },
+  { hex: "#60a5fa", color: C.blue },
+  { hex: "#a78bfa", color: C.purple },
+  { hex: "#ec4899", color: C.pink },
+  { hex: "#6366f1", color: C.indigo },
+  { hex: "#14b8a6", color: C.teal },
+  { hex: "#eab308", color: C.yellow },
+  { hex: "#94a3b8", color: C.gray },
+  { hex: "#92400e", color: C.brown },
 ];
-function bucketFor(hex?: string | null): typeof PALETTE_BUCKETS[number]["label"] {
-  if (!hex) return "indigo";
-  const target = hex.toLowerCase();
-  let best = PALETTE_BUCKETS[0];
-  let bestDist = Number.POSITIVE_INFINITY;
-  const t = parseInt(target.replace("#", "").slice(0, 6), 16);
-  if (Number.isNaN(t)) return "indigo";
+function stageColor(stage: ApiStage): string {
+  if (stage.isWon) return C.green;
+  if (stage.isLost) return C.red;
+  if (!stage.color) return C.indigo;
+  const t = parseInt(stage.color.replace("#", "").slice(0, 6), 16);
+  if (Number.isNaN(t)) return C.indigo;
   const tr = (t >> 16) & 0xff, tg = (t >> 8) & 0xff, tb = t & 0xff;
+  let best = PALETTE_BUCKETS[0];
+  let bestDist = Infinity;
   for (const p of PALETTE_BUCKETS) {
     const v = parseInt(p.hex.replace("#", ""), 16);
     const dr = ((v >> 16) & 0xff) - tr;
@@ -82,23 +81,9 @@ function bucketFor(hex?: string | null): typeof PALETTE_BUCKETS[number]["label"]
     const d = dr * dr + dg * dg + db * db;
     if (d < bestDist) { best = p; bestDist = d; }
   }
-  return best.label;
+  return best.color;
 }
 
-function stageColor(stage: ApiStage): string {
-  if (stage.isWon) return C.green;
-  if (stage.isLost) return C.red;
-  const bucket = bucketFor(stage.color);
-  const map: Record<string, string> = {
-    green: C.green, orange: C.orange, red: C.red, blue: C.blue, purple: C.purple,
-    pink: C.pink, indigo: C.indigo, teal: C.teal, yellow: C.yellow, gray: C.gray, brown: C.brown,
-  };
-  return map[bucket] ?? C.indigo;
-}
-
-// ─── Owner avatars from ownerId (no names available without a fetch
-// per-user; we hash the id to a palette color + show initial of the id
-// so each owner is visually distinct) ─────────────────────────
 const AVATAR_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
 function avatarFor(id: string) {
   let h = 0;
@@ -106,98 +91,40 @@ function avatarFor(id: string) {
   return { initials: id.slice(0, 2).toUpperCase(), color: AVATAR_PALETTE[h % AVATAR_PALETTE.length] };
 }
 
-// ─── Build groups from stages + deals ───────────────────────
-function buildGroups(stages: ApiStage[], deals: ApiOpportunity[]): TableGroup[] {
-  const byStage = new Map<string, ApiOpportunity[]>();
-  for (const d of deals) {
-    const sid = d.pipelineStageId ?? "_unassigned";
-    if (!byStage.has(sid)) byStage.set(sid, []);
-    byStage.get(sid)!.push(d);
+function dealAmount(d: ApiOpportunity): number {
+  if (typeof d.amount === "string") {
+    const n = parseFloat(d.amount);
+    return isFinite(n) ? n : 0;
   }
-
-  const groups: TableGroup[] = stages.map((s) => ({
-    id: s.id,
-    title: s.name,
-    color: stageColor(s),
-    rows: (byStage.get(s.id) ?? []).map(dealToRow),
-  }));
-
-  // Stash any orphans (deal with no stage) in an extra group at the end
-  const orphan = byStage.get("_unassigned");
-  if (orphan && orphan.length > 0) {
-    groups.push({
-      id: "_unassigned",
-      title: "No stage",
-      color: C.gray,
-      rows: orphan.map(dealToRow),
-    });
-  }
-  return groups;
+  return d.amount ?? 0;
 }
 
-function dealToRow(d: ApiOpportunity): Row {
-  const amount = typeof d.amount === "string" ? parseFloat(d.amount) : (d.amount ?? null);
-  const close = d.expectedCloseDate;
-  const closeState = close
-    ? (new Date(close).getTime() < Date.now() - 86400000 ? "overdue" : undefined)
-    : undefined;
-  return {
-    id: d.id,
-    name: d.name,
-    done: d.pipelineStage?.isWon === true,
-    cells: {
-      stage: { value: stageStatusValue(d.pipelineStage), label: d.pipelineStage?.name ?? "—" },
-      owner: d.ownerId ? [avatarFor(d.ownerId)] : [],
-      amount: amount ?? undefined,
-      close: close ? { iso: close, state: closeState } : undefined,
-      account: d.account?.name ?? "—",
-    },
-  };
+function fmtMoney(n: number, currency = "₹"): string {
+  if (n >= 1_00_00_000) return `${currency}${(n / 1_00_00_000).toFixed(1)}Cr`;
+  if (n >= 1_00_000) return `${currency}${(n / 1_00_000).toFixed(1)}L`;
+  if (n >= 1_000) return `${currency}${(n / 1_000).toFixed(0)}k`;
+  return `${currency}${n.toLocaleString()}`;
 }
 
-function stageStatusValue(stage?: ApiStage | null) {
-  if (!stage) return "empty" as const;
-  if (stage.isWon) return "done" as const;
-  if (stage.isLost) return "stuck" as const;
-  return "working" as const; // any non-terminal stage renders orange-ish in the cell
+function dueChip(iso?: string | null): { label: string; tone: "good" | "warn" | "bad" | "muted" } | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((t - today.getTime()) / 86_400_000);
+  if (days < 0) return { label: `${-days}d overdue`, tone: "bad" };
+  if (days === 0) return { label: "Today", tone: "warn" };
+  if (days <= 7) return { label: `in ${days}d`, tone: "warn" };
+  if (days <= 30) return { label: new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" }), tone: "good" };
+  return { label: new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" }), tone: "muted" };
 }
 
-function dealToKCard(d: ApiOpportunity) {
-  const amount = typeof d.amount === "string" ? parseFloat(d.amount) : (d.amount ?? null);
-  return {
-    id: d.id,
-    title: d.name,
-    refId: amount ? `${d.currency ?? "₹"}${amount.toLocaleString()}` : undefined,
-    labels: d.account?.name ? [{ label: d.account.name, color: "purple" as const }] : [],
-    people: d.ownerId ? [avatarFor(d.ownerId)] : [],
-    date: d.expectedCloseDate ? { iso: d.expectedCloseDate } : undefined,
-  };
-}
-
-// ─── Columns ────────────────────────────────────────────────
-const COLUMNS: Column[] = [
-  { id: "stage",   label: "Stage",       type: "status" },
-  { id: "owner",   label: "Owner",       type: "person" },
-  { id: "amount",  label: "Value",       type: "number", currency: "₹" },
-  { id: "close",   label: "Close date",  type: "date" },
-  { id: "account", label: "Account",     type: "text" },
-];
-
-const TABS: TabDef[] = [
-  { id: "kanban",    label: "Kanban",     Icon: Boxes },
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
-
-// ─── Page ────────────────────────────────────────────────────
 export default function CrmPage() {
   const [stages, setStages] = useState<ApiStage[] | null>(null);
   const [deals, setDeals] = useState<ApiOpportunity[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("kanban");
-  const { rowVersion } = useOsShell();
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [hoverStageId, setHoverStageId] = useState<string | null>(null);
+  const { rowVersion, bumpRowVersion } = useOsShell();
   const { toast } = useOsToast();
 
   const load = useCallback(async () => {
@@ -214,83 +141,91 @@ export default function CrmPage() {
       const dealList: ApiOpportunity[] = d.opportunities ?? d.data ?? (Array.isArray(d) ? d : []);
       setStages(stageList);
       setDeals(dealList);
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-
-  // Cross-component invalidations (drawer / Sidekick tool calls)
   const crmVersion = rowVersion("crm");
-  useEffect(() => {
-    if (crmVersion > 0) void load();
-  }, [crmVersion, load]);
+  useEffect(() => { if (crmVersion > 0) void load(); }, [crmVersion, load]);
 
-  const groups = useMemo(
-    () => stages && deals ? buildGroups(stages, deals) : [],
-    [stages, deals],
-  );
-
-  // ─── Picker options derived from real stages ──────────────
-  const stageOptions: PickerOption[] = useMemo(() => {
-    if (!stages) return [];
-    return stages.map((s) => ({
-      // Map each stage to its OS status bucket for cell rendering, but
-      // store the actual stage id in the value (we read it back in the
-      // handler so we know which stage to PATCH to).
-      value: s.id,
-      label: s.name,
-      color: stageColor(s),
-    }));
-  }, [stages]);
-
-  // ─── Persistence handlers ─────────────────────────────────
   async function patchDeal(id: string, body: Record<string, unknown>) {
     const res = await fetch("/api/crm/opportunities", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, ...body }),
     });
-    if (!res.ok) throw new Error(`PATCH failed: ${res.status}`);
+    if (!res.ok) throw new Error(`PATCH ${res.status}`);
+    bumpRowVersion("crm");
     return res.json();
   }
 
-  const handlers = {
-    // The picker gives back the stage id we passed in `value`.
-    onStatusChange: async (rowId: string, _groupId: string, value: string) => {
-      await patchDeal(rowId, { pipelineStageId: value });
-      void load();
-    },
-    onRename: async (rowId: string, _groupId: string, name: string) => {
-      await patchDeal(rowId, { name });
-    },
-    onAdd: async (groupId: string) => {
-      const stage = stages?.find((s) => s.id === groupId);
+  async function addDeal(stageId: string) {
+    try {
+      const stage = stages?.find((s) => s.id === stageId);
       const body: Record<string, unknown> = { name: "Untitled deal" };
       if (stage && !stage.isWon && !stage.isLost) body.pipelineStageId = stage.id;
-
       const res = await fetch("/api/crm/opportunities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`POST failed: ${res.status}`);
-      const created = await res.json();
-      const opp: ApiOpportunity = created.opportunity ?? created.data ?? created;
-      // Re-fetch shortly so the new row appears with full denorm
-      setTimeout(() => void load(), 200);
-      return { id: opp.id, name: opp.name };
-    },
-  };
+      if (!res.ok) throw new Error(`POST ${res.status}`);
+      toast("Deal added");
+      void load();
+    } catch {
+      toast("Couldn't add deal");
+    }
+  }
 
-  // ─── Kanban with drag-to-stage persistence ────────────────
-  // We hand the kanban a synthesized columns array. Drag persistence
-  // would route through OsKanban's onMove if it exposed one; until then
-  // the user can change stage via the table picker (which IS persistent)
-  // and drag-and-drop updates the local state via OsKanban's internal
-  // reducer for visual feedback. A follow-up will plumb a real handler.
-  const kanbanColumns: KColumn[] = useMemo(() => {
+  async function moveDeal(dealId: string, toStageId: string) {
+    const current = deals?.find((d) => d.id === dealId);
+    if (!current || current.pipelineStageId === toStageId) return;
+    // Optimistic
+    setDeals((prev) => prev?.map((d) => d.id === dealId ? { ...d, pipelineStageId: toStageId, pipelineStage: stages?.find((s) => s.id === toStageId) ?? d.pipelineStage } : d) ?? prev);
+    try {
+      await patchDeal(dealId, { pipelineStageId: toStageId });
+      void load();
+    } catch {
+      toast("Couldn't move deal");
+      void load();
+    }
+  }
+
+  // ─── KPIs ─────────────────────────────────────────────────
+  const kpis = useMemo(() => {
+    if (!deals || !stages) {
+      return { openValue: 0, weighted: 0, openCount: 0, closingThisMonthCount: 0, closingThisMonthValue: 0 };
+    }
+    const totalStages = stages.length || 1;
+    const openDeals = deals.filter((d) => !d.pipelineStage?.isWon && !d.pipelineStage?.isLost);
+    const openValue = openDeals.reduce((acc, d) => acc + dealAmount(d), 0);
+    const weighted = openDeals.reduce((acc, d) => {
+      const stage = stages.find((s) => s.id === d.pipelineStageId);
+      const prob = stage ? Math.min(0.95, (stage.position + 1) / totalStages) : 0.5;
+      return acc + dealAmount(d) * prob;
+    }, 0);
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).getTime() + 86_399_999;
+    const closingThisMonth = openDeals.filter((d) => {
+      if (!d.expectedCloseDate) return false;
+      const t = new Date(d.expectedCloseDate).getTime();
+      return t >= monthStart && t <= monthEnd;
+    });
+    return {
+      openValue,
+      weighted,
+      openCount: openDeals.length,
+      closingThisMonthCount: closingThisMonth.length,
+      closingThisMonthValue: closingThisMonth.reduce((acc, d) => acc + dealAmount(d), 0),
+    };
+  }, [deals, stages]);
+
+  // ─── Pipeline columns ─────────────────────────────────────
+  const columns = useMemo(() => {
     if (!stages || !deals) return [];
     const byStage = new Map<string, ApiOpportunity[]>();
     for (const d of deals) {
@@ -298,119 +233,181 @@ export default function CrmPage() {
       if (!byStage.has(sid)) byStage.set(sid, []);
       byStage.get(sid)!.push(d);
     }
-    return stages.map((s) => ({
-      id: s.id,
-      title: s.name,
-      color: stageColor(s),
-      cards: (byStage.get(s.id) ?? []).map(dealToKCard),
-    }));
+    const cols = stages.map((s) => {
+      const colDeals = byStage.get(s.id) ?? [];
+      const totalValue = colDeals.reduce((acc, d) => acc + dealAmount(d), 0);
+      return { stage: s, color: stageColor(s), deals: colDeals, totalValue };
+    });
+    const orphan = byStage.get("_unassigned");
+    if (orphan && orphan.length > 0) {
+      cols.push({
+        stage: { id: "_unassigned", name: "No stage", position: 999, color: null, isWon: false, isLost: false },
+        color: C.gray,
+        deals: orphan,
+        totalValue: orphan.reduce((acc, d) => acc + dealAmount(d), 0),
+      });
+    }
+    return cols;
   }, [stages, deals]);
-
-  // Aggregate totals for the title bar
-  const openValue = useMemo(() => {
-    if (!deals) return 0;
-    return deals.reduce((acc, d) => {
-      if (d.pipelineStage?.isWon || d.pipelineStage?.isLost) return acc;
-      const amt = typeof d.amount === "string" ? parseFloat(d.amount) : (d.amount ?? 0);
-      return acc + (amt || 0);
-    }, 0);
-  }, [deals]);
 
   return (
     <>
       <OsTitleBar
-        title="CRM Pipeline"
+        title="CRM"
         Icon={BarChart3}
         iconGradient={GRAD.greenTeal}
-        description={
-          deals === null || stages === null
-            ? "Loading pipeline…"
-            : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${stages.length} stages · ₹${openValue.toLocaleString()} open value`
-        }
+        description={deals === null || stages === null
+          ? "Loading pipeline…"
+          : `${kpis.openCount} open · ${fmtMoney(kpis.openValue)} pipeline`}
         people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.pr]}
         morePeople={9}
+        actions={
+          <div className="crmp__head-actions">
+            <Link href="/crm/accounts" className="crmp__nav-link"><Users /> Accounts</Link>
+            <Link href="/crm/leads" className="crmp__nav-link"><FileText /> Leads</Link>
+            <Link href="/crm/reports" className="crmp__nav-link"><BarChart3 /> Reports</Link>
+            <button type="button" className="crmp__btn-primary" onClick={() => { if (columns[0]) void addDeal(columns[0].stage.id); }}>
+              <Plus /> New deal
+            </button>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "kanban" && (
-        <>
-          <OsFilterBar newLabel="New deal" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView
-              Icon={BarChart3}
-              iconGradient={GRAD.redPink}
-              title="Couldn't load pipeline"
-              subtitle={`API error: ${loadError}.`}
-              cta="Retry"
-            />
-          ) : stages === null || deals === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>
-              Loading pipeline…
-            </div>
-          ) : kanbanColumns.length === 0 ? (
-            <OsEmptyView
-              Icon={BarChart3}
-              iconGradient={GRAD.greenTeal}
-              title="No deals yet"
-              subtitle="Add your first deal in any stage column, or let Sidekick (⌘J) import from a CSV."
-              cta="New deal"
-            />
-          ) : (
-            <OsKanban moduleId="crm" columns={kanbanColumns} />
-          )}
-        </>
-      )}
+      <div className="crmp">
+        {/* KPI strip */}
+        <div className="crmp__kpis">
+          <KpiTile
+            accent="var(--os-c-green)"
+            Icon={DollarSign}
+            label="Open pipeline"
+            value={fmtMoney(kpis.openValue)}
+            sub={`${kpis.openCount} deal${kpis.openCount === 1 ? "" : "s"}`}
+          />
+          <KpiTile
+            accent="var(--os-c-blue)"
+            Icon={TrendingUp}
+            label="Weighted forecast"
+            value={fmtMoney(kpis.weighted)}
+            sub="stage-probability adjusted"
+          />
+          <KpiTile
+            accent="var(--os-c-purple)"
+            Icon={Layers}
+            label="Stages"
+            value={`${stages?.length ?? 0}`}
+            sub={`${(deals ?? []).filter((d) => d.pipelineStage?.isWon).length} won`}
+          />
+          <KpiTile
+            accent="var(--os-c-orange)"
+            Icon={CalendarDays}
+            label="Closing this month"
+            value={`${kpis.closingThisMonthCount}`}
+            sub={kpis.closingThisMonthValue > 0 ? fmtMoney(kpis.closingThisMonthValue) : "no deals due"}
+          />
+        </div>
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New deal" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={BarChart3} iconGradient={GRAD.redPink} title="Couldn't load pipeline" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : stages === null || deals === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>
-              Loading pipeline…
-            </div>
-          ) : groups.length === 0 ? (
-            <OsEmptyView Icon={BarChart3} iconGradient={GRAD.greenTeal} title="No deals yet" subtitle="Add your first deal in any group, or use Sidekick to import." cta="New deal" />
-          ) : (
-            <OsMainTable
-              moduleId="crm"
-              columns={COLUMNS}
-              groups={groups}
-              statusOptions={stageOptions}
-              handlers={handlers}
-            />
-          )}
-        </>
-      )}
+        {/* Pipeline */}
+        {loadError ? (
+          <OsEmptyView
+            Icon={BarChart3}
+            iconGradient={GRAD.redPink}
+            title="Couldn't load pipeline"
+            subtitle={`API error: ${loadError}.`}
+            cta="Retry"
+          />
+        ) : stages === null || deals === null ? (
+          <div className="crmp__loading">Loading pipeline…</div>
+        ) : columns.length === 0 ? (
+          <OsEmptyView
+            Icon={BarChart3}
+            iconGradient={GRAD.greenTeal}
+            title="No stages configured"
+            subtitle="Set up your pipeline stages in CRM Settings, then add your first deal."
+            cta="Pipeline settings"
+          />
+        ) : (
+          <div className="crmp__pipeline">
+            {columns.map((col) => (
+              <section
+                key={col.stage.id}
+                className={`crmp__col${hoverStageId === col.stage.id ? " is-drop" : ""}`}
+                onDragOver={(e) => { e.preventDefault(); if (dragId) setHoverStageId(col.stage.id); }}
+                onDragLeave={() => { if (hoverStageId === col.stage.id) setHoverStageId(null); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setHoverStageId(null);
+                  if (dragId) void moveDeal(dragId, col.stage.id);
+                  setDragId(null);
+                }}
+              >
+                <header className="crmp__col-head" style={{ ["--col-c" as unknown as string]: col.color }}>
+                  <span className="crmp__col-dot" aria-hidden="true" />
+                  <span className="crmp__col-title">{col.stage.name}</span>
+                  <span className="crmp__col-count">{col.deals.length}</span>
+                  <span className="crmp__col-sum">{fmtMoney(col.totalValue)}</span>
+                </header>
 
-      {activeTab === "calendar" && (
-        <OsCalendar
-          moduleId="crm"
-          events={(deals ?? [])
-            .filter((d) => d.expectedCloseDate)
-            .map((d): CalendarEvent => ({
-              id: d.id,
-              title: `${d.name}${d.amount ? ` · ₹${(typeof d.amount === "string" ? parseFloat(d.amount) : d.amount).toLocaleString()}` : ""}`,
-              date: d.expectedCloseDate as string,
-              color: d.pipelineStage ? stageColor(d.pipelineStage) : C.gray,
-              done: d.pipelineStage?.isWon === true,
-              payload: dealToRow(d).cells,
-            }))}
-          newLabel="New deal"
-        />
-      )}
+                <div className="crmp__col-body">
+                  {col.deals.length === 0 ? (
+                    <div className="crmp__col-empty">Drop a deal here</div>
+                  ) : col.deals.map((d) => {
+                    const amt = dealAmount(d);
+                    const due = dueChip(d.expectedCloseDate);
+                    const owner = d.ownerId ? avatarFor(d.ownerId) : null;
+                    return (
+                      <Link
+                        key={d.id}
+                        href={`/crm/${d.id}`}
+                        className={`crmp__card${dragId === d.id ? " is-dragging" : ""}`}
+                        draggable
+                        onDragStart={(e) => {
+                          setDragId(d.id);
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd={() => { setDragId(null); setHoverStageId(null); }}
+                      >
+                        <span className="crmp__card-accent" style={{ background: col.color }} aria-hidden="true" />
+                        <span className="crmp__card-grip" aria-hidden="true"><GripVertical /></span>
+                        <div className="crmp__card-title">{d.name}</div>
+                        {d.account?.name && <div className="crmp__card-acct">{d.account.name}</div>}
+                        <div className="crmp__card-foot">
+                          {amt > 0 && <span className="crmp__card-amt">{fmtMoney(amt, d.currency ?? "₹")}</span>}
+                          {due && <span className={`crmp__card-due crmp__card-due--${due.tone}`}>{due.label}</span>}
+                          {owner && (
+                            <span className="crmp__card-owner" style={{ background: owner.color }}>{owner.initials}</span>
+                          )}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
 
-      {activeTab !== "kanban" && activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView
-          Icon={BarChart3}
-          iconGradient={GRAD.greenTeal}
-          title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`}
-          subtitle="This view will share the same live data as Kanban + Main table. Persistence already works on those two — try them."
-          chips={["Live data", "Persistent edits", "Drag-and-drop"]}
-          cta="Back to Kanban"
-        />
-      )}
+                <button
+                  type="button"
+                  className="crmp__col-add"
+                  onClick={() => void addDeal(col.stage.id)}
+                >
+                  <Plus /> Add deal
+                </button>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
     </>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof DollarSign; label: string; value: string; sub: string }) {
+  return (
+    <div className="crmp__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="crmp__kpi-accent" aria-hidden="true" />
+      <div className="crmp__kpi-row">
+        <div className="crmp__kpi-icon"><Icon /></div>
+        <div className="crmp__kpi-label">{label}</div>
+      </div>
+      <div className="crmp__kpi-value">{value}</div>
+      <div className="crmp__kpi-sub">{sub}</div>
+    </div>
   );
 }

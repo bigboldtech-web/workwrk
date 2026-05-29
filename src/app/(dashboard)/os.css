@@ -11367,3 +11367,266 @@ table.os-tbl {
 .okrd-activity__line code { font-size: 11.5px; padding: 1px 6px; background: var(--os-surface-1); border-radius: 4px; color: var(--okrd-color); font-weight: 600; font-family: ui-monospace, SFMono-Regular, monospace; }
 .okrd-activity__note { margin: 4px 0 0; font-size: 11.5px; color: var(--os-ink-3); font-style: italic; line-height: 1.45; }
 .okrd-activity__time { display: block; margin-top: 3px; font-size: 10.5px; color: var(--os-ink-3); font-weight: 500; }
+
+/* ════════════════════════════════════════════════════════════════
+ * CRM · PIPELINE — kanban-first bespoke layout
+ * ════════════════════════════════════════════════════════════════ */
+.crmp { padding: 14px 28px 40px; max-width: 1600px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.crmp__loading { padding: 60px 24px; text-align: center; color: var(--os-ink-3); font-size: 13px; }
+
+/* ─── Header actions ─── */
+.crmp__head-actions { display: flex; gap: 6px; align-items: center; }
+.crmp__nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--os-ink-2);
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  text-decoration: none;
+  transition: all 120ms;
+}
+.crmp__nav-link svg { width: 13px; height: 13px; }
+.crmp__nav-link:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+.crmp__btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--os-c-green), var(--os-c-teal));
+  color: white;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 120ms;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.16);
+  margin-left: 4px;
+}
+.crmp__btn-primary svg { width: 13px; height: 13px; }
+.crmp__btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px color-mix(in srgb, var(--os-c-green) 24%, transparent), inset 0 1px 0 rgba(255,255,255,0.16); }
+
+/* ─── KPI strip ─── */
+.crmp__kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.crmp__kpi {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  padding: 14px 16px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+.crmp__kpi-accent {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--kpi-accent);
+}
+.crmp__kpi-row { display: flex; align-items: center; gap: 8px; }
+.crmp__kpi-icon {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--kpi-accent) 14%, transparent);
+  color: var(--kpi-accent);
+}
+.crmp__kpi-icon svg { width: 13px; height: 13px; }
+.crmp__kpi-label { font-size: 11px; font-weight: 700; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.crmp__kpi-value { font-size: 22px; font-weight: 700; color: var(--os-ink); font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; }
+.crmp__kpi-sub { font-size: 11.5px; color: var(--os-ink-3); }
+
+/* ─── Pipeline ─── */
+.crmp__pipeline {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(280px, 1fr);
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  scroll-snap-type: x proximity;
+}
+.crmp__col {
+  display: flex;
+  flex-direction: column;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  scroll-snap-align: start;
+  min-height: 320px;
+  transition: all 120ms;
+}
+.crmp__col.is-drop {
+  border-color: var(--os-brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--os-brand) 14%, transparent);
+  background: color-mix(in srgb, var(--os-brand) 3%, var(--os-canvas));
+}
+
+.crmp__col-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--os-line);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--col-c) 8%, transparent), transparent);
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+.crmp__col-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--col-c);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--col-c) 18%, transparent);
+}
+.crmp__col-title { flex: 1; font-size: 13px; font-weight: 700; color: var(--os-ink); }
+.crmp__col-count {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--os-surface-1);
+  color: var(--os-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.crmp__col-sum {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--col-c);
+  font-variant-numeric: tabular-nums;
+}
+
+.crmp__col-body {
+  flex: 1;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 60px;
+}
+.crmp__col-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--os-ink-3);
+  font-style: italic;
+  border: 1px dashed var(--os-line);
+  border-radius: 8px;
+  background: var(--os-surface);
+}
+
+/* ─── Cards ─── */
+.crmp__card {
+  position: relative;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px 9px 14px;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 9px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  cursor: grab;
+  transition: all 120ms;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.crmp__card:hover {
+  border-color: var(--os-line-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.06);
+}
+.crmp__card:active { cursor: grabbing; }
+.crmp__card.is-dragging {
+  opacity: 0.5;
+  transform: rotate(1.5deg) scale(1.02);
+}
+.crmp__card-accent {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 3px;
+}
+.crmp__card-grip {
+  position: absolute;
+  top: 8px; right: 6px;
+  color: var(--os-ink-3);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.crmp__card-grip svg { width: 12px; height: 12px; }
+.crmp__card:hover .crmp__card-grip { opacity: 0.6; }
+
+.crmp__card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--os-ink);
+  line-height: 1.35;
+  padding-right: 16px;
+}
+.crmp__card-acct {
+  font-size: 11px;
+  color: var(--os-ink-3);
+  font-weight: 500;
+}
+.crmp__card-foot {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+.crmp__card-amt {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--os-c-green);
+  font-variant-numeric: tabular-nums;
+}
+.crmp__card-due {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.crmp__card-due--good  { background: color-mix(in srgb, var(--os-c-green) 12%, transparent);  color: var(--os-c-green); }
+.crmp__card-due--warn  { background: color-mix(in srgb, var(--os-c-orange) 16%, transparent); color: #a4640d; }
+.crmp__card-due--bad   { background: color-mix(in srgb, var(--os-c-red) 14%, transparent);    color: var(--os-c-red); }
+.crmp__card-due--muted { background: var(--os-surface-1); color: var(--os-ink-3); border-color: var(--os-line); }
+
+.crmp__card-owner {
+  margin-left: auto;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: white;
+  font-size: 9.5px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+}
+
+/* ─── Add deal button ─── */
+.crmp__col-add {
+  margin: 0 10px 10px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px;
+  background: transparent;
+  border: 1px dashed var(--os-line);
+  border-radius: 8px;
+  color: var(--os-ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms;
+}
+.crmp__col-add svg { width: 12px; height: 12px; }
+.crmp__col-add:hover {
+  color: var(--os-brand);
+  border-color: var(--os-brand);
+  background: color-mix(in srgb, var(--os-brand) 6%, transparent);
+}
+
+@media (max-width: 1100px) {
+  .crmp__kpis { grid-template-columns: repeat(2, 1fr); }
+}

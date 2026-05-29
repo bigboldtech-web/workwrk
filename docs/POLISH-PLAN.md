@@ -61,7 +61,7 @@ Every page subtask must pass this gate before being marked done:
 
 ## D. Sales / CRM (7 pages)
 
-- [ ] /crm — pipeline kanban-first
+- [x] /crm — pipeline kanban-first
 - [ ] /crm/[id] — opportunity detail with deal scoreboard
 - [ ] /crm/pipeline — drag-drop with weighted ARR
 - [ ] /crm/accounts — account cards with logo
