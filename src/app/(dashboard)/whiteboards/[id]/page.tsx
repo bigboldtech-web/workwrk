@@ -1,14 +1,19 @@
 "use client";
 
-// Single-whiteboard canvas. Excalidraw is dynamically imported with
-// ssr:false because it touches `window` on load. Scene is autosaved
-// every 3 seconds when dirty.
+/* Whiteboard canvas — Excalidraw wrapper.
+ *
+ * Custom toolbar above the canvas (back button, inline-editable title,
+ * autosave status pill). The canvas itself is Excalidraw — we own
+ * load/save, Excalidraw owns the drawing UI.
+ *
+ * SSR is disabled for Excalidraw (touches window) and the toolbar is
+ * full-height so the canvas can fill the viewport below.
+ */
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft, Save, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, CheckCircle2, Cloud } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = dynamic(
@@ -40,10 +45,9 @@ export default function WhiteboardCanvasPage() {
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [dirty, setDirty] = useState(false);
 
-  // Latest scene captured from Excalidraw onChange — flushed by the
-  // autosave loop. Ref instead of state so onChange doesn't cause
-  // re-renders.
+  // Latest scene captured from Excalidraw onChange — flushed by autosave.
   const pendingSceneRef = useRef<SceneShape | null>(null);
   const dirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -78,6 +82,7 @@ export default function WhiteboardCanvasPage() {
       });
       if (res.ok) {
         dirtyRef.current = false;
+        setDirty(false);
         setLastSavedAt(new Date());
       }
     } finally {
@@ -86,20 +91,19 @@ export default function WhiteboardCanvasPage() {
   }, [params?.id]);
 
   const onCanvasChange = useCallback((elements: readonly unknown[], appState: unknown, files: unknown) => {
-    // Excalidraw fires onChange on every frame; we don't want to save
-    // on every keystroke. Stash latest scene; debounce-flush.
     pendingSceneRef.current = {
       elements: elements as unknown[],
       appState: appState as Record<string, unknown>,
       files: files as Record<string, unknown>,
     };
     dirtyRef.current = true;
+    setDirty(true);
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => { flushSave(); }, AUTOSAVE_DEBOUNCE_MS);
   }, [flushSave]);
 
-  // Save on tab close / route away
+  // Save on tab close / unmount
   useEffect(() => {
     function onBeforeUnload(e: BeforeUnloadEvent) {
       if (dirtyRef.current) {
@@ -123,9 +127,7 @@ export default function WhiteboardCanvasPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: renameValue.trim() }),
     });
-    if (res.ok) {
-      setBoard({ ...board, name: renameValue.trim() });
-    }
+    if (res.ok) setBoard({ ...board, name: renameValue.trim() });
   }
 
   if (loading || !board) return <CanvasLoader />;
@@ -139,39 +141,45 @@ export default function WhiteboardCanvasPage() {
     : undefined;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--app-topbar-height,56px))]">
-      {/* Mini toolbar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-surface">
-        <Link
-          href="/whiteboards"
-          className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground"
-        >
-          <ArrowLeft size={12} /> All whiteboards
-        </Link>
+    <div className="wbc">
+      {/* Toolbar */}
+      <header className="wbc__bar">
+        <button type="button" className="wbc__back" onClick={() => router.push("/whiteboards")} aria-label="Back to whiteboards">
+          <ArrowLeft />
+        </button>
+
         <input
+          className="wbc__title"
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           onBlur={renameBoard}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          className="font-medium text-sm bg-transparent border-0 focus:outline-none focus:bg-surface-2 px-2 py-1 rounded-md min-w-[200px]"
+          placeholder="Untitled whiteboard"
         />
-        <div className="ml-auto flex items-center gap-3 text-xs text-muted-2">
+
+        <div className="wbc__status">
           {saving ? (
-            <span className="inline-flex items-center gap-1 text-amber-600">
-              <Loader2 size={11} className="animate-spin" /> Saving…
+            <span className="wbc__status-saving">
+              <Loader2 className="wbc__spin" /> Saving…
+            </span>
+          ) : dirty ? (
+            <span className="wbc__status-dirty">
+              <Cloud /> Unsaved changes
             </span>
           ) : lastSavedAt ? (
-            <span className="inline-flex items-center gap-1">
-              <Save size={11} /> Saved {lastSavedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+            <span className="wbc__status-saved">
+              <CheckCircle2 /> Saved {lastSavedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           ) : (
-            <span className="text-muted-2">Autosave on · Cmd+S to flush</span>
+            <span className="wbc__status-idle">
+              <Cloud /> Autosave on
+            </span>
           )}
         </div>
-      </div>
+      </header>
 
       {/* Canvas */}
-      <div className="flex-1 relative">
+      <div className="wbc__canvas">
         <Excalidraw
           initialData={initialData}
           onChange={onCanvasChange}
@@ -180,8 +188,8 @@ export default function WhiteboardCanvasPage() {
               changeViewBackgroundColor: true,
               clearCanvas: true,
               export: { saveFileToDisk: true },
-              loadScene: false,        // we own load/save through our API
-              saveToActiveFile: false, // ditto
+              loadScene: false,
+              saveToActiveFile: false,
               toggleTheme: true,
             },
           }}
@@ -193,11 +201,9 @@ export default function WhiteboardCanvasPage() {
 
 function CanvasLoader() {
   return (
-    <div className="flex items-center justify-center h-[calc(100vh-var(--app-topbar-height,56px))]">
-      <div className="text-center">
-        <Loader2 size={24} className="mx-auto mb-2 animate-spin text-pink-600" />
-        <p className="text-sm text-muted">Loading whiteboard…</p>
-      </div>
+    <div className="wbc__loading">
+      <Loader2 className="wbc__spin" />
+      <p>Loading whiteboard…</p>
     </div>
   );
 }
