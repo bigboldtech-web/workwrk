@@ -2,18 +2,22 @@
 
 /* Tasks · Gantt — horizontal timeline.
  *
- * Rows: every task (sorted by start date).
- * Columns: days in the visible window (default 60 days, today centered).
- * Bars: scheduled span from start to end, colored by status, with a
- *       priority dot at the left edge. Today's vertical guide line.
- * Group toggle: by status / by assignee.
+ * Rows: every task in the window, optionally grouped by status or
+ * assignee. Columns: days (default 60). Each bar represents the span
+ * from start to end colored by status, with a priority dot in the
+ * rail. Today's vertical guide line + sticky day header. Double-click
+ * a bar to shift one day left.
  *
- * GET   /api/tasks?startDate=…&endDate=…
- * PATCH /api/tasks { id, date }   (drag the whole bar to reschedule)
+ *  GET   /api/tasks?startDate=…&endDate=…
+ *  PATCH /api/tasks { id, date }
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GanttChart, ChevronLeft, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  GanttChart, ChevronLeft, ChevronRight, BarChart3, Users, Activity,
+} from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -32,8 +36,8 @@ type ApiTask = {
 };
 
 const MS_DAY = 86_400_000;
-const COL_W = 28; // px per day
-const ROW_H = 32;
+const COL_W = 30;
+const ROW_H = 34;
 
 const STATUS_COLOR: Record<ApiStatus, string> = {
   PLANNED: "var(--os-c-indigo)", IN_PROGRESS: "var(--os-c-orange)", COMPLETED: "var(--os-c-green)",
@@ -54,13 +58,21 @@ function taskSpan(t: ApiTask): { start: Date; end: Date } {
   return { start: startOfDay(start), end: startOfDay(end) };
 }
 
+const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-pink)", "var(--os-c-teal)", "var(--os-c-indigo)", "var(--os-c-blue)", "var(--os-c-red)"];
+function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
+function initials(f?: string | null, l?: string | null) {
+  return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?";
+}
+
 type GroupBy = "status" | "assignee";
+
+const DOW_INITIAL = ["M", "T", "W", "T", "F", "S", "S"];
 
 export default function GanttPage() {
   const [tasks, setTasks] = useState<ApiTask[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [windowStart, setWindowStart] = useState<Date>(() => startOfDay(new Date(Date.now() - 14 * MS_DAY)));
-  const [windowDays, setWindowDays] = useState<number>(60);
+  const [windowDays] = useState<number>(60);
   const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
@@ -82,16 +94,21 @@ export default function GanttPage() {
   const v = rowVersion("tasks");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const days = useMemo(() => Array.from({ length: windowDays }, (_, i) => new Date(windowStart.getTime() + i * MS_DAY)), [windowStart, windowDays]);
+  const days = useMemo(
+    () => Array.from({ length: windowDays }, (_, i) => new Date(windowStart.getTime() + i * MS_DAY)),
+    [windowStart, windowDays],
+  );
   const today0 = startOfDay(new Date()).getTime();
   const todayOffset = Math.floor((today0 - windowStart.getTime()) / MS_DAY);
 
-  const sorted = useMemo(() => {
-    return [...(tasks ?? [])].sort((a, b) => taskSpan(a).start.getTime() - taskSpan(b).start.getTime());
-  }, [tasks]);
+  const sorted = useMemo(
+    () => [...(tasks ?? [])].sort((a, b) => taskSpan(a).start.getTime() - taskSpan(b).start.getTime()),
+    [tasks],
+  );
 
   const groups = useMemo(() => {
-    const map = new Map<string, { id: string; title: string; color: string; items: ApiTask[] }>();
+    interface Group { id: string; title: string; color: string; items: ApiTask[]; subtitle?: string }
+    const map = new Map<string, Group>();
     for (const t of sorted) {
       if (groupBy === "status") {
         const key = t.status;
@@ -100,8 +117,10 @@ export default function GanttPage() {
         map.get(key)!.items.push(t);
       } else {
         const key = t.assignee?.id ?? "__none";
-        const title = t.assignee ? `${t.assignee.firstName ?? ""} ${t.assignee.lastName ?? ""}`.trim() || "Unknown" : "Unassigned";
-        if (!map.has(key)) map.set(key, { id: key, title, color: "var(--os-c-indigo)", items: [] });
+        const title = t.assignee
+          ? `${t.assignee.firstName ?? ""} ${t.assignee.lastName ?? ""}`.trim() || "Unknown"
+          : "Unassigned";
+        if (!map.has(key)) map.set(key, { id: key, title, color: t.assignee ? avColor(t.assignee.id) : "var(--os-c-darkgray)", items: [] });
         map.get(key)!.items.push(t);
       }
     }
@@ -112,8 +131,11 @@ export default function GanttPage() {
     const newDate = new Date(new Date(t.date).getTime() + daysShift * MS_DAY).toISOString();
     setTasks((prev) => prev?.map((x) => x.id === t.id ? { ...x, date: newDate } : x) ?? prev);
     try {
-      const res = await fetch("/api/tasks", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id, date: newDate }) });
-      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      const res = await fetch("/api/tasks", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: t.id, date: newDate }),
+      });
+      if (!res.ok) throw new Error();
     } catch { toast("Couldn't reschedule"); void load(); }
   }
 
@@ -134,111 +156,159 @@ export default function GanttPage() {
   }, [days, windowDays]);
 
   return (
-    <div className="gantt">
-      <header className="gantt__head">
-        <div className="gantt__head-l">
-          <div className="gantt__icon"><GanttChart /></div>
-          <div>
-            <h1 className="gantt__title">Gantt</h1>
-            <div className="gantt__sub">
-              {tasks === null ? "Loading…" : `${sorted.length} task${sorted.length === 1 ? "" : "s"} in window · ${windowDays}-day view`}
+    <>
+      <OsTitleBar
+        title="Gantt"
+        Icon={GanttChart}
+        iconGradient={GRAD.bluePurple}
+        description={tasks === null ? "Loading…" : `${sorted.length} task${sorted.length === 1 ? "" : "s"} in window · ${windowDays}-day view`}
+        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
+        morePeople={5}
+        actions={
+          <div className="gantt__head-actions">
+            <div className="gantt__group">
+              <button type="button" className={groupBy === "status" ? "is-active" : ""} onClick={() => setGroupBy("status")}>
+                <Activity /> Status
+              </button>
+              <button type="button" className={groupBy === "assignee" ? "is-active" : ""} onClick={() => setGroupBy("assignee")}>
+                <Users /> Assignee
+              </button>
+            </div>
+            <div className="gantt__nav">
+              <button type="button" onClick={() => setWindowStart(new Date(windowStart.getTime() - 14 * MS_DAY))} aria-label="-14 days"><ChevronLeft /></button>
+              <button type="button" onClick={() => setWindowStart(startOfDay(new Date(Date.now() - 14 * MS_DAY)))} className="gantt__nav-today">Today</button>
+              <button type="button" onClick={() => setWindowStart(new Date(windowStart.getTime() + 14 * MS_DAY))} aria-label="+14 days"><ChevronRight /></button>
             </div>
           </div>
-        </div>
-        <div className="gantt__controls">
-          <div className="gantt__group">
-            <span>Group:</span>
-            <button type="button" className={groupBy === "status" ? "is-active" : ""} onClick={() => setGroupBy("status")}>Status</button>
-            <button type="button" className={groupBy === "assignee" ? "is-active" : ""} onClick={() => setGroupBy("assignee")}>Assignee</button>
-          </div>
-          <div className="gantt__nav">
-            <button type="button" onClick={() => setWindowStart(new Date(windowStart.getTime() - 14 * MS_DAY))}><ChevronLeft /></button>
-            <button type="button" onClick={() => setWindowStart(startOfDay(new Date(Date.now() - 14 * MS_DAY)))} className="gantt__nav-today">Today</button>
-            <button type="button" onClick={() => setWindowStart(new Date(windowStart.getTime() + 14 * MS_DAY))}><ChevronRight /></button>
-          </div>
-        </div>
-      </header>
+        }
+      />
 
       {loadError ? (
-        <div className="gantt__error">Couldn&apos;t load: {loadError}</div>
+        <div className="gantt__loading">Couldn&apos;t load: {loadError}</div>
       ) : (
-        <div className="gantt__viewport">
-          <aside className="gantt__rail">
-            <div className="gantt__rail-head">&nbsp;</div>
-            {groups.flatMap((g) => [
-              <div key={`g-${g.id}`} className="gantt__rail-group" style={{ borderLeftColor: g.color }}>
-                {g.title} <span>{g.items.length}</span>
-              </div>,
-              ...g.items.map((t) => (
-                <div key={t.id} className="gantt__rail-row" title={t.title}>
-                  <span className="gantt__rail-prio" style={{ background: PRIO_COLOR[t.priority] }} />
-                  <span className="gantt__rail-name">{t.title}</span>
-                </div>
-              )),
-            ])}
-          </aside>
-          <div className="gantt__scroll">
-            <div className="gantt__canvas" style={{ width: totalWidth }}>
-              {/* month headers */}
-              <div className="gantt__months">
-                {monthHeaders.map((m) => (
-                  <div key={m.offset} className="gantt__month" style={{ left: m.offset * COL_W, width: m.days * COL_W }}>{m.label}</div>
-                ))}
+        <div className="gantt">
+          <div className="gantt__viewport">
+            {/* Rail (task names) */}
+            <aside className="gantt__rail">
+              <div className="gantt__rail-head">
+                <span className="gantt__rail-head-label">{groupBy === "status" ? "By status" : "By assignee"}</span>
+                <span className="gantt__rail-head-count"><BarChart3 /> {sorted.length}</span>
               </div>
-              {/* day grid */}
-              <div className="gantt__days">
-                {days.map((d, i) => {
-                  const dow = (d.getDay() + 6) % 7;
-                  const isWeekend = dow === 5 || dow === 6;
-                  return (
-                    <div key={i} className={`gantt__day ${isWeekend ? "is-weekend" : ""}`} style={{ left: i * COL_W }}>
-                      <span>{d.getDate()}</span>
+              {groups.flatMap((g) => [
+                <div key={`g-${g.id}`} className="gantt__rail-group" style={{ borderLeftColor: g.color }}>
+                  <span className="gantt__rail-group-title">{g.title}</span>
+                  <span className="gantt__rail-group-count">{g.items.length}</span>
+                </div>,
+                ...g.items.map((t) => (
+                  <div key={t.id} className="gantt__rail-row" title={t.title}>
+                    <span className="gantt__rail-prio" style={{ background: PRIO_COLOR[t.priority] }} />
+                    <span className="gantt__rail-name">{t.title}</span>
+                    {t.assignee && groupBy === "status" && (
+                      <span className="gantt__rail-av" style={{ background: avColor(t.assignee.id) }}>
+                        {initials(t.assignee.firstName, t.assignee.lastName)}
+                      </span>
+                    )}
+                  </div>
+                )),
+              ])}
+            </aside>
+
+            {/* Scrollable timeline */}
+            <div className="gantt__scroll">
+              <div className="gantt__canvas" style={{ width: totalWidth }}>
+                {/* Month headers */}
+                <div className="gantt__months">
+                  {monthHeaders.map((m) => (
+                    <div key={m.offset} className="gantt__month" style={{ left: m.offset * COL_W, width: m.days * COL_W }}>
+                      {m.label}
                     </div>
-                  );
-                })}
-              </div>
-              {/* today line */}
-              {todayOffset >= 0 && todayOffset < windowDays && (
-                <div className="gantt__today-line" style={{ left: todayOffset * COL_W + COL_W / 2 }}>
-                  <span>Today</span>
+                  ))}
                 </div>
-              )}
-              {/* group rows + bars */}
-              <div className="gantt__rows">
-                {groups.flatMap((g) => [
-                  <div key={`g-${g.id}`} className="gantt__group-row" style={{ height: ROW_H }} />,
-                  ...g.items.map((t) => {
-                    const { start, end } = taskSpan(t);
-                    const startOffset = Math.max(0, Math.floor((start.getTime() - windowStart.getTime()) / MS_DAY));
-                    const endOffset = Math.min(windowDays, Math.ceil((end.getTime() - windowStart.getTime()) / MS_DAY));
-                    const visibleSpan = Math.max(1, endOffset - startOffset);
-                    const offscreen = end.getTime() < windowStart.getTime() || start.getTime() > windowStart.getTime() + windowDays * MS_DAY;
+
+                {/* Day grid */}
+                <div className="gantt__days">
+                  {days.map((d, i) => {
+                    const dow = (d.getDay() + 6) % 7;
+                    const isWeekend = dow === 5 || dow === 6;
+                    const isToday = i === todayOffset;
                     return (
-                      <div key={t.id} className="gantt__bar-row" style={{ height: ROW_H }}>
-                        {!offscreen && (
-                          <div
-                            className="gantt__bar"
-                            style={{
-                              left: startOffset * COL_W,
-                              width: visibleSpan * COL_W - 2,
-                              background: STATUS_COLOR[t.status],
-                              opacity: t.status === "COMPLETED" ? 0.55 : 1,
-                            }}
-                            title={`${t.title} · ${start.toLocaleDateString()} → ${end.toLocaleDateString()}`}
-                            onDoubleClick={() => void rescheduleTask(t, -1)}
-                          >
-                            <span className="gantt__bar-label">{t.title}</span>
-                          </div>
-                        )}
+                      <div key={i} className={`gantt__day ${isWeekend ? "is-weekend" : ""} ${isToday ? "is-today" : ""}`} style={{ left: i * COL_W }}>
+                        <span className="gantt__day-num">{d.getDate()}</span>
+                        <span className="gantt__day-dow">{DOW_INITIAL[dow]}</span>
                       </div>
                     );
-                  }),
-                ])}
+                  })}
+                </div>
+
+                {/* Today vertical line */}
+                {todayOffset >= 0 && todayOffset < windowDays && (
+                  <div className="gantt__today-line" style={{ left: todayOffset * COL_W + COL_W / 2 }}>
+                    <span className="gantt__today-pill">Today</span>
+                  </div>
+                )}
+
+                {/* Weekend stripes (extend full height) */}
+                <div className="gantt__weekends" style={{ width: totalWidth }}>
+                  {days.map((d, i) => {
+                    const dow = (d.getDay() + 6) % 7;
+                    if (dow < 5) return null;
+                    return <div key={i} className="gantt__weekend-stripe" style={{ left: i * COL_W, width: COL_W }} />;
+                  })}
+                </div>
+
+                {/* Rows + bars */}
+                <div className="gantt__rows">
+                  {groups.flatMap((g) => [
+                    <div key={`g-${g.id}`} className="gantt__group-row" style={{ height: ROW_H }} />,
+                    ...g.items.map((t) => {
+                      const { start, end } = taskSpan(t);
+                      const startOffset = Math.max(0, Math.floor((start.getTime() - windowStart.getTime()) / MS_DAY));
+                      const endOffset = Math.min(windowDays, Math.ceil((end.getTime() - windowStart.getTime()) / MS_DAY));
+                      const visibleSpan = Math.max(1, endOffset - startOffset);
+                      const offscreen = end.getTime() < windowStart.getTime() || start.getTime() > windowStart.getTime() + windowDays * MS_DAY;
+                      return (
+                        <div key={t.id} className="gantt__bar-row" style={{ height: ROW_H }}>
+                          {!offscreen && (
+                            <div
+                              className={`gantt__bar ${t.status === "COMPLETED" ? "is-done" : ""}`}
+                              style={{
+                                left: startOffset * COL_W + 2,
+                                width: visibleSpan * COL_W - 4,
+                                background: STATUS_COLOR[t.status],
+                              }}
+                              title={`${t.title} · ${start.toLocaleDateString()} → ${end.toLocaleDateString()}`}
+                              onDoubleClick={() => void rescheduleTask(t, -1)}
+                            >
+                              <span className="gantt__bar-cap" style={{ background: PRIO_COLOR[t.priority] }} />
+                              <span className="gantt__bar-label">{t.title}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }),
+                  ])}
+                </div>
               </div>
             </div>
+          </div>
+
+          {/* Legend */}
+          <div className="gantt__legend">
+            <span>Status</span>
+            <span><i style={{ background: STATUS_COLOR.PLANNED }} /> Planned</span>
+            <span><i style={{ background: STATUS_COLOR.IN_PROGRESS }} /> In progress</span>
+            <span><i style={{ background: STATUS_COLOR.COMPLETED }} /> Completed</span>
+            <span className="gantt__legend-sep">·</span>
+            <span>Priority cap</span>
+            <span><i style={{ background: PRIO_COLOR.URGENT }} /> P0</span>
+            <span><i style={{ background: PRIO_COLOR.HIGH }} /> P1</span>
+            <span><i style={{ background: PRIO_COLOR.NORMAL }} /> P2</span>
+            <span><i style={{ background: PRIO_COLOR.LOW }} /> P3</span>
+            <span className="gantt__legend-sep">·</span>
+            <span>Double-click a bar to shift -1 day</span>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
