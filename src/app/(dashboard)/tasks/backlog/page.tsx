@@ -1,19 +1,24 @@
 "use client";
 
-/* Backlog — flat, dense, sortable. The PM's spreadsheet.
+/* Backlog — the PM's flat, sortable spreadsheet of unscheduled work.
  *
- * Rows: every unscheduled / future task in the org.
- * Columns: priority · title · estimate (h) · age · assignee · labels.
- * Click any header to sort. Bulk-select via checkbox column. Drag the
- * priority chip to bump it up/down. Type at the bottom row to add.
+ * Rows: every non-completed future task. Sort by priority / title /
+ * estimate / age / assignee. Bulk-select for promote or archive.
+ * Inline add at the bottom. Priority pill bumps up/down with arrows.
  *
- * GET   /api/tasks?startDate=…&endDate=…       (we pull a 90d window)
- * PATCH /api/tasks   { id, status?, priority?, estimateHours?, title?, date? }
- * POST  /api/tasks   { title, date, allDay }
+ *  GET   /api/tasks?startDate=…&endDate=…
+ *  PATCH /api/tasks   { id, ... }
+ *  POST  /api/tasks   { title, date, allDay }
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers, ChevronUp, ChevronDown, Flame, Trash2, ArrowUpDown, Plus } from "lucide-react";
+import {
+  Layers, ChevronUp, ChevronDown, Flame, Trash2, ArrowUpDown,
+  Plus, AlertOctagon, UserMinus, Hourglass, ListChecks, Loader2,
+} from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -34,8 +39,10 @@ type ApiTask = {
 const PRIO_RANK: Record<ApiPrio, number> = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
 const PRIO_LABEL: Record<ApiPrio, string> = { URGENT: "P0", HIGH: "P1", NORMAL: "P2", LOW: "P3" };
 const PRIO_COLOR: Record<ApiPrio, string> = {
-  URGENT: "var(--os-c-red)", HIGH: "var(--os-c-orange)",
-  NORMAL: "var(--os-c-blue)", LOW: "var(--os-c-darkgray)",
+  URGENT: "var(--os-c-red)",
+  HIGH:   "var(--os-c-orange)",
+  NORMAL: "var(--os-c-blue)",
+  LOW:    "var(--os-c-darkgray)",
 };
 const PRIO_NEXT: Record<ApiPrio, ApiPrio> = { LOW: "NORMAL", NORMAL: "HIGH", HIGH: "URGENT", URGENT: "URGENT" };
 const PRIO_PREV: Record<ApiPrio, ApiPrio> = { URGENT: "HIGH", HIGH: "NORMAL", NORMAL: "LOW", LOW: "LOW" };
@@ -53,6 +60,12 @@ const fmtAge = (iso?: string) => {
 type SortKey = "priority" | "title" | "estimate" | "age" | "assignee";
 type SortDir = "asc" | "desc";
 
+const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-pink)", "var(--os-c-teal)", "var(--os-c-indigo)", "var(--os-c-blue)", "var(--os-c-red)"];
+function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
+function initialsFor(f?: string | null, l?: string | null) {
+  return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?";
+}
+
 export default function BacklogPage() {
   const [tasks, setTasks] = useState<ApiTask[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -60,6 +73,7 @@ export default function BacklogPage() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState("");
+  const [adding, setAdding] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -71,7 +85,6 @@ export default function BacklogPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list: ApiTask[] = Array.isArray(data) ? data : (data.data ?? []);
-      // backlog = future, non-completed
       setTasks(list.filter((t) => t.status !== "COMPLETED"));
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
@@ -107,13 +120,16 @@ export default function BacklogPage() {
     return arr;
   }, [tasks, sortKey, sortDir]);
 
-  const totalEst = sorted.reduce((acc, t) => acc + (t.estimateHours ?? 0), 0);
-  const p0Count = sorted.filter((t) => t.priority === "URGENT").length;
-  const unassignedCount = sorted.filter((t) => !t.assignee).length;
+  const stats = useMemo(() => ({
+    total: sorted.length,
+    hours: sorted.reduce((acc, t) => acc + (t.estimateHours ?? 0), 0),
+    p0: sorted.filter((t) => t.priority === "URGENT").length,
+    unassigned: sorted.filter((t) => !t.assignee).length,
+  }), [sorted]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
-    else { setSortKey(key); setSortDir(key === "title" || key === "assignee" ? "asc" : "asc"); }
+    else { setSortKey(key); setSortDir("asc"); }
   }
 
   async function patch(id: string, body: Record<string, unknown>) {
@@ -124,10 +140,7 @@ export default function BacklogPage() {
         body: JSON.stringify({ id, ...body }),
       });
       if (!res.ok) throw new Error(`PATCH ${res.status}`);
-    } catch {
-      toast("Couldn't save");
-      void load();
-    }
+    } catch { toast("Couldn't save"); void load(); }
   }
 
   async function bumpPriority(t: ApiTask, dir: "up" | "down") {
@@ -143,6 +156,7 @@ export default function BacklogPage() {
 
   async function addRow() {
     if (!draft.trim()) return;
+    setAdding(true);
     try {
       const res = await fetch("/api/tasks", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -152,12 +166,11 @@ export default function BacklogPage() {
           allDay: true,
         }),
       });
-      if (!res.ok) throw new Error(`POST ${res.status}`);
+      if (!res.ok) throw new Error();
       setDraft("");
       void load();
-    } catch {
-      toast("Couldn't add");
-    }
+    } catch { toast("Couldn't add"); }
+    finally { setAdding(false); }
   }
 
   async function bulkPromote() {
@@ -170,6 +183,7 @@ export default function BacklogPage() {
     setSelected(new Set());
   }
   async function bulkArchive() {
+    if (!confirm(`Archive ${selected.size} item${selected.size === 1 ? "" : "s"}?`)) return;
     const ids = Array.from(selected);
     for (const id of ids) await patch(id, { status: "COMPLETED" });
     setSelected(new Set());
@@ -179,8 +193,7 @@ export default function BacklogPage() {
   function toggleOne(id: string) {
     setSelected((s) => {
       const n = new Set(s);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
+      if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
   }
@@ -190,123 +203,169 @@ export default function BacklogPage() {
   }
 
   return (
-    <div className="backlog">
-      <header className="backlog__head">
-        <div className="backlog__head-l">
-          <div className="backlog__icon"><Layers /></div>
-          <div>
-            <h1 className="backlog__title">Backlog</h1>
-            <div className="backlog__sub">
-              {tasks === null ? "Loading…" : (
-                <>{sorted.length} item{sorted.length === 1 ? "" : "s"} · {totalEst.toFixed(0)}h estimated · {p0Count} P0 · {unassignedCount} unassigned</>
-              )}
+    <>
+      <OsTitleBar
+        title="Backlog"
+        Icon={Layers}
+        iconGradient={GRAD.indigoBlue}
+        description={tasks === null ? "Loading…" : `${stats.total} item${stats.total === 1 ? "" : "s"} · ${stats.hours.toFixed(0)}h estimated`}
+        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
+        morePeople={5}
+        actions={
+          selected.size > 0 ? (
+            <div className="bklg__bulk">
+              <span>{selected.size} selected</span>
+              <button type="button" onClick={bulkPromote} title="Promote priority"><ChevronUp /> Promote</button>
+              <button type="button" onClick={bulkArchive} title="Archive (mark completed)"><Trash2 /> Archive</button>
+              <button type="button" onClick={() => setSelected(new Set())}>Clear</button>
             </div>
-          </div>
-        </div>
-        {selected.size > 0 ? (
-          <div className="backlog__bulk">
-            <span>{selected.size} selected</span>
-            <button type="button" onClick={bulkPromote}><ChevronUp /> Promote</button>
-            <button type="button" onClick={bulkArchive}><Trash2 /> Archive</button>
-            <button type="button" onClick={() => setSelected(new Set())}>Clear</button>
-          </div>
-        ) : null}
-      </header>
+          ) : null
+        }
+      />
 
       {loadError ? (
-        <div className="backlog__error">Couldn&apos;t load backlog: {loadError}</div>
+        <OsEmptyView Icon={Layers} iconGradient={GRAD.redPink} title="Couldn't load backlog" subtitle={`API error: ${loadError}`} cta="Retry" />
       ) : tasks === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
+        <div className="bklg__loading">Loading backlog…</div>
       ) : (
-        <div className="backlog__table">
-          <div className="backlog__row backlog__row--head">
-            <div className="backlog__cell backlog__cell--check">
-              <input
-                type="checkbox"
-                checked={selected.size > 0 && selected.size === sorted.length}
-                ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < sorted.length; }}
-                onChange={toggleAll}
-              />
+        <div className="bklg">
+          {/* Stat strip */}
+          {sorted.length > 0 && (
+            <div className="bklg__stats">
+              <Stat Icon={ListChecks} label="Items" value={`${stats.total}`} color="var(--os-c-indigo)" />
+              <Stat Icon={Hourglass} label="Hours estimated" value={`${stats.hours.toFixed(0)}h`} color="var(--os-c-blue)" />
+              <Stat Icon={AlertOctagon} label="P0 urgent" value={`${stats.p0}`} color="var(--os-c-red)" highlight={stats.p0 > 0} />
+              <Stat Icon={UserMinus} label="Unassigned" value={`${stats.unassigned}`} color="var(--os-c-orange)" highlight={stats.unassigned > 0} />
             </div>
-            <SortHeader label="Pri" k="priority" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="backlog__cell--prio" />
-            <SortHeader label="Title" k="title" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="backlog__cell--title" />
-            <SortHeader label="Est" k="estimate" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="backlog__cell--est" />
-            <SortHeader label="Age" k="age" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="backlog__cell--age" />
-            <SortHeader label="Assignee" k="assignee" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="backlog__cell--owner" />
-            <div className="backlog__cell backlog__cell--labels">Labels</div>
-          </div>
+          )}
 
-          {sorted.length === 0 ? (
-            <div className="backlog__empty">Backlog is empty. Drop ideas in below.</div>
-          ) : sorted.map((t) => (
-            <div key={t.id} className={`backlog__row ${selected.has(t.id) ? "is-selected" : ""}`}>
-              <div className="backlog__cell backlog__cell--check">
-                <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleOne(t.id)} />
+          {/* Spreadsheet */}
+          <div className="bklg__table">
+            <div className="bklg__row bklg__row--head">
+              <div className="bklg__cell bklg__cell--check">
+                <input
+                  type="checkbox"
+                  checked={selected.size > 0 && selected.size === sorted.length}
+                  ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < sorted.length; }}
+                  onChange={toggleAll}
+                />
               </div>
-              <div className="backlog__cell backlog__cell--prio">
-                <div className="backlog__prio" style={{ background: PRIO_COLOR[t.priority] }}>
-                  <button type="button" onClick={() => bumpPriority(t, "up")}   className="backlog__prio-arrow" title="Promote"><ChevronUp /></button>
-                  <span>{PRIO_LABEL[t.priority]}</span>
-                  <button type="button" onClick={() => bumpPriority(t, "down")} className="backlog__prio-arrow" title="Demote"><ChevronDown /></button>
+              <SortHeader label="Priority" k="priority" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} cls="bklg__cell--prio" />
+              <SortHeader label="Title"    k="title"    sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} cls="bklg__cell--title" />
+              <SortHeader label="Est"      k="estimate" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} cls="bklg__cell--est" />
+              <SortHeader label="Age"      k="age"      sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} cls="bklg__cell--age" />
+              <SortHeader label="Assignee" k="assignee" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} cls="bklg__cell--owner" />
+              <div className="bklg__cell bklg__cell--labels">Labels</div>
+            </div>
+
+            {sorted.length === 0 ? (
+              <div className="bklg__empty">Backlog is empty. Drop a quick idea below to start filling it.</div>
+            ) : sorted.map((t) => (
+              <div key={t.id} className={`bklg__row ${selected.has(t.id) ? "is-selected" : ""}`} style={{ ["--prio-color" as string]: PRIO_COLOR[t.priority] }}>
+                <div className="bklg__cell bklg__cell--check">
+                  <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleOne(t.id)} />
+                </div>
+
+                <div className="bklg__cell bklg__cell--prio">
+                  <div className="bklg__prio" style={{ background: PRIO_COLOR[t.priority] }}>
+                    <span>{PRIO_LABEL[t.priority]}</span>
+                    <div className="bklg__prio-arrows">
+                      <button type="button" onClick={() => bumpPriority(t, "up")} aria-label="Promote"><ChevronUp /></button>
+                      <button type="button" onClick={() => bumpPriority(t, "down")} aria-label="Demote"><ChevronDown /></button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bklg__cell bklg__cell--title">
+                  {(t.priority === "URGENT" || t.priority === "HIGH") && (
+                    <Flame style={{ width: 12, height: 12, color: PRIO_COLOR[t.priority], marginRight: 6, verticalAlign: -2 }} />
+                  )}
+                  {t.title}
+                </div>
+
+                <div className="bklg__cell bklg__cell--est">
+                  <input
+                    type="number"
+                    min={0}
+                    max={999}
+                    defaultValue={t.estimateHours ?? ""}
+                    onBlur={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v !== (t.estimateHours ?? 0)) void setEstimate(t, v); }}
+                    className="bklg__est-input"
+                    placeholder="—"
+                  />
+                  <span className="bklg__est-unit">h</span>
+                </div>
+
+                <div className="bklg__cell bklg__cell--age">{fmtAge(t.createdAt)}</div>
+
+                <div className="bklg__cell bklg__cell--owner">
+                  {t.assignee ? (
+                    <>
+                      <span className="bklg__avatar" style={{ background: avColor(t.assignee.id) }}>
+                        {initialsFor(t.assignee.firstName, t.assignee.lastName)}
+                      </span>
+                      <span className="bklg__assignee-name">
+                        {`${t.assignee.firstName ?? ""} ${t.assignee.lastName ?? ""}`.trim()}
+                      </span>
+                    </>
+                  ) : (
+                    <em className="bklg__unassigned">unassigned</em>
+                  )}
+                </div>
+
+                <div className="bklg__cell bklg__cell--labels">
+                  {(t.labels ?? []).slice(0, 3).map((l) => (
+                    <span key={l.label.id} className="bklg__label">{l.label.name}</span>
+                  ))}
+                  {(t.labels?.length ?? 0) > 3 && <span className="bklg__label-more">+{(t.labels?.length ?? 0) - 3}</span>}
                 </div>
               </div>
-              <div className="backlog__cell backlog__cell--title">
-                {(t.priority === "URGENT" || t.priority === "HIGH") && (
-                  <Flame style={{ width: 11, height: 11, color: PRIO_COLOR[t.priority], marginRight: 6, verticalAlign: -1 }} />
-                )}
-                {t.title}
-              </div>
-              <div className="backlog__cell backlog__cell--est">
-                <input
-                  type="number"
-                  min={0}
-                  max={999}
-                  defaultValue={t.estimateHours ?? ""}
-                  onBlur={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v !== (t.estimateHours ?? 0)) void setEstimate(t, v); }}
-                  className="backlog__est-input"
-                  placeholder="—"
-                />
-                <span className="backlog__est-unit">h</span>
-              </div>
-              <div className="backlog__cell backlog__cell--age">{fmtAge(t.createdAt)}</div>
-              <div className="backlog__cell backlog__cell--owner">
-                {t.assignee ? `${t.assignee.firstName ?? ""} ${t.assignee.lastName ?? ""}`.trim() : <em style={{ color: "var(--os-ink-3)" }}>unassigned</em>}
-              </div>
-              <div className="backlog__cell backlog__cell--labels">
-                {(t.labels ?? []).slice(0, 3).map((l) => (
-                  <span key={l.label.id} className="backlog__label">{l.label.name}</span>
-                ))}
-              </div>
-            </div>
-          ))}
+            ))}
 
-          <div className="backlog__row backlog__row--add">
-            <div className="backlog__cell backlog__cell--check"></div>
-            <div className="backlog__cell backlog__cell--prio"><Plus style={{ width: 14, height: 14, color: "var(--os-ink-3)" }} /></div>
-            <div className="backlog__cell backlog__cell--title" style={{ gridColumn: "span 5" }}>
-              <input
-                type="text"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void addRow(); }}
-                placeholder="Type a backlog item and press Enter…"
-                className="backlog__add-input"
-              />
+            {/* Inline add row */}
+            <div className="bklg__row bklg__row--add">
+              <div className="bklg__cell bklg__cell--check" />
+              <div className="bklg__cell bklg__cell--prio">
+                {adding ? <Loader2 className="bklg__spin" /> : <Plus />}
+              </div>
+              <div className="bklg__cell bklg__cell--add-input" style={{ gridColumn: "span 5" }}>
+                <input
+                  type="text"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void addRow(); }}
+                  placeholder="Type a backlog item and press Enter…"
+                  className="bklg__add-input"
+                  disabled={adding}
+                />
+              </div>
             </div>
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+function Stat({ Icon, label, value, color, highlight }: { Icon: typeof Layers; label: string; value: string; color: string; highlight?: boolean }) {
+  return (
+    <div className={`bklg-stat ${highlight ? "is-highlight" : ""}`} style={{ ["--stat-color" as string]: color }}>
+      <span className="bklg-stat__icon"><Icon /></span>
+      <div className="bklg-stat__body">
+        <div className="bklg-stat__value">{value}</div>
+        <div className="bklg-stat__label">{label}</div>
+      </div>
     </div>
   );
 }
 
-function SortHeader({ label, k, sortKey, sortDir, onClick, className }: {
+function SortHeader({ label, k, sortKey, sortDir, onClick, cls }: {
   label: string; k: SortKey; sortKey: SortKey; sortDir: SortDir;
-  onClick: (k: SortKey) => void; className?: string;
+  onClick: (k: SortKey) => void; cls?: string;
 }) {
   const active = sortKey === k;
   return (
-    <button type="button" onClick={() => onClick(k)} className={`backlog__cell backlog__sort ${className ?? ""} ${active ? "is-active" : ""}`}>
+    <button type="button" onClick={() => onClick(k)} className={`bklg__cell bklg__sort ${cls ?? ""} ${active ? "is-active" : ""}`}>
       <span>{label}</span>
       {active ? (sortDir === "asc" ? <ChevronUp /> : <ChevronDown />) : <ArrowUpDown />}
     </button>
