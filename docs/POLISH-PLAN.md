@@ -67,7 +67,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /crm/accounts — account cards with logo
 - [x] /crm/leads — lead routing list with score badges
 - [x] /crm/activities — activity stream
-- [ ] /crm/reports — bespoke charts
+- [x] /crm/reports — bespoke charts
 
 ## E. Marketing (4 pages)
 
