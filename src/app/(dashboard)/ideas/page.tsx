@@ -1,21 +1,28 @@
 "use client";
 
-/* Ideas — kanban. Not a table.
+/* Ideas — voting + kanban hybrid.
  *
- * 6 columns matching IdeaStatus: Submitted -> Under review -> Approved
- * -> Implemented (+ Rejected/Rewarded sidebars). Each idea is a card
- * with title, snippet, submitter avatar, vote count, comment count,
- * and inline upvote button. Drag a card to a different column to move
- * the idea forward.
+ * Top: pipeline of 4 status columns (Submitted → Under review →
+ * Approved → Implemented). Cards drag between columns to move them
+ * forward. Each card is Product-Hunt-style: large upvote stack on the
+ * left, idea body on the right.
  *
- * GET   /api/ideas?sort=votes
- * PATCH /api/ideas/[id]   { status }
- * POST  /api/ideas        { title, description }
- * POST  /api/ideas/[id]/vote   (toggle)
+ * Bottom: archive strip (Rewarded ⭐ + Rejected) when there's content.
+ *
+ *  GET   /api/ideas?sort=votes|new
+ *  POST  /api/ideas               { title, description, category? }
+ *  PATCH /api/ideas/[id]          { status }
+ *  POST  /api/ideas/[id]/vote     toggle
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Lightbulb, ThumbsUp, MessageSquare, Plus, X } from "lucide-react";
+import {
+  Lightbulb, ThumbsUp, MessageSquare, Plus, X, Trophy,
+  Flame, Clock, Loader2,
+} from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -49,19 +56,39 @@ const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orang
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
 
+function relTime(iso: string): string {
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+type Sort = "votes" | "new";
+
 export default function IdeasPage() {
   const [ideas, setIdeas] = useState<ApiIdea[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [composer, setComposer] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [draft, setDraft] = useState({ title: "", description: "" });
   const [dragId, setDragId] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
+  const [sort, setSort] = useState<Sort>("votes");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
-      const [iRes, mRes] = await Promise.all([fetch("/api/ideas?sort=votes"), fetch("/api/me")]);
+      const [iRes, mRes] = await Promise.all([
+        fetch(`/api/ideas?sort=${sort}`),
+        fetch("/api/me"),
+      ]);
       if (!iRes.ok) throw new Error(`HTTP ${iRes.status}`);
       const d = await iRes.json();
       setIdeas(d.data ?? (Array.isArray(d) ? d : []));
@@ -72,7 +99,7 @@ export default function IdeasPage() {
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
-  }, []);
+  }, [sort]);
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("ideas");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
@@ -94,9 +121,10 @@ export default function IdeasPage() {
     setIdeas((prev) => prev?.map((i) => i.id === id ? { ...i, status } : i) ?? prev);
     try {
       const res = await fetch(`/api/ideas/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
       });
-      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      if (!res.ok) throw new Error();
     } catch { toast("Couldn't move idea"); void load(); }
   }
 
@@ -105,7 +133,9 @@ export default function IdeasPage() {
     setIdeas((prev) => prev?.map((i) => {
       if (i.id !== id) return i;
       const voted = (i.votes ?? []).some((v) => v.userId === meId);
-      const newVotes = voted ? (i.votes ?? []).filter((v) => v.userId !== meId) : [...(i.votes ?? []), { userId: meId }];
+      const newVotes = voted
+        ? (i.votes ?? []).filter((v) => v.userId !== meId)
+        : [...(i.votes ?? []), { userId: meId }];
       return { ...i, votes: newVotes, _count: { ...i._count, votes: newVotes.length } };
     }) ?? prev);
     try {
@@ -115,16 +145,19 @@ export default function IdeasPage() {
 
   async function submit() {
     if (!draft.title.trim()) return;
+    setSubmitting(true);
     try {
       const res = await fetch("/api/ideas", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: draft.title.trim(), description: draft.description.trim() || undefined }),
       });
-      if (!res.ok) throw new Error(`POST ${res.status}`);
+      if (!res.ok) throw new Error();
       setDraft({ title: "", description: "" });
       setComposer(false);
       void load();
+      toast("Idea submitted");
     } catch { toast("Couldn't submit idea"); }
+    finally { setSubmitting(false); }
   }
 
   const total = ideas?.length ?? 0;
@@ -132,140 +165,171 @@ export default function IdeasPage() {
   const myCount = (ideas ?? []).filter((i) => i.submitter?.id === meId).length;
 
   return (
-    <div className="ideas">
-      <header className="ideas__head">
-        <div className="ideas__head-l">
-          <div className="ideas__icon"><Lightbulb /></div>
-          <div>
-            <h1 className="ideas__title">Ideas</h1>
-            <div className="ideas__sub">
-              {ideas === null ? "Loading…" : `${total} idea${total === 1 ? "" : "s"} · ${implementedCount} implemented · ${myCount} you submitted`}
+    <>
+      <OsTitleBar
+        title="Ideas"
+        Icon={Lightbulb}
+        iconGradient={GRAD.yellowOrange}
+        description={ideas === null ? "Loading…" : `${total} idea${total === 1 ? "" : "s"} · ${implementedCount} implemented · you've submitted ${myCount}`}
+        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
+        morePeople={9}
+        actions={
+          <div className="ideas__head-actions">
+            <div className="ideas__sort">
+              <button type="button" className={sort === "votes" ? "is-active" : ""} onClick={() => setSort("votes")}>
+                <Flame /> Top
+              </button>
+              <button type="button" className={sort === "new" ? "is-active" : ""} onClick={() => setSort("new")}>
+                <Clock /> New
+              </button>
             </div>
+            <button type="button" className="ideas__new" onClick={() => setComposer(true)}>
+              <Plus /> Share an idea
+            </button>
           </div>
-        </div>
-        <button type="button" className="ideas__new" onClick={() => setComposer(true)}>
-          <Plus /> Share an idea
-        </button>
-      </header>
+        }
+      />
 
-      {composer ? (
-        <div className="ideas__composer">
-          <div className="ideas__composer-head">
-            <h3>What&apos;s the idea?</h3>
-            <button type="button" onClick={() => { setComposer(false); setDraft({ title: "", description: "" }); }} aria-label="Close"><X /></button>
+      <div className="ideas">
+        {/* Inline composer (animates in from top) */}
+        {composer && (
+          <div className="ideas__composer">
+            <header className="ideas__composer-head">
+              <h3><Lightbulb /> What&apos;s the idea?</h3>
+              <button type="button" onClick={() => { setComposer(false); setDraft({ title: "", description: "" }); }} aria-label="Close"><X /></button>
+            </header>
+            <input
+              type="text"
+              value={draft.title}
+              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+              placeholder="One-line title — what are you proposing?"
+              autoFocus
+              className="ideas__composer-title"
+            />
+            <textarea
+              value={draft.description}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              placeholder="What's the problem? What would change if we did this? (Optional but helps people vote.)"
+              rows={3}
+              className="ideas__composer-desc"
+            />
+            <footer className="ideas__composer-foot">
+              <span>Anyone in your org can upvote and comment.</span>
+              <button type="button" onClick={submit} disabled={!draft.title.trim() || submitting} className="ideas__submit">
+                {submitting ? <><Loader2 className="ideas__spin" /> Submitting…</> : <>Submit <ThumbsUp /></>}
+              </button>
+            </footer>
           </div>
-          <input
-            type="text"
-            value={draft.title}
-            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-            placeholder="One-line title…"
-            autoFocus
-          />
-          <textarea
-            value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-            placeholder="What's the problem? What would change if we did this? Optional but helpful."
-            rows={3}
-          />
-          <button type="button" onClick={submit} disabled={!draft.title.trim()}>Submit</button>
-        </div>
-      ) : null}
+        )}
 
-      {loadError ? (
-        <div className="ideas__error">{loadError}</div>
-      ) : ideas === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-      ) : total === 0 ? (
-        <div className="ideas__empty">
-          <Lightbulb />
-          <div>
-            <h3>No ideas yet</h3>
-            <p>Got a hunch? A fix? A what-if? Drop it in — even half-baked ones spark conversations.</p>
+        {loadError ? (
+          <OsEmptyView Icon={Lightbulb} iconGradient={GRAD.redPink} title="Couldn't load ideas" subtitle={`API error: ${loadError}`} cta="Retry" />
+        ) : ideas === null ? (
+          <div className="ideas__loading">Loading…</div>
+        ) : total === 0 ? (
+          <OsEmptyView Icon={Lightbulb} iconGradient={GRAD.yellowOrange} title="No ideas yet" subtitle="Got a hunch? A fix? A what-if? Drop it in — even half-baked ones spark conversations." chips={["Product", "Process", "Culture", "Cost-cutting"]} cta="Share an idea" />
+        ) : (
+          <div className="ideas__board">
+            {STATUS_ORDER.map((s) => {
+              const items = byStatus.get(s) ?? [];
+              const hue = STATUS_HUE[s];
+              return (
+                <section
+                  key={s}
+                  className={`ideas__col ${dragId ? "is-dropzone" : ""}`}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); if (dragId) void moveToStatus(dragId, s); setDragId(null); }}
+                  style={{ ["--col-hue" as string]: hue }}
+                >
+                  <header className="ideas__col-head">
+                    <span className="ideas__col-dot" />
+                    <span className="ideas__col-name">{STATUS_LABEL[s]}</span>
+                    <span className="ideas__col-count">{items.length}</span>
+                  </header>
+                  <div className="ideas__col-body">
+                    {items.length === 0 ? (
+                      <div className="ideas__col-empty">{dragId ? "Drop here" : "Empty"}</div>
+                    ) : items.map((i) => {
+                      const voteCount = i._count?.votes ?? 0;
+                      const voted = !!meId && (i.votes ?? []).some((v) => v.userId === meId);
+                      return (
+                        <article
+                          key={i.id}
+                          className="idea"
+                          draggable
+                          onDragStart={() => setDragId(i.id)}
+                          onDragEnd={() => setDragId(null)}
+                        >
+                          {/* Product-Hunt-style upvote stack on the left */}
+                          <button
+                            type="button"
+                            className={`idea__vote ${voted ? "is-voted" : ""}`}
+                            onClick={(e) => { e.stopPropagation(); void vote(i.id); }}
+                            title={voted ? "Remove your vote" : "Upvote"}
+                          >
+                            <ThumbsUp />
+                            <span>{voteCount}</span>
+                          </button>
+
+                          {/* Body */}
+                          <div className="idea__body">
+                            <h4 className="idea__title">{i.title}</h4>
+                            {i.description ? (
+                              <p className="idea__desc">{i.description.length > 120 ? i.description.slice(0, 120) + "…" : i.description}</p>
+                            ) : null}
+                            <footer className="idea__foot">
+                              <div className="idea__who">
+                                {i.submitter && (
+                                  <span className="idea__av" style={{ background: avColor(i.submitter.id) }}>
+                                    {initials(i.submitter.firstName, i.submitter.lastName)}
+                                  </span>
+                                )}
+                                <span className="idea__who-name">
+                                  {[i.submitter?.firstName, i.submitter?.lastName].filter(Boolean).join(" ") || "Someone"}
+                                </span>
+                                <span className="idea__time">· {relTime(i.createdAt)}</span>
+                              </div>
+                              {(i._count?.comments ?? 0) > 0 && (
+                                <span className="idea__comments"><MessageSquare /> {i._count?.comments}</span>
+                              )}
+                            </footer>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
           </div>
-        </div>
-      ) : (
-        <div className="ideas__board">
-          {STATUS_ORDER.map((s) => {
-            const items = byStatus.get(s) ?? [];
-            return (
-              <section
-                key={s}
-                className="ideas__col"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => { e.preventDefault(); if (dragId) void moveToStatus(dragId, s); setDragId(null); }}
-              >
-                <header className="ideas__col-head" style={{ borderTop: `3px solid ${STATUS_HUE[s]}` }}>
-                  <span>{STATUS_LABEL[s]}</span>
-                  <span className="ideas__col-count">{items.length}</span>
-                </header>
-                <div className="ideas__col-body">
-                  {items.length === 0 ? (
-                    <div className="ideas__col-empty">Drop an idea here.</div>
-                  ) : items.map((i) => {
-                    const voteCount = i._count?.votes ?? 0;
-                    const voted = !!meId && (i.votes ?? []).some((v) => v.userId === meId);
-                    return (
-                      <article
-                        key={i.id}
-                        className="idea"
-                        draggable
-                        onDragStart={() => setDragId(i.id)}
-                        onDragEnd={() => setDragId(null)}
-                      >
-                        <h4 className="idea__title">{i.title}</h4>
-                        {i.description ? <p className="idea__desc">{i.description.length > 120 ? i.description.slice(0, 120) + "…" : i.description}</p> : null}
-                        <footer className="idea__foot">
-                          <div className="idea__who">
-                            {i.submitter && (
-                              <span className="idea__av" style={{ background: avColor(i.submitter.id) }}>
-                                {initials(i.submitter.firstName, i.submitter.lastName)}
-                              </span>
-                            )}
-                            <span className="idea__who-name">{[i.submitter?.firstName, i.submitter?.lastName].filter(Boolean).join(" ") || "Someone"}</span>
-                          </div>
-                          <div className="idea__meta">
-                            {(i._count?.comments ?? 0) > 0 && (
-                              <span className="idea__meta-chip"><MessageSquare /> {i._count?.comments}</span>
-                            )}
-                            <button type="button" className={`idea__vote ${voted ? "is-voted" : ""}`} onClick={() => vote(i.id)} title={voted ? "Remove vote" : "Upvote"}>
-                              <ThumbsUp /> {voteCount}
-                            </button>
-                          </div>
-                        </footer>
-                      </article>
-                    );
-                  })}
+        )}
+
+        {/* Archive strip */}
+        {(rewarded.length + rejected.length) > 0 && (
+          <section className="ideas__archive">
+            {rewarded.length > 0 && (
+              <div className="ideas__archive-block" style={{ ["--col-hue" as string]: STATUS_HUE.REWARDED }}>
+                <header><Trophy /> Rewarded · {rewarded.length}</header>
+                <div className="ideas__archive-list">
+                  {rewarded.slice(0, 6).map((i) => (
+                    <div key={i.id} className="ideas__archive-item">{i.title}</div>
+                  ))}
                 </div>
-              </section>
-            );
-          })}
-        </div>
-      )}
-
-      {(rejected.length + rewarded.length) > 0 && (
-        <section className="ideas__archive">
-          {rewarded.length > 0 && (
-            <div className="ideas__archive-block">
-              <h3 style={{ color: STATUS_HUE.REWARDED }}>Rewarded · {rewarded.length}</h3>
-              <div className="ideas__archive-list">
-                {rewarded.slice(0, 6).map((i) => (
-                  <div key={i.id} className="ideas__archive-item">⭐ {i.title}</div>
-                ))}
               </div>
-            </div>
-          )}
-          {rejected.length > 0 && (
-            <div className="ideas__archive-block">
-              <h3 style={{ color: STATUS_HUE.REJECTED }}>Rejected · {rejected.length}</h3>
-              <div className="ideas__archive-list">
-                {rejected.slice(0, 6).map((i) => (
-                  <div key={i.id} className="ideas__archive-item">— {i.title}</div>
-                ))}
+            )}
+            {rejected.length > 0 && (
+              <div className="ideas__archive-block" style={{ ["--col-hue" as string]: STATUS_HUE.REJECTED }}>
+                <header><X /> Rejected · {rejected.length}</header>
+                <div className="ideas__archive-list">
+                  {rejected.slice(0, 6).map((i) => (
+                    <div key={i.id} className="ideas__archive-item">{i.title}</div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </section>
-      )}
-    </div>
+            )}
+          </section>
+        )}
+      </div>
+    </>
   );
 }
