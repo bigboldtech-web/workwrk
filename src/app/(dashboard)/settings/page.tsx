@@ -1,26 +1,27 @@
 "use client";
 
-/* Real Settings hub page.
+/* Settings hub — category card grid.
  *
- *  GET /api/settings   → org profile, enabled modules, scoring weights,
- *                        notification toggles, security policy, usage counts
+ *  GET /api/settings   org profile + enabled modules + scoring weights +
+ *                      security policy + usage counts.
  *
- *  Editing routes to dedicated sub-pages (/settings/identity, /api, /audit,
- *  /tags, /calendar). The board surface here is a directory of every
- *  configurable bucket with current value snapshots.
+ * Replaces the previous "generic table" view with a card grid grouped
+ * by area (Organization, Product, Scoring, Policies, Usage). Each
+ * card surfaces 2-4 key values + an "Open" CTA that deep-links to the
+ * sub-page that actually edits those fields.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { SlidersHorizontal, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  SlidersHorizontal, Building2, Boxes, Award, Shield, BarChart3,
+  Tag, FileCheck, Key, Calendar as CalendarIcon, Users, BookOpen,
+  Sparkles, ChevronRight, type LucideIcon,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { useOsToast } from "@/components/layout/os/toast";
 
 type ApiSettings = {
   organization?: { id: string; name: string; slug?: string | null; plan?: string | null; status?: string | null; domain?: string | null };
@@ -37,87 +38,19 @@ type ApiSettings = {
   usage?: { users?: number; sops?: number; aiQueries?: number };
 };
 
-function buildGroups(s: ApiSettings | null): TableGroup[] {
-  if (!s) return [];
-  const org = s.organization;
-  const set = s.settings ?? {};
-  const sec = set.security ?? {};
-  const usage = s.usage ?? {};
-
-  const profileRows: Row[] = [
-    { id: "name",     name: "Organization name", cells: { value: org?.name ?? "—", area: "Identity", subpage: "/settings/identity" } },
-    { id: "slug",     name: "Workspace slug",    cells: { value: org?.slug ?? "—", area: "Identity", subpage: "/settings/identity" } },
-    { id: "domain",   name: "Primary domain",    cells: { value: org?.domain ?? "—", area: "Identity", subpage: "/settings/identity" } },
-    { id: "plan",     name: "Plan",              cells: { value: org?.plan ?? "—", area: "Billing", subpage: "/settings" } },
-    { id: "industry", name: "Industry",          cells: { value: set.industry || "—", area: "Profile", subpage: "/settings" } },
-    { id: "tz",       name: "Timezone",          cells: { value: set.timezone ?? "—", area: "Profile", subpage: "/settings" } },
-    { id: "ccy",      name: "Currency",          cells: { value: set.currency ?? "—", area: "Profile", subpage: "/settings" } },
-    { id: "fyStart",  name: "Fiscal year start", cells: { value: set.fiscalYearStart ? `Month ${set.fiscalYearStart}` : "—", area: "Profile", subpage: "/settings" } },
-  ];
-
-  const productRows: Row[] = [
-    { id: "modules", name: "Enabled modules", cells: { value: `${set.enabledModules?.length ?? 0} on`, area: "Product", subpage: "/settings" } },
-    { id: "tags",    name: "Tags & labels",   cells: { value: "Manage", area: "Taxonomy", subpage: "/settings/tags" } },
-    { id: "audit",   name: "Audit log",       cells: { value: "Open", area: "Compliance", subpage: "/settings/audit" } },
-    { id: "api",     name: "API keys",        cells: { value: "Manage", area: "Integrations", subpage: "/settings/api" } },
-    { id: "cal",     name: "Calendar feeds",  cells: { value: "Manage", area: "Integrations", subpage: "/settings/calendar" } },
-  ];
-
-  const scoringRows: Row[] = [
-    { id: "reviewFreq", name: "Review frequency", cells: { value: set.reviewFrequency ?? "QUARTERLY", area: "Cadence", subpage: "/settings" } },
-    { id: "weights",    name: "Score weights",
-      cells: {
-        value: set.scoreWeights
-          ? Object.entries(set.scoreWeights).map(([k, v]) => `${k} ${v}%`).join(" · ")
-          : "—",
-        area: "Scoring", subpage: "/settings",
-      },
-    },
-    { id: "bands", name: "Performance bands", cells: { value: `${set.scoringBands?.length ?? 0} bands`, area: "Scoring", subpage: "/settings" } },
-  ];
-
-  const policyRows: Row[] = [
-    { id: "minPw",     name: "Min password length",   cells: { value: `${sec.minPasswordLength ?? 8} chars`, area: "Security", subpage: "/account/security" } },
-    { id: "reqUpper",  name: "Require uppercase",     cells: { value: sec.requireUppercase ? "Yes" : "No",  area: "Security", subpage: "/account/security" } },
-    { id: "reqNum",    name: "Require numbers",       cells: { value: sec.requireNumbers ? "Yes" : "No",    area: "Security", subpage: "/account/security" } },
-    { id: "session",   name: "Session timeout (min)", cells: { value: `${sec.sessionTimeout ?? 30}`,        area: "Security", subpage: "/account/security" } },
-    { id: "twofa",     name: "Two-factor (org)",      cells: { value: sec.twoFactorEnabled ? "Required" : "Optional", area: "Security", subpage: "/account/security" } },
-  ];
-
-  const usageRows: Row[] = [
-    { id: "users",   name: "Active users",  cells: { value: `${usage.users ?? 0}`,    area: "Usage", subpage: "/people" } },
-    { id: "sops",    name: "Total SOPs",    cells: { value: `${usage.sops ?? 0}`,     area: "Usage", subpage: "/sops" } },
-    { id: "ai",      name: "AI queries",    cells: { value: `${usage.aiQueries ?? 0}`, area: "Usage", subpage: "/analytics" } },
-  ];
-
-  return [
-    { id: "profile",  title: "Organization profile", color: C.blue,   rows: profileRows },
-    { id: "product",  title: "Product & modules",    color: C.indigo, rows: productRows },
-    { id: "scoring",  title: "Scoring & reviews",    color: C.purple, rows: scoringRows },
-    { id: "policies", title: "Policies",             color: C.orange, rows: policyRows },
-    { id: "usage",    title: "Usage",                color: C.green,  rows: usageRows },
-  ];
+interface SettingsCard {
+  href: string;
+  title: string;
+  description: string;
+  Icon: LucideIcon;
+  color: string;
+  fields: Array<{ label: string; value: string }>;
 }
-
-const COLUMNS: Column[] = [
-  { id: "area",    label: "Area",     type: "text" },
-  { id: "value",   label: "Current",  type: "text" },
-  { id: "subpage", label: "Sub-page", type: "text" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function SettingsPage() {
   const [data, setData] = useState<ApiSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
   const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
@@ -133,16 +66,175 @@ export default function SettingsPage() {
   const v = rowVersion("settings");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(data), [data]);
-
-  const handlers = {
-    onAdd: async (_g: string) => {
-      toast("Settings are managed via dedicated sub-pages — pick an area from the table");
-      throw new Error("not supported");
-    },
-  };
-
   const moduleCount = data?.settings?.enabledModules?.length ?? 0;
+  const org = data?.organization;
+  const set = data?.settings ?? {};
+  const sec = set.security ?? {};
+  const usage = data?.usage ?? {};
+
+  const sections: Array<{ title: string; cards: SettingsCard[] }> = data ? [
+    {
+      title: "Organization",
+      cards: [
+        {
+          href: "/settings/identity",
+          title: "Identity & profile",
+          description: "Name, slug, primary domain, contact info.",
+          Icon: Building2, color: C.blue,
+          fields: [
+            { label: "Name", value: org?.name ?? "—" },
+            { label: "Slug", value: org?.slug ?? "—" },
+            { label: "Domain", value: org?.domain ?? "—" },
+          ],
+        },
+        {
+          href: "/settings",
+          title: "Locale & finance",
+          description: "Timezone, currency, fiscal year start.",
+          Icon: CalendarIcon, color: C.teal,
+          fields: [
+            { label: "Timezone", value: set.timezone ?? "—" },
+            { label: "Currency", value: set.currency ?? "—" },
+            { label: "Fiscal start", value: set.fiscalYearStart ? `Month ${set.fiscalYearStart}` : "—" },
+          ],
+        },
+        {
+          href: "/settings",
+          title: "Plan & billing",
+          description: "Current subscription and billing details.",
+          Icon: Award, color: C.purple,
+          fields: [
+            { label: "Plan", value: org?.plan ?? "Starter" },
+            { label: "Status", value: org?.status ?? "Active" },
+            { label: "Industry", value: set.industry ?? "—" },
+          ],
+        },
+      ],
+    },
+    {
+      title: "Product & integrations",
+      cards: [
+        {
+          href: "/settings",
+          title: "Enabled modules",
+          description: "Turn WorkwrK apps on or off for your team.",
+          Icon: Boxes, color: C.indigo,
+          fields: [
+            { label: "Active", value: `${moduleCount} modules` },
+            { label: "Team size", value: set.teamSize ?? "—" },
+          ],
+        },
+        {
+          href: "/settings/tags",
+          title: "Tags & labels",
+          description: "Shared taxonomy across boards, tasks, and SOPs.",
+          Icon: Tag, color: C.pink,
+          fields: [{ label: "Manage", value: "Open" }],
+        },
+        {
+          href: "/settings/api",
+          title: "API keys",
+          description: "Service tokens for webhooks and automations.",
+          Icon: Key, color: C.green,
+          fields: [{ label: "Manage", value: "Open" }],
+        },
+        {
+          href: "/settings/calendar",
+          title: "Calendar feeds",
+          description: "Subscribe external calendars; publish org feeds.",
+          Icon: CalendarIcon, color: C.orange,
+          fields: [{ label: "Manage", value: "Open" }],
+        },
+      ],
+    },
+    {
+      title: "Scoring & reviews",
+      cards: [
+        {
+          href: "/settings",
+          title: "Review cadence",
+          description: "How often performance reviews are scheduled.",
+          Icon: Sparkles, color: C.pink,
+          fields: [{ label: "Frequency", value: set.reviewFrequency ?? "Quarterly" }],
+        },
+        {
+          href: "/settings",
+          title: "Score weights",
+          description: "Weight each metric for composite performance scoring.",
+          Icon: BarChart3, color: C.purple,
+          fields: set.scoreWeights
+            ? Object.entries(set.scoreWeights).slice(0, 3).map(([k, v]) => ({ label: k, value: `${v}%` }))
+            : [{ label: "Weights", value: "Default" }],
+        },
+        {
+          href: "/settings",
+          title: "Performance bands",
+          description: "Ranges that map composite scores to labels (e.g. 'Strong').",
+          Icon: Award, color: C.indigo,
+          fields: [{ label: "Bands", value: `${set.scoringBands?.length ?? 0} configured` }],
+        },
+      ],
+    },
+    {
+      title: "Security & compliance",
+      cards: [
+        {
+          href: "/account/security",
+          title: "Password policy",
+          description: "Minimum length and character requirements.",
+          Icon: Shield, color: C.red,
+          fields: [
+            { label: "Min length", value: `${sec.minPasswordLength ?? 8} chars` },
+            { label: "Uppercase", value: sec.requireUppercase ? "Required" : "Optional" },
+            { label: "Numbers", value: sec.requireNumbers ? "Required" : "Optional" },
+          ],
+        },
+        {
+          href: "/account/security",
+          title: "Session & 2FA",
+          description: "Idle timeout and two-factor enforcement.",
+          Icon: Key, color: C.orange,
+          fields: [
+            { label: "Timeout", value: `${sec.sessionTimeout ?? 30} min` },
+            { label: "2FA", value: sec.twoFactorEnabled ? "Required" : "Optional" },
+          ],
+        },
+        {
+          href: "/settings/audit",
+          title: "Audit log",
+          description: "Every privileged action across the workspace.",
+          Icon: FileCheck, color: C.brown,
+          fields: [{ label: "Open", value: "Audit log" }],
+        },
+      ],
+    },
+    {
+      title: "Usage",
+      cards: [
+        {
+          href: "/people",
+          title: "People",
+          description: "Active members and seats consumed.",
+          Icon: Users, color: C.blue,
+          fields: [{ label: "Active users", value: `${usage.users ?? 0}` }],
+        },
+        {
+          href: "/sops",
+          title: "Knowledge",
+          description: "SOPs and docs across the workspace.",
+          Icon: BookOpen, color: C.green,
+          fields: [{ label: "Total SOPs", value: `${usage.sops ?? 0}` }],
+        },
+        {
+          href: "/analytics",
+          title: "AI usage",
+          description: "Sidekick + agent queries this billing period.",
+          Icon: Sparkles, color: C.purple,
+          fields: [{ label: "AI queries", value: `${usage.aiQueries ?? 0}` }],
+        },
+      ],
+    },
+  ] : [];
 
   return (
     <>
@@ -150,31 +242,48 @@ export default function SettingsPage() {
         title="Settings"
         Icon={SlidersHorizontal}
         iconGradient={GRAD.bluePurple}
-        description={data === null ? "Loading workspace…" : `${data.organization?.name ?? "Workspace"} · ${moduleCount} modules on · plan ${data.organization?.plan ?? "—"}`}
+        description={data === null ? "Loading…" : `${org?.name ?? "Workspace"} · ${moduleCount} modules on · plan ${org?.plan ?? "—"}`}
         people={[PEOPLE.bb]}
         morePeople={0}
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={SlidersHorizontal} iconGradient={GRAD.redPink} title="Couldn't load settings" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : data === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : (
-            <OsMainTable moduleId="settings" columns={COLUMNS} groups={groups} handlers={handlers} />
-          )}
-        </>
-      )}
-
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="settings" events={[] as CalendarEvent[]} newLabel="" />
-      )}
-
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={SlidersHorizontal} iconGradient={GRAD.bluePurple} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
+      {loadError ? (
+        <OsEmptyView Icon={SlidersHorizontal} iconGradient={GRAD.redPink} title="Couldn't load settings" subtitle={`API error: ${loadError}.`} cta="Retry" />
+      ) : data === null ? (
+        <div className="settings__loading">Loading settings…</div>
+      ) : (
+        <div className="settings">
+          {sections.map((section) => (
+            <section key={section.title} className="settings__section">
+              <header className="settings__section-head">
+                <h2>{section.title}</h2>
+                <span className="settings__section-count">{section.cards.length}</span>
+              </header>
+              <div className="settings__grid">
+                {section.cards.map((card) => (
+                  <Link key={card.title + card.href} href={card.href} className="setcard">
+                    <div className="setcard__head">
+                      <span className="setcard__icon" style={{ background: `color-mix(in srgb, ${card.color} 14%, transparent)`, color: card.color }}>
+                        <card.Icon />
+                      </span>
+                      <ChevronRight className="setcard__arrow" />
+                    </div>
+                    <h3 className="setcard__title">{card.title}</h3>
+                    <p className="setcard__desc">{card.description}</p>
+                    <div className="setcard__fields">
+                      {card.fields.map((f) => (
+                        <div key={f.label} className="setcard__field">
+                          <span className="setcard__field-label">{f.label}</span>
+                          <span className="setcard__field-value">{f.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       )}
     </>
   );
