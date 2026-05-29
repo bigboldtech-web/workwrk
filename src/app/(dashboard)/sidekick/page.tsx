@@ -28,10 +28,12 @@ type Message = {
 };
 
 const STARTERS = [
-  { tag: "PIPELINE", text: "What deals are stalled more than 14 days?" },
-  { tag: "DRAFT",    text: "Draft a follow-up email to Acme Corp about renewal." },
-  { tag: "PLAN",     text: "Plan my week — pick the 3 things that matter most." },
-  { tag: "ANALYZE",  text: "Summarize last week's wins, losses, and risks." },
+  { tag: "FORM",    color: "var(--os-c-purple)", text: "Create a customer feedback form with 5 fields." },
+  { tag: "TABLE",   color: "var(--os-c-teal)",   text: "Make a table to track our top 10 competitors." },
+  { tag: "DOC",     color: "var(--os-c-blue)",   text: "Draft a Q3 OKRs planning doc for the engineering team." },
+  { tag: "TASK",    color: "var(--os-c-green)",  text: "Capture a task to follow up with Acme on renewal." },
+  { tag: "ANALYZE", color: "var(--os-c-orange)", text: "Summarize this week's wins, losses, and risks." },
+  { tag: "PLAN",    color: "var(--os-c-pink)",   text: "Plan my week — pick the 3 things that matter most." },
 ];
 
 function fmtRelative(iso: string) {
@@ -347,8 +349,9 @@ export default function SidekickPage() {
                         type="button"
                         className="os-chat__starter"
                         onClick={() => { setInput(s.text); inputRef.current?.focus(); }}
+                        style={{ ["--starter-color" as string]: s.color }}
                       >
-                        <span className="os-chat__starter-tag">{s.tag}</span>
+                        <span className="os-chat__starter-tag" style={{ background: `color-mix(in srgb, ${s.color} 12%, transparent)`, color: s.color }}>{s.tag}</span>
                         <span className="os-chat__starter-text">{s.text}</span>
                       </button>
                     ))}

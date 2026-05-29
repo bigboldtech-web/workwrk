@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Table as TableIcon, Plus, Rows, ChevronRight } from "lucide-react";
+import { Table as TableIcon, Plus, Rows, ChevronRight, Sparkles, Loader2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -56,6 +56,44 @@ export default function TablesPage() {
     } catch { toast("Couldn't create table"); }
   }
 
+  const [aiImporting, setAiImporting] = useState(false);
+  async function aiFromCsv() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,text/csv";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setAiImporting(true);
+      try {
+        // Bootstrap a blank table from the CSV name, then import.
+        const baseName = file.name.replace(/\.csv$/i, "").replace(/[_-]+/g, " ");
+        const tCreate = await fetch("/api/tables", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: baseName.slice(0, 80) || "Imported table" }),
+        });
+        if (!tCreate.ok) throw new Error();
+        const t = (await tCreate.json()).data;
+        const csv = await file.text();
+        const imp = await fetch(`/api/tables/${t.id}/import`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csv }),
+        });
+        if (!imp.ok) {
+          const err = await imp.json().catch(() => ({ error: `HTTP ${imp.status}` }));
+          toast(`Import failed: ${err.error}`);
+          router.push(`/tables/${t.id}`);
+          return;
+        }
+        const r = (await imp.json()).data;
+        toast(`Imported ${r.rowsCreated} row${r.rowsCreated === 1 ? "" : "s"}`);
+        router.push(`/tables/${t.id}`);
+      } catch { toast("Couldn't import CSV"); }
+      finally { setAiImporting(false); }
+    };
+    input.click();
+  }
+
   const total = tables?.length ?? 0;
   const totalRows = (tables ?? []).reduce((acc, t) => acc + (t.rowCount ?? 0), 0);
 
@@ -71,7 +109,12 @@ export default function TablesPage() {
             </div>
           </div>
         </div>
-        <button type="button" className="frmlist__new" onClick={quickAdd}><Plus /> New table</button>
+        <div className="frmlist__actions">
+          <button type="button" className="frmlist__btn frmlist__btn--ai" onClick={aiFromCsv} disabled={aiImporting}>
+            {aiImporting ? <><Loader2 className="frmlist__spin" /> Importing…</> : <><Sparkles /> Import CSV</>}
+          </button>
+          <button type="button" className="frmlist__new" onClick={quickAdd}><Plus /> New table</button>
+        </div>
       </header>
 
       {loadError ? (

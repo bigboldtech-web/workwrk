@@ -101,9 +101,9 @@ export default function FormsPage() {
             </div>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" className="frmlist__new" onClick={aiGenerate} disabled={generating} style={{ background: "linear-gradient(135deg, var(--os-c-purple), var(--os-c-pink))" }}>
-            {generating ? <><Loader2 style={{ animation: "spin 1s linear infinite" }} /> Generating…</> : <><Sparkles /> AI generate</>}
+        <div className="frmlist__actions">
+          <button type="button" className="frmlist__btn frmlist__btn--ai" onClick={aiGenerate} disabled={generating}>
+            {generating ? <><Loader2 className="frmlist__spin" /> Generating…</> : <><Sparkles /> AI generate</>}
           </button>
           <button type="button" className="frmlist__new" onClick={quickAdd}><Plus /> New form</button>
         </div>
