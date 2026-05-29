@@ -28,13 +28,21 @@ import {
   BookOpen,
   Wrench,
   Building2,
+  HardDrive,
+  FormInput,
+  Table as TableIcon,
+  type LucideIcon,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
+import { SidebarOrgSwitcher } from "./sidebar-org-switcher";
 
 type Leaf = {
   href: string;
   label: string;
-  mark: string;
+  /** Single-char mark used when no Icon is set (legacy/space children). */
+  mark?: string;
+  /** Lucide icon — preferred for PINNED items; gives a real-icon feel. */
+  Icon?: LucideIcon;
   color: string;
   pulse?: boolean;
   count?: number;
@@ -52,14 +60,14 @@ type Space = {
 
 /* ─────────────── Pinned (always visible) ─────────────── */
 const PINNED: Leaf[] = [
-  { href: "/today",     label: "Today — your day", mark: "T", color: "var(--os-c-orange)", pulse: true },
-  { href: "/inbox",     label: "Inbox",            mark: "I", color: "var(--os-c-indigo)" },
-  { href: "/activity",  label: "Activity feed",    mark: "A", color: "var(--os-c-brown)" },
-  { href: "/favorites", label: "Favorites",        mark: "F", color: "var(--os-c-yellow)" },
-  { href: "/sidekick",  label: "Sidekick AI",      mark: "S", color: "var(--os-c-pink)" },
-  { href: "/files",     label: "Files",            mark: "F", color: "var(--os-c-blue)" },
-  { href: "/forms",     label: "Forms",            mark: "F", color: "var(--os-c-purple)" },
-  { href: "/tables",    label: "Tables",           mark: "T", color: "var(--os-c-teal)" },
+  { href: "/today",     label: "Today",        Icon: Home,      color: "var(--os-c-orange)", pulse: true },
+  { href: "/inbox",     label: "Inbox",        Icon: Inbox,     color: "var(--os-c-indigo)" },
+  { href: "/activity",  label: "Activity",     Icon: Activity,  color: "var(--os-c-brown)" },
+  { href: "/favorites", label: "Favorites",    Icon: Star,      color: "var(--os-c-yellow)" },
+  { href: "/sidekick",  label: "Sidekick AI",  Icon: Sparkles,  color: "var(--os-c-pink)" },
+  { href: "/files",     label: "Files",        Icon: HardDrive, color: "var(--os-c-blue)" },
+  { href: "/forms",     label: "Forms",        Icon: FormInput, color: "var(--os-c-purple)" },
+  { href: "/tables",    label: "Tables",       Icon: TableIcon, color: "var(--os-c-teal)" },
 ];
 
 /* ─────────────── Spaces (collapsible clusters) ─────────────── */
@@ -276,7 +284,19 @@ function LeafItem({ item, pathname }: { item: Leaf; pathname: string }) {
   const active = leafActive(pathname, item.href);
   return (
     <Link href={item.href} className={`os-side__item ${active ? "is-active" : ""}`}>
-      <span className="os-side__item-mark" style={{ background: item.color }}>{item.mark}</span>
+      {item.Icon ? (
+        <span
+          className="os-side__item-icon"
+          style={{
+            background: `color-mix(in srgb, ${item.color} 12%, transparent)`,
+            color: item.color,
+          }}
+        >
+          <item.Icon />
+        </span>
+      ) : (
+        <span className="os-side__item-mark" style={{ background: item.color }}>{item.mark}</span>
+      )}
       <span className="os-side__item-text">{item.label}</span>
       {item.pulse ? <span className="os-side__item-pulse" aria-hidden /> : null}
       {item.count !== undefined ? <span className="os-side__item-count">{item.count}</span> : null}
@@ -324,14 +344,7 @@ export function OsSidebar() {
   return (
     <aside className="os-side" aria-label="Workspace navigation">
       <div className="os-side__head">
-        <button type="button" className="os-side__ws">
-          <span className="os-side__ws-mark">C</span>
-          <span className="os-side__ws-info">
-            <span className="os-side__ws-name">Cashkr</span>
-            <span className="os-side__ws-tier">Enterprise · 247 users</span>
-          </span>
-          <span className="os-side__ws-chev"><ChevronDown /></span>
-        </button>
+        <SidebarOrgSwitcher />
 
         <button type="button" className="os-side__search" onClick={openPalette}>
           <Search />

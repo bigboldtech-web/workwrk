@@ -1,25 +1,26 @@
 "use client";
 
-/* Real Activity feed page.
+/* Activity feed — chronological stream of everything happening in the org.
  *
- *  GET /api/activity?scope=team|my|all&limit=200
+ * Replaces the previous "generic table" view. Each entry is a card with:
+ *   avatar | actor name + action sentence + relative time | target chip
  *
- *  Read-only stream of ActivityLog rows. Groups by day (Today / Yesterday /
- *  earlier ISO date). Activity itself is generated as a side effect of other
- *  modules — no add/edit here.
+ * Grouped by day (Today / Yesterday / weekday / older). Scope pills
+ * filter to My/Team/Whole org. Auto-refreshes when other modules
+ * bump the activity row-version.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  Activity, FormInput, Table as TableIcon, LayoutGrid, FileText, HardDrive,
+  CheckSquare, Users, Sparkles, Target, BookOpen, ClipboardList,
+  type LucideIcon,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { useOsToast } from "@/components/layout/os/toast";
 
 type ApiActivity = {
   id: string;
@@ -27,7 +28,7 @@ type ApiActivity = {
   description: string;
   targetType?: string | null;
   targetId?: string | null;
-  metadata?: unknown;
+  metadata?: Record<string, unknown> | null;
   createdAt: string;
   actor?: { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null } | null;
 };
@@ -39,92 +40,78 @@ function initials(f?: string | null, l?: string | null) {
   const la = (l ?? "")[0] ?? "";
   return ((fa + la) || "?").toUpperCase();
 }
-
-function typeColor(t: string): string {
-  if (t.includes("create") || t.includes("start") || t.includes("add") || t.includes("submission")) return C.green;
-  if (t.includes("delete") || t.includes("cancel") || t.includes("remove")) return C.red;
-  if (t.includes("update") || t.includes("edit") || t.includes("rename")) return C.blue;
-  if (t.includes("complete") || t.includes("done") || t.includes("publish") || t.includes("applied")) return C.teal;
-  return C.indigo;
+function actorName(a: ApiActivity["actor"]): string {
+  if (!a) return "Someone";
+  const f = a.firstName ?? "";
+  const l = a.lastName ?? "";
+  const joined = `${f} ${l}`.trim();
+  return joined || "Someone";
 }
 
-// Humanize internal targetType identifiers for display.
-const TARGET_LABELS: Record<string, string> = {
-  FormDefinition: "Form",
-  DataTable: "Table",
-  StudioBoard: "Board",
-  Doc: "Doc",
-  FileEntry: "File",
-};
-function humanTarget(t?: string | null): string {
-  if (!t) return "—";
-  return TARGET_LABELS[t] ?? t.replace(/_/g, " ");
-}
-
+// Group entries into "Today / Yesterday / weekday / ISO" buckets in
+// reverse-chrono order. Doing this here (not via Map) keeps insertion
+// order matching the array order.
 function dayKey(iso: string): string {
   const now = new Date();
   const d = new Date(iso);
-  const isSameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  if (isSameDay(d, now)) return "Today";
-  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-  if (isSameDay(d, yesterday)) return "Yesterday";
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  const same = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (same(d, now)) return "Today";
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (same(d, y)) return "Yesterday";
+  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
+  if (days < 7) return d.toLocaleDateString("en-US", { weekday: "long" });
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
 }
 
-function actToRow(a: ApiActivity): Row {
-  return {
-    id: a.id,
-    name: a.description,
-    cells: {
-      actor: a.actor ? [{ initials: initials(a.actor.firstName, a.actor.lastName), color: avColor(a.actor.id) }] : [],
-      type: a.type.replace(/[._]/g, " "),
-      target: humanTarget(a.targetType),
-      when: { iso: a.createdAt },
-    },
-  };
+function relTime(iso: string): string {
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-function buildGroups(rows: ApiActivity[]): TableGroup[] {
-  const byDay = new Map<string, { color: string; items: ApiActivity[] }>();
-  const palette = [C.indigo, C.purple, C.blue, C.teal, C.green, C.orange, C.pink];
-  let idx = 0;
-  for (const a of rows) {
-    const key = dayKey(a.createdAt);
-    if (!byDay.has(key)) {
-      byDay.set(key, { color: key === "Today" ? C.green : key === "Yesterday" ? C.blue : palette[idx++ % palette.length], items: [] });
-    }
-    byDay.get(key)!.items.push(a);
-  }
-  return Array.from(byDay.entries()).map(([day, { color, items }]) => ({
-    id: day, title: day, color,
-    rows: items.map(actToRow),
-  }));
+// Per-target visual: tinted background pill + Lucide icon + label.
+const TARGET_VISUAL: Record<string, { Icon: LucideIcon; label: string; color: string; href?: (id: string) => string }> = {
+  FormDefinition: { Icon: FormInput,  label: "Form",   color: C.purple, href: (id) => `/forms/${id}` },
+  DataTable:      { Icon: TableIcon,  label: "Table",  color: C.teal,   href: (id) => `/tables/${id}` },
+  StudioBoard:    { Icon: LayoutGrid, label: "Board",  color: C.indigo },
+  Doc:            { Icon: FileText,   label: "Doc",    color: C.blue,   href: (id) => `/docs/${id}` },
+  FileEntry:      { Icon: HardDrive,  label: "File",   color: C.brown },
+  Task:           { Icon: CheckSquare,label: "Task",   color: C.green,  href: (id) => `/tasks?id=${id}` },
+  User:           { Icon: Users,      label: "Person", color: C.pink },
+  Kra:            { Icon: Target,     label: "KRA",    color: C.orange },
+  Kpi:            { Icon: Target,     label: "KPI",    color: C.red },
+  Sop:            { Icon: BookOpen,   label: "SOP",    color: C.indigo },
+};
+
+// Verb tinting derived from the activity type string — green/red/blue/teal
+// for create/delete/update/done, plus pink for "submission" and amber for
+// AI-generated entries (Sidekick produced this).
+function actionTone(type: string): string {
+  const t = type.toLowerCase();
+  if (t.includes("delete") || t.includes("cancel") || t.includes("remove")) return C.red;
+  if (t.includes("submission") || t.includes("invite") || t.includes("send")) return C.pink;
+  if (t.includes("applied") || t.includes("complete") || t.includes("publish") || t.includes("extracted")) return C.teal;
+  if (t.includes("update") || t.includes("edit") || t.includes("rename") || t.includes("change")) return C.blue;
+  if (t.includes("create") || t.includes("add") || t.includes("start")) return C.green;
+  return C.indigo;
 }
 
-const COLUMNS: Column[] = [
-  { id: "actor",  label: "Actor",  type: "person" },
-  { id: "type",   label: "Type",   type: "text" },
-  { id: "target", label: "Target", type: "text" },
-  { id: "when",   label: "When",   type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
+type Scope = "my" | "team" | "all";
 
 export default function ActivityPage() {
   const [rows, setRows] = useState<ApiActivity[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [scope, setScope] = useState<Scope>("team");
   const { rowVersion } = useOsShell();
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/activity?scope=team&limit=200");
+      const res = await fetch(`/api/activity?scope=${scope}&limit=200`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list: ApiActivity[] = data?.data?.data ?? data?.data ?? (Array.isArray(data) ? data : []);
@@ -132,25 +119,28 @@ export default function ActivityPage() {
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
-  }, []);
+  }, [scope]);
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("activity");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(rows ?? []), [rows]);
+  // Build day-grouped list, preserving the upstream order (already
+  // reverse-chronological from the API).
+  const grouped = useMemo(() => {
+    const out: Array<{ day: string; items: ApiActivity[] }> = [];
+    let current: { day: string; items: ApiActivity[] } | null = null;
+    for (const a of rows ?? []) {
+      const d = dayKey(a.createdAt);
+      if (!current || current.day !== d) {
+        current = { day: d, items: [] };
+        out.push(current);
+      }
+      current.items.push(a);
+    }
+    return out;
+  }, [rows]);
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (rows ?? []).slice(0, 200).map((a): CalendarEvent => ({
-      id: a.id,
-      title: a.description.length > 60 ? a.description.slice(0, 60) + "…" : a.description,
-      date: a.createdAt,
-      color: typeColor(a.type),
-      payload: actToRow(a).cells,
-    })),
-    [rows],
-  );
-
-  const todayCount = (rows ?? []).filter((a) => dayKey(a.createdAt) === "Today").length;
+  const todayCount = useMemo(() => (rows ?? []).filter((a) => dayKey(a.createdAt) === "Today").length, [rows]);
 
   return (
     <>
@@ -158,34 +148,98 @@ export default function ActivityPage() {
         title="Activity feed"
         Icon={Activity}
         iconGradient={GRAD.orangePink}
-        description={rows === null ? "Loading activity…" : `${rows.length} event${rows.length === 1 ? "" : "s"}${todayCount > 0 ? ` · ${todayCount} today` : ""} · live-synced`}
+        description={rows === null ? "Loading…" : `${rows.length} event${rows.length === 1 ? "" : "s"}${todayCount > 0 ? ` · ${todayCount} today` : ""} · live-synced`}
         people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.sc]}
         morePeople={8}
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={Activity} iconGradient={GRAD.redPink} title="Couldn't load activity" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : rows === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : rows.length === 0 ? (
-            <OsEmptyView Icon={Activity} iconGradient={GRAD.orangePink} title="No activity yet" subtitle="As your team uses WorkwrK — creating tasks, posting updates, moving deals — every action shows up here in real time." chips={["Tasks", "Deals", "Tickets", "Onboarding"]} cta="Explore modules" />
-          ) : (
-            <OsMainTable moduleId="activity" columns={COLUMNS} groups={groups} />
-          )}
-        </>
-      )}
+      <div className="actfeed__scope">
+        <div className="actfeed__scope-pills" role="tablist" aria-label="Activity scope">
+          {(["my", "team", "all"] as Scope[]).map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="tab"
+              aria-selected={scope === s}
+              className={scope === s ? "is-active" : ""}
+              onClick={() => setScope(s)}
+            >
+              {s === "my" ? "Just me" : s === "team" ? "My team" : "Whole org"}
+            </button>
+          ))}
+        </div>
+        <div className="actfeed__live"><span className="actfeed__live-dot" /> Live</div>
+      </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="activity" events={calendarEvents} newLabel="" />
-      )}
-
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={Activity} iconGradient={GRAD.orangePink} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
+      {loadError ? (
+        <OsEmptyView Icon={Activity} iconGradient={GRAD.redPink} title="Couldn't load activity" subtitle={`API error: ${loadError}.`} cta="Retry" />
+      ) : rows === null ? (
+        <div className="actfeed__loading">Loading activity…</div>
+      ) : rows.length === 0 ? (
+        <OsEmptyView Icon={Activity} iconGradient={GRAD.orangePink} title="No activity yet" subtitle="As your team uses WorkwrK — creating tasks, posting updates, moving deals — every action shows up here in real time." chips={["Tasks", "Deals", "Tickets", "Onboarding"]} cta="Explore modules" />
+      ) : (
+        <div className="actfeed">
+          {grouped.map((bucket) => (
+            <section key={bucket.day} className="actfeed__day">
+              <header className="actfeed__day-head">
+                <span className="actfeed__day-name">{bucket.day}</span>
+                <span className="actfeed__day-count">{bucket.items.length} {bucket.items.length === 1 ? "event" : "events"}</span>
+                <span className="actfeed__day-line" />
+              </header>
+              <ol className="actfeed__list">
+                {bucket.items.map((a) => <FeedEntry key={a.id} activity={a} />)}
+              </ol>
+            </section>
+          ))}
+        </div>
       )}
     </>
+  );
+}
+
+function FeedEntry({ activity }: { activity: ApiActivity }) {
+  const name = actorName(activity.actor);
+  const initialsStr = activity.actor ? initials(activity.actor.firstName, activity.actor.lastName) : "?";
+  const aColor = activity.actor ? avColor(activity.actor.id) : C.gray;
+  const tone = actionTone(activity.type);
+
+  const target = activity.targetType ? TARGET_VISUAL[activity.targetType] : undefined;
+  const targetHref = target?.href && activity.targetId ? target.href(activity.targetId) : undefined;
+
+  // Cheap AI-touched signal — entries where Claude/Sidekick was actor or
+  // helper. Lets us pin a small sparkle so users see what their agents did.
+  const metaActor = activity.metadata && typeof activity.metadata === "object" ? (activity.metadata as Record<string, unknown>) : null;
+  const isAi = activity.type.startsWith("ai.") || metaActor?.viaAgent === true || metaActor?.viaSidekick === true;
+
+  return (
+    <li className="actfeed__entry">
+      <div className="actfeed__avatar" style={{ background: activity.actor?.avatar ? "transparent" : aColor }}>
+        {activity.actor?.avatar
+          ? <img src={activity.actor.avatar} alt={name} />
+          : <span>{initialsStr}</span>}
+      </div>
+      <div className="actfeed__body">
+        <div className="actfeed__line">
+          <span className="actfeed__actor">{name}</span>
+          <span className="actfeed__verb" style={{ color: tone }}>{activity.description}</span>
+          {isAi && <span className="actfeed__ai" title="AI-driven"><Sparkles /></span>}
+        </div>
+        <div className="actfeed__meta">
+          <time dateTime={activity.createdAt}>{relTime(activity.createdAt)}</time>
+          {target && (
+            targetHref ? (
+              <Link href={targetHref} className="actfeed__chip" style={{ background: `color-mix(in srgb, ${target.color} 12%, transparent)`, color: target.color }}>
+                <target.Icon /> {target.label}
+              </Link>
+            ) : (
+              <span className="actfeed__chip" style={{ background: `color-mix(in srgb, ${target.color} 12%, transparent)`, color: target.color }}>
+                <target.Icon /> {target.label}
+              </span>
+            )
+          )}
+          <span className="actfeed__type"><ClipboardList /> {activity.type.replace(/[._]/g, " ")}</span>
+        </div>
+      </div>
+    </li>
   );
 }
