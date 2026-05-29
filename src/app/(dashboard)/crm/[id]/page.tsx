@@ -75,7 +75,7 @@ export default function CrmDetail() {
   if (loading) {
     return (
       <>
-        <OsTitleBar title="Loading deal…" Icon={BarChart3} iconGradient={GRAD.greenTeal} showActions={false} />
+        <OsTitleBar title="Loading deal…" Icon={BarChart3} iconGradient={GRAD.greenTeal} showInvite={false} />
         <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading deal…</div>
       </>
     );
@@ -83,7 +83,7 @@ export default function CrmDetail() {
   if (notFound || !deal) {
     return (
       <>
-        <OsTitleBar title="Deal not found" Icon={BarChart3} iconGradient={GRAD.redPink} showActions={false} />
+        <OsTitleBar title="Deal not found" Icon={BarChart3} iconGradient={GRAD.redPink} showInvite={false} />
         <OsEmptyView Icon={BarChart3} iconGradient={GRAD.redPink} title="We couldn't find that deal" subtitle="It may have been deleted or you don't have access." cta="Back to CRM" />
       </>
     );

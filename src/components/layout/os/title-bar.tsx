@@ -1,7 +1,8 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { Star, Zap, Sparkles, UserPlus } from "lucide-react";
+import type { ReactNode } from "react";
+import { Star, UserPlus } from "lucide-react";
 
 export type Person = { initials: string; color: string };
 
@@ -12,7 +13,13 @@ export type TitleBarProps = {
   description?: string;
   people?: Person[];
   morePeople?: number;
-  showActions?: boolean;
+  /** Page-specific action buttons rendered to the right of the people stack.
+   *  Pages should pass their own CTAs here (e.g. "New deal", "Import CSV").
+   *  When omitted, only the universal "Invite" button shows. */
+  actions?: ReactNode;
+  /** Hide the universal "Invite" button on pages where it doesn't fit
+   *  (e.g. Settings, Account). Default: true. */
+  showInvite?: boolean;
   starred?: boolean;
 };
 
@@ -23,7 +30,8 @@ export function OsTitleBar({
   description,
   people = [],
   morePeople = 0,
-  showActions = true,
+  actions,
+  showInvite = true,
   starred = true,
 }: TitleBarProps) {
   return (
@@ -51,21 +59,12 @@ export function OsTitleBar({
           {morePeople > 0 ? <span className="os-title-bar__people-more">+{morePeople}</span> : null}
         </div>
       ) : null}
-      {showActions ? (
-        <>
-          <button type="button" className="os-title-bar__btn os-title-bar__btn--integrate">
-            <Zap />
-            <span>Integrate</span>
-          </button>
-          <button type="button" className="os-title-bar__btn os-title-bar__btn--automate">
-            <Sparkles />
-            <span>Automate</span>
-          </button>
-          <button type="button" className="os-title-bar__btn os-title-bar__btn--invite">
-            <UserPlus />
-            <span>Invite</span>
-          </button>
-        </>
+      {actions}
+      {showInvite ? (
+        <button type="button" className="os-title-bar__btn os-title-bar__btn--invite">
+          <UserPlus />
+          <span>Invite</span>
+        </button>
       ) : null}
     </div>
   );

@@ -75,11 +75,11 @@ export default function MarketingDetail() {
   }
 
   if (loading) return (<>
-    <OsTitleBar title="Loading campaign…" Icon={Megaphone} iconGradient={GRAD.orangePink} showActions={false} />
+    <OsTitleBar title="Loading campaign…" Icon={Megaphone} iconGradient={GRAD.orangePink} showInvite={false} />
     <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
   </>);
   if (notFound || !c) return (<>
-    <OsTitleBar title="Campaign not found" Icon={Megaphone} iconGradient={GRAD.redPink} showActions={false} />
+    <OsTitleBar title="Campaign not found" Icon={Megaphone} iconGradient={GRAD.redPink} showInvite={false} />
     <OsEmptyView Icon={Megaphone} iconGradient={GRAD.redPink} title="We couldn't find that campaign" subtitle="It may have been deleted." cta="Back to Marketing" />
   </>);
 

@@ -73,11 +73,11 @@ export default function HelpdeskDetail() {
   }
 
   if (loading) return (<>
-    <OsTitleBar title="Loading ticket…" Icon={Headphones} iconGradient={GRAD.orangePink} showActions={false} />
+    <OsTitleBar title="Loading ticket…" Icon={Headphones} iconGradient={GRAD.orangePink} showInvite={false} />
     <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
   </>);
   if (notFound || !t) return (<>
-    <OsTitleBar title="Ticket not found" Icon={Headphones} iconGradient={GRAD.redPink} showActions={false} />
+    <OsTitleBar title="Ticket not found" Icon={Headphones} iconGradient={GRAD.redPink} showInvite={false} />
     <OsEmptyView Icon={Headphones} iconGradient={GRAD.redPink} title="We couldn't find that ticket" subtitle="It may have been deleted or marked spam." cta="Back to Helpdesk" />
   </>);
 

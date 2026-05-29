@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Megaphone, X, Pin, AlertTriangle, PartyPopper, Info, CalendarDays } from "lucide-react";
+import { Megaphone, X, Pin, AlertTriangle, PartyPopper, Info, CalendarDays, ChevronDown, ExternalLink } from "lucide-react";
 
 type ApiAnnouncement = {
   id: string;
@@ -43,16 +43,33 @@ function timeAgo(iso: string): string {
 
 export function OsAnnouncementsPopover({ onClose }: { onClose: () => void }) {
   const [items, setItems] = useState<ApiAnnouncement[] | null>(null);
+  // Track which announcements are expanded inline. Auto-expand the
+  // first must-acknowledge one so the user sees it without clicking.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/announcements");
       if (!res.ok) return setItems([]);
       const data = await res.json();
-      setItems(data.data ?? (Array.isArray(data) ? data : []));
+      const list: ApiAnnouncement[] = data.data ?? (Array.isArray(data) ? data : []);
+      setItems(list);
+      // Auto-open the first item that needs ack so it surfaces without
+      // requiring another click.
+      const firstAck = list.find((a) => a.mustAcknowledge && !a.acknowledged);
+      if (firstAck) setExpanded((prev) => new Set(prev).add(firstAck.id));
     } catch { setItems([]); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+
+  function toggle(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const sorted = useMemo(() => {
     return [...(items ?? [])].sort((a, b) => {
@@ -94,26 +111,42 @@ export function OsAnnouncementsPopover({ onClose }: { onClose: () => void }) {
           const Icon = TYPE_ICON[a.type];
           const hue = TYPE_HUE[a.type];
           const needsAck = a.mustAcknowledge && !a.acknowledged;
+          const isOpen = expanded.has(a.id);
           return (
-            <Link key={a.id} href="/announcements" className={`ann-pop__item ${needsAck ? "needs-ack" : ""}`} onClick={onClose}>
-              <span className="ann-pop__item-icon" style={{ background: hue }}><Icon /></span>
-              <div className="ann-pop__item-main">
-                <div className="ann-pop__item-title">
-                  {a.pinned && <Pin className="ann-pop__pin" aria-label="Pinned" />}
-                  <span>{a.title}</span>
+            <div key={a.id} className={`ann-pop__item ${needsAck ? "needs-ack" : ""} ${isOpen ? "is-open" : ""}`}>
+              <button type="button" className="ann-pop__item-summary" onClick={() => toggle(a.id)} aria-expanded={isOpen}>
+                <span className="ann-pop__item-icon" style={{ background: hue }}><Icon /></span>
+                <div className="ann-pop__item-main">
+                  <div className="ann-pop__item-title">
+                    {a.pinned && <Pin className="ann-pop__pin" aria-label="Pinned" />}
+                    <span>{a.title}</span>
+                  </div>
+                  {a.body && !isOpen ? (
+                    <p className="ann-pop__item-body">{a.body.slice(0, 110)}{a.body.length > 110 ? "…" : ""}</p>
+                  ) : null}
+                  <div className="ann-pop__item-meta">
+                    <span>{timeAgo(a.publishedAt ?? a.createdAt)}</span>
+                    {a.priority && a.priority !== "NORMAL" && <span className={`ann-pop__prio ann-pop__prio--${a.priority.toLowerCase()}`}>{a.priority}</span>}
+                  </div>
                 </div>
-                {a.body ? <p className="ann-pop__item-body">{a.body.slice(0, 110)}{a.body.length > 110 ? "…" : ""}</p> : null}
-                <div className="ann-pop__item-meta">
-                  <span>{timeAgo(a.publishedAt ?? a.createdAt)}</span>
-                  {a.priority && a.priority !== "NORMAL" && <span className={`ann-pop__prio ann-pop__prio--${a.priority.toLowerCase()}`}>{a.priority}</span>}
+                <ChevronDown className="ann-pop__chev" data-open={isOpen} />
+              </button>
+              {isOpen ? (
+                <div className="ann-pop__item-detail">
+                  {a.body ? <p>{a.body}</p> : <p className="ann-pop__item-body">No additional details.</p>}
+                  <div className="ann-pop__item-actions">
+                    {needsAck ? (
+                      <button type="button" className="ann-pop__ack" onClick={() => void ack(a.id)}>
+                        Acknowledge
+                      </button>
+                    ) : null}
+                    <Link href="/announcements" className="ann-pop__open" onClick={onClose}>
+                      <ExternalLink /> Open in announcements
+                    </Link>
+                  </div>
                 </div>
-              </div>
-              {needsAck ? (
-                <button type="button" className="ann-pop__ack" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void ack(a.id); }}>
-                  Acknowledge
-                </button>
               ) : null}
-            </Link>
+            </div>
           );
         })}
       </div>

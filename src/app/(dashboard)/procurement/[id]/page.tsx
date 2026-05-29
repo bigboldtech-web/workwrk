@@ -111,11 +111,11 @@ export default function ProcurementDetail() {
   }
 
   if (loading) return (<>
-    <OsTitleBar title="Loading PO…" Icon={ShoppingCart} iconGradient={GRAD.brownOrange} showActions={false} />
+    <OsTitleBar title="Loading PO…" Icon={ShoppingCart} iconGradient={GRAD.brownOrange} showInvite={false} />
     <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
   </>);
   if (notFound || !p) return (<>
-    <OsTitleBar title="PO not found" Icon={ShoppingCart} iconGradient={GRAD.redPink} showActions={false} />
+    <OsTitleBar title="PO not found" Icon={ShoppingCart} iconGradient={GRAD.redPink} showInvite={false} />
     <OsEmptyView Icon={ShoppingCart} iconGradient={GRAD.redPink} title="We couldn't find that purchase order" subtitle="It may have been deleted." cta="Back to Procurement" />
   </>);
 

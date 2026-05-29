@@ -214,7 +214,7 @@ export default function TaskDetailPage() {
   if (loading) {
     return (
       <>
-        <OsTitleBar title="Loading task…" Icon={CheckSquare} iconGradient={GRAD.bluePurple} showActions={false} />
+        <OsTitleBar title="Loading task…" Icon={CheckSquare} iconGradient={GRAD.bluePurple} showInvite={false} />
         <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>
           Loading task…
         </div>
@@ -224,7 +224,7 @@ export default function TaskDetailPage() {
   if (notFound || !task) {
     return (
       <>
-        <OsTitleBar title="Task not found" Icon={CheckSquare} iconGradient={GRAD.redPink} showActions={false} />
+        <OsTitleBar title="Task not found" Icon={CheckSquare} iconGradient={GRAD.redPink} showInvite={false} />
         <OsEmptyView
           Icon={CheckSquare}
           iconGradient={GRAD.redPink}

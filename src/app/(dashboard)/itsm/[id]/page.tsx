@@ -71,11 +71,11 @@ export default function ItsmDetail() {
   }
 
   if (loading) return (<>
-    <OsTitleBar title="Loading ticket…" Icon={Server} iconGradient={GRAD.bluePurple} showActions={false} />
+    <OsTitleBar title="Loading ticket…" Icon={Server} iconGradient={GRAD.bluePurple} showInvite={false} />
     <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading ticket…</div>
   </>);
   if (notFound || !t) return (<>
-    <OsTitleBar title="Ticket not found" Icon={Server} iconGradient={GRAD.redPink} showActions={false} />
+    <OsTitleBar title="Ticket not found" Icon={Server} iconGradient={GRAD.redPink} showInvite={false} />
     <OsEmptyView Icon={Server} iconGradient={GRAD.redPink} title="We couldn't find that ticket" subtitle="It may have been deleted or you don't have access." cta="Back to ITSM" />
   </>);
 

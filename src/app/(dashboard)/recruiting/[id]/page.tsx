@@ -73,11 +73,11 @@ export default function RecruitingDetail() {
   }
 
   if (loading) return (<>
-    <OsTitleBar title="Loading application…" Icon={UserPlus} iconGradient={GRAD.orangePink} showActions={false} />
+    <OsTitleBar title="Loading application…" Icon={UserPlus} iconGradient={GRAD.orangePink} showInvite={false} />
     <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
   </>);
   if (notFound || !a) return (<>
-    <OsTitleBar title="Application not found" Icon={UserPlus} iconGradient={GRAD.redPink} showActions={false} />
+    <OsTitleBar title="Application not found" Icon={UserPlus} iconGradient={GRAD.redPink} showInvite={false} />
     <OsEmptyView Icon={UserPlus} iconGradient={GRAD.redPink} title="We couldn't find that application" subtitle="It may have been withdrawn or you don't have access." cta="Back to Recruiting" />
   </>);
 

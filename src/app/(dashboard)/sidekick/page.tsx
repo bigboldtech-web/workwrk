@@ -273,7 +273,7 @@ export default function SidekickPage() {
         description={active?.title ? `Chat · ${active.title}` : "Your AI working partner · ⌘J to toggle the side panel"}
         people={[PEOPLE.bb, PEOPLE.sc]}
         morePeople={2}
-        showActions={false}
+        showInvite={false}
       />
 
       <div className="os-chat">
