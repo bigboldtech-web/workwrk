@@ -1,27 +1,29 @@
 "use client";
 
+/* Meeting room — bespoke detail page.
+ *
+ * Two-column layout:
+ *   Left (2/3): Notes editor with AI tools (voice → text, AI summary,
+ *               paste transcript). Auto-saves every 30s.
+ *   Right (1/3): Stacked sidebar — meeting info, attendees, decisions,
+ *                action items, follow-up alert from previous meeting.
+ *
+ * Header: inline-editable title + type chip + when + attendee avatars
+ * + delete + back. New `actions` slot used; no shared chrome.
+ */
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Edit3, Save, Trash2, FileText, Users, CheckSquare,
-  MessageSquare, Plus, Calendar, Clock, ArrowRight, Square,
-  CheckCircle, X, ExternalLink, Mic, MicOff, Sparkles, ClipboardPaste,
+  MessageSquare, Plus, Calendar as CalendarIcon, Clock, X,
+  CheckCircle, Square, ExternalLink, Mic, Sparkles, ClipboardPaste,
+  Loader2, AlertTriangle, ChevronRight,
 } from "lucide-react";
-import { useToast } from "@/components/ui/toast";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useOsToast } from "@/components/layout/os/toast";
+import { C } from "@/components/layout/os/catalog";
+
+// ─── Types ────────────────────────────────────────────────
 
 interface ActionItem {
   id: string;
@@ -48,49 +50,54 @@ interface Meeting {
   agenda: string | null;
   notes: string | null;
   decisions: string | null;
+  meetingUrl?: string | null;
   attendees: { id: string; userId: string; attended: boolean; user: { id: string; firstName: string; lastName: string; avatar: string | null; email: string } }[];
   actionItems: ActionItem[];
 }
 
-function formatDate(d: string | null) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+interface UserLite { id: string; firstName: string; lastName: string }
+
+const TYPE_LABELS: Record<string, string> = {
+  DAILY_STANDUP: "Daily standup", WEEKLY_REVIEW: "Weekly review",
+  ONE_ON_ONE: "1:1", QUARTERLY_REVIEW: "Quarterly review",
+  ANNUAL_PLANNING: "Annual planning", ADHOC: "Ad hoc",
+};
+const TYPE_COLORS: Record<string, string> = {
+  DAILY_STANDUP: C.orange, WEEKLY_REVIEW: C.purple, ONE_ON_ONE: C.blue,
+  QUARTERLY_REVIEW: C.indigo, ANNUAL_PLANNING: C.pink, ADHOC: C.yellow,
+};
+
+const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
+function avatarColorFor(seed: string) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return AV_PALETTE[h % AV_PALETTE.length];
+}
+function initialsFor(first?: string | null, last?: string | null) {
+  const f = (first ?? "").trim()[0] ?? "";
+  const l = (last ?? "").trim()[0] ?? "";
+  return ((f + l) || "?").toUpperCase();
 }
 
-function formatDateTime(d: string) {
-  return new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+function fmtDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
-function getMeetingTypeLabel(type: string) {
-  return type.replace(/_/g, " ");
-}
+// ─── Voice-to-text (kept from previous implementation) ────
 
-function getMeetingTypeColor(type: string) {
-  switch (type) {
-    case "DAILY_STANDUP": return "bg-blue-500/20 text-blue-400";
-    case "WEEKLY_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]";
-    case "ONE_ON_ONE": return "bg-green-500/20 text-green-400";
-    case "QUARTERLY_REVIEW": return "bg-orange-500/20 text-orange-400";
-    default: return "bg-slate-500/20 text-slate-400";
-  }
-}
-
-// ============================================
-// Voice-to-Text Recording Button
-// ============================================
 function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => void }) {
   const [isRecording, setIsRecording] = useState(false);
   const [supported, setSupported] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [interimText, setInterimText] = useState("");
-  // "reconnecting" means a network blip was reported; cleared the moment
-  // a fresh recognition session actually starts (onstart) or a result
-  // comes in. Previously there was no onstart handler, so this label got
-  // stuck on screen forever whenever the first retry didn't immediately
-  // produce speech.
   const [reconnecting, setReconnecting] = useState(false);
 
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<{ stop: () => void; start: () => void } | null>(null);
   const isRecordingRef = useRef(false);
   const consecutiveFailuresRef = useRef(0);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,87 +108,71 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setSupported(false);
-      return;
-    }
-    recognitionRef.current = null; // lazy-created in toggleRecording
+    const SR = (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).SpeechRecognition
+      ?? (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
+    if (!SR) { setSupported(false); return; }
     return () => {
       if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
       try { recognitionRef.current?.stop(); } catch { /* ignore */ }
     };
   }, []);
 
-  // Build a fresh SpeechRecognition each time we (re)start. A recognition
-  // that hit a "network" error can get into a zombie state where .start()
-  // silently no-ops — reusing it is exactly why the UI got stuck on
-  // "Reconnecting…". Creating a new one per session dodges that entirely.
   function buildRecognition() {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return null;
-    const recognition = new SpeechRecognition();
+    const SR = (window as unknown as Record<string, unknown>).SpeechRecognition
+      ?? (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
+    if (!SR) return null;
+    const recognition = new (SR as new () => {
+      continuous: boolean; interimResults: boolean; lang: string;
+      onstart: () => void; onresult: (e: { resultIndex: number; results: { isFinal: boolean; [k: number]: { transcript: string } }[] }) => void;
+      onerror: (e: { error: string }) => void; onend: () => void;
+      start: () => void; stop: () => void;
+    })();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
     recognition.onstart = () => {
-      // Fresh session is live — any reconnect banner is no longer true.
       consecutiveFailuresRef.current = 0;
       setReconnecting(false);
       setErrorMsg("");
     };
-
-    recognition.onresult = (event: any) => {
-      // Any result (even interim) means we're truly connected again.
+    recognition.onresult = (event) => {
       if (reconnecting) setReconnecting(false);
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
           const transcript = event.results[i][0].transcript.trim();
-          if (transcript) {
-            onTranscriptRef.current(transcript);
-            setInterimText("");
-          }
+          if (transcript) { onTranscriptRef.current(transcript); setInterimText(""); }
         } else {
           interim += event.results[i][0].transcript;
         }
       }
       if (interim) setInterimText(interim);
     };
-
-    recognition.onerror = (e: any) => {
+    recognition.onerror = (e) => {
       if (e.error === "no-speech" || e.error === "aborted") return;
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        setErrorMsg("Microphone access denied. Please allow microphone in your browser settings.");
+        setErrorMsg("Microphone access denied — allow it in browser settings.");
         isRecordingRef.current = false;
         setIsRecording(false);
         setReconnecting(false);
         return;
       }
       if (e.error === "network") {
-        // onend will run next and handle the retry with backoff.
         if (isRecordingRef.current) setReconnecting(true);
         return;
       }
-      // Unknown error — still let onend decide whether to retry.
-      console.error("[VoiceRecord] Error:", e.error);
+      console.error("[Voice] Error:", e.error);
     };
-
     recognition.onend = () => {
       if (!isRecordingRef.current) {
-        setReconnecting(false);
-        setInterimText("");
-        setIsRecording(false);
+        setReconnecting(false); setInterimText(""); setIsRecording(false);
         return;
       }
-      // Still recording per user intent → attempt a retry with backoff.
       consecutiveFailuresRef.current += 1;
       if (consecutiveFailuresRef.current > MAX_CONSECUTIVE_FAILURES) {
-        setErrorMsg("Speech recognition keeps failing. Check your internet connection and try again — or type notes directly.");
-        isRecordingRef.current = false;
-        setIsRecording(false);
-        setReconnecting(false);
+        setErrorMsg("Recognition keeps failing — check your connection or type directly.");
+        isRecordingRef.current = false; setIsRecording(false); setReconnecting(false);
         return;
       }
       setReconnecting(true);
@@ -193,767 +184,574 @@ function VoiceRecordButton({ onTranscript }: { onTranscript: (text: string) => v
           if (!fresh) return;
           recognitionRef.current = fresh;
           fresh.start();
-        } catch {
-          // Another retry will be scheduled by the next onend.
-        }
+        } catch { /* next onend will retry */ }
       }, delay);
     };
-
     return recognition;
   }
 
-  function toggleRecording() {
+  function toggle() {
     setErrorMsg("");
-    if (!supported) {
-      setErrorMsg("Voice recording is only supported in Chrome. Please use Chrome or paste your transcript manually.");
-      return;
-    }
+    if (!supported) { setErrorMsg("Voice only works in Chrome."); return; }
     if (isRecording) {
       isRecordingRef.current = false;
       if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
       try { recognitionRef.current?.stop(); } catch { /* ignore */ }
-      setIsRecording(false);
-      setInterimText("");
-      setReconnecting(false);
+      setIsRecording(false); setInterimText(""); setReconnecting(false);
       return;
     }
     isRecordingRef.current = true;
     consecutiveFailuresRef.current = 0;
     const fresh = buildRecognition();
-    if (!fresh) {
-      setErrorMsg("Voice recording is only supported in Chrome.");
-      isRecordingRef.current = false;
-      return;
-    }
+    if (!fresh) { setErrorMsg("Voice only works in Chrome."); isRecordingRef.current = false; return; }
     recognitionRef.current = fresh;
-    try {
-      fresh.start();
-      setIsRecording(true);
-    } catch {
-      setErrorMsg("Failed to start recording. Please check microphone permissions.");
-      isRecordingRef.current = false;
-    }
+    try { fresh.start(); setIsRecording(true); }
+    catch { setErrorMsg("Couldn't start — check microphone permission."); isRecordingRef.current = false; }
   }
 
-  if (!supported) {
-    return (
-      <p className="text-[10px] text-muted">Voice recording requires Chrome browser.</p>
-    );
-  }
+  if (!supported) return null;
 
   return (
-    <div className="flex items-center gap-2">
-      <Button
-        variant={isRecording ? "destructive" : "outline"}
-        size="sm"
-        onClick={toggleRecording}
-        className="gap-1.5 text-xs"
-      >
+    <div className="mtgr-tool">
+      <button type="button" className={`mtgr-tool__btn ${isRecording ? "is-recording" : ""}`} onClick={toggle}>
         {isRecording ? (
           <>
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-            </span>
-            Stop Recording
+            <span className="mtgr-tool__pulse" />
+            Stop recording
           </>
         ) : (
-          <><Mic size={14} /> Voice Record</>
+          <><Mic /> Voice record</>
         )}
-      </Button>
-      {isRecording && reconnecting && (
-        <span className="text-[11px] text-orange-400 animate-pulse">Reconnecting…</span>
-      )}
-      {isRecording && !reconnecting && interimText && (
-        <span className="text-[11px] text-muted italic truncate max-w-[200px]">
-          {interimText}...
-        </span>
-      )}
-      {isRecording && !reconnecting && !interimText && (
-        <span className="text-[11px] text-muted animate-pulse">Listening...</span>
-      )}
-      {errorMsg && (
-        <span className="text-[11px] text-red-400">{errorMsg}</span>
-      )}
+      </button>
+      {isRecording && reconnecting && <span className="mtgr-tool__hint">Reconnecting…</span>}
+      {isRecording && !reconnecting && interimText && <span className="mtgr-tool__interim">{interimText}…</span>}
+      {isRecording && !reconnecting && !interimText && <span className="mtgr-tool__hint">Listening…</span>}
+      {errorMsg && <span className="mtgr-tool__error">{errorMsg}</span>}
     </div>
   );
 }
 
-// ============================================
-// AI Summary Button
-// ============================================
-function AISummaryButton({ notes, onSummary }: { notes: string; onSummary: (summary: string) => void }) {
+function AISummaryButton({ notes, onSummary }: { notes: string; onSummary: (s: string) => void }) {
   const [generating, setGenerating] = useState(false);
-  const { success: toastSuccess, error: toastError } = useToast();
+  const { toast } = useOsToast();
 
-  async function generateSummary() {
-    if (!notes.trim()) { toastError("Write some notes first, then generate a summary."); return; }
+  async function generate() {
+    if (!notes.trim()) { toast("Write some notes first."); return; }
     setGenerating(true);
     try {
       const res = await fetch("/api/ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: `Convert these raw meeting notes into a structured Minutes of Meeting (MOM) format. Include sections: Attendees (if mentioned), Discussion Points, Key Decisions, Action Items (with owners if mentioned), and Next Steps. Keep it professional and concise. Here are the notes:\n\n${notes}`,
+          query: `Convert these raw meeting notes into a structured Minutes of Meeting (MOM) format. Include sections: Attendees, Discussion Points, Key Decisions, Action Items (with owners), Next Steps. Keep it professional and concise.\n\n${notes}`,
           type: "meeting_summary",
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        const summary = data.response || data.data?.response || data.answer || "";
-        if (summary) {
-          onSummary(`--- MINUTES OF MEETING ---\n\n${summary}\n\n--- Original Notes ---\n${notes}`);
-          toastSuccess("Meeting summary generated!");
-        } else {
-          toastError("Could not generate summary. Try again.");
-        }
-      } else {
-        toastError("AI service unavailable. Make sure ANTHROPIC_API_KEY is set.");
-      }
-    } catch { toastError("Failed to generate summary"); } finally { setGenerating(false); }
+      if (!res.ok) { toast("AI service unavailable."); return; }
+      const data = await res.json();
+      const summary = data.response || data.data?.response || data.answer || "";
+      if (summary) {
+        onSummary(`— MINUTES OF MEETING —\n\n${summary}\n\n— Original notes —\n${notes}`);
+        toast("Summary generated");
+      } else { toast("AI returned no summary."); }
+    } catch { toast("Couldn't generate summary"); }
+    finally { setGenerating(false); }
   }
 
   return (
-    <Button variant="outline" size="sm" onClick={generateSummary} disabled={generating || !notes.trim()} className="gap-1.5 text-xs">
-      <Sparkles size={14} /> {generating ? "Generating..." : "AI Summary"}
-    </Button>
+    <button type="button" className="mtgr-tool__btn" onClick={generate} disabled={generating || !notes.trim()}>
+      {generating ? <Loader2 className="mtgr-spin" /> : <Sparkles />} {generating ? "Generating…" : "AI summary"}
+    </button>
   );
 }
 
-// ============================================
-// Paste Transcript Button
-// ============================================
 function PasteTranscriptButton({ onPaste }: { onPaste: (text: string) => void }) {
-  const [showDialog, setShowDialog] = useState(false);
+  const [open, setOpen] = useState(false);
   const [transcript, setTranscript] = useState("");
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setShowDialog(true)} className="gap-1.5 text-xs">
-        <ClipboardPaste size={14} /> Paste Transcript
-      </Button>
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Paste Meeting Transcript</DialogTitle></DialogHeader>
-          <div className="py-4 space-y-3">
-            <p className="text-xs text-muted">
-              Paste a transcript from Zoom, Google Meet, Teams, or any transcription tool. You can then use AI Summary to structure it.
-            </p>
-            <Textarea
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Paste your meeting transcript here..."
-              rows={12}
-              className="text-sm"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
-            <Button onClick={() => {
-              if (transcript.trim()) {
-                onPaste(transcript.trim());
-                setTranscript("");
-                setShowDialog(false);
-              }
+      <button type="button" className="mtgr-tool__btn" onClick={() => setOpen(true)}>
+        <ClipboardPaste /> Paste transcript
+      </button>
+      {open && (
+        <Modal title="Paste meeting transcript" onClose={() => setOpen(false)} maxWidth={620}>
+          <p className="mtgr-modal__hint">Paste from Zoom, Google Meet, Teams, or any transcription tool. Run AI summary after to structure it.</p>
+          <textarea
+            value={transcript}
+            onChange={(e) => setTranscript(e.target.value)}
+            placeholder="Paste your meeting transcript here…"
+            rows={14}
+            className="mtgr-modal__textarea"
+          />
+          <footer className="mtgr-modal__foot">
+            <button type="button" className="mtgr-btn mtgr-btn--ghost" onClick={() => setOpen(false)}>Cancel</button>
+            <button type="button" className="mtgr-btn mtgr-btn--primary" onClick={() => {
+              if (transcript.trim()) { onPaste(transcript.trim()); setTranscript(""); setOpen(false); }
             }} disabled={!transcript.trim()}>
-              Add to Notes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              Add to notes
+            </button>
+          </footer>
+        </Modal>
+      )}
     </>
   );
 }
 
+// ─── Reusable modal (matches OS aesthetic) ───────────────
+
+function Modal({ title, onClose, children, maxWidth = 480 }: { title: string; onClose: () => void; children: React.ReactNode; maxWidth?: number }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="mtgr-modal-back" onClick={onClose}>
+      <div className="mtgr-modal" style={{ maxWidth }} onClick={(e) => e.stopPropagation()}>
+        <header className="mtgr-modal__head">
+          <h2>{title}</h2>
+          <button type="button" onClick={onClose} aria-label="Close"><X /></button>
+        </header>
+        <div className="mtgr-modal__body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main page ───────────────────────────────────────────
+
 export default function MeetingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { toast } = useOsToast();
 
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const { success: toastSuccess, error: toastError } = useToast();
-  const [tab, setTab] = useState("details");
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<UserLite[]>([]);
+  const [prevIncomplete, setPrevIncomplete] = useState<ActionItem[]>([]);
 
-  // Edit details state
-  const [editing, setEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState("");
-  const [editAgenda, setEditAgenda] = useState("");
+  // Title (inline-editable)
+  const [titleDraft, setTitleDraft] = useState("");
 
-  // Notes state
+  // Notes
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
-  const autoSaveRef = useRef<NodeJS.Timeout | null>(null);
+  const [notesSaving, setNotesSaving] = useState(false);
+  const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Decisions state
+  // Decisions
   const [decisions, setDecisions] = useState<Decision[]>([]);
-  const [showDecisionDialog, setShowDecisionDialog] = useState(false);
-  const [newDecisionText, setNewDecisionText] = useState("");
+  const [addingDecision, setAddingDecision] = useState(false);
+  const [newDecision, setNewDecision] = useState("");
 
-  // Action items state
-  const [showActionDialog, setShowActionDialog] = useState(false);
+  // Action items
+  const [addingAction, setAddingAction] = useState(false);
   const [aiTitle, setAiTitle] = useState("");
   const [aiAssigneeId, setAiAssigneeId] = useState("");
   const [aiDeadline, setAiDeadline] = useState("");
 
-  // Delete confirmation
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  // Delete
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  // Previous meeting follow-up
-  const [prevIncomplete, setPrevIncomplete] = useState<ActionItem[]>([]);
-
+  // ── Fetchers ────────────────────────────────────────────
   const fetchMeeting = useCallback(async () => {
     try {
       const res = await fetch(`/api/meetings/${id}`);
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) throw new Error("not ok");
       const data: Meeting = await res.json();
       setMeeting(data);
-      setEditTitle(data.title);
-      setEditAgenda(data.agenda || "");
-      setNotes(data.notes || "");
-
-      // Parse decisions from JSON string
+      setTitleDraft(data.title);
+      setNotes(data.notes ?? "");
       try {
         const parsed = data.decisions ? JSON.parse(data.decisions) : [];
         setDecisions(Array.isArray(parsed) ? parsed : []);
       } catch {
         setDecisions(data.decisions ? [{ text: data.decisions, decidedBy: "", date: "" }] : []);
       }
-    } catch (err) {
-      console.error("Error fetching meeting:", err);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error("Fetch meeting failed:", err); }
+    finally { setLoading(false); }
   }, [id]);
 
   const fetchUsers = useCallback(async () => {
     try {
       const res = await fetch("/api/users?limit=500");
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(Array.isArray(data) ? data : data?.data || []);
-      }
-    } catch {}
+      if (!res.ok) return;
+      const data = await res.json();
+      setUsers(Array.isArray(data) ? data : data?.data ?? []);
+    } catch { /* ignore */ }
   }, []);
 
-  // Fetch follow-up from previous meeting of same type
-  const fetchPreviousIncomplete = useCallback(async (meetingData: Meeting) => {
+  const fetchPrevIncomplete = useCallback(async (m: Meeting) => {
     try {
-      const res = await fetch(`/api/meetings?type=${meetingData.type}`);
+      const res = await fetch(`/api/meetings?type=${m.type}`);
       if (!res.ok) return;
       const all = await res.json();
-      if (!Array.isArray(all)) return;
-
-      // Find previous meeting (scheduled before this one, same type)
-      const current = new Date(meetingData.scheduledAt).getTime();
-      const previous = all
-        .filter((m: any) => new Date(m.scheduledAt).getTime() < current && m.id !== meetingData.id)
-        .sort((a: any, b: any) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())[0];
-
+      const list = Array.isArray(all) ? all : all?.data?.items ?? [];
+      const current = new Date(m.scheduledAt).getTime();
+      const previous = list
+        .filter((x: Meeting) => new Date(x.scheduledAt).getTime() < current && x.id !== m.id)
+        .sort((a: Meeting, b: Meeting) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())[0];
       if (!previous) return;
-
-      // Check if attendees overlap
-      const currentAttendees = new Set(meetingData.attendees.map((a) => a.userId));
-      const prevAttendees = (previous.attendees || []).map((a: any) => a.user?.id || a.userId);
-      const overlap = prevAttendees.some((uid: string) => currentAttendees.has(uid));
-      if (!overlap) return;
-
-      // Fetch that meeting's action items
       const detailRes = await fetch(`/api/meetings/${previous.id}`);
       if (!detailRes.ok) return;
       const detail = await detailRes.json();
-      const incomplete = (detail.actionItems || []).filter((ai: ActionItem) => ai.status !== "COMPLETED");
+      const incomplete = (detail.actionItems ?? []).filter((ai: ActionItem) => ai.status !== "COMPLETED");
       setPrevIncomplete(incomplete);
-    } catch {}
+    } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => {
-    fetchMeeting();
-    fetchUsers();
-  }, [fetchMeeting, fetchUsers]);
+  useEffect(() => { void fetchMeeting(); void fetchUsers(); }, [fetchMeeting, fetchUsers]);
+  useEffect(() => { if (meeting) void fetchPrevIncomplete(meeting); }, [meeting, fetchPrevIncomplete]);
 
-  useEffect(() => {
-    if (meeting) fetchPreviousIncomplete(meeting);
-  }, [meeting, fetchPreviousIncomplete]);
-
-  // Auto-save notes every 30 seconds
+  // ── Auto-save notes ────────────────────────────────────
   useEffect(() => {
     if (!notesDirty || !meeting) return;
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     autoSaveRef.current = setTimeout(async () => {
+      setNotesSaving(true);
       await fetch(`/api/meetings/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes }),
       });
       setNotesDirty(false);
-    }, 30000);
+      setNotesSaving(false);
+    }, 2500); // shorter window — feels live
     return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
   }, [notes, notesDirty, id, meeting]);
 
-  const saveNotes = async () => {
-    setSaving(true);
+  // ── Actions ────────────────────────────────────────────
+  async function saveTitle() {
+    if (!meeting || titleDraft.trim() === meeting.title) return;
     await fetch(`/api/meetings/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes }),
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: titleDraft.trim() }),
     });
-    setNotesDirty(false);
-    setSaving(false);
-  };
+    void fetchMeeting();
+  }
 
-  const saveDetails = async () => {
-    setSaving(true);
-    const res = await fetch(`/api/meetings/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: editTitle, agenda: editAgenda }),
+  async function saveAgenda(agenda: string) {
+    if (!meeting) return;
+    setMeeting({ ...meeting, agenda });
+    await fetch(`/api/meetings/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agenda }),
     });
-    if (res.ok) {
-      await fetchMeeting();
-      setEditing(false);
-    }
-    setSaving(false);
-  };
+  }
 
-  const handleDelete = async () => {
+  async function handleDelete() {
     const res = await fetch(`/api/meetings/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      toastSuccess("Meeting deleted");
-      router.push("/meetings");
-    } else {
-      toastError("Failed to delete meeting");
-    }
-    setShowDeleteConfirm(false);
-  };
+    if (res.ok) { toast("Meeting deleted"); router.push("/meetings"); }
+    else toast("Couldn't delete meeting");
+    setConfirmingDelete(false);
+  }
 
-  // Decision handlers
-  const addDecision = async () => {
-    if (!newDecisionText.trim()) return;
-    const updated = [...decisions, { text: newDecisionText, decidedBy: "", date: new Date().toISOString().split("T")[0] }];
+  async function addDecision() {
+    if (!newDecision.trim()) return;
+    const updated = [...decisions, { text: newDecision.trim(), decidedBy: "", date: new Date().toISOString().slice(0, 10) }];
     await fetch(`/api/meetings/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decisions: JSON.stringify(updated) }),
     });
     setDecisions(updated);
-    setNewDecisionText("");
-    setShowDecisionDialog(false);
-  };
+    setNewDecision("");
+    setAddingDecision(false);
+  }
 
-  const removeDecision = async (index: number) => {
-    const updated = decisions.filter((_, i) => i !== index);
+  async function removeDecision(idx: number) {
+    const updated = decisions.filter((_, i) => i !== idx);
     await fetch(`/api/meetings/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decisions: JSON.stringify(updated) }),
     });
     setDecisions(updated);
-  };
+  }
 
-  // Action item handlers
-  const addActionItem = async () => {
+  async function addActionItem() {
     if (!aiTitle || !aiAssigneeId) return;
-    setSaving(true);
     const res = await fetch(`/api/meetings/${id}/action-items`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: aiTitle, assigneeId: aiAssigneeId, deadline: aiDeadline || undefined }),
     });
     if (res.ok) {
-      setShowActionDialog(false);
-      setAiTitle("");
-      setAiAssigneeId("");
-      setAiDeadline("");
-      fetchMeeting();
+      setAddingAction(false); setAiTitle(""); setAiAssigneeId(""); setAiDeadline("");
+      void fetchMeeting();
     }
-    setSaving(false);
-  };
+  }
 
-  const toggleActionItem = async (item: ActionItem) => {
-    const newStatus = item.status === "COMPLETED" ? "NOT_STARTED" : "COMPLETED";
+  async function toggleAction(item: ActionItem) {
+    const next = item.status === "COMPLETED" ? "NOT_STARTED" : "COMPLETED";
     await fetch(`/api/meetings/${id}/action-items`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId: item.id, status: newStatus }),
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId: item.id, status: next }),
     });
-    fetchMeeting();
-  };
+    void fetchMeeting();
+  }
 
-  const deleteActionItem = async (itemId: string) => {
+  async function deleteAction(itemId: string) {
     await fetch(`/api/meetings/${id}/action-items?itemId=${itemId}`, { method: "DELETE" });
-    fetchMeeting();
-  };
+    void fetchMeeting();
+  }
 
-  const convertToTask = async (itemId: string) => {
+  async function convertToTask(itemId: string) {
     const res = await fetch(`/api/meetings/${id}/action-items`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId }),
     });
     if (res.ok) {
       const data = await res.json();
-      toastSuccess(`Task created: ${data.task.title}`);
+      toast(`Task created: ${data.task.title}`);
     }
-  };
-
-  if (loading) {
-    return (
-      <div className="space-y-4 animate-fade-in">
-        <div className="flex items-center gap-4">
-          <Skeleton className="h-8 w-8" />
-          <Skeleton className="h-6 w-64" />
-        </div>
-        <Skeleton className="h-96 w-full" />
-      </div>
-    );
   }
 
+  // ── Render ──────────────────────────────────────────────
+  if (loading) {
+    return <div className="mtgr__loading"><Loader2 className="mtgr-spin" /> Loading meeting…</div>;
+  }
   if (!meeting) {
     return (
-      <div className="text-center py-20">
-        <p className="text-muted">Meeting not found</p>
-        <Button variant="outline" className="mt-4" onClick={() => router.push("/meetings")}>Back to Meetings</Button>
+      <div className="mtgr__not-found">
+        <p>Meeting not found.</p>
+        <button type="button" className="mtgr-btn mtgr-btn--ghost" onClick={() => router.push("/meetings")}>
+          <ArrowLeft /> Back to meetings
+        </button>
       </div>
     );
   }
 
-  const actionItemsDone = meeting.actionItems.filter((a) => a.status === "COMPLETED").length;
-  const actionItemsTotal = meeting.actionItems.length;
+  const color = TYPE_COLORS[meeting.type] ?? C.indigo;
+  const typeLabel = TYPE_LABELS[meeting.type] ?? meeting.type;
+  const actionsDone = meeting.actionItems.filter((a) => a.status === "COMPLETED").length;
+  const actionsTotal = meeting.actionItems.length;
+  const startMs = new Date(meeting.scheduledAt).getTime();
+  const isPast = startMs + meeting.duration * 60_000 < Date.now();
+  const isLive = startMs <= Date.now() && Date.now() < startMs + meeting.duration * 60_000;
 
   return (
-    <div className="space-y-3 animate-fade-in">
+    <div className="mtgr" style={{ ["--mtgr-color" as string]: color }}>
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/meetings")} className="shrink-0">
-            <ArrowLeft size={18} />
-          </Button>
+      <header className="mtgr__head">
+        <button type="button" className="mtgr__back" onClick={() => router.push("/meetings")} aria-label="Back">
+          <ArrowLeft />
+        </button>
+        <div className="mtgr__head-main">
+          <div className="mtgr__head-meta">
+            <span className="mtgr__type-chip" style={{ background: `color-mix(in srgb, ${color} 12%, transparent)`, color }}>{typeLabel}</span>
+            {isLive && <span className="mtgr__live"><span className="mtgr__live-dot" /> Live now</span>}
+            {isPast && !isLive && <span className="mtgr__past">Completed</span>}
+            <span className="mtgr__head-when"><CalendarIcon /> {fmtDateTime(meeting.scheduledAt)}</span>
+            <span className="mtgr__head-when"><Clock /> {meeting.duration} min</span>
+          </div>
+          <input
+            type="text"
+            className="mtgr__title"
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={saveTitle}
+            placeholder="Untitled meeting"
+          />
+        </div>
+        <div className="mtgr__head-actions">
+          <button type="button" className="mtgr-btn mtgr-btn--ghost mtgr-btn--danger" onClick={() => setConfirmingDelete(true)}>
+            <Trash2 /> Delete
+          </button>
+        </div>
+      </header>
+
+      {/* Follow-up alert */}
+      {prevIncomplete.length > 0 && (
+        <div className="mtgr__followup">
+          <AlertTriangle />
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight">{meeting.title}</h1>
-              <Badge className={`text-[10px] ${getMeetingTypeColor(meeting.type)}`}>
-                {getMeetingTypeLabel(meeting.type)}
-              </Badge>
-            </div>
-            <p className="text-sm text-muted flex items-center gap-3 mt-0.5">
-              <span className="flex items-center gap-1"><Calendar size={12} /> {formatDateTime(meeting.scheduledAt)}</span>
-              <span className="flex items-center gap-1"><Clock size={12} /> {meeting.duration} min</span>
-              <span className="flex items-center gap-1"><Users size={12} /> {meeting.attendees.length} attendees</span>
-            </p>
+            <strong>{prevIncomplete.length} unfinished action{prevIncomplete.length === 1 ? "" : "s"} from your last {typeLabel.toLowerCase()}</strong>
+            <ul>
+              {prevIncomplete.slice(0, 3).map((ai) => (
+                <li key={ai.id}>
+                  {ai.title}
+                  <em>— {ai.assignee.firstName} {ai.assignee.lastName}</em>
+                </li>
+              ))}
+              {prevIncomplete.length > 3 && <li className="mtgr__followup-more">+{prevIncomplete.length - 3} more</li>}
+            </ul>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 text-red-400 hover:text-red-300" onClick={() => setShowDeleteDialog(true)}>
-            <Trash2 size={14} /> Delete
-          </Button>
-        </div>
-      </div>
+      )}
 
-      {/* Follow-up from previous meeting */}
-      {prevIncomplete.length > 0 && (
-        <Card className="border-orange-500/20 bg-orange-500/5">
-          <CardContent className="p-4">
-            <p className="text-sm font-semibold text-orange-400 mb-2">
-              Follow-up from previous meeting ({prevIncomplete.length} incomplete action items)
-            </p>
-            <div className="space-y-1">
-              {prevIncomplete.map((ai) => (
-                <div key={ai.id} className="flex items-center gap-2 text-xs text-muted">
-                  <Square size={12} className="text-orange-400 shrink-0" />
-                  <span>{ai.title}</span>
-                  <span className="ml-auto">{ai.assignee.firstName} {ai.assignee.lastName}</span>
+      {/* Two-column body */}
+      <div className="mtgr__body">
+        {/* Left: notes */}
+        <main className="mtgr__notes">
+          <header className="mtgr__notes-head">
+            <h2><FileText /> Notes</h2>
+            <div className="mtgr__notes-status">
+              {notesSaving ? <><Loader2 className="mtgr-spin" /> Saving…</>
+                : notesDirty ? <>Unsaved</>
+                : <>All changes saved</>}
+            </div>
+          </header>
+          <div className="mtgr__tools">
+            <VoiceRecordButton onTranscript={(text) => { setNotes((prev) => prev + (prev ? "\n" : "") + text); setNotesDirty(true); }} />
+            <AISummaryButton notes={notes} onSummary={(summary) => { setNotes(summary); setNotesDirty(true); }} />
+            <PasteTranscriptButton onPaste={(text) => { setNotes((prev) => prev + (prev ? "\n\n— Pasted transcript —\n" : "") + text); setNotesDirty(true); }} />
+          </div>
+          <textarea
+            className="mtgr__textarea"
+            value={notes}
+            onChange={(e) => { setNotes(e.target.value); setNotesDirty(true); }}
+            placeholder={`Start typing notes for "${meeting.title}", or record voice, or paste a transcript above…`}
+          />
+        </main>
+
+        {/* Right: sidebar */}
+        <aside className="mtgr__side">
+          {/* Agenda card */}
+          <section className="mtgr-card">
+            <header><h3><Edit3 /> Agenda</h3></header>
+            <textarea
+              className="mtgr-card__agenda"
+              defaultValue={meeting.agenda ?? ""}
+              onBlur={(e) => saveAgenda(e.target.value)}
+              placeholder="What are we covering?"
+              rows={3}
+            />
+          </section>
+
+          {/* Attendees card */}
+          <section className="mtgr-card">
+            <header>
+              <h3><Users /> Attendees</h3>
+              <span className="mtgr-card__count">{meeting.attendees.length}</span>
+            </header>
+            <div className="mtgr-att-list">
+              {meeting.attendees.length === 0 ? (
+                <div className="mtgr-card__empty">No attendees added.</div>
+              ) : meeting.attendees.map((a) => (
+                <div key={a.id} className="mtgr-att-row">
+                  <span className="mtgr-att-row__chip" style={{ background: avatarColorFor(a.userId) }}>
+                    {initialsFor(a.user.firstName, a.user.lastName)}
+                  </span>
+                  <span className="mtgr-att-row__name">{a.user.firstName} {a.user.lastName}</span>
+                  {a.attended && <CheckCircle className="mtgr-att-row__check" />}
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </section>
+
+          {/* Decisions card */}
+          <section className="mtgr-card">
+            <header>
+              <h3><MessageSquare /> Decisions</h3>
+              <span className="mtgr-card__count">{decisions.length}</span>
+              <button type="button" className="mtgr-card__add" onClick={() => setAddingDecision(true)} aria-label="Add decision"><Plus /></button>
+            </header>
+            {decisions.length === 0 ? (
+              <div className="mtgr-card__empty">No decisions recorded.</div>
+            ) : (
+              <ol className="mtgr-dec-list">
+                {decisions.map((d, i) => (
+                  <li key={i} className="mtgr-dec-row">
+                    <p>{d.text}</p>
+                    {d.date && <span>{fmtDate(d.date)}</span>}
+                    <button type="button" onClick={() => removeDecision(i)} aria-label="Remove"><X /></button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+
+          {/* Action items card */}
+          <section className="mtgr-card">
+            <header>
+              <h3><CheckSquare /> Action items</h3>
+              <span className="mtgr-card__count">{actionsDone} / {actionsTotal}</span>
+              <button type="button" className="mtgr-card__add" onClick={() => setAddingAction(true)} aria-label="Add action"><Plus /></button>
+            </header>
+            {meeting.actionItems.length === 0 ? (
+              <div className="mtgr-card__empty">Nothing assigned yet.</div>
+            ) : (
+              <ol className="mtgr-action-list">
+                {meeting.actionItems.map((item) => (
+                  <li key={item.id} className={`mtgr-action-row ${item.status === "COMPLETED" ? "is-done" : ""}`}>
+                    <button type="button" onClick={() => toggleAction(item)} aria-label="Toggle done">
+                      {item.status === "COMPLETED" ? <CheckCircle /> : <Square />}
+                    </button>
+                    <div className="mtgr-action-row__body">
+                      <p>{item.title}</p>
+                      <div>
+                        <span>{item.assignee.firstName} {item.assignee.lastName}</span>
+                        {item.deadline && <span>· due {fmtDate(item.deadline)}</span>}
+                      </div>
+                    </div>
+                    <div className="mtgr-action-row__act">
+                      <button type="button" onClick={() => convertToTask(item.id)} title="Convert to task"><ExternalLink /></button>
+                      <button type="button" onClick={() => deleteAction(item.id)} title="Delete"><Trash2 /></button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </aside>
+      </div>
+
+      {/* ── Modals ──────────────────────────────────── */}
+
+      {addingDecision && (
+        <Modal title="Add decision" onClose={() => setAddingDecision(false)}>
+          <label className="mtgr-modal__label">What was decided?</label>
+          <textarea
+            value={newDecision}
+            onChange={(e) => setNewDecision(e.target.value)}
+            rows={4}
+            className="mtgr-modal__textarea"
+            placeholder="e.g. Ship v2 by Q3 end with feature X scoped down…"
+          />
+          <footer className="mtgr-modal__foot">
+            <button type="button" className="mtgr-btn mtgr-btn--ghost" onClick={() => setAddingDecision(false)}>Cancel</button>
+            <button type="button" className="mtgr-btn mtgr-btn--primary" onClick={addDecision} disabled={!newDecision.trim()}>
+              Add decision <ChevronRight />
+            </button>
+          </footer>
+        </Modal>
       )}
 
-      {/* Tabs */}
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="w-full justify-start">
-          <TabsTrigger value="details" className="gap-1.5"><Edit3 size={14} /> Details</TabsTrigger>
-          <TabsTrigger value="notes" className="gap-1.5"><FileText size={14} /> Notes</TabsTrigger>
-          <TabsTrigger value="decisions" className="gap-1.5"><MessageSquare size={14} /> Decisions ({decisions.length})</TabsTrigger>
-          <TabsTrigger value="actions" className="gap-1.5">
-            <CheckSquare size={14} /> Action Items ({actionItemsDone}/{actionItemsTotal})
-          </TabsTrigger>
-        </TabsList>
+      {addingAction && (
+        <Modal title="Add action item" onClose={() => setAddingAction(false)}>
+          <label className="mtgr-modal__label">Title</label>
+          <input type="text" value={aiTitle} onChange={(e) => setAiTitle(e.target.value)} className="mtgr-modal__input" placeholder="What needs to be done?" />
+          <label className="mtgr-modal__label">Assigned to</label>
+          <select value={aiAssigneeId} onChange={(e) => setAiAssigneeId(e.target.value)} className="mtgr-modal__input">
+            <option value="">Pick someone…</option>
+            {(meeting.attendees ?? []).map((a) => (
+              <option key={a.user.id} value={a.user.id}>{a.user.firstName} {a.user.lastName} (in meeting)</option>
+            ))}
+            {users.filter((u) => !meeting.attendees.some((a) => a.user.id === u.id)).map((u) => (
+              <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
+            ))}
+          </select>
+          <label className="mtgr-modal__label">Deadline (optional)</label>
+          <input type="date" value={aiDeadline} onChange={(e) => setAiDeadline(e.target.value)} className="mtgr-modal__input" />
+          <footer className="mtgr-modal__foot">
+            <button type="button" className="mtgr-btn mtgr-btn--ghost" onClick={() => setAddingAction(false)}>Cancel</button>
+            <button type="button" className="mtgr-btn mtgr-btn--primary" onClick={addActionItem} disabled={!aiTitle || !aiAssigneeId}>
+              Add action <ChevronRight />
+            </button>
+          </footer>
+        </Modal>
+      )}
 
-        {/* Details Tab */}
-        <TabsContent value="details" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Meeting Details</CardTitle>
-                {editing ? (
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => { setEditing(false); setEditTitle(meeting.title); setEditAgenda(meeting.agenda || ""); }}>Cancel</Button>
-                    <Button size="sm" onClick={saveDetails} disabled={saving} className="gap-1.5"><Save size={14} /> {saving ? "Saving..." : "Save"}</Button>
-                  </div>
-                ) : (
-                  <Button variant="outline" size="sm" onClick={() => setEditing(true)} className="gap-1.5"><Edit3 size={14} /> Edit</Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-[10px] text-muted uppercase tracking-wider">Title</Label>
-                  {editing ? (
-                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="mt-1" />
-                  ) : (
-                    <p className="text-sm mt-1">{meeting.title}</p>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-[10px] text-muted uppercase tracking-wider">Type</Label>
-                  <p className="text-sm mt-1">{getMeetingTypeLabel(meeting.type)}</p>
-                </div>
-                <div>
-                  <Label className="text-[10px] text-muted uppercase tracking-wider">Scheduled</Label>
-                  <p className="text-sm mt-1">{formatDateTime(meeting.scheduledAt)}</p>
-                </div>
-                <div>
-                  <Label className="text-[10px] text-muted uppercase tracking-wider">Duration</Label>
-                  <p className="text-sm mt-1">{meeting.duration} minutes</p>
-                </div>
-              </div>
-              <div>
-                <Label className="text-[10px] text-muted uppercase tracking-wider">Agenda</Label>
-                {editing ? (
-                  <Textarea value={editAgenda} onChange={(e) => setEditAgenda(e.target.value)} className="mt-1" rows={4} />
-                ) : (
-                  <p className="text-sm mt-1 text-muted whitespace-pre-wrap">{meeting.agenda || "No agenda set."}</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Attendees */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Attendees ({meeting.attendees.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-3">
-                {meeting.attendees.map((a) => (
-                  <div key={a.id} className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface-3">
-                    <Avatar className="h-7 w-7">
-                      <AvatarFallback className="text-[10px]">
-                        {a.user.firstName[0]}{a.user.lastName[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm">{a.user.firstName} {a.user.lastName}</span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Notes Tab */}
-        <TabsContent value="notes" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Meeting Notes</CardTitle>
-                <div className="flex items-center gap-2">
-                  {notesDirty && <span className="text-[10px] text-orange-400">Unsaved</span>}
-                  <Button size="sm" onClick={saveNotes} disabled={saving || !notesDirty} className="gap-1.5">
-                    <Save size={14} /> {saving ? "Saving..." : "Save"}
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {/* Tool buttons */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <VoiceRecordButton onTranscript={(text) => { setNotes((prev) => prev + (prev ? "\n" : "") + text); setNotesDirty(true); }} />
-                <AISummaryButton notes={notes} onSummary={(summary) => { setNotes(summary); setNotesDirty(true); }} />
-                <PasteTranscriptButton onPaste={(text) => { setNotes((prev) => prev + (prev ? "\n\n--- Pasted Transcript ---\n" : "") + text); setNotesDirty(true); }} />
-              </div>
-              <Textarea
-                value={notes}
-                onChange={(e) => { setNotes(e.target.value); setNotesDirty(true); }}
-                placeholder="Write meeting notes, use voice recording, or paste a transcript..."
-                rows={16}
-                className="bg-surface-3 border-border text-sm"
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Decisions Tab */}
-        <TabsContent value="decisions" className="mt-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Decisions ({decisions.length})</CardTitle>
-                <Button variant="outline" size="sm" onClick={() => setShowDecisionDialog(true)} className="gap-1.5">
-                  <Plus size={14} /> Add Decision
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {decisions.length === 0 ? (
-                <div className="text-center py-8 text-muted text-sm">No decisions recorded yet.</div>
-              ) : (
-                <div className="space-y-2">
-                  {decisions.map((d, i) => (
-                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-border bg-surface-3 group">
-                      <div className="rounded-full bg-[rgba(212,255,46,0.08)] p-1.5 mt-0.5 shrink-0">
-                        <MessageSquare size={12} className="text-[color:var(--accent-strong)]" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm">{d.text}</p>
-                        <p className="text-[10px] text-muted mt-1">{d.date ? formatDate(d.date) : ""}</p>
-                      </div>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 text-red-400" onClick={() => removeDecision(i)}>
-                        <X size={12} />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Action Items Tab */}
-        <TabsContent value="actions" className="mt-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">
-                  Action Items — {actionItemsDone} of {actionItemsTotal} complete
-                </CardTitle>
-                <Button variant="outline" size="sm" onClick={() => setShowActionDialog(true)} className="gap-1.5">
-                  <Plus size={14} /> Add Action Item
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {meeting.actionItems.length === 0 ? (
-                <div className="text-center py-8 text-muted text-sm">No action items yet.</div>
-              ) : (
-                <div className="space-y-2">
-                  {meeting.actionItems.map((item) => (
-                    <div key={item.id} className={`flex items-start gap-3 p-3 rounded-lg border transition-all group ${
-                      item.status === "COMPLETED" ? "border-green-500/20 bg-green-500/5" : "border-border bg-surface-3"
-                    }`}>
-                      <button onClick={() => toggleActionItem(item)} className="mt-0.5 shrink-0">
-                        {item.status === "COMPLETED" ? (
-                          <CheckCircle size={18} className="text-green-400" />
-                        ) : (
-                          <Square size={18} className="text-muted hover:text-[#e2ff6b]" />
-                        )}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-sm font-medium ${item.status === "COMPLETED" ? "line-through text-muted" : ""}`}>
-                          {item.title}
-                        </p>
-                        <div className="flex items-center gap-3 mt-1 text-[10px] text-muted">
-                          <span>{item.assignee.firstName} {item.assignee.lastName}</span>
-                          {item.deadline && <span>Due {formatDate(item.deadline)}</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Convert to Task" onClick={() => convertToTask(item.id)}>
-                          <ExternalLink size={12} className="text-[color:var(--accent-strong)]" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400" onClick={() => deleteActionItem(item.id)}>
-                          <Trash2 size={12} />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* Add Decision Dialog */}
-      <Dialog open={showDecisionDialog} onOpenChange={setShowDecisionDialog}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add Decision</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Decision</Label>
-              <Textarea value={newDecisionText} onChange={(e) => setNewDecisionText(e.target.value)} placeholder="What was decided?" rows={3} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDecisionDialog(false)}>Cancel</Button>
-            <Button onClick={addDecision} disabled={!newDecisionText.trim()}>Add Decision</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Action Item Dialog */}
-      <Dialog open={showActionDialog} onOpenChange={setShowActionDialog}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add Action Item</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Title</Label>
-              <Input value={aiTitle} onChange={(e) => setAiTitle(e.target.value)} placeholder="What needs to be done?" />
-            </div>
-            <div className="space-y-2">
-              <Label>Assigned To</Label>
-              <Select value={aiAssigneeId} onValueChange={setAiAssigneeId}>
-                <SelectTrigger><SelectValue placeholder="Select person" /></SelectTrigger>
-                <SelectContent>
-                  {(meeting?.attendees || []).map((a) => (
-                    <SelectItem key={a.user.id} value={a.user.id}>{a.user.firstName} {a.user.lastName}</SelectItem>
-                  ))}
-                  {users.filter((u) => !meeting?.attendees.some((a) => a.user.id === u.id)).map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Deadline</Label>
-              <Input type="date" value={aiDeadline} onChange={(e) => setAiDeadline(e.target.value)} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowActionDialog(false)}>Cancel</Button>
-            <Button onClick={addActionItem} disabled={saving || !aiTitle || !aiAssigneeId}>
-              {saving ? "Adding..." : "Add"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Delete Meeting</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted py-4">
-            Are you sure you want to delete &ldquo;{meeting.title}&rdquo;? This will also delete all notes, decisions, and action items.
+      {confirmingDelete && (
+        <Modal title="Delete this meeting?" onClose={() => setConfirmingDelete(false)}>
+          <p className="mtgr-modal__hint">
+            This permanently deletes &ldquo;{meeting.title}&rdquo; along with all notes, decisions, and action items. This can&apos;t be undone.
           </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => setShowDeleteConfirm(true)}>Delete Meeting</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        onConfirm={handleDelete}
-        title="Delete Meeting"
-        description="This will permanently delete this meeting and all its notes, decisions, and action items. This cannot be undone."
-        confirmLabel="Delete Meeting"
-      />
+          <footer className="mtgr-modal__foot">
+            <button type="button" className="mtgr-btn mtgr-btn--ghost" onClick={() => setConfirmingDelete(false)}>Cancel</button>
+            <button type="button" className="mtgr-btn mtgr-btn--danger" onClick={handleDelete}>
+              <Trash2 /> Delete meeting
+            </button>
+          </footer>
+        </Modal>
+      )}
     </div>
   );
 }
