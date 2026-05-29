@@ -1,25 +1,28 @@
 "use client";
 
-/* Detail page for a single task — full-page equivalent of the drawer.
+/* Detail page for a single task — full-page bespoke layout.
  * Shareable URL: /tasks/<id>
  *
- * Shows the same fields + updates as the drawer, but full-width and
- * with its own breadcrumb back to /tasks. Mutations persist via the
- * existing /api/tasks PATCH endpoint and the comments API.
+ * Layout:
+ *   - OsTitleBar with back-to-tasks + copy-link in actions slot.
+ *   - Hero card with status accent strip + inline-editable title + description.
+ *   - 2-col body: Updates feed (left, 2/3) + properties sidebar (right, 1/3).
+ *   - Sidebar: status / priority pills (open picker), owner, due, labels, key dates.
+ *
+ * Mutations go through /api/tasks PATCH and the per-task comments API.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   CheckSquare, ArrowLeft, Calendar as CalendarIcon, MessageCircle,
-  Send, Paperclip, Smile, AtSign, Share2, Star, MoreHorizontal, MessageSquare,
+  Send, Paperclip, Smile, AtSign, Share2, MoreHorizontal,
+  User as UserIcon, Tag, Clock, Flag, Activity as ActivityIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { OsPickerPopover, type PickerOption } from "@/components/layout/os/picker-popover";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -31,6 +34,7 @@ type ApiTask = {
   status: "PLANNED" | "IN_PROGRESS" | "COMPLETED";
   priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
   completedAt?: string | null;
+  createdAt?: string;
   assignee?: { id: string; firstName?: string | null; lastName?: string | null } | null;
   labels?: { label: { id: string; name: string; color?: string | null } }[];
 };
@@ -55,20 +59,24 @@ const PRIO_OPTIONS: PickerOption[] = [
 ];
 
 const STATUS_META = {
-  PLANNED: { label: "Planned", color: C.indigo },
-  IN_PROGRESS: { label: "In progress", color: C.orange },
-  COMPLETED: { label: "Done", color: C.green },
+  PLANNED:     { label: "Planned",     color: "var(--os-c-indigo)" },
+  IN_PROGRESS: { label: "In progress", color: "var(--os-c-orange)" },
+  COMPLETED:   { label: "Done",        color: "var(--os-c-green)"  },
 };
 const PRIO_META = {
-  LOW: { label: "Low", color: C.teal },
-  NORMAL: { label: "Medium", color: C.yellow },
-  HIGH: { label: "High", color: C.red },
-  URGENT: { label: "Critical", color: C.pink },
+  LOW:    { label: "Low",      color: "var(--os-c-teal)"   },
+  NORMAL: { label: "Medium",   color: "var(--os-c-yellow)" },
+  HIGH:   { label: "High",     color: "var(--os-c-red)"    },
+  URGENT: { label: "Critical", color: "var(--os-c-pink)"   },
 };
 
 function fmtDate(iso?: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+}
+function fmtShortDate(iso?: string | null) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 function fmtRelative(iso: string) {
   const d = new Date(iso);
@@ -89,11 +97,6 @@ function avatarFor(seed: string) {
   return AV_PALETTE[h % AV_PALETTE.length];
 }
 
-const TABS: TabDef[] = [
-  { id: "updates",  label: "Updates",   Icon: MessageCircle },
-  { id: "activity", label: "Activity",  Icon: MessageSquare },
-];
-
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -104,8 +107,8 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<ApiTask | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState("updates");
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [composer, setComposer] = useState("");
   const [comments, setComments] = useState<ApiComment[] | null>(null);
   const [posting, setPosting] = useState(false);
@@ -114,12 +117,10 @@ export default function TaskDetailPage() {
     | { rect: DOMRect; type: "status" | "priority" }
   >(null);
 
-  // ── Load task (filter from list; no GET-by-id endpoint) ────
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     try {
-      // Wide window — find the task wherever its date lands
       const from = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
       const to   = new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10);
       const res = await fetch(`/api/tasks?startDate=${from}&endDate=${to}`);
@@ -128,7 +129,12 @@ export default function TaskDetailPage() {
       const list: ApiTask[] = Array.isArray(data) ? data : (data.data ?? []);
       const found = list.find((t) => t.id === id);
       if (!found) { setNotFound(true); setTask(null); }
-      else { setTask(found); setTitle(found.title); setNotFound(false); }
+      else {
+        setTask(found);
+        setTitle(found.title);
+        setDescription(found.description ?? "");
+        setNotFound(false);
+      }
     } catch {
       setNotFound(true);
     } finally {
@@ -210,14 +216,12 @@ export default function TaskDetailPage() {
     );
   }
 
-  // ─── Loading / not-found ────────────────────────────────────
+  // ─── Loading / not-found ─────────────────────────────────────
   if (loading) {
     return (
       <>
         <OsTitleBar title="Loading task…" Icon={CheckSquare} iconGradient={GRAD.bluePurple} showInvite={false} />
-        <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>
-          Loading task…
-        </div>
+        <div className="tdt__loading">Loading task…</div>
       </>
     );
   }
@@ -242,180 +246,105 @@ export default function TaskDetailPage() {
 
   return (
     <>
-      {/* Title bar with back link */}
-      <div className="os-title-bar">
-        <Link href="/tasks" className="os-title-bar__btn" aria-label="Back to tasks" style={{ height: 32, padding: "0 10px" }}>
-          <ArrowLeft />
-          <span>My tasks</span>
-        </Link>
-        <div style={{ width: 1, height: 24, background: "var(--os-line)", margin: "0 4px" }} />
-        <div className="os-title-bar__icon" style={{ background: GRAD.bluePurple }}>
-          <CheckSquare />
-        </div>
-        <div className="os-title-bar__main">
-          <span className="os-title-bar__name">{title || "(untitled)"}</span>
-          <button type="button" className="os-title-bar__star" aria-label="Star"><Star /></button>
-        </div>
-        <div className="os-title-bar__spacer" />
-        <button type="button" className="os-title-bar__btn" onClick={copyLink}>
-          <Share2 />
-          <span>Copy link</span>
-        </button>
-        <button type="button" className="os-title-bar__btn" aria-label="More"><MoreHorizontal /></button>
-      </div>
-
-      <OsTabs tabs={TABS} active={tab} onSelect={setTab} canAdd={false} />
-
-      <div style={{ maxWidth: 920, margin: "0 auto", padding: "24px 32px 80px", width: "100%" }}>
-        {/* Inline-editable title */}
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={async () => {
-            const t = title.trim();
-            if (!t || t === task.title) return;
-            const ok = await patch({ title: t });
-            if (ok) toast("Renamed");
-            else setTitle(task.title);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
-            if (e.key === "Escape") { setTitle(task.title); (e.target as HTMLInputElement).blur(); }
-          }}
-          aria-label="Task title"
-          style={{
-            width: "100%",
-            fontFamily: "var(--os-font)",
-            fontSize: 28,
-            fontWeight: 700,
-            color: "var(--os-ink)",
-            letterSpacing: "-0.02em",
-            background: "transparent",
-            border: "1px solid transparent",
-            borderRadius: 6,
-            padding: "6px 10px",
-            margin: "0 -10px 20px",
-            outline: "none",
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = "var(--os-brand)"; e.currentTarget.style.background = "var(--os-canvas)"; }}
-        />
-
-        {/* Pinned fields panel */}
-        <div className="os-drawer__fields" style={{ marginBottom: 22 }}>
-          <div className="os-drawer__field">
-            <span className="os-drawer__field-label">Status</span>
-            <span className="os-drawer__field-value">
-              <button
-                type="button"
-                className="os-drawer__field-pill"
-                style={{ background: statusMeta.color, color: "white", border: "none", cursor: "pointer" }}
-                onClick={(e) => setPicker({ rect: (e.currentTarget as HTMLElement).getBoundingClientRect(), type: "status" })}
-              >
-                {statusMeta.label}
-              </button>
-            </span>
+      <OsTitleBar
+        title={title || "(untitled)"}
+        Icon={CheckSquare}
+        iconGradient={GRAD.bluePurple}
+        description={`Task · ${statusMeta.label}`}
+        actions={
+          <div className="tdt__head-actions">
+            <button type="button" className="tdt__back" onClick={() => router.push("/tasks")}>
+              <ArrowLeft /> My tasks
+            </button>
+            <button type="button" className="tdt__btn tdt__btn--ghost" onClick={copyLink}>
+              <Share2 /> Copy link
+            </button>
+            <button type="button" className="tdt__btn tdt__btn--icon" aria-label="More"><MoreHorizontal /></button>
           </div>
-          <div className="os-drawer__field">
-            <span className="os-drawer__field-label">Priority</span>
-            <span className="os-drawer__field-value">
-              <button
-                type="button"
-                className="os-drawer__field-pill"
-                style={{ background: prioMeta.color, color: prioMeta.color === C.yellow ? C.indigo : "white", border: "none", cursor: "pointer" }}
-                onClick={(e) => setPicker({ rect: (e.currentTarget as HTMLElement).getBoundingClientRect(), type: "priority" })}
-              >
-                {prioMeta.label}
-              </button>
-            </span>
-          </div>
-          <div className="os-drawer__field">
-            <span className="os-drawer__field-label">Owner</span>
-            <span className="os-drawer__field-value">
-              {task.assignee ? (
-                <>
-                  <span className="os-av os-av--sm" style={{ background: avatarFor(task.assignee.id) }}>
-                    {((task.assignee.firstName?.[0] ?? "") + (task.assignee.lastName?.[0] ?? "")).toUpperCase() || "?"}
-                  </span>
-                  <span style={{ fontSize: 12, color: "var(--os-ink-2)", marginLeft: 6 }}>
-                    {`${task.assignee.firstName ?? ""} ${task.assignee.lastName ?? ""}`.trim() || "Unknown"}
-                  </span>
-                </>
+        }
+      />
+
+      <div className="tdt">
+        {/* Hero card with status accent strip */}
+        <section className="tdt__hero">
+          <span className="tdt__hero-accent" style={{ background: statusMeta.color }} aria-hidden="true" />
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={async () => {
+              const t = title.trim();
+              if (!t || t === task.title) return;
+              const ok = await patch({ title: t });
+              if (ok) toast("Renamed");
+              else setTitle(task.title);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+              if (e.key === "Escape") { setTitle(task.title); (e.target as HTMLInputElement).blur(); }
+            }}
+            aria-label="Task title"
+            className="tdt__title"
+          />
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onBlur={async () => {
+              const d = description.trim();
+              if (d === (task.description ?? "").trim()) return;
+              const ok = await patch({ description: d });
+              if (ok) toast("Description saved");
+            }}
+            placeholder="Add a description…"
+            aria-label="Task description"
+            className="tdt__desc"
+            rows={3}
+          />
+        </section>
+
+        {/* 2-col body */}
+        <div className="tdt__body">
+          {/* Left: Updates */}
+          <section className="tdt__feed">
+            <div className="tdt__card-head">
+              <MessageCircle /> Updates
+              <span className="tdt__card-sub">{visibleComments.length} message{visibleComments.length === 1 ? "" : "s"}</span>
+            </div>
+
+            <div className="tdt__updates">
+              {visibleComments.length === 0 ? (
+                <div className="tdt__updates-empty">
+                  <MessageCircle />
+                  <div>No updates yet. Start the thread below.</div>
+                </div>
               ) : (
-                <span style={{ color: "var(--os-ink-3)", fontSize: 12 }}>Unassigned</span>
+                visibleComments.map((u) => {
+                  const init = u.author
+                    ? ((u.author.firstName?.[0] ?? "") + (u.author.lastName?.[0] ?? "")).toUpperCase() || "?"
+                    : "?";
+                  const color = avatarFor(u.author?.id ?? u.id);
+                  const name = u.author
+                    ? `${u.author.firstName ?? ""} ${u.author.lastName ?? ""}`.trim() || "Unknown"
+                    : "Unknown";
+                  return (
+                    <article key={u.id} className="tdt__update">
+                      <span className="tdt__update-av" style={{ background: color }}>{init}</span>
+                      <div className="tdt__update-body">
+                        <div className="tdt__update-head">
+                          <span className="tdt__update-author">{name}</span>
+                          <span className="tdt__update-time">{fmtRelative(u.createdAt)}</span>
+                        </div>
+                        <div className="tdt__update-text">{u.body}</div>
+                      </div>
+                    </article>
+                  );
+                })
               )}
-            </span>
-          </div>
-          <div className="os-drawer__field">
-            <span className="os-drawer__field-label">Due date</span>
-            <span className="os-drawer__field-value">
-              <CalendarIcon style={{ width: 13, height: 13, color: "var(--os-ink-3)" }} />
-              {fmtDate(task.date)}
-            </span>
-          </div>
-          {task.labels && task.labels.length > 0 ? (
-            <div className="os-drawer__field" style={{ gridColumn: "1 / -1" }}>
-              <span className="os-drawer__field-label">Labels</span>
-              <span className="os-drawer__field-value" style={{ flexWrap: "wrap", gap: 4 }}>
-                {task.labels.map((l) => (
-                  <span key={l.label.id} className="os-drawer__field-tag" style={{ background: C.indigo }}>
-                    {l.label.name}
-                  </span>
-                ))}
-              </span>
             </div>
-          ) : null}
-          {task.description ? (
-            <div className="os-drawer__field" style={{ gridColumn: "1 / -1" }}>
-              <span className="os-drawer__field-label">Description</span>
-              <span className="os-drawer__field-value" style={{ display: "block", fontSize: 13, lineHeight: 1.55, color: "var(--os-ink)" }}>
-                {task.description}
-              </span>
-            </div>
-          ) : null}
-        </div>
 
-        {tab === "updates" && (
-          <>
-            <h3 className="os-drawer__section-title">
-              <MessageCircle />
-              Updates
-              <span style={{ fontWeight: 500, color: "var(--os-ink-3)", marginLeft: 6 }}>
-                {visibleComments.length}
-              </span>
-            </h3>
-            {visibleComments.length === 0 ? (
-              <div style={{ padding: "24px 0", color: "var(--os-ink-3)", fontSize: 13, textAlign: "center" }}>
-                No updates yet. Start the conversation below.
-              </div>
-            ) : (
-              visibleComments.map((u) => {
-                const initials = u.author
-                  ? ((u.author.firstName?.[0] ?? "") + (u.author.lastName?.[0] ?? "")).toUpperCase() || "?"
-                  : "?";
-                const color = avatarFor(u.author?.id ?? u.id);
-                const name = u.author
-                  ? `${u.author.firstName ?? ""} ${u.author.lastName ?? ""}`.trim() || "Unknown"
-                  : "Unknown";
-                return (
-                  <div key={u.id} className="os-drawer__update">
-                    <span className="os-av os-av--md" style={{ background: color }}>{initials}</span>
-                    <div className="os-drawer__update-body">
-                      <div className="os-drawer__update-head">
-                        <span className="os-drawer__update-author">{name}</span>
-                        <span className="os-drawer__update-time">{fmtRelative(u.createdAt)}</span>
-                      </div>
-                      <div className="os-drawer__update-text" style={{ whiteSpace: "pre-wrap" }}>
-                        {u.body}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-
-            <div className="os-drawer__composer" style={{ marginTop: 18 }}>
+            {/* Composer */}
+            <div className="tdt__composer">
               <textarea
-                className="os-drawer__composer-input"
+                className="tdt__composer-input"
                 placeholder="Write an update… ⌘⏎ to send"
                 value={composer}
                 onChange={(e) => setComposer(e.target.value)}
@@ -426,30 +355,112 @@ export default function TaskDetailPage() {
                   }
                 }}
                 disabled={posting}
+                rows={2}
               />
-              <div className="os-drawer__composer-foot">
-                <button type="button" className="os-drawer__composer-icon" aria-label="Attach"><Paperclip /></button>
-                <button type="button" className="os-drawer__composer-icon" aria-label="Emoji"><Smile /></button>
-                <button type="button" className="os-drawer__composer-icon" aria-label="Mention"><AtSign /></button>
+              <div className="tdt__composer-foot">
+                <div className="tdt__composer-tools">
+                  <button type="button" className="tdt__composer-icon" aria-label="Attach"><Paperclip /></button>
+                  <button type="button" className="tdt__composer-icon" aria-label="Emoji"><Smile /></button>
+                  <button type="button" className="tdt__composer-icon" aria-label="Mention"><AtSign /></button>
+                </div>
                 <button
                   type="button"
-                  className="os-drawer__composer-send"
+                  className="tdt__composer-send"
                   onClick={() => void postComment()}
                   disabled={!composer.trim() || posting}
                 >
                   <Send />
-                  {posting ? "Posting…" : "Update"}
+                  {posting ? "Posting…" : "Send update"}
                 </button>
               </div>
             </div>
-          </>
-        )}
+          </section>
 
-        {tab === "activity" && (
-          <div style={{ padding: "32px 0", color: "var(--os-ink-3)", fontSize: 13, textAlign: "center" }}>
-            Activity log API coming next. Until then, the Updates tab shows everything that's been said about this task.
-          </div>
-        )}
+          {/* Right: Properties sidebar */}
+          <aside className="tdt__side">
+            <div className="tdt__side-card">
+              <div className="tdt__card-head">
+                <Flag /> Properties
+              </div>
+
+              <div className="tdt__props">
+                <Prop label="Status" Icon={ActivityIcon}>
+                  <button
+                    type="button"
+                    className="tdt__pill"
+                    style={{ background: statusMeta.color, color: "white" }}
+                    onClick={(e) => setPicker({ rect: (e.currentTarget as HTMLElement).getBoundingClientRect(), type: "status" })}
+                  >
+                    {statusMeta.label}
+                  </button>
+                </Prop>
+
+                <Prop label="Priority" Icon={Flag}>
+                  <button
+                    type="button"
+                    className="tdt__pill"
+                    style={{ background: prioMeta.color, color: prioMeta.color === "var(--os-c-yellow)" ? "var(--os-c-indigo)" : "white" }}
+                    onClick={(e) => setPicker({ rect: (e.currentTarget as HTMLElement).getBoundingClientRect(), type: "priority" })}
+                  >
+                    {prioMeta.label}
+                  </button>
+                </Prop>
+
+                <Prop label="Owner" Icon={UserIcon}>
+                  {task.assignee ? (
+                    <div className="tdt__owner">
+                      <span className="tdt__owner-av" style={{ background: avatarFor(task.assignee.id) }}>
+                        {((task.assignee.firstName?.[0] ?? "") + (task.assignee.lastName?.[0] ?? "")).toUpperCase() || "?"}
+                      </span>
+                      <span className="tdt__owner-name">
+                        {`${task.assignee.firstName ?? ""} ${task.assignee.lastName ?? ""}`.trim() || "Unknown"}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="tdt__muted">Unassigned</span>
+                  )}
+                </Prop>
+
+                <Prop label="Due date" Icon={CalendarIcon}>
+                  <span className="tdt__value">{fmtDate(task.date)}</span>
+                </Prop>
+
+                {task.labels && task.labels.length > 0 ? (
+                  <Prop label="Labels" Icon={Tag} stacked>
+                    <div className="tdt__tags">
+                      {task.labels.map((l) => (
+                        <span key={l.label.id} className="tdt__tag" style={{ background: l.label.color || "var(--os-c-indigo)" }}>
+                          {l.label.name}
+                        </span>
+                      ))}
+                    </div>
+                  </Prop>
+                ) : null}
+
+                {task.completedAt && (
+                  <Prop label="Completed" Icon={Clock}>
+                    <span className="tdt__value">{fmtShortDate(task.completedAt)}</span>
+                  </Prop>
+                )}
+              </div>
+            </div>
+
+            <div className="tdt__side-card">
+              <div className="tdt__card-head">
+                <ActivityIcon /> Quick actions
+              </div>
+              <div className="tdt__quick">
+                <button type="button" className="tdt__quick-btn" onClick={() => patch({ status: task.status === "COMPLETED" ? "IN_PROGRESS" : "COMPLETED" })}>
+                  <CheckSquare />
+                  {task.status === "COMPLETED" ? "Reopen task" : "Mark complete"}
+                </button>
+                <button type="button" className="tdt__quick-btn" onClick={copyLink}>
+                  <Share2 /> Copy share link
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
       </div>
 
       {picker ? (
@@ -471,5 +482,14 @@ export default function TaskDetailPage() {
         />
       ) : null}
     </>
+  );
+}
+
+function Prop({ label, Icon, stacked, children }: { label: string; Icon: typeof Flag; stacked?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={`tdt__prop${stacked ? " tdt__prop--stacked" : ""}`}>
+      <div className="tdt__prop-label"><Icon /> {label}</div>
+      <div className="tdt__prop-value">{children}</div>
+    </div>
   );
 }

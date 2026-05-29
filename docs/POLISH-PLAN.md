@@ -42,22 +42,22 @@ Every page subtask must pass this gate before being marked done:
 ## C. Work (next up — 13 pages)
 
 - [x] /tasks — column header accent polish
-- [ ] /tasks/backlog — bespoke list view (priority + estimate columns)
-- [ ] /tasks/board — kanban polish with workload heatmap
-- [ ] /tasks/calendar — wire to OsCalendar with task-specific colors
-- [ ] /tasks/gantt — bespoke timeline (not generic chrome)
-- [ ] /tasks/sprint — sprint velocity card layout
-- [ ] /tasks/[id] — task detail bespoke layout
-- [ ] /meetings — agenda-first card grid
-- [ ] /meetings/[id] — meeting room layout with notes side panel
+- [x] /tasks/backlog — bespoke list view (priority + estimate columns)
+- [x] /tasks/board — kanban polish with workload heatmap
+- [x] /tasks/calendar — wire to OsCalendar with task-specific colors
+- [x] /tasks/gantt — bespoke timeline (not generic chrome)
+- [x] /tasks/sprint — sprint velocity card layout
+- [x] /tasks/[id] — task detail bespoke layout
+- [x] /meetings — agenda-first card grid
+- [x] /meetings/[id] — meeting room layout with notes side panel
 - [x] /docs — list (rebuilt)
 - [x] /docs/[id] — doc editor (block polish done)
-- [ ] /whiteboards — board picker grid
-- [ ] /whiteboards/[id] — Excalidraw chrome polish
-- [ ] /notetaker — recording state with waveform
-- [ ] /ideas — voting feed style
-- [ ] /okrs — cascade tree first; current page is generic
-- [ ] /okrs/[id] — OKR detail with sparkline
+- [x] /whiteboards — board picker grid
+- [x] /whiteboards/[id] — Excalidraw chrome polish
+- [x] /notetaker — recording state with waveform
+- [x] /ideas — voting feed style
+- [x] /okrs — cascade tree first; current page is generic
+- [x] /okrs/[id] — OKR detail with sparkline
 
 ## D. Sales / CRM (7 pages)
 
