@@ -435,6 +435,47 @@ function SessionRow({
   );
 }
 
+// Per-tool visual: Lucide icon + color + human verb. Falls back to a
+// generic wrench/indigo for tools we haven't customised yet.
+const TOOL_VISUAL: Record<string, { Icon: typeof Wrench; color: string; verb: string }> = {
+  create_form:        { Icon: Wrench, color: "var(--os-c-purple)", verb: "Created form" },
+  list_forms:         { Icon: Wrench, color: "var(--os-c-purple)", verb: "Looked up forms" },
+  create_data_table:  { Icon: Wrench, color: "var(--os-c-teal)",   verb: "Created table" },
+  list_data_tables:   { Icon: Wrench, color: "var(--os-c-teal)",   verb: "Looked up tables" },
+  create_doc:         { Icon: Wrench, color: "var(--os-c-blue)",   verb: "Created doc" },
+  create_task:        { Icon: Wrench, color: "var(--os-c-green)",  verb: "Created task" },
+  search_tasks:       { Icon: Wrench, color: "var(--os-c-green)",  verb: "Searched tasks" },
+  create_lead:        { Icon: Wrench, color: "var(--os-c-green)",  verb: "Created lead" },
+  search_leads:       { Icon: Wrench, color: "var(--os-c-green)",  verb: "Searched leads" },
+  create_ticket:      { Icon: Wrench, color: "var(--os-c-orange)", verb: "Created ticket" },
+  create_meeting:     { Icon: Wrench, color: "var(--os-c-indigo)", verb: "Created meeting" },
+  create_studio_item: { Icon: Wrench, color: "var(--os-c-indigo)", verb: "Added board row" },
+  list_studio_boards: { Icon: Wrench, color: "var(--os-c-indigo)", verb: "Looked up boards" },
+  send_kudos:         { Icon: Wrench, color: "var(--os-c-pink)",   verb: "Sent kudos" },
+  search_employees:   { Icon: Wrench, color: "var(--os-c-pink)",   verb: "Searched people" },
+};
+
+function toolVisualFor(name: string) {
+  return TOOL_VISUAL[name] ?? { Icon: Wrench, color: "var(--os-c-indigo)", verb: `Ran ${name.replace(/_/g, " ")}` };
+}
+
+function toolInputPreview(input: Record<string, unknown>): string {
+  const keys = Object.keys(input);
+  if (keys.length === 0) return "";
+  // Prefer common identity keys for the preview line.
+  for (const k of ["name", "title", "query", "id"]) {
+    if (input[k] !== undefined && typeof input[k] === "string") return String(input[k]).slice(0, 80);
+  }
+  // Otherwise serialize the first 1-2 entries.
+  const parts: string[] = [];
+  for (const k of keys.slice(0, 2)) {
+    const v = input[k];
+    const s = typeof v === "string" ? v : JSON.stringify(v);
+    parts.push(`${k}: ${s.slice(0, 40)}`);
+  }
+  return parts.join(", ");
+}
+
 function MessageRow({ m, streaming = false }: { m: Message; streaming?: boolean }) {
   const isUser = m.role === "USER";
   const showTyping = streaming && !m.content && (!m.toolCalls || m.toolCalls.length === 0);
@@ -452,15 +493,29 @@ function MessageRow({ m, streaming = false }: { m: Message; streaming?: boolean 
           {streaming ? null : <span className="os-msg__time">{fmtRelative(m.createdAt)}</span>}
         </div>
         {m.toolCalls && m.toolCalls.length > 0 ? (
-          <div>
-            {m.toolCalls.map((tc, i) => (
-              <div key={i} className="os-msg__tool">
-                <div className="os-msg__tool-name">
-                  <Wrench />
-                  Ran tool: <code>{tc.name}</code>
-                </div>
-              </div>
-            ))}
+          <div className="os-msg__tools">
+            {m.toolCalls.map((tc, i) => {
+              const v = toolVisualFor(tc.name);
+              const preview = toolInputPreview(tc.input ?? {});
+              const hasInput = preview.length > 0;
+              return (
+                <details key={i} className="os-msg__tool" style={{ ["--tool-color" as string]: v.color }}>
+                  <summary>
+                    <span className="os-msg__tool-icon" style={{ background: `color-mix(in srgb, ${v.color} 14%, transparent)`, color: v.color }}>
+                      <v.Icon />
+                    </span>
+                    <span className="os-msg__tool-meta">
+                      <span className="os-msg__tool-verb">{v.verb}</span>
+                      {hasInput && <span className="os-msg__tool-preview">{preview}</span>}
+                    </span>
+                    <code className="os-msg__tool-name-tag">{tc.name}</code>
+                  </summary>
+                  {hasInput && (
+                    <pre className="os-msg__tool-input">{JSON.stringify(tc.input, null, 2)}</pre>
+                  )}
+                </details>
+              );
+            })}
           </div>
         ) : null}
         {showTyping ? (

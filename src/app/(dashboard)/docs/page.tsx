@@ -1,22 +1,29 @@
 "use client";
 
-/* Real Docs page.
+/* Docs & notes — bespoke card grid.
  *
  *  GET  /api/docs               list
- *  POST /api/docs               { title, content?, entityType?, entityId? }
- *  PUT  /api/docs/[id]          { title?, content? }  (versions automatically)
+ *  POST /api/docs               { title }
+ *  PUT  /api/docs/[id]          { title?, content? }
  *
- *  Docs have no status enum. We bucket by attachment: standalone docs vs
- *  docs attached to a board row, and "Recent (last 7d)" surfaced first.
+ * Three sections:
+ *   1. Pinned (entityType === null && pinned)  — future hook
+ *   2. Recent (touched in last 7 days)
+ *   3. By collection (attached docs grouped by entityType)
+ *   4. Standalone notes
+ *
+ * Each card shows the doc's title + 2-line excerpt + small metadata
+ * row (relative-updated time + attached-to chip). Click → open editor.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileText, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  FileText, Plus, Sparkles, Loader2, Search, Clock, Pin, ChevronRight,
+  Type,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -28,6 +35,7 @@ type ApiDoc = {
   excerpt?: string | null;
   entityType?: string | null;
   entityId?: string | null;
+  summary?: string | null;
   createdById?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -35,54 +43,34 @@ type ApiDoc = {
 
 const MS_DAY = 86400_000;
 
-function docToRow(d: ApiDoc): Row {
-  return {
-    id: d.id,
-    name: d.title,
-    cells: {
-      attached: d.entityType ? `${d.entityType.toLowerCase()}` : "standalone",
-      excerpt: d.excerpt ? d.excerpt.slice(0, 80) + (d.excerpt.length > 80 ? "…" : "") : "—",
-      created: { iso: d.createdAt },
-      updated: { iso: d.updatedAt },
-    },
-  };
+function relTime(iso: string): string {
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function buildGroups(rows: ApiDoc[]): TableGroup[] {
-  const recentCutoff = Date.now() - 7 * MS_DAY;
-  const recent: ApiDoc[] = [];
-  const attached: ApiDoc[] = [];
-  const standalone: ApiDoc[] = [];
-  for (const d of rows) {
-    if (new Date(d.updatedAt).getTime() >= recentCutoff) recent.push(d);
-    else if (d.entityType) attached.push(d);
-    else standalone.push(d);
-  }
-  return [
-    { id: "recent",     title: "Recent (last 7 days)", color: C.orange, rows: recent.map(docToRow) },
-    { id: "attached",   title: "Attached to items",   color: C.purple,  rows: attached.map(docToRow) },
-    { id: "standalone", title: "Standalone notes",     color: C.teal,    rows: standalone.map(docToRow) },
-  ].filter((g) => g.rows.length > 0 || g.id === "standalone");
+// Tint each doc card based on the first character of its title — gives the
+// grid visual variety without requiring stored color choices.
+function tintFor(title: string): string {
+  const colors = [C.indigo, C.purple, C.blue, C.teal, C.green, C.orange, C.pink];
+  let h = 0;
+  for (let i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) >>> 0;
+  return colors[h % colors.length];
 }
-
-const COLUMNS: Column[] = [
-  { id: "attached", label: "Attached to", type: "text" },
-  { id: "excerpt",  label: "Excerpt",     type: "text" },
-  { id: "created",  label: "Created",     type: "date" },
-  { id: "updated",  label: "Updated",     type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function DocsPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<ApiDoc[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -100,41 +88,42 @@ export default function DocsPage() {
   const v = rowVersion("docs");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(rows ?? []), [rows]);
-
-  const handlers = {
-    onRename: async (rowId: string, _g: string, name: string) => {
-      const res = await fetch(`/api/docs/${rowId}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: name }),
-      });
-      if (!res.ok) {
-        if (res.status === 410) toast("Doc is archived");
-        throw new Error(`PUT ${res.status}`);
-      }
-    },
-    onAdd: async (_g: string) => {
+  async function newDoc() {
+    setCreating(true);
+    try {
       const res = await fetch("/api/docs", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "Untitled doc" }),
       });
-      if (!res.ok) throw new Error(`POST ${res.status}`);
+      if (!res.ok) throw new Error();
       const data = await res.json();
       const d: ApiDoc = data.doc ?? data.data ?? data;
-      setTimeout(() => void load(), 200);
-      return { id: d.id, name: d.title };
-    },
-  };
+      router.push(`/docs/${d.id}`);
+    } catch { toast("Couldn't create doc"); }
+    finally { setCreating(false); }
+  }
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (rows ?? []).map((d): CalendarEvent => ({
-      id: d.id,
-      title: d.title,
-      date: d.updatedAt,
-      color: d.entityType ? C.purple : C.teal,
-      payload: docToRow(d).cells,
-    })),
-    [rows],
-  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows ?? [];
+    return (rows ?? []).filter((d) =>
+      d.title.toLowerCase().includes(q) ||
+      (d.excerpt ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, search]);
+
+  const { recent, attached, standalone } = useMemo(() => {
+    const cutoff = Date.now() - 7 * MS_DAY;
+    const recent: ApiDoc[] = [];
+    const attached: ApiDoc[] = [];
+    const standalone: ApiDoc[] = [];
+    for (const d of filtered) {
+      if (new Date(d.updatedAt).getTime() >= cutoff) recent.push(d);
+      else if (d.entityType) attached.push(d);
+      else standalone.push(d);
+    }
+    return { recent, attached, standalone };
+  }, [filtered]);
 
   return (
     <>
@@ -142,34 +131,93 @@ export default function DocsPage() {
         title="Docs & notes"
         Icon={FileText}
         iconGradient={GRAD.tealGreen}
-        description={rows === null ? "Loading docs…" : `${rows.length} doc${rows.length === 1 ? "" : "s"} · live-synced`}
+        description={rows === null ? "Loading…" : `${rows.length} doc${rows.length === 1 ? "" : "s"} · live-synced`}
         people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
         morePeople={9}
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New doc" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={FileText} iconGradient={GRAD.redPink} title="Couldn't load docs" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : rows === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : rows.length === 0 ? (
-            <OsEmptyView Icon={FileText} iconGradient={GRAD.tealGreen} title="No docs yet" subtitle="Write standalone notes or attach docs to any board row. Every save creates an automatic version." chips={["Standalone", "Attached", "Versioned"]} cta="New doc" />
-          ) : (
-            <OsMainTable moduleId="docs" columns={COLUMNS} groups={groups} handlers={handlers} />
+      <div className="docs__toolbar">
+        <div className="docs__search">
+          <Search />
+          <input
+            type="search"
+            placeholder="Search docs by title or excerpt…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <button type="button" className="docs__new" onClick={newDoc} disabled={creating}>
+          {creating ? <><Loader2 className="docs__spin" /> Creating…</> : <><Plus /> New doc</>}
+        </button>
+      </div>
+
+      {loadError ? (
+        <OsEmptyView Icon={FileText} iconGradient={GRAD.redPink} title="Couldn't load docs" subtitle={`API error: ${loadError}.`} cta="Retry" />
+      ) : rows === null ? (
+        <div className="docs__loading">Loading docs…</div>
+      ) : rows.length === 0 ? (
+        <OsEmptyView Icon={FileText} iconGradient={GRAD.tealGreen} title="No docs yet" subtitle="Write standalone notes or attach docs to any board row. Every save creates an automatic version." chips={["Standalone", "Attached", "Versioned"]} cta="New doc" />
+      ) : filtered.length === 0 ? (
+        <div className="docs__loading">Nothing matches &ldquo;{search}&rdquo;.</div>
+      ) : (
+        <div className="docs">
+          {recent.length > 0 && (
+            <Section title="Recent" Icon={Clock} count={recent.length} accent={C.orange}>
+              {recent.map((d) => <DocCard key={d.id} doc={d} />)}
+            </Section>
           )}
-        </>
-      )}
-
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="docs" events={calendarEvents} newLabel="New doc" />
-      )}
-
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={FileText} iconGradient={GRAD.tealGreen} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
+          {attached.length > 0 && (
+            <Section title="Attached to items" Icon={Pin} count={attached.length} accent={C.purple}>
+              {attached.map((d) => <DocCard key={d.id} doc={d} />)}
+            </Section>
+          )}
+          {standalone.length > 0 && (
+            <Section title="Standalone notes" Icon={Type} count={standalone.length} accent={C.teal}>
+              {standalone.map((d) => <DocCard key={d.id} doc={d} />)}
+            </Section>
+          )}
+        </div>
       )}
     </>
+  );
+}
+
+function Section({ title, Icon, count, accent, children }: { title: string; Icon: typeof FileText; count: number; accent: string; children: React.ReactNode }) {
+  return (
+    <section className="docs__section">
+      <header className="docs__section-head">
+        <Icon className="docs__section-icon" style={{ color: accent }} />
+        <h2>{title}</h2>
+        <span className="docs__section-count">{count}</span>
+      </header>
+      <div className="docs__grid">{children}</div>
+    </section>
+  );
+}
+
+function DocCard({ doc }: { doc: ApiDoc }) {
+  const color = tintFor(doc.title);
+  const preview = doc.summary ?? doc.excerpt ?? "";
+  const isAi = !!doc.summary;
+  return (
+    <Link href={`/docs/${doc.id}`} className="doc-card">
+      <header className="doc-card__head">
+        <span className="doc-card__icon" style={{ background: `color-mix(in srgb, ${color} 14%, transparent)`, color }}>
+          <FileText />
+        </span>
+        {doc.entityType && <span className="doc-card__attach">{doc.entityType.toLowerCase().replace(/_/g, " ")}</span>}
+      </header>
+      <h3 className="doc-card__title">{doc.title || "Untitled doc"}</h3>
+      {preview && (
+        <p className="doc-card__excerpt">
+          {isAi && <Sparkles className="doc-card__ai" />}
+          {preview.length > 140 ? preview.slice(0, 140) + "…" : preview}
+        </p>
+      )}
+      <footer className="doc-card__foot">
+        <span>{relTime(doc.updatedAt)}</span>
+        <ChevronRight />
+      </footer>
+    </Link>
   );
 }
