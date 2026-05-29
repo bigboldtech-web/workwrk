@@ -63,7 +63,7 @@ Every page subtask must pass this gate before being marked done:
 
 - [x] /crm — pipeline kanban-first
 - [x] /crm/[id] — opportunity detail with deal scoreboard
-- [ ] /crm/pipeline — drag-drop with weighted ARR
+- [x] /crm/pipeline — drag-drop with weighted ARR
 - [ ] /crm/accounts — account cards with logo
 - [ ] /crm/leads — lead routing list with score badges
 - [ ] /crm/activities — activity stream

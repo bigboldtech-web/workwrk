@@ -1,28 +1,29 @@
 "use client";
 
-/* Real CRM Pipeline page (opportunities by stage).
+/* CRM · Pipeline — weighted ARR forecast with drag-to-stage.
  *
- *  GET   /api/crm/pipeline-stages   list stages (lazily seeds default 6-stage flow)
+ *  GET   /api/crm/pipeline-stages   list stages with probability
  *  GET   /api/crm/opportunities     list deals
- *  POST  /api/crm/opportunities     { name, accountId?, amount?, pipelineStageId? }
- *  PATCH /api/crm/opportunities     { id, pipelineStageId? | amount? | name? }
+ *  PATCH /api/crm/opportunities     { id, pipelineStageId }   (drag updates this)
  *
- *  Stage rename here is destructive (re-staging the deal). We use stage as
- *  the status column and group rows under each stage in order.
+ * Layout:
+ *   OsTitleBar with period filter + New deal CTA in actions slot.
+ *   Hero forecast strip: Committed · Weighted · Best case · Upside (gap).
+ *   ARR funnel: stacked bar showing each stage's contribution to weighted ARR.
+ *   Stage rows: count + sum + weighted bar + draggable deal pills.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Workflow, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  Workflow, Plus, DollarSign, TrendingUp, Target, Gauge, ChevronRight,
+  Building2,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import type { PickerOption } from "@/components/layout/os/picker-popover";
 
 type ApiStage = {
   id: string;
@@ -49,78 +50,60 @@ type ApiOpportunity = {
   updatedAt: string;
 };
 
+const PALETTE_BUCKETS = [
+  { hex: "#10b981", color: C.green },
+  { hex: "#f59e0b", color: C.orange },
+  { hex: "#ef4444", color: C.red },
+  { hex: "#60a5fa", color: C.blue },
+  { hex: "#a78bfa", color: C.purple },
+  { hex: "#ec4899", color: C.pink },
+  { hex: "#6366f1", color: C.indigo },
+  { hex: "#14b8a6", color: C.teal },
+  { hex: "#eab308", color: C.yellow },
+  { hex: "#94a3b8", color: C.gray },
+];
+function stageColor(s: ApiStage): string {
+  if (s.isWon) return C.green;
+  if (s.isLost) return C.red;
+  if (!s.color) return C.indigo;
+  const t = parseInt(s.color.replace("#", "").slice(0, 6), 16);
+  if (Number.isNaN(t)) return C.indigo;
+  const tr = (t >> 16) & 0xff, tg = (t >> 8) & 0xff, tb = t & 0xff;
+  let best = PALETTE_BUCKETS[0]; let bestDist = Infinity;
+  for (const p of PALETTE_BUCKETS) {
+    const v = parseInt(p.hex.replace("#", ""), 16);
+    const dr = ((v >> 16) & 0xff) - tr;
+    const dg = ((v >> 8) & 0xff) - tg;
+    const db = (v & 0xff) - tb;
+    const d = dr * dr + dg * dg + db * db;
+    if (d < bestDist) { best = p; bestDist = d; }
+  }
+  return best.color;
+}
+
 function num(v?: number | string | null): number {
   if (v == null) return 0;
-  return typeof v === "string" ? parseFloat(v) : v;
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return isFinite(n) ? n : 0;
 }
 
-function stageStatusValue(s: ApiStage): StatusValue {
-  if (s.isWon) return "done";
-  if (s.isLost) return "stuck";
-  if (s.probability >= 75) return "review";
-  if (s.probability >= 50) return "working";
-  if (s.probability >= 25) return "progress";
-  return "planning";
+function fmtMoney(n: number, currency = "₹"): string {
+  if (n >= 1_00_00_000) return `${currency}${(n / 1_00_00_000).toFixed(2)}Cr`;
+  if (n >= 1_00_000) return `${currency}${(n / 1_00_000).toFixed(1)}L`;
+  if (n >= 1_000) return `${currency}${(n / 1_000).toFixed(0)}k`;
+  return `${currency}${Math.round(n).toLocaleString()}`;
 }
 
-function oppToRow(o: ApiOpportunity, stage: ApiStage | undefined): Row {
-  return {
-    id: o.id,
-    name: o.name,
-    done: !!o.pipelineStage?.isWon,
-    cells: {
-      stage: stage
-        ? { value: stageStatusValue(stage), label: stage.name }
-        : (o.pipelineStage ? { value: "planning" as StatusValue, label: o.pipelineStage.name } : undefined),
-      account: o.account?.name ?? "—",
-      amount: num(o.amount),
-      currency: o.currency ?? "USD",
-      probability: stage ? { pct: stage.probability, color: stage.probability >= 75 ? "green" : stage.probability >= 50 ? "blue" : stage.probability >= 25 ? "warning" : "danger" } : undefined,
-      close: o.expectedCloseDate ? { iso: o.expectedCloseDate } : undefined,
-      updated: { iso: o.updatedAt },
-    },
-  };
-}
-
-function buildGroups(stages: ApiStage[], opps: ApiOpportunity[]): TableGroup[] {
-  const byStage = new Map<string, ApiOpportunity[]>();
-  for (const s of stages) byStage.set(s.id, []);
-  for (const o of opps) {
-    const sid = o.pipelineStageId ?? "";
-    if (!byStage.has(sid)) byStage.set(sid, []);
-    byStage.get(sid)!.push(o);
-  }
-  return stages.map((s) => ({
-    id: s.id,
-    title: s.name,
-    color: s.color ?? (s.isWon ? C.green : s.isLost ? C.red : C.indigo),
-    rows: (byStage.get(s.id) ?? []).map((o) => oppToRow(o, s)),
-  }));
-}
-
-const COLUMNS: Column[] = [
-  { id: "stage",       label: "Stage",        type: "status" },
-  { id: "account",     label: "Account",      type: "text" },
-  { id: "amount",      label: "Amount",       type: "number" },
-  { id: "currency",    label: "Currency",     type: "text" },
-  { id: "probability", label: "Probability",  type: "progress" },
-  { id: "close",       label: "Expected close", type: "date" },
-  { id: "updated",     label: "Updated",      type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
+type Period = "quarter" | "year" | "all";
 
 export default function CrmPipelinePage() {
   const [stages, setStages] = useState<ApiStage[] | null>(null);
   const [opps, setOpps] = useState<ApiOpportunity[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
-  const { rowVersion } = useOsShell();
+  const [period, setPeriod] = useState<Period>("quarter");
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [hoverStage, setHoverStage] = useState<string | null>(null);
+  const { rowVersion, bumpRowVersion } = useOsShell();
   const { toast } = useOsToast();
 
   const load = useCallback(async () => {
@@ -133,8 +116,11 @@ export default function CrmPipelinePage() {
       if (!oRes.ok) throw new Error(`opps ${oRes.status}`);
       const sJ = await sRes.json();
       const oJ = await oRes.json();
-      setStages(sJ.stages ?? sJ.data ?? []);
+      const stageList: ApiStage[] = sJ.stages ?? sJ.data ?? [];
+      stageList.sort((a, b) => a.position - b.position);
+      setStages(stageList);
       setOpps(oJ.opportunities ?? oJ.data ?? []);
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -142,102 +128,328 @@ export default function CrmPipelinePage() {
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("crm/pipeline");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
+  // Also re-load when CRM changes anywhere (deal added on /crm, etc.)
+  const vCrm = rowVersion("crm");
+  useEffect(() => { if (vCrm > 0) void load(); }, [vCrm, load]);
 
-  const statusOptions = useMemo<PickerOption[]>(
-    () => (stages ?? []).map((s) => ({
-      value: s.id, label: s.name,
-      color: s.color ?? (s.isWon ? C.green : s.isLost ? C.red : C.indigo),
-    })),
-    [stages],
-  );
+  // ─── Period filter ────────────────────────────────────────
+  const periodFilter = useCallback((o: ApiOpportunity): boolean => {
+    if (period === "all") return true;
+    const dateStr = o.expectedCloseDate ?? o.closedAt ?? o.updatedAt;
+    if (!dateStr) return true;
+    const t = new Date(dateStr).getTime();
+    const now = new Date();
+    if (period === "quarter") {
+      const q = Math.floor(now.getMonth() / 3);
+      const start = new Date(now.getFullYear(), q * 3, 1).getTime();
+      const end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59).getTime();
+      return t >= start && t <= end;
+    }
+    if (period === "year") {
+      const start = new Date(now.getFullYear(), 0, 1).getTime();
+      const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59).getTime();
+      return t >= start && t <= end;
+    }
+    return true;
+  }, [period]);
 
-  const groups = useMemo(() => buildGroups(stages ?? [], opps ?? []), [stages, opps]);
+  const scopedOpps = useMemo(() => (opps ?? []).filter(periodFilter), [opps, periodFilter]);
 
-  const handlers = {
-    onStatusChange: async (rowId: string, _g: string, value: string) => {
+  // ─── Forecast math ────────────────────────────────────────
+  const forecast = useMemo(() => {
+    if (!stages || !opps) return { committed: 0, weighted: 0, bestCase: 0, upside: 0 };
+    const wonOpps = scopedOpps.filter((o) => o.pipelineStage?.isWon === true);
+    const openOpps = scopedOpps.filter((o) => !o.pipelineStage?.isWon && !o.pipelineStage?.isLost);
+    const committed = wonOpps.reduce((acc, o) => acc + num(o.amount), 0);
+    const bestCase = openOpps.reduce((acc, o) => acc + num(o.amount), 0);
+    const weighted = openOpps.reduce((acc, o) => {
+      const stage = stages.find((s) => s.id === o.pipelineStageId);
+      const prob = stage ? (stage.probability ?? 50) / 100 : 0.5;
+      return acc + num(o.amount) * prob;
+    }, 0);
+    return { committed, weighted, bestCase, upside: bestCase - weighted };
+  }, [stages, opps, scopedOpps]);
+
+  // ─── Per-stage breakdown ──────────────────────────────────
+  const stageRows = useMemo(() => {
+    if (!stages || !opps) return [];
+    return stages
+      .filter((s) => !s.isLost) // exclude lost from forecast view
+      .map((s) => {
+        const dealsInStage = scopedOpps.filter((o) => o.pipelineStageId === s.id);
+        const sumValue = dealsInStage.reduce((acc, o) => acc + num(o.amount), 0);
+        const weighted = sumValue * (s.probability / 100);
+        return { stage: s, color: stageColor(s), deals: dealsInStage, sumValue, weighted };
+      });
+  }, [stages, opps, scopedOpps]);
+
+  const maxStageWeighted = Math.max(1, ...stageRows.map((r) => r.weighted));
+
+  // ─── Funnel segments (weighted) ───────────────────────────
+  const funnelSegments = useMemo(() => {
+    const total = stageRows.reduce((acc, r) => acc + r.weighted, 0);
+    if (total === 0) return [];
+    return stageRows
+      .filter((r) => r.weighted > 0)
+      .map((r) => ({
+        id: r.stage.id,
+        name: r.stage.name,
+        color: r.color,
+        value: r.weighted,
+        pct: (r.weighted / total) * 100,
+      }));
+  }, [stageRows]);
+
+  // ─── Drag handlers ────────────────────────────────────────
+  async function moveDeal(dealId: string, toStageId: string) {
+    const current = opps?.find((o) => o.id === dealId);
+    if (!current || current.pipelineStageId === toStageId) return;
+    const targetStage = stages?.find((s) => s.id === toStageId);
+    setOpps((prev) => prev?.map((o) => o.id === dealId
+      ? { ...o, pipelineStageId: toStageId, pipelineStage: targetStage ? { id: targetStage.id, name: targetStage.name, color: targetStage.color, isWon: targetStage.isWon, isLost: targetStage.isLost } : o.pipelineStage }
+      : o) ?? prev);
+    try {
       const res = await fetch("/api/crm/opportunities", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: rowId, pipelineStageId: value }),
+        body: JSON.stringify({ id: dealId, pipelineStageId: toStageId }),
       });
       if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      bumpRowVersion("crm");
       void load();
-    },
-    onRename: async (rowId: string, _g: string, name: string) => {
-      const res = await fetch("/api/crm/opportunities", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: rowId, name }),
-      });
-      if (!res.ok) throw new Error(`PATCH ${res.status}`);
-    },
-    onAdd: async (groupId: string) => {
+      toast(`Moved to ${targetStage?.name ?? "stage"}`);
+    } catch {
+      toast("Couldn't move");
+      void load();
+    }
+  }
+
+  async function addDeal() {
+    const stageId = stages?.[0]?.id;
+    try {
       const res = await fetch("/api/crm/opportunities", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Untitled deal", pipelineStageId: groupId }),
+        body: JSON.stringify({ name: "Untitled deal", pipelineStageId: stageId }),
       });
       if (!res.ok) throw new Error(`POST ${res.status}`);
-      const data = await res.json();
-      const o: ApiOpportunity = data.opportunity ?? data.data ?? data;
-      setTimeout(() => void load(), 200);
-      return { id: o.id, name: o.name };
-    },
-  };
-
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (opps ?? [])
-      .filter((o) => o.expectedCloseDate)
-      .map((o): CalendarEvent => {
-        const stage = stages?.find((s) => s.id === o.pipelineStageId);
-        return {
-          id: o.id,
-          title: `${o.name}${o.amount ? ` · ${num(o.amount).toLocaleString()}` : ""}`,
-          date: o.expectedCloseDate as string,
-          color: stage?.color ?? (stage?.isWon ? C.green : stage?.isLost ? C.red : C.indigo),
-          done: !!o.pipelineStage?.isWon,
-          payload: oppToRow(o, stage).cells,
-        };
-      }),
-    [opps, stages],
-  );
-
-  const openOpps = (opps ?? []).filter((o) => !o.closedAt);
-  const pipelineValue = openOpps.reduce((acc, o) => acc + num(o.amount), 0);
-  const wonOpps = (opps ?? []).filter((o) => o.isWon === true);
-  const wonValue = wonOpps.reduce((acc, o) => acc + num(o.amount), 0);
+      toast("Deal added");
+      void load();
+    } catch {
+      toast("Couldn't add deal");
+    }
+  }
 
   return (
     <>
       <OsTitleBar
-        title="CRM · Pipeline"
+        title="Pipeline · Forecast"
         Icon={Workflow}
         iconGradient={GRAD.greenTeal}
-        description={opps === null ? "Loading pipeline…" : `${openOpps.length} open deal${openOpps.length === 1 ? "" : "s"} · pipeline ${pipelineValue.toLocaleString()} · won ${wonValue.toLocaleString()}`}
+        description={opps === null
+          ? "Loading…"
+          : `${scopedOpps.filter((o) => !o.pipelineStage?.isWon && !o.pipelineStage?.isLost).length} open · weighted ${fmtMoney(forecast.weighted)}`}
         people={[PEOPLE.bb, PEOPLE.mk]}
         morePeople={4}
+        actions={
+          <div className="crmw__head-actions">
+            <div className="crmw__period">
+              {(["quarter", "year", "all"] as Period[]).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={period === p ? "is-active" : ""}
+                  onClick={() => setPeriod(p)}
+                >
+                  {p === "quarter" ? "This Q" : p === "year" ? "This year" : "All time"}
+                </button>
+              ))}
+            </div>
+            <Link href="/crm" className="crmw__nav-link">
+              Kanban <ChevronRight />
+            </Link>
+            <button type="button" className="crmw__btn-primary" onClick={addDeal}>
+              <Plus /> New deal
+            </button>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New deal" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={Workflow} iconGradient={GRAD.redPink} title="Couldn't load pipeline" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : opps === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : (opps.length === 0 && (stages?.length ?? 0) > 0) ? (
-            <OsEmptyView Icon={Workflow} iconGradient={GRAD.greenTeal} title="Pipeline is empty" subtitle={`${stages?.length ?? 0} stages ready — drop your first deal in and start moving it through.`} chips={(stages ?? []).slice(0, 4).map((s) => s.name)} cta="New deal" />
-          ) : (
-            <OsMainTable moduleId="crm/pipeline" columns={COLUMNS} groups={groups} statusOptions={statusOptions} handlers={handlers} />
-          )}
-        </>
-      )}
+      <div className="crmw">
+        {/* Forecast strip */}
+        <div className="crmw__forecast">
+          <ForecastTile
+            accent="var(--os-c-green)"
+            Icon={DollarSign}
+            label="Committed"
+            value={fmtMoney(forecast.committed)}
+            sub="closed-won"
+          />
+          <ForecastTile
+            accent="var(--os-c-blue)"
+            Icon={TrendingUp}
+            label="Weighted"
+            value={fmtMoney(forecast.weighted)}
+            sub="value × probability"
+            hero
+          />
+          <ForecastTile
+            accent="var(--os-c-purple)"
+            Icon={Target}
+            label="Best case"
+            value={fmtMoney(forecast.bestCase)}
+            sub="all open deals"
+          />
+          <ForecastTile
+            accent="var(--os-c-orange)"
+            Icon={Gauge}
+            label="Upside"
+            value={fmtMoney(forecast.upside)}
+            sub="best - weighted"
+          />
+        </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="crm/pipeline" events={calendarEvents} newLabel="New deal" />
-      )}
+        {/* ARR funnel */}
+        {funnelSegments.length > 0 && (
+          <section className="crmw__funnel">
+            <div className="crmw__funnel-head">
+              <span className="crmw__funnel-title">Weighted ARR by stage</span>
+              <span className="crmw__funnel-total">{fmtMoney(forecast.weighted)} total</span>
+            </div>
+            <div className="crmw__funnel-bar">
+              {funnelSegments.map((seg) => (
+                <div
+                  key={seg.id}
+                  className="crmw__funnel-seg"
+                  style={{ width: `${seg.pct}%`, background: seg.color }}
+                  title={`${seg.name}: ${fmtMoney(seg.value)} (${seg.pct.toFixed(1)}%)`}
+                />
+              ))}
+            </div>
+            <div className="crmw__funnel-legend">
+              {funnelSegments.map((seg) => (
+                <span key={seg.id} className="crmw__funnel-chip">
+                  <span className="crmw__funnel-dot" style={{ background: seg.color }} />
+                  {seg.name}
+                  <span className="crmw__funnel-val">{fmtMoney(seg.value)}</span>
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={Workflow} iconGradient={GRAD.greenTeal} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
-      )}
+        {/* Stage breakdown */}
+        {loadError ? (
+          <OsEmptyView
+            Icon={Workflow}
+            iconGradient={GRAD.redPink}
+            title="Couldn't load pipeline"
+            subtitle={`API error: ${loadError}.`}
+            cta="Retry"
+          />
+        ) : opps === null || stages === null ? (
+          <div className="crmw__loading">Loading pipeline…</div>
+        ) : stageRows.length === 0 ? (
+          <OsEmptyView
+            Icon={Workflow}
+            iconGradient={GRAD.greenTeal}
+            title="No stages configured"
+            subtitle="Set up your pipeline stages in CRM Settings."
+            cta="Settings"
+          />
+        ) : (
+          <section className="crmw__stages">
+            {stageRows.map((row) => {
+              const isDrop = hoverStage === row.stage.id;
+              return (
+                <div
+                  key={row.stage.id}
+                  className={`crmw__stage${isDrop ? " is-drop" : ""}`}
+                  style={{ ["--st-c" as unknown as string]: row.color }}
+                  onDragOver={(e) => { e.preventDefault(); if (dragId) setHoverStage(row.stage.id); }}
+                  onDragLeave={() => { if (hoverStage === row.stage.id) setHoverStage(null); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setHoverStage(null);
+                    if (dragId) void moveDeal(dragId, row.stage.id);
+                    setDragId(null);
+                  }}
+                >
+                  <header className="crmw__stage-head">
+                    <span className="crmw__stage-dot" />
+                    <span className="crmw__stage-name">{row.stage.name}</span>
+                    <span className="crmw__stage-prob">{row.stage.probability}%</span>
+                    <span className="crmw__stage-count">{row.deals.length} deal{row.deals.length === 1 ? "" : "s"}</span>
+                    <div className="crmw__stage-grow" />
+                    <div className="crmw__stage-nums">
+                      <div className="crmw__stage-num">
+                        <span className="crmw__stage-num-label">Sum</span>
+                        <span className="crmw__stage-num-val">{fmtMoney(row.sumValue)}</span>
+                      </div>
+                      <div className="crmw__stage-num crmw__stage-num--weighted">
+                        <span className="crmw__stage-num-label">Weighted</span>
+                        <span className="crmw__stage-num-val">{fmtMoney(row.weighted)}</span>
+                      </div>
+                    </div>
+                  </header>
+
+                  <div className="crmw__stage-bar-track">
+                    <div
+                      className="crmw__stage-bar-fill"
+                      style={{ width: `${(row.weighted / maxStageWeighted) * 100}%`, background: row.color }}
+                    />
+                  </div>
+
+                  <div className="crmw__stage-deals">
+                    {row.deals.length === 0 ? (
+                      <div className="crmw__stage-empty">Drop deals here to forecast at {row.stage.probability}%</div>
+                    ) : (
+                      row.deals.map((o) => {
+                        const amt = num(o.amount);
+                        const weighted = amt * (row.stage.probability / 100);
+                        return (
+                          <Link
+                            key={o.id}
+                            href={`/crm/${o.id}`}
+                            className={`crmw__deal${dragId === o.id ? " is-dragging" : ""}`}
+                            draggable
+                            onDragStart={(e) => { setDragId(o.id); e.dataTransfer.effectAllowed = "move"; }}
+                            onDragEnd={() => { setDragId(null); setHoverStage(null); }}
+                          >
+                            <span className="crmw__deal-accent" style={{ background: row.color }} aria-hidden="true" />
+                            <div className="crmw__deal-main">
+                              <div className="crmw__deal-title">{o.name}</div>
+                              {o.account?.name && (
+                                <div className="crmw__deal-acct"><Building2 /> {o.account.name}</div>
+                              )}
+                            </div>
+                            <div className="crmw__deal-nums">
+                              <div className="crmw__deal-amt">{fmtMoney(amt)}</div>
+                              <div className="crmw__deal-weighted">{fmtMoney(weighted)} wt</div>
+                            </div>
+                          </Link>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        )}
+      </div>
     </>
+  );
+}
+
+function ForecastTile({ accent, Icon, label, value, sub, hero }: { accent: string; Icon: typeof DollarSign; label: string; value: string; sub: string; hero?: boolean }) {
+  return (
+    <div className={`crmw__tile${hero ? " crmw__tile--hero" : ""}`} style={{ ["--tile-c" as unknown as string]: accent }}>
+      <span className="crmw__tile-accent" aria-hidden="true" />
+      <div className="crmw__tile-row">
+        <div className="crmw__tile-icon"><Icon /></div>
+        <div className="crmw__tile-label">{label}</div>
+      </div>
+      <div className="crmw__tile-value">{value}</div>
+      <div className="crmw__tile-sub">{sub}</div>
+    </div>
   );
 }
