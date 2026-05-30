@@ -86,7 +86,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /itsm/incidents — severity pills (kept; mature-IT use case)
 - [x] /itsm/problems — problem-cause card view (kept; bespoke clusters)
 - [~] /itsm/changes — **DROPPED** (collapse into ticket type=CHANGE)
-- [ ] /itsm/tickets — unified queue with type filter (replaces tickets + standalone changes)
+- [x] /itsm/tickets — unified queue with multi-axis filters (priority + status + category)
 - [~] /itsm/cmdb — **DROPPED** (enterprise IT only; revisit on customer demand)
 - [ ] /itsm/kb — KB article grid
 - [ ] /helpdesk — customer support overview (external = different from internal ITSM)
