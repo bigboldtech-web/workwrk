@@ -79,7 +79,7 @@ Every page subtask must pass this gate before being marked done:
 
 ## F. Service — ITSM + Helpdesk (12 pages)
 
-- [ ] /itsm — service desk overview with SLA tiles
+- [x] /itsm — service desk overview with SLA tiles
 - [ ] /itsm/[id] — ticket detail with timeline
 - [ ] /itsm/incidents — severity pills
 - [ ] /itsm/problems — problem-cause card view
