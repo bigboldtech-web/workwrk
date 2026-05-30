@@ -91,7 +91,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /itsm/kb — KB article grid
 - [x] /helpdesk — customer support overview (external = different from internal ITSM)
 - [x] /helpdesk/[id] — chat-like ticket detail
-- [ ] /helpdesk/tickets — ticket queue
+- [x] /helpdesk/tickets — agent ticket queue with view tabs + multi-axis filters
 - [ ] /helpdesk/customers — customer cards
 - [ ] /helpdesk/macros — macro library
 
