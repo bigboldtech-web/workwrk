@@ -75,7 +75,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /marketing/[id] — campaign detail with metrics scoreboard
 - [x] /marketing/campaigns — list with status pipeline
 - [ ] /marketing/content — content calendar grid
-- [ ] /marketing/events — events list with date hero
+- [x] /marketing/events — events list with date hero
 
 ## F. Service — ITSM + Helpdesk (12 pages)
 
