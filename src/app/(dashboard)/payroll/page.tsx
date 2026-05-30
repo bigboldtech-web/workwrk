@@ -1,26 +1,29 @@
 "use client";
 
-/* Real, persistent Payroll page (pay runs).
+/* Payroll — bespoke run hero with status flow + KPI strip.
  *
- *  GET  /api/pay-runs               list
- *  POST /api/pay-runs               { payGroupId, periodStart, periodEnd, payDate }
- *  PATCH /api/pay-runs/[id]         { action: calculate | post | cancel }
+ *  GET   /api/pay-runs           list
+ *  PATCH /api/pay-runs/[id]      { action: calculate | post | cancel }
  *
- *  Status enum: DRAFT | CALCULATING | CALCULATED | POSTED | CANCELLED
+ * Layout:
+ *   OsTitleBar with nav + New pay run in actions.
+ *   Hero card for the most-active run (DRAFT or CALCULATED next), with status flow stepper + totals.
+ *   4-tile KPI strip: YTD spend · Last posted net · Employees paid · Next pay date.
+ *   2-col body: Recent runs list (status-grouped) + Pay groups sidebar.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CircleDollarSign, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  CircleDollarSign, ArrowRight, ChevronRight, Calendar as CalendarIcon,
+  Users, TrendingUp, FileText, Play, CheckCircle2,
+  Loader2, Layers, BarChart3, Receipt, XCircle, Plus,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import type { PickerOption } from "@/components/layout/os/picker-popover";
 
 type PrStatus = "DRAFT" | "CALCULATING" | "CALCULATED" | "POSTED" | "CANCELLED";
 
@@ -36,12 +39,10 @@ type ApiPayRun = {
   totalDeductions?: number | string | null;
   payGroup?: { id: string; name: string } | null;
   _count?: { payslips?: number };
+  postedAt?: string | null;
+  createdAt?: string;
 };
 
-const STATUS_TO_OS: Record<PrStatus, StatusValue> = {
-  DRAFT: "planning", CALCULATING: "working", CALCULATED: "review",
-  POSTED: "done", CANCELLED: "empty",
-};
 const STATUS_LABELS: Record<PrStatus, string> = {
   DRAFT: "Draft", CALCULATING: "Calculating", CALCULATED: "Calculated",
   POSTED: "Posted", CANCELLED: "Cancelled",
@@ -50,74 +51,47 @@ const STATUS_COLORS: Record<PrStatus, string> = {
   DRAFT: C.indigo, CALCULATING: C.orange, CALCULATED: C.purple,
   POSTED: C.green, CANCELLED: C.gray,
 };
-const STATUS_OPTIONS: PickerOption[] = (["DRAFT", "CALCULATED", "POSTED", "CANCELLED"] as PrStatus[]).map((s) => ({
-  value: s, label: STATUS_LABELS[s], color: STATUS_COLORS[s],
-}));
-
-function num(v?: number | string | null) { if (v === null || v === undefined) return 0; return typeof v === "string" ? parseFloat(v) : v; }
-function actionFor(from: PrStatus, to: PrStatus): string | null {
-  if (from === to) return null;
-  if (from === "DRAFT" && to === "CALCULATED") return "calculate";
-  if (from === "CALCULATED" && to === "POSTED") return "post";
-  if (to === "CANCELLED") return "cancel";
+const STATUS_FLOW: PrStatus[] = ["DRAFT", "CALCULATING", "CALCULATED", "POSTED"];
+function nextAction(s: PrStatus): { label: string; action: string } | null {
+  if (s === "DRAFT") return { label: "Calculate", action: "calculate" };
+  if (s === "CALCULATED") return { label: "Post payroll", action: "post" };
   return null;
 }
 
-const GROUP_ORDER: PrStatus[] = ["DRAFT", "CALCULATING", "CALCULATED", "POSTED"];
-
-function runToRow(r: ApiPayRun): Row {
-  const period = `${new Date(r.periodStart).toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${new Date(r.periodEnd).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-  return {
-    id: r.id,
-    name: `${r.payGroup?.name ?? "Pay group"} · ${period}`,
-    done: r.status === "POSTED",
-    cells: {
-      status: { value: STATUS_TO_OS[r.status], label: STATUS_LABELS[r.status] },
-      group: r.payGroup?.name ?? "—",
-      gross: num(r.totalGross),
-      net: num(r.totalNet),
-      payslips: `${r._count?.payslips ?? 0}`,
-      payDate: { iso: r.payDate },
-    },
-  };
+function num(v?: number | string | null): number {
+  if (v == null) return 0;
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return isFinite(n) ? n : 0;
 }
-
-function buildGroups(runs: ApiPayRun[]): TableGroup[] {
-  const buckets = new Map<PrStatus, ApiPayRun[]>();
-  for (const s of GROUP_ORDER) buckets.set(s, []);
-  for (const r of runs) {
-    if (r.status === "CANCELLED") continue;
-    const b = buckets.get(r.status);
-    if (b) b.push(r);
+function fmtMoney(n: number, currency = "₹"): string {
+  if (n >= 1_00_00_000) return `${currency}${(n / 1_00_00_000).toFixed(2)}Cr`;
+  if (n >= 1_00_000) return `${currency}${(n / 1_00_000).toFixed(1)}L`;
+  if (n >= 1_000) return `${currency}${(n / 1_000).toFixed(0)}k`;
+  return `${currency}${Math.round(n).toLocaleString()}`;
+}
+function fmtFullMoney(n: number, currency = "₹"): string {
+  return `${currency}${Math.round(n).toLocaleString()}`;
+}
+function fmtShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+function fmtPeriod(start: string, end: string): string {
+  const s = new Date(start);
+  const e = new Date(end);
+  if (s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth()) {
+    return `${s.toLocaleDateString("en-US", { day: "numeric" })} → ${e.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
   }
-  return GROUP_ORDER
-    .map((s) => ({
-      id: s, title: STATUS_LABELS[s], color: STATUS_COLORS[s],
-      rows: (buckets.get(s) ?? []).map(runToRow),
-    }))
-    .filter((g) => g.rows.length > 0 || g.id === "DRAFT" || g.id === "CALCULATED");
+  return `${s.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${e.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
 }
-
-const COLUMNS: Column[] = [
-  { id: "status",   label: "Status",   type: "status" },
-  { id: "group",    label: "Pay group", type: "text" },
-  { id: "gross",    label: "Gross",    type: "number", currency: "₹" },
-  { id: "net",      label: "Net",      type: "number", currency: "₹" },
-  { id: "payslips", label: "Payslips", type: "text" },
-  { id: "payDate",  label: "Pay date", type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
+function daysUntil(iso: string): number {
+  const t = new Date(iso).getTime();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((t - today.getTime()) / 86_400_000);
+}
 
 export default function PayrollPage() {
   const [runs, setRuns] = useState<ApiPayRun[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -127,6 +101,7 @@ export default function PayrollPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRuns(data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -135,46 +110,71 @@ export default function PayrollPage() {
   const v = rowVersion("payroll");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(runs ?? []), [runs]);
-
-  const handlers = {
-    onStatusChange: async (rowId: string, _g: string, value: string) => {
-      const r = (runs ?? []).find((x) => x.id === rowId);
-      if (!r) return;
-      const action = actionFor(r.status, value as PrStatus);
-      if (!action) {
-        toast(`Can't go from ${STATUS_LABELS[r.status]} → ${STATUS_LABELS[value as PrStatus]}`);
-        throw new Error("illegal");
-      }
-      const res = await fetch(`/api/pay-runs/${rowId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }),
+  async function advance(run: ApiPayRun) {
+    const next = nextAction(run.status);
+    if (!next) return;
+    try {
+      const res = await fetch(`/api/pay-runs/${run.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: next.action }),
       });
       if (!res.ok) {
         if (res.status === 403) toast("Only org admins can move payroll");
-        throw new Error(`PATCH ${res.status}`);
+        else toast("Couldn't advance run");
+        return;
       }
+      toast(`${run.payGroup?.name ?? "Pay run"} → ${next.label === "Post payroll" ? "Posted" : "Calculated"}`);
       void load();
-    },
-    onAdd: async (_g: string) => {
-      toast("New pay runs need a pay group + period — use the payroll setup flow");
-      throw new Error("not supported");
-    },
-  };
+    } catch { toast("Couldn't advance run"); }
+  }
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (runs ?? []).map((r): CalendarEvent => ({
-      id: r.id,
-      title: `${r.payGroup?.name ?? "Pay run"} · ₹${num(r.totalNet).toLocaleString()}`,
-      date: r.payDate,
-      color: STATUS_COLORS[r.status],
-      done: r.status === "POSTED",
-      payload: runToRow(r).cells,
-    })),
-    [runs],
-  );
+  // ─── Focal run (hero) ────────────────────────────────────
+  const focal = useMemo(() => {
+    const list = runs ?? [];
+    // Prefer CALCULATED ready to post, then DRAFT ready to calculate, then most recent
+    return list.find((r) => r.status === "CALCULATED")
+      ?? list.find((r) => r.status === "DRAFT")
+      ?? list.find((r) => r.status === "CALCULATING")
+      ?? list.sort((a, b) => new Date(b.payDate).getTime() - new Date(a.payDate).getTime())[0]
+      ?? null;
+  }, [runs]);
 
-  const draftCount = (runs ?? []).filter((r) => r.status === "DRAFT" || r.status === "CALCULATED").length;
-  const totalNet = (runs ?? []).reduce((acc, r) => r.status === "POSTED" ? acc + num(r.totalNet) : acc, 0);
+  // ─── Pay groups (derived) ────────────────────────────────
+  const payGroups = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; runs: number; lastRun?: ApiPayRun }>();
+    for (const r of runs ?? []) {
+      if (!r.payGroup) continue;
+      const k = r.payGroup.id;
+      if (!m.has(k)) m.set(k, { id: k, name: r.payGroup.name, runs: 0 });
+      const entry = m.get(k)!;
+      entry.runs++;
+      if (!entry.lastRun || new Date(r.payDate).getTime() > new Date(entry.lastRun.payDate).getTime()) {
+        entry.lastRun = r;
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => b.runs - a.runs);
+  }, [runs]);
+
+  // ─── KPIs ────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const list = runs ?? [];
+    const year = new Date().getFullYear();
+    const postedThisYear = list.filter((r) => r.status === "POSTED" && new Date(r.payDate).getFullYear() === year);
+    const ytdSpend = postedThisYear.reduce((acc, r) => acc + num(r.totalNet), 0);
+    const lastPosted = list.filter((r) => r.status === "POSTED").sort((a, b) => new Date(b.payDate).getTime() - new Date(a.payDate).getTime())[0];
+    const employeesPaid = lastPosted?._count?.payslips ?? 0;
+    const inFlight = list.filter((r) => r.status === "DRAFT" || r.status === "CALCULATED" || r.status === "CALCULATING").length;
+    const nextRun = list
+      .filter((r) => r.status !== "CANCELLED" && r.status !== "POSTED" && new Date(r.payDate).getTime() >= Date.now())
+      .sort((a, b) => new Date(a.payDate).getTime() - new Date(b.payDate).getTime())[0];
+    return { ytdSpend, lastPostedNet: num(lastPosted?.totalNet), employeesPaid, inFlight, nextRun, ytdCount: postedThisYear.length };
+  }, [runs]);
+
+  // ─── Recent runs grouped ─────────────────────────────────
+  const recentRuns = useMemo(() => (runs ?? [])
+    .filter((r) => r.status !== "CANCELLED")
+    .sort((a, b) => new Date(b.payDate).getTime() - new Date(a.payDate).getTime())
+    .slice(0, 12), [runs]);
 
   return (
     <>
@@ -182,34 +182,272 @@ export default function PayrollPage() {
         title="Payroll"
         Icon={CircleDollarSign}
         iconGradient={GRAD.greenTeal}
-        description={runs === null ? "Loading pay runs…" : `${runs.length} pay run${runs.length === 1 ? "" : "s"} · ${draftCount} in flight · ₹${totalNet.toLocaleString()} posted`}
+        description={runs === null
+          ? "Loading pay runs…"
+          : `${runs.length} run${runs.length === 1 ? "" : "s"} · ${stats.inFlight} in flight · ${fmtMoney(stats.ytdSpend)} YTD`}
         people={[PEOPLE.bb, PEOPLE.vn]}
         morePeople={2}
+        actions={
+          <div className="pyrl__head-actions">
+            <Link href="/payroll/runs" className="pyrl__nav-link"><FileText /> All runs</Link>
+            <Link href="/payroll/groups" className="pyrl__nav-link"><Layers /> Groups</Link>
+            <button type="button" className="pyrl__btn-primary" onClick={() => toast("New pay run needs a pay group + period — open in /payroll/groups")}>
+              <Plus /> New pay run
+            </button>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New pay run" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={CircleDollarSign} iconGradient={GRAD.redPink} title="Couldn't load pay runs" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : runs === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : runs.length === 0 ? (
-            <OsEmptyView Icon={CircleDollarSign} iconGradient={GRAD.greenTeal} title="No pay runs yet" subtitle="Set up your first pay group, then run payroll. The picker moves a run through Draft → Calculated → Posted." chips={["Draft", "Calculate", "Post", "Cancel"]} cta="Configure payroll" />
-          ) : (
-            <OsMainTable moduleId="payroll" columns={COLUMNS} groups={groups} statusOptions={STATUS_OPTIONS} handlers={handlers} />
-          )}
-        </>
-      )}
+      <div className="pyrl">
+        {/* Hero — focal run */}
+        {loadError ? (
+          <OsEmptyView Icon={CircleDollarSign} iconGradient={GRAD.redPink} title="Couldn't load payroll" subtitle={`API error: ${loadError}.`} cta="Retry" />
+        ) : runs === null ? (
+          <div className="pyrl__loading">Loading pay runs…</div>
+        ) : !focal ? (
+          <OsEmptyView
+            Icon={CircleDollarSign}
+            iconGradient={GRAD.greenTeal}
+            title="No pay runs yet"
+            subtitle="Set up your first pay group, then run payroll. Runs flow Draft → Calculated → Posted."
+            chips={["Draft", "Calculate", "Post"]}
+            cta="Configure payroll"
+          />
+        ) : (
+          <RunHero run={focal} onAdvance={advance} />
+        )}
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="payroll" events={calendarEvents} newLabel="New pay run" />
-      )}
+        {/* KPIs */}
+        {runs !== null && runs.length > 0 && (
+          <div className="pyrl__kpis">
+            <KpiTile
+              accent="var(--os-c-green)"
+              Icon={TrendingUp}
+              label="YTD payroll spend"
+              value={fmtMoney(stats.ytdSpend)}
+              sub={`${stats.ytdCount} run${stats.ytdCount === 1 ? "" : "s"} posted ${new Date().getFullYear()}`}
+            />
+            <KpiTile
+              accent="var(--os-c-blue)"
+              Icon={Receipt}
+              label="Last posted net"
+              value={fmtMoney(stats.lastPostedNet)}
+              sub={stats.lastPostedNet > 0 ? "most recent run" : "no posted runs yet"}
+            />
+            <KpiTile
+              accent="var(--os-c-purple)"
+              Icon={Users}
+              label="Employees paid"
+              value={`${stats.employeesPaid}`}
+              sub="from last posted run"
+            />
+            <KpiTile
+              accent="var(--os-c-orange)"
+              Icon={CalendarIcon}
+              label="Next pay date"
+              value={stats.nextRun ? fmtShortDate(stats.nextRun.payDate) : "—"}
+              sub={stats.nextRun ? `${stats.nextRun.payGroup?.name ?? "Pay group"} · ${Math.max(0, daysUntil(stats.nextRun.payDate))}d away` : "no scheduled run"}
+            />
+          </div>
+        )}
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={CircleDollarSign} iconGradient={GRAD.greenTeal} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data", "Persistent edits"]} cta="Back to Main table" />
-      )}
+        {/* 2-col body */}
+        {runs !== null && runs.length > 0 && (
+          <div className="pyrl__body">
+            {/* Recent runs */}
+            <section className="pyrl__panel">
+              <header className="pyrl__panel-head">
+                <FileText /> Recent runs
+                <Link href="/payroll/runs" className="pyrl__panel-link">All <ChevronRight /></Link>
+              </header>
+              <div className="pyrl__runs">
+                {recentRuns.map((r) => <RunRow key={r.id} run={r} onAdvance={advance} />)}
+              </div>
+            </section>
+
+            {/* Pay groups sidebar */}
+            <aside className="pyrl__side">
+              <div className="pyrl__panel">
+                <header className="pyrl__panel-head">
+                  <Layers /> Pay groups
+                  <Link href="/payroll/groups" className="pyrl__panel-link">Manage <ChevronRight /></Link>
+                </header>
+                {payGroups.length === 0 ? (
+                  <div className="pyrl__panel-empty">No pay groups configured yet.</div>
+                ) : (
+                  <div className="pyrl__groups">
+                    {payGroups.slice(0, 6).map((g) => (
+                      <Link key={g.id} href={`/payroll/groups#${g.id}`} className="pyrl__group">
+                        <div className="pyrl__group-icon"><Users /></div>
+                        <div className="pyrl__group-main">
+                          <div className="pyrl__group-name">{g.name}</div>
+                          <div className="pyrl__group-meta">
+                            {g.runs} run{g.runs === 1 ? "" : "s"}
+                            {g.lastRun && ` · last ${fmtShortDate(g.lastRun.payDate)}`}
+                          </div>
+                        </div>
+                        <ArrowRight className="pyrl__group-arrow" />
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="pyrl__panel">
+                <header className="pyrl__panel-head">
+                  <BarChart3 /> Quick actions
+                </header>
+                <div className="pyrl__quick">
+                  <Link href="/payroll/runs" className="pyrl__quick-btn">
+                    <FileText /> View all runs
+                  </Link>
+                  <Link href="/payroll/groups" className="pyrl__quick-btn">
+                    <Layers /> Configure groups
+                  </Link>
+                  <Link href="/payroll/payslip" className="pyrl__quick-btn">
+                    <Receipt /> Browse payslips
+                  </Link>
+                  <Link href="/compensation" className="pyrl__quick-btn">
+                    <TrendingUp /> Compensation plans
+                  </Link>
+                </div>
+              </div>
+            </aside>
+          </div>
+        )}
+      </div>
     </>
+  );
+}
+
+function RunHero({ run, onAdvance }: { run: ApiPayRun; onAdvance: (r: ApiPayRun) => void }) {
+  const statusColor = STATUS_COLORS[run.status];
+  const StatusIcon = run.status === "POSTED" ? CheckCircle2 : run.status === "CALCULATING" ? Loader2 : run.status === "CANCELLED" ? XCircle : Play;
+  const nextStep = nextAction(run.status);
+  const currentIdx = STATUS_FLOW.indexOf(run.status);
+  const dayDelta = daysUntil(run.payDate);
+  const dayLabel = dayDelta > 0 ? `in ${dayDelta} day${dayDelta === 1 ? "" : "s"}`
+                  : dayDelta === 0 ? "today"
+                  : `${-dayDelta} day${dayDelta === -1 ? "" : "s"} ago`;
+
+  return (
+    <section className="pyrl__hero" style={{ ["--hero-c" as unknown as string]: statusColor }}>
+      <span className="pyrl__hero-accent" aria-hidden="true" />
+      <div className="pyrl__hero-main">
+        <div className="pyrl__hero-meta">
+          <span className="pyrl__hero-tag">Focus run</span>
+          <span className="pyrl__hero-status">
+            <StatusIcon /> {STATUS_LABELS[run.status]}
+          </span>
+          <span className="pyrl__hero-pay-date">
+            <CalendarIcon /> Pay {fmtShortDate(run.payDate)} · {dayLabel}
+          </span>
+        </div>
+        <h2 className="pyrl__hero-title">{run.payGroup?.name ?? "Pay group"}</h2>
+        <div className="pyrl__hero-period">{fmtPeriod(run.periodStart, run.periodEnd)}</div>
+
+        {/* Status flow stepper */}
+        <div className="pyrl__flow">
+          {STATUS_FLOW.map((s, i) => {
+            const isCurrent = s === run.status;
+            const isPast = currentIdx >= 0 && i < currentIdx;
+            const tone = isCurrent ? "current" : isPast ? "past" : "future";
+            return (
+              <span key={s} className={`pyrl__flow-step pyrl__flow-step--${tone}`} style={{ ["--step-c" as unknown as string]: STATUS_COLORS[s] }}>
+                <span className="pyrl__flow-dot">{i + 1}</span>
+                <span className="pyrl__flow-label">{STATUS_LABELS[s]}</span>
+                {i < STATUS_FLOW.length - 1 && <ChevronRight className="pyrl__flow-sep" />}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="pyrl__hero-totals">
+        <Total label="Gross"      value={fmtFullMoney(num(run.totalGross))} accent="var(--os-ink)" />
+        <Total label="Deductions" value={fmtFullMoney(num(run.totalDeductions))} accent="var(--os-c-red)" />
+        <Total label="Tax"        value={fmtFullMoney(num(run.totalTax))} accent="var(--os-c-orange)" />
+        <Total label="Net"        value={fmtFullMoney(num(run.totalNet))} accent="var(--os-c-green)" hero />
+        <div className="pyrl__hero-actions">
+          {nextStep && (
+            <button type="button" className="pyrl__hero-advance" onClick={() => onAdvance(run)}>
+              <ChevronRight /> {nextStep.label}
+            </button>
+          )}
+          <Link href={`/payroll/${run.id}`} className="pyrl__hero-open">
+            Open run <ArrowRight />
+          </Link>
+        </div>
+        {run._count?.payslips !== undefined && (
+          <div className="pyrl__hero-payslips">
+            <Users /> {run._count.payslips} payslip{run._count.payslips === 1 ? "" : "s"}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Total({ label, value, accent, hero }: { label: string; value: string; accent: string; hero?: boolean }) {
+  return (
+    <div className={`pyrl__total${hero ? " pyrl__total--hero" : ""}`} style={{ ["--total-c" as unknown as string]: accent }}>
+      <div className="pyrl__total-label">{label}</div>
+      <div className="pyrl__total-value">{value}</div>
+    </div>
+  );
+}
+
+function RunRow({ run, onAdvance }: { run: ApiPayRun; onAdvance: (r: ApiPayRun) => void }) {
+  const statusColor = STATUS_COLORS[run.status];
+  const next = nextAction(run.status);
+  const StatusIcon = run.status === "POSTED" ? CheckCircle2 : run.status === "CALCULATING" ? Loader2 : run.status === "CANCELLED" ? XCircle : Play;
+
+  return (
+    <article className="pyrl__run" style={{ ["--row-c" as unknown as string]: statusColor }}>
+      <span className="pyrl__run-accent" aria-hidden="true" />
+      <Link href={`/payroll/${run.id}`} className="pyrl__run-main">
+        <div className="pyrl__run-head">
+          <span className="pyrl__run-status">
+            <StatusIcon /> {STATUS_LABELS[run.status]}
+          </span>
+          <span className="pyrl__run-group">{run.payGroup?.name ?? "Pay group"}</span>
+        </div>
+        <div className="pyrl__run-period">{fmtPeriod(run.periodStart, run.periodEnd)}</div>
+        <div className="pyrl__run-meta">
+          <CalendarIcon /> Pay {fmtShortDate(run.payDate)}
+          {run._count?.payslips !== undefined && (
+            <span><Users /> {run._count.payslips} slips</span>
+          )}
+        </div>
+      </Link>
+      <div className="pyrl__run-totals">
+        <span className="pyrl__run-net">{fmtMoney(num(run.totalNet))}</span>
+        <span className="pyrl__run-net-label">net</span>
+      </div>
+      <div className="pyrl__run-actions">
+        {next && (
+          <button type="button" className="pyrl__run-advance" onClick={() => onAdvance(run)} title={next.label}>
+            <ChevronRight />
+          </button>
+        )}
+        <Link href={`/payroll/${run.id}`} className="pyrl__run-open">
+          <ArrowRight />
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof CircleDollarSign; label: string; value: string; sub: string }) {
+  return (
+    <div className="pyrl__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="pyrl__kpi-accent" aria-hidden="true" />
+      <div className="pyrl__kpi-row">
+        <div className="pyrl__kpi-icon"><Icon /></div>
+        <div className="pyrl__kpi-label">{label}</div>
+      </div>
+      <div className="pyrl__kpi-value">{value}</div>
+      <div className="pyrl__kpi-sub">{sub}</div>
+    </div>
   );
 }
