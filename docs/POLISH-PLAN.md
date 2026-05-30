@@ -73,7 +73,7 @@ Every page subtask must pass this gate before being marked done:
 
 - [x] /marketing — hub with campaign/content/event tiles
 - [x] /marketing/[id] — campaign detail with metrics scoreboard
-- [ ] /marketing/campaigns — list with status pipeline
+- [x] /marketing/campaigns — list with status pipeline
 - [ ] /marketing/content — content calendar grid
 - [ ] /marketing/events — events list with date hero
 
