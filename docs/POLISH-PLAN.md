@@ -89,7 +89,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /itsm/tickets — unified queue with multi-axis filters (priority + status + category)
 - [~] /itsm/cmdb — **DROPPED** (enterprise IT only; revisit on customer demand)
 - [x] /itsm/kb — KB article grid
-- [ ] /helpdesk — customer support overview (external = different from internal ITSM)
+- [x] /helpdesk — customer support overview (external = different from internal ITSM)
 - [ ] /helpdesk/[id] — chat-like ticket detail
 - [ ] /helpdesk/tickets — ticket queue
 - [ ] /helpdesk/customers — customer cards
