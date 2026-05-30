@@ -101,7 +101,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /people/[id] — profile page hero (functional KRA/KPI/skills/etc. tabs preserved)
 - [x] /people/departments — org tree view (with grid alternate)
 - [x] /people/roles — role library with level chips
-- [ ] /people/skills — skill matrix
+- [x] /people/skills — skill matrix with ring gauge + holder directory
 - [ ] /organization — org settings hub
 
 ## H. Time & Pay (15 pages)
