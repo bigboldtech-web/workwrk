@@ -102,7 +102,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /people/departments — org tree view (with grid alternate)
 - [x] /people/roles — role library with level chips
 - [x] /people/skills — skill matrix with ring gauge + holder directory
-- [ ] /organization — org settings hub
+- [x] /organization — org settings hub + hierarchy preview
 
 ## H. Time & Pay (15 pages)
 
