@@ -90,7 +90,7 @@ Every page subtask must pass this gate before being marked done:
 - [~] /itsm/cmdb — **DROPPED** (enterprise IT only; revisit on customer demand)
 - [x] /itsm/kb — KB article grid
 - [x] /helpdesk — customer support overview (external = different from internal ITSM)
-- [ ] /helpdesk/[id] — chat-like ticket detail
+- [x] /helpdesk/[id] — chat-like ticket detail
 - [ ] /helpdesk/tickets — ticket queue
 - [ ] /helpdesk/customers — customer cards
 - [ ] /helpdesk/macros — macro library
