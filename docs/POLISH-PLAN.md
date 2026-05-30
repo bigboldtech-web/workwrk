@@ -100,7 +100,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /people — directory with photo cards
 - [x] /people/[id] — profile page hero (functional KRA/KPI/skills/etc. tabs preserved)
 - [x] /people/departments — org tree view (with grid alternate)
-- [ ] /people/roles — role library with level chips
+- [x] /people/roles — role library with level chips
 - [ ] /people/skills — skill matrix
 - [ ] /organization — org settings hub
 

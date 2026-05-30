@@ -1,19 +1,27 @@
 "use client";
 
-/* People · Roles — job-title catalog grouped by access level.
+/* People · Roles — job-title library with level chips.
  *
- * Roles are job titles your org defines (e.g. "Senior Engineer",
- * "Account Executive"). Each row shows headcount filling that role,
- * its access level (EMPLOYEE / MANAGER / DIRECTOR / VP / C_LEVEL),
- * and its parent department. Groups by level so you can audit the
- * org pyramid at a glance.
+ *  GET   /api/roles
+ *  POST  /api/roles  { title, level }
  *
- * Reads: GET /api/roles
- * Write: POST /api/roles  (quick-create via prompt)
+ * Layout:
+ *   OsTitleBar with back + nav + New role.
+ *   4-tile KPI strip: Roles · Headcount · Unfilled · Levels.
+ *   Toolbar: search + level filter chips (C-Suite, VP, Director, etc.).
+ *   Grouped sections by level: each with header pill + count + role cards.
+ *   Cards: title + level chip + dept + headcount badge (orange when 0).
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Briefcase, Plus, Users } from "lucide-react";
+import Link from "next/link";
+import {
+  Briefcase, Plus, Users, Search, ArrowLeft, Building2, UserX,
+  Layers, GraduationCap,
+} from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -29,20 +37,37 @@ type ApiRole = {
 };
 
 const LEVEL_ORDER: Level[] = ["C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "HR", "COMPANY_ADMIN", "SUPER_ADMIN"];
-const LEVEL_LABEL: Record<Level, string> = {
+const LEVEL_LABELS: Record<Level, string> = {
   C_LEVEL: "C-Suite", VP: "VPs", DIRECTOR: "Directors", MANAGER: "Managers",
   TEAM_LEAD: "Team leads", EMPLOYEE: "Individual contributors",
   HR: "HR", COMPANY_ADMIN: "Company admin", SUPER_ADMIN: "Super admin",
 };
-const LEVEL_HUE: Record<Level, string> = {
-  C_LEVEL: "var(--os-c-purple)", VP: "var(--os-c-pink)", DIRECTOR: "var(--os-c-indigo)",
-  MANAGER: "var(--os-c-blue)", TEAM_LEAD: "var(--os-c-teal)", EMPLOYEE: "var(--os-c-darkgray)",
-  HR: "var(--os-c-orange)", COMPANY_ADMIN: "var(--os-c-red)", SUPER_ADMIN: "var(--os-c-red)",
+const LEVEL_SHORT: Record<Level, string> = {
+  C_LEVEL: "C-Suite", VP: "VP", DIRECTOR: "Director", MANAGER: "Manager",
+  TEAM_LEAD: "Team lead", EMPLOYEE: "IC", HR: "HR", COMPANY_ADMIN: "Admin", SUPER_ADMIN: "Super",
 };
+const LEVEL_COLORS: Record<Level, string> = {
+  C_LEVEL: C.purple, VP: C.pink, DIRECTOR: C.indigo, MANAGER: C.blue,
+  TEAM_LEAD: C.teal, EMPLOYEE: C.sage, HR: C.orange, COMPANY_ADMIN: C.red, SUPER_ADMIN: C.red,
+};
+const LEVEL_RANK: Record<Level, number> = {
+  C_LEVEL: 7, VP: 6, DIRECTOR: 5, MANAGER: 4, TEAM_LEAD: 3,
+  EMPLOYEE: 1, HR: 2, COMPANY_ADMIN: 0, SUPER_ADMIN: 0,
+};
+
+const DEPT_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
+function deptColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return DEPT_PALETTE[h % DEPT_PALETTE.length];
+}
 
 export default function RolesPage() {
   const [roles, setRoles] = useState<ApiRole[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [levelFilter, setLevelFilter] = useState<Level | null>(null);
+  const [showUnfilledOnly, setShowUnfilledOnly] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -52,6 +77,7 @@ export default function RolesPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRoles(data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -61,7 +87,7 @@ export default function RolesPage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function quickAdd() {
-    const title = window.prompt("Role title?")?.trim();
+    const title = (typeof window !== "undefined" ? window.prompt("Role title?") : "")?.trim();
     if (!title) return;
     try {
       const res = await fetch("/api/roles", {
@@ -69,78 +95,230 @@ export default function RolesPage() {
         body: JSON.stringify({ title, level: "EMPLOYEE" }),
       });
       if (!res.ok) throw new Error(`POST ${res.status}`);
+      toast("Role created");
       void load();
     } catch { toast("Couldn't create role"); }
   }
 
+  // ─── Filter + group ──────────────────────────────────────
+  const filtered = useMemo(() => {
+    let list = roles ?? [];
+    if (levelFilter) list = list.filter((r) => (r.level ?? "EMPLOYEE") === levelFilter);
+    if (showUnfilledOnly) list = list.filter((r) => (r._count?.users ?? 0) === 0);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter((r) =>
+        r.title.toLowerCase().includes(q) ||
+        (r.description ?? "").toLowerCase().includes(q) ||
+        (r.department?.name ?? "").toLowerCase().includes(q));
+    }
+    return list;
+  }, [roles, levelFilter, showUnfilledOnly, search]);
+
   const grouped = useMemo(() => {
     const m = new Map<Level, ApiRole[]>();
-    for (const r of roles ?? []) {
+    for (const r of filtered) {
       const k: Level = r.level ?? "EMPLOYEE";
       if (!m.has(k)) m.set(k, []);
       m.get(k)!.push(r);
     }
-    return LEVEL_ORDER.map((l) => ({ level: l, items: m.get(l) ?? [] })).filter((g) => g.items.length > 0);
+    return LEVEL_ORDER
+      .map((l) => ({
+        level: l,
+        items: (m.get(l) ?? []).slice().sort((a, b) => a.title.localeCompare(b.title)),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [filtered]);
+
+  // ─── KPIs ────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const list = roles ?? [];
+    const totalHeadcount = list.reduce((acc, r) => acc + (r._count?.users ?? 0), 0);
+    const unfilled = list.filter((r) => (r._count?.users ?? 0) === 0).length;
+    const levelCount = new Set(list.map((r) => r.level ?? "EMPLOYEE")).size;
+    return { total: list.length, totalHeadcount, unfilled, levelCount };
   }, [roles]);
 
-  const total = roles?.length ?? 0;
-  const totalHeadcount = (roles ?? []).reduce((acc, r) => acc + (r._count?.users ?? 0), 0);
-  const unfilled = (roles ?? []).filter((r) => (r._count?.users ?? 0) === 0).length;
+  const levelCounts = useMemo(() => {
+    const list = roles ?? [];
+    const m = new Map<Level, number>();
+    for (const r of list) {
+      const k: Level = r.level ?? "EMPLOYEE";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [roles]);
 
   return (
-    <div className="roles">
-      <header className="roles__head">
-        <div className="roles__head-l">
-          <div className="roles__icon"><Briefcase /></div>
-          <div>
-            <h1 className="roles__title">Roles</h1>
-            <div className="roles__sub">{roles === null ? "Loading…" : `${total} role${total === 1 ? "" : "s"} · ${totalHeadcount} people across them · ${unfilled} unfilled`}</div>
+    <>
+      <OsTitleBar
+        title="Roles"
+        Icon={Briefcase}
+        iconGradient={GRAD.purpleIndigo}
+        description={roles === null
+          ? "Loading roles…"
+          : `${stats.total} role${stats.total === 1 ? "" : "s"} · ${stats.totalHeadcount} people${stats.unfilled > 0 ? ` · ${stats.unfilled} unfilled` : ""}`}
+        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
+        morePeople={4}
+        actions={
+          <div className="rls__head-actions">
+            <button type="button" className="rls__back" onClick={() => history.back()}>
+              <ArrowLeft /> People
+            </button>
+            <Link href="/people/departments" className="rls__nav-link"><Building2 /> Departments</Link>
+            <Link href="/people/skills" className="rls__nav-link"><GraduationCap /> Skills</Link>
+            <button type="button" className="rls__btn-primary" onClick={quickAdd}>
+              <Plus /> New role
+            </button>
           </div>
-        </div>
-        <button type="button" className="roles__new" onClick={quickAdd}>
-          <Plus /> New role
-        </button>
-      </header>
+        }
+      />
 
-      {loadError ? (
-        <div className="roles__error">{loadError}</div>
-      ) : roles === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-      ) : total === 0 ? (
-        <div className="roles__empty">
-          <Briefcase />
-          <div>
-            <h3>No roles defined yet</h3>
-            <p>Roles are job titles your org uses — &quot;Senior Engineer&quot;, &quot;AE&quot;, &quot;Director of Ops&quot;. Each role gets an access level that controls what its holders can see.</p>
-          </div>
+      <div className="rls">
+        {/* KPIs */}
+        <div className="rls__kpis">
+          <KpiTile accent="var(--os-c-purple)" Icon={Briefcase} label="Roles defined" value={`${stats.total}`}        sub="job titles" />
+          <KpiTile accent="var(--os-c-blue)"   Icon={Users}     label="Headcount"     value={`${stats.totalHeadcount}`} sub="filling roles" />
+          <KpiTile accent={stats.unfilled > 0 ? "var(--os-c-orange)" : "var(--os-c-green)"}
+                   Icon={UserX} label="Unfilled" value={`${stats.unfilled}`} sub={stats.unfilled > 0 ? "needs hiring" : "all positions filled"} />
+          <KpiTile accent="var(--os-c-teal)"   Icon={Layers}    label="Levels"        value={`${stats.levelCount}`}   sub="org tiers in use" />
         </div>
-      ) : (
-        <div className="roles__groups">
-          {grouped.map((g) => (
-            <section key={g.level} className="roles__group" style={{ borderLeft: `4px solid ${LEVEL_HUE[g.level]}` }}>
-              <header className="roles__group-head">
-                <h2>{LEVEL_LABEL[g.level]}</h2>
-                <span>{g.items.length} role{g.items.length === 1 ? "" : "s"} · {g.items.reduce((acc, r) => acc + (r._count?.users ?? 0), 0)} people</span>
+
+        {/* Toolbar */}
+        <div className="rls__toolbar">
+          <div className="rls__search">
+            <Search />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search role title, department, description…"
+              aria-label="Search roles"
+            />
+          </div>
+          <label className="rls__unfilled-toggle">
+            <input type="checkbox" checked={showUnfilledOnly} onChange={(e) => setShowUnfilledOnly(e.target.checked)} />
+            <span>Unfilled only</span>
+          </label>
+        </div>
+
+        {/* Level filter chips */}
+        {LEVEL_ORDER.some((l) => (levelCounts.get(l) ?? 0) > 0) && (
+          <div className="rls__levels">
+            <button
+              type="button"
+              className={`rls__level${levelFilter === null ? " is-active" : ""}`}
+              onClick={() => setLevelFilter(null)}
+            >
+              All levels <span className="rls__level-count">{stats.total}</span>
+            </button>
+            {LEVEL_ORDER.filter((l) => (levelCounts.get(l) ?? 0) > 0)
+              .sort((a, b) => LEVEL_RANK[b] - LEVEL_RANK[a])
+              .map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  className={`rls__level${levelFilter === l ? " is-active" : ""}`}
+                  style={{ ["--lvl-c" as unknown as string]: LEVEL_COLORS[l] }}
+                  onClick={() => setLevelFilter(l)}
+                >
+                  <span className="rls__level-dot" />
+                  {LEVEL_LABELS[l]}
+                  <span className="rls__level-count">{levelCounts.get(l) ?? 0}</span>
+                </button>
+              ))}
+          </div>
+        )}
+
+        {/* Body */}
+        {loadError ? (
+          <OsEmptyView Icon={Briefcase} iconGradient={GRAD.redPink} title="Couldn't load roles" subtitle={`API error: ${loadError}.`} cta="Retry" />
+        ) : roles === null ? (
+          <div className="rls__loading">Loading roles…</div>
+        ) : stats.total === 0 ? (
+          <OsEmptyView
+            Icon={Briefcase}
+            iconGradient={GRAD.purpleIndigo}
+            title="No roles defined yet"
+            subtitle="Roles are job titles your org uses — 'Senior Engineer', 'AE', 'Director of Ops'. Each role gets an access level that controls what its holders can see."
+            cta="New role"
+          />
+        ) : grouped.length === 0 ? (
+          <div className="rls__empty">
+            <Search />
+            <div>No roles match these filters.</div>
+            <button type="button" className="rls__empty-reset" onClick={() => { setSearch(""); setLevelFilter(null); setShowUnfilledOnly(false); }}>Clear filters</button>
+          </div>
+        ) : (
+          grouped.map((g) => (
+            <section
+              key={g.level}
+              className="rls__group"
+              style={{ ["--g-c" as unknown as string]: LEVEL_COLORS[g.level] }}
+            >
+              <header className="rls__group-head">
+                <span className="rls__group-pill">{LEVEL_SHORT[g.level]}</span>
+                <h2 className="rls__group-title">{LEVEL_LABELS[g.level]}</h2>
+                <span className="rls__group-count">{g.items.length} role{g.items.length === 1 ? "" : "s"}</span>
+                <span className="rls__group-headcount">
+                  {g.items.reduce((acc, r) => acc + (r._count?.users ?? 0), 0)} people
+                </span>
+                <span className="rls__group-line" />
               </header>
-              <div className="roles__list">
-                {g.items.map((r) => {
-                  const count = r._count?.users ?? 0;
-                  return (
-                    <div key={r.id} className="role-row">
-                      <span className="role-row__title">{r.title}</span>
-                      {r.description ? <span className="role-row__desc">{r.description}</span> : null}
-                      <span className="role-row__dept">{r.department?.name ?? "—"}</span>
-                      <span className={`role-row__count ${count === 0 ? "is-empty" : ""}`}>
-                        <Users /> {count}
-                      </span>
-                    </div>
-                  );
-                })}
+              <div className="rls__grid">
+                {g.items.map((r) => <RoleCard key={r.id} role={r} />)}
               </div>
             </section>
-          ))}
-        </div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+function RoleCard({ role: r }: { role: ApiRole }) {
+  const count = r._count?.users ?? 0;
+  const isUnfilled = count === 0;
+  const levelColor = LEVEL_COLORS[r.level ?? "EMPLOYEE"];
+  return (
+    <article className={`rls__card${isUnfilled ? " is-unfilled" : ""}`} style={{ ["--card-c" as unknown as string]: levelColor }}>
+      <header className="rls__card-head">
+        <h3 className="rls__card-title">{r.title}</h3>
+        <span className={`rls__card-count${isUnfilled ? " is-zero" : ""}`}>
+          <Users /> {count}
+        </span>
+      </header>
+
+      <div className="rls__card-tags">
+        <span className="rls__card-level">{LEVEL_SHORT[r.level ?? "EMPLOYEE"]}</span>
+        {r.department?.name && (
+          <span className="rls__card-dept" style={{ ["--dept-c" as unknown as string]: deptColor(r.department.name) }}>
+            <Building2 /> {r.department.name}
+          </span>
+        )}
+        {isUnfilled && (
+          <span className="rls__card-vacant">
+            <UserX /> Open position
+          </span>
+        )}
+      </div>
+
+      {r.description && (
+        <p className="rls__card-desc">{r.description.length > 140 ? r.description.slice(0, 140) + "…" : r.description}</p>
       )}
+    </article>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Briefcase; label: string; value: string; sub: string }) {
+  return (
+    <div className="rls__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="rls__kpi-accent" aria-hidden="true" />
+      <div className="rls__kpi-row">
+        <div className="rls__kpi-icon"><Icon /></div>
+        <div className="rls__kpi-label">{label}</div>
+      </div>
+      <div className="rls__kpi-value">{value}</div>
+      <div className="rls__kpi-sub">{sub}</div>
     </div>
   );
 }
