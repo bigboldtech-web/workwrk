@@ -107,7 +107,7 @@ Every page subtask must pass this gate before being marked done:
 ## H. Time & Pay (15 pages)
 
 - [x] /payroll — payroll run hero
-- [ ] /payroll/[id] — payroll run detail
+- [x] /payroll/[id] — payroll run detail
 - [ ] /payroll/runs — historical runs
 - [ ] /payroll/groups — group config
 - [ ] /payroll/payslip/[id] — printable payslip

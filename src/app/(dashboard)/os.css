@@ -21687,3 +21687,373 @@ a.prfh__contact:hover { color: var(--os-brand); }
   .pyrl__kpis { grid-template-columns: repeat(2, 1fr); }
   .pyrl__body { grid-template-columns: 1fr; }
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * PAYROLL · RUN DETAIL — hero + flow + payslips table
+ * ════════════════════════════════════════════════════════════════ */
+.pyrd { padding: 14px 28px 60px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.pyrd__loading { padding: 60px 24px; text-align: center; color: var(--os-ink-3); font-size: 13px; }
+
+/* ─── Header actions ─── */
+.pyrd__head-actions { display: flex; gap: 6px; align-items: center; }
+.pyrd__back, .pyrd__btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  color: var(--os-ink-2);
+  cursor: pointer;
+  transition: all 120ms;
+}
+.pyrd__back svg, .pyrd__btn svg { width: 13px; height: 13px; }
+.pyrd__back:hover, .pyrd__btn:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+.pyrd__btn--icon { padding: 0; width: 30px; justify-content: center; }
+
+/* ─── Hero ─── */
+.pyrd__hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 22px 26px;
+  background: linear-gradient(135deg, var(--os-surface), color-mix(in srgb, var(--hero-c) 4%, var(--os-surface)));
+  border: 1px solid color-mix(in srgb, var(--hero-c) 28%, var(--os-line));
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+.pyrd__hero-accent {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: var(--hero-c);
+}
+.pyrd__hero-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pyrd__hero-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pyrd__hero-id {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  color: var(--os-ink-2);
+  letter-spacing: 0.04em;
+}
+.pyrd__hero-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hero-c) 14%, transparent);
+  color: var(--hero-c);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pyrd__hero-status svg { width: 12px; height: 12px; }
+.pyrd__hero-freq {
+  font-size: 11px;
+  color: var(--os-ink-3);
+  font-weight: 600;
+}
+.pyrd__hero-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--os-ink);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 4px 0 0;
+}
+.pyrd__hero-period {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--os-ink-2);
+}
+.pyrd__hero-period svg { width: 13px; height: 13px; color: var(--os-ink-3); }
+
+.pyrd__flow {
+  display: flex; align-items: center;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-top: 6px;
+}
+.pyrd__flow-step {
+  display: inline-flex; align-items: center; gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.pyrd__flow-dot {
+  display: grid; place-items: center;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  font-size: 10.5px;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: all 120ms;
+}
+.pyrd__flow-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pyrd__flow-sep {
+  margin-left: auto;
+  width: 12px; height: 12px;
+  color: var(--os-line-strong);
+  flex-shrink: 0;
+}
+.pyrd__flow-step--past .pyrd__flow-dot { background: var(--step-c); color: white; box-shadow: inset 0 1px 0 rgba(255,255,255,0.18); }
+.pyrd__flow-step--past .pyrd__flow-label { color: var(--os-ink-2); }
+.pyrd__flow-step--current .pyrd__flow-dot { background: var(--step-c); color: white; box-shadow: 0 0 0 3px color-mix(in srgb, var(--step-c) 22%, transparent); transform: scale(1.06); }
+.pyrd__flow-step--current .pyrd__flow-label { color: var(--step-c); font-weight: 700; }
+.pyrd__flow-step--future .pyrd__flow-dot { background: var(--os-surface-1); border: 1px solid var(--os-line); color: var(--os-ink-3); }
+.pyrd__flow-step--future .pyrd__flow-label { color: var(--os-ink-3); }
+
+.pyrd__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.pyrd__action {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--os-line);
+  border-radius: 8px;
+  background: var(--os-surface-1);
+  color: var(--os-ink);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 140ms;
+  font-family: var(--os-font);
+}
+.pyrd__action svg { width: 13px; height: 13px; }
+.pyrd__action:hover:not(:disabled) { background: white; border-color: var(--os-line-strong); transform: translateY(-1px); box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05); }
+.pyrd__action:disabled { opacity: 0.5; cursor: not-allowed; }
+.pyrd__action--primary {
+  background: linear-gradient(135deg, var(--os-c-purple), var(--os-c-indigo));
+  color: white;
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.pyrd__action--primary:hover:not(:disabled) { box-shadow: 0 4px 12px color-mix(in srgb, var(--os-c-purple) 28%, transparent), inset 0 1px 0 rgba(255,255,255,0.18); }
+.pyrd__action--win {
+  background: linear-gradient(135deg, var(--os-c-green), var(--os-c-teal));
+  color: white;
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.pyrd__action--win:hover:not(:disabled) { box-shadow: 0 4px 12px color-mix(in srgb, var(--os-c-green) 28%, transparent), inset 0 1px 0 rgba(255,255,255,0.18); }
+.pyrd__action--danger { color: var(--os-c-red); border-color: color-mix(in srgb, var(--os-c-red) 22%, transparent); }
+.pyrd__action--danger:hover:not(:disabled) { background: color-mix(in srgb, var(--os-c-red) 8%, transparent); border-color: var(--os-c-red); }
+
+/* Hero totals grid */
+.pyrd__hero-totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-content: start;
+}
+.pyrd__total {
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 10px;
+  padding: 11px 14px 10px;
+}
+.pyrd__total--hero {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, var(--os-surface), color-mix(in srgb, var(--total-c) 6%, var(--os-surface)));
+  border-color: color-mix(in srgb, var(--total-c) 30%, var(--os-line));
+}
+.pyrd__total-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--os-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pyrd__total-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--total-c);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.pyrd__total--hero .pyrd__total-value { font-size: 24px; }
+
+/* ─── Method mix chips ─── */
+.pyrd__methods { display: flex; gap: 8px; flex-wrap: wrap; padding-left: 2px; }
+.pyrd__method {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--os-ink-2);
+}
+.pyrd__method svg { width: 12px; height: 12px; color: var(--m-c); }
+.pyrd__method-name { color: var(--os-ink-2); }
+.pyrd__method-count {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--m-c);
+  background: color-mix(in srgb, var(--m-c) 12%, transparent);
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Panel ─── */
+.pyrd__panel {
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  padding: 14px 16px 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+.pyrd__panel-head {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12.5px; font-weight: 700; color: var(--os-ink);
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.pyrd__panel-head > svg { width: 14px; height: 14px; color: var(--os-ink-2); }
+.pyrd__panel-sub { font-weight: 500; color: var(--os-ink-3); font-size: 11px; }
+.pyrd__panel-search {
+  margin-left: auto;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: 7px;
+  font-family: var(--os-font);
+  font-size: 11.5px;
+  color: var(--os-ink);
+  outline: none;
+  min-width: 180px;
+}
+.pyrd__panel-search:focus { border-color: var(--os-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--os-brand) 14%, transparent); }
+.pyrd__panel-sort {
+  appearance: none;
+  height: 28px;
+  padding: 0 24px 0 10px;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  border-radius: 7px;
+  font-family: var(--os-font);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--os-ink);
+  cursor: pointer;
+  outline: none;
+}
+.pyrd__panel-empty { padding: 32px 16px; text-align: center; color: var(--os-ink-3); font-size: 12.5px; font-style: italic; }
+
+/* ─── Payslips table ─── */
+.pyrd__slips {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) 70px 100px 90px 110px 110px minmax(150px, auto) 24px;
+  gap: 0;
+  border-top: 1px solid var(--os-line);
+}
+.pyrd__slip-head {
+  display: contents;
+  font-size: 10px;
+}
+.pyrd__slip-head > span {
+  padding: 8px 10px;
+  background: var(--os-surface-1);
+  font-weight: 700;
+  color: var(--os-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--os-line);
+}
+.pyrd__slip-head .pyrd__slip-num { text-align: right; }
+
+.pyrd__slip {
+  display: contents;
+  text-decoration: none;
+  color: inherit;
+}
+.pyrd__slip > * {
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--os-line);
+  background: var(--os-surface);
+  transition: background 120ms;
+  align-self: center;
+}
+.pyrd__slip:hover > * { background: var(--os-surface-1); }
+
+.pyrd__slip-emp { display: flex; align-items: center; gap: 10px; }
+.pyrd__slip-av {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: white;
+  font-size: 10.5px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+  flex-shrink: 0;
+}
+.pyrd__slip-emp-info { min-width: 0; }
+.pyrd__slip-name { font-size: 12.5px; font-weight: 600; color: var(--os-ink); line-height: 1.2; }
+.pyrd__slip-email { font-size: 10.5px; color: var(--os-ink-3); margin-top: 2px; }
+
+.pyrd__slip-num { text-align: right; font-variant-numeric: tabular-nums; }
+.pyrd__slip-val { font-size: 12px; color: var(--os-ink); font-family: ui-monospace, SFMono-Regular, monospace; }
+.pyrd__slip-tax { color: var(--os-c-orange); }
+.pyrd__slip-ded { color: var(--os-c-red); }
+.pyrd__slip-net { color: var(--os-c-green); font-weight: 700; }
+
+.pyrd__slip-method {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px;
+  color: var(--os-ink-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pyrd__slip-method svg { width: 11px; height: 11px; color: var(--m-c); }
+
+.pyrd__slip-arrow {
+  width: 14px; height: 14px;
+  color: var(--os-ink-3);
+  opacity: 0;
+  transition: all 120ms;
+  justify-self: center;
+}
+.pyrd__slip:hover .pyrd__slip-arrow { opacity: 1; color: var(--os-brand); transform: translateX(2px); }
+
+/* ─── Notes ─── */
+.pyrd__notes {
+  font-size: 13px;
+  color: var(--os-ink-2);
+  line-height: 1.55;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1200px) {
+  .pyrd__slips {
+    grid-template-columns: minmax(180px, 2fr) 60px 90px 100px 110px 24px;
+  }
+  .pyrd__slip-head > span:nth-child(4),
+  .pyrd__slip-head > span:nth-child(5),
+  .pyrd__slip-head > span:nth-child(7),
+  .pyrd__slip > .pyrd__slip-tax,
+  .pyrd__slip > .pyrd__slip-ded,
+  .pyrd__slip > .pyrd__slip-method { display: none; }
+}
+@media (max-width: 900px) {
+  .pyrd__hero { grid-template-columns: 1fr; }
+}
