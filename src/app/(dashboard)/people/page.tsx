@@ -1,17 +1,27 @@
 "use client";
 
-/* People · Directory — the company "who's who".
+/* People · Directory — photo-card "who's who" of the company.
  *
- * Top: search + horizontal department-filter chips. Below: people cards
- * grouped by department. Each card: avatar, name, title, email, manager
- * (if any), tenure chip, direct-reports count, on-leave badge.
+ *  GET /api/users?limit=500
  *
- * Reads: GET /api/users?limit=500
+ * Layout:
+ *   OsTitleBar with org nav links in actions.
+ *   4-tile KPI strip: Total · Departments · On leave · New (last 30d).
+ *   Toolbar: search + status tabs (All / On leave / New) + sort dropdown.
+ *   Department chip row (auto-derived).
+ *   Grouped sections by department with colored dot + count + line.
+ *   Photo cards: gradient avatar tile + name/role + dept/office chips + manager line + tenure pill.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Users, Search, Mail, Briefcase, MapPin, UserPlus } from "lucide-react";
+import {
+  Users, Search, Mail, Briefcase, MapPin, UserPlus, ChevronDown,
+  Building2, Sparkles, Hash, Network, GraduationCap, ArrowLeft,
+} from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type ApiUser = {
@@ -30,9 +40,28 @@ type ApiUser = {
   _count?: { directReports?: number };
 };
 
-const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-pink)", "var(--os-c-teal)", "var(--os-c-indigo)", "var(--os-c-blue)", "var(--os-c-red)"];
-function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
-function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
+const AV_GRADIENTS = [
+  GRAD.bluePurple, GRAD.greenTeal, GRAD.pinkPurple, GRAD.indigoBlue,
+  GRAD.orangePink, GRAD.purpleIndigo, GRAD.tealGreen, GRAD.yellowOrange,
+];
+function avGradient(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return AV_GRADIENTS[h % AV_GRADIENTS.length];
+}
+function initials(f?: string | null, l?: string | null): string {
+  return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?";
+}
+function fullName(u: ApiUser): string {
+  return [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || "Unknown";
+}
+
+const CAT_COLORS = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
+function deptColor(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return CAT_COLORS[h % CAT_COLORS.length];
+}
 
 const MS_DAY = 86_400_000;
 function tenure(join?: string | null): string {
@@ -43,12 +72,24 @@ function tenure(join?: string | null): string {
   const y = Math.floor(days / 365); const m = Math.floor((days % 365) / 30);
   return m === 0 ? `${y}y` : `${y}y ${m}mo`;
 }
+function tenureTone(join?: string | null): "new" | "regular" | "veteran" {
+  if (!join) return "regular";
+  const days = (Date.now() - new Date(join).getTime()) / MS_DAY;
+  if (days < 90) return "new";
+  if (days > 365 * 3) return "veteran";
+  return "regular";
+}
+
+type Filter = "all" | "active" | "on-leave" | "new";
+type SortKey = "name" | "recent" | "tenure" | "reports";
 
 export default function PeopleDirectoryPage() {
   const [users, setUsers] = useState<ApiUser[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeDept, setActiveDept] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
   const { rowVersion } = useOsShell();
 
   const load = useCallback(async () => {
@@ -58,6 +99,7 @@ export default function PeopleDirectoryPage() {
       const data = await res.json();
       const list: ApiUser[] = data?.data?.items ?? data?.data ?? (Array.isArray(data) ? data : []);
       setUsers(list.filter((u) => u.status !== "TERMINATED"));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -66,134 +108,278 @@ export default function PeopleDirectoryPage() {
   const v = rowVersion("people");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const filtered = useMemo(() => {
-    let list = users ?? [];
-    if (activeDept) list = list.filter((u) => (u.department?.id ?? "__none") === activeDept);
-    const q = search.trim().toLowerCase();
-    if (q) {
-      list = list.filter((u) =>
-        `${u.firstName ?? ""} ${u.lastName ?? ""}`.toLowerCase().includes(q) ||
-        (u.email ?? "").toLowerCase().includes(q) ||
-        (u.role?.title ?? "").toLowerCase().includes(q) ||
-        (u.department?.name ?? "").toLowerCase().includes(q)
-      );
-    }
-    return list;
-  }, [users, activeDept, search]);
-
+  // ─── Departments ─────────────────────────────────────────
   const depts = useMemo(() => {
-    const m = new Map<string, { id: string; name: string; count: number }>();
+    const m = new Map<string, { id: string; name: string; count: number; color: string }>();
     for (const u of users ?? []) {
       const id = u.department?.id ?? "__none";
-      const name = u.department?.name ?? "No department";
-      if (!m.has(id)) m.set(id, { id, name, count: 0 });
+      const name = u.department?.name ?? "Unassigned";
+      if (!m.has(id)) m.set(id, { id, name, count: 0, color: deptColor(name) });
       m.get(id)!.count += 1;
     }
     return Array.from(m.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [users]);
 
-  const grouped = useMemo(() => {
-    const m = new Map<string, ApiUser[]>();
-    for (const u of filtered) {
-      const k = u.department?.name ?? "No department";
-      if (!m.has(k)) m.set(k, []);
-      m.get(k)!.push(u);
+  // ─── Filter ──────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let list = users ?? [];
+    if (filter === "on-leave") list = list.filter((u) => u.status === "ON_LEAVE");
+    if (filter === "new") list = list.filter((u) => u.joinDate && (Date.now() - new Date(u.joinDate).getTime()) < 90 * MS_DAY);
+    if (filter === "active") list = list.filter((u) => u.status === "ACTIVE" || !u.status);
+    if (activeDept) list = list.filter((u) => (u.department?.id ?? "__none") === activeDept);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter((u) =>
+        fullName(u).toLowerCase().includes(q) ||
+        (u.email ?? "").toLowerCase().includes(q) ||
+        (u.role?.title ?? "").toLowerCase().includes(q) ||
+        (u.department?.name ?? "").toLowerCase().includes(q));
     }
-    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [filtered]);
+    return list;
+  }, [users, filter, activeDept, search]);
 
-  const total = users?.length ?? 0;
-  const onLeave = (users ?? []).filter((u) => u.status === "ON_LEAVE").length;
+  // ─── Group (only when no specific dept active) ───────────
+  const grouped = useMemo(() => {
+    const map = new Map<string, ApiUser[]>();
+    for (const u of filtered) {
+      const k = u.department?.name ?? "Unassigned";
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(u);
+    }
+    const sortFn = sortFor(sortKey);
+    for (const arr of map.values()) arr.sort(sortFn);
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, people]) => ({ name, color: deptColor(name), people }));
+  }, [filtered, sortKey]);
+
+  const flatSorted = useMemo(() => filtered.slice().sort(sortFor(sortKey)), [filtered, sortKey]);
+
+  // ─── KPIs ────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const list = users ?? [];
+    const onLeave = list.filter((u) => u.status === "ON_LEAVE").length;
+    const newHires = list.filter((u) => u.joinDate && (Date.now() - new Date(u.joinDate).getTime()) < 90 * MS_DAY).length;
+    return { total: list.length, depts: depts.length, onLeave, newHires };
+  }, [users, depts.length]);
 
   return (
-    <div className="pdir">
-      <header className="pdir__head">
-        <div className="pdir__head-l">
-          <div className="pdir__icon"><Users /></div>
-          <div>
-            <h1 className="pdir__title">People directory</h1>
-            <div className="pdir__sub">
-              {users === null ? "Loading…" : `${total} teammate${total === 1 ? "" : "s"} · ${depts.length} department${depts.length === 1 ? "" : "s"}${onLeave > 0 ? ` · ${onLeave} on leave` : ""}`}
-            </div>
+    <>
+      <OsTitleBar
+        title="People"
+        Icon={Users}
+        iconGradient={GRAD.bluePurple}
+        description={users === null
+          ? "Loading directory…"
+          : `${stats.total} teammate${stats.total === 1 ? "" : "s"} · ${stats.depts} department${stats.depts === 1 ? "" : "s"}${stats.onLeave > 0 ? ` · ${stats.onLeave} on leave` : ""}`}
+        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
+        morePeople={Math.max(0, stats.total - 3)}
+        actions={
+          <div className="ppl__head-actions">
+            <Link href="/people/departments" className="ppl__nav-link"><Network /> Org chart</Link>
+            <Link href="/people/roles" className="ppl__nav-link"><Briefcase /> Roles</Link>
+            <Link href="/people/skills" className="ppl__nav-link"><GraduationCap /> Skills</Link>
+            <button type="button" className="ppl__btn-primary" onClick={() => alert("Invite people via Workspace settings.")}>
+              <UserPlus /> Invite
+            </button>
           </div>
+        }
+      />
+
+      <div className="ppl">
+        {/* KPIs */}
+        <div className="ppl__kpis">
+          <KpiTile accent="var(--os-c-blue)"   Icon={Users}     label="Headcount"   value={`${stats.total}`}     sub="all active teammates" />
+          <KpiTile accent="var(--os-c-purple)" Icon={Building2} label="Departments" value={`${stats.depts}`}     sub="org units" />
+          <KpiTile accent="var(--os-c-orange)" Icon={ArrowLeft} label="On leave"    value={`${stats.onLeave}`}   sub={stats.onLeave > 0 ? "back when noted" : "everyone here"} />
+          <KpiTile accent="var(--os-c-green)"  Icon={Sparkles}  label="New (90d)"   value={`${stats.newHires}`}  sub="recent joiners" />
         </div>
-        <div className="pdir__actions">
-          <div className="pdir__search">
+
+        {/* Toolbar */}
+        <div className="ppl__toolbar">
+          <div className="ppl__search">
             <Search />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find anyone by name, role, dept, email…" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Find anyone by name, role, dept, email…"
+              aria-label="Search people"
+            />
           </div>
-          <Link href="/organization" className="pdir__link">Org chart →</Link>
-        </div>
-      </header>
-
-      <nav className="pdir__dept-filter">
-        <button type="button" className={!activeDept ? "is-active" : ""} onClick={() => setActiveDept(null)}>
-          All <em>{total}</em>
-        </button>
-        {depts.map((d) => (
-          <button key={d.id} type="button" className={activeDept === d.id ? "is-active" : ""} onClick={() => setActiveDept(d.id)}>
-            {d.name} <em>{d.count}</em>
-          </button>
-        ))}
-      </nav>
-
-      {loadError ? (
-        <div className="pdir__error">{loadError}</div>
-      ) : users === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-      ) : filtered.length === 0 ? (
-        <div className="pdir__empty">
-          <UserPlus />
-          <div>
-            <h3>{search ? "Nobody matches that search." : "No teammates yet"}</h3>
-            <p>{search ? "Try a different name or role." : "Invite people from Workspace → Settings or HR → Onboarding."}</p>
+          <div className="ppl__tabs">
+            <button type="button" className={filter === "all" ? "is-active" : ""} onClick={() => setFilter("all")}>All <span>{stats.total}</span></button>
+            <button type="button" className={filter === "active" ? "is-active" : ""} onClick={() => setFilter("active")}>Active</button>
+            <button type="button" className={`${filter === "on-leave" ? "is-active" : ""} ${stats.onLeave > 0 ? "is-warn" : ""}`} onClick={() => setFilter("on-leave")}>On leave <span>{stats.onLeave}</span></button>
+            <button type="button" className={filter === "new" ? "is-active" : ""} onClick={() => setFilter("new")}>New <span>{stats.newHires}</span></button>
+          </div>
+          <div className="ppl__sort">
+            <span>Sort</span>
+            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="ppl__sort-select">
+              <option value="name">A–Z</option>
+              <option value="recent">Recently joined</option>
+              <option value="tenure">Longest tenure</option>
+              <option value="reports">Most reports</option>
+            </select>
+            <ChevronDown />
           </div>
         </div>
-      ) : (
-        <div className="pdir__sections">
-          {grouped.map(([dept, items]) => (
-            <section key={dept} className="pdir__section">
-              <header className="pdir__section-head">
-                <h2>{dept}</h2>
-                <span>{items.length}</span>
+
+        {/* Department chips */}
+        {depts.length > 0 && (
+          <div className="ppl__depts">
+            <button
+              type="button"
+              className={`ppl__dept${activeDept === null ? " is-active" : ""}`}
+              onClick={() => setActiveDept(null)}
+            >
+              <Hash /> All departments <span className="ppl__dept-count">{stats.total}</span>
+            </button>
+            {depts.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                className={`ppl__dept${activeDept === d.id ? " is-active" : ""}`}
+                style={{ ["--dept-c" as unknown as string]: d.color }}
+                onClick={() => setActiveDept(d.id)}
+              >
+                <span className="ppl__dept-dot" />
+                {d.name}
+                <span className="ppl__dept-count">{d.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Body */}
+        {loadError ? (
+          <OsEmptyView Icon={Users} iconGradient={GRAD.redPink} title="Couldn't load people" subtitle={`API error: ${loadError}.`} cta="Retry" />
+        ) : users === null ? (
+          <div className="ppl__loading">Loading directory…</div>
+        ) : stats.total === 0 ? (
+          <OsEmptyView
+            Icon={UserPlus}
+            iconGradient={GRAD.bluePurple}
+            title="No teammates yet"
+            subtitle="Invite people from Workspace settings or HR onboarding."
+            cta="Invite"
+          />
+        ) : filtered.length === 0 ? (
+          <div className="ppl__empty">
+            <Search />
+            <div>No one matches these filters.</div>
+            <button type="button" className="ppl__empty-reset" onClick={() => { setActiveDept(null); setFilter("all"); setSearch(""); }}>Clear filters</button>
+          </div>
+        ) : activeDept ? (
+          // Single dept selected — flat grid
+          <div className="ppl__grid">
+            {flatSorted.map((u) => <PersonCard key={u.id} user={u} />)}
+          </div>
+        ) : (
+          // Grouped by department
+          grouped.map((g) => (
+            <section key={g.name} className="ppl__group" style={{ ["--g-c" as unknown as string]: g.color }}>
+              <header className="ppl__group-head">
+                <span className="ppl__group-dot" />
+                <h2 className="ppl__group-title">{g.name}</h2>
+                <span className="ppl__group-count">{g.people.length}</span>
+                <span className="ppl__group-line" />
               </header>
-              <div className="pdir__grid">
-                {items.map((u) => (
-                  <Link key={u.id} href={`/people/${u.id}`} className={`pcard ${u.status === "ON_LEAVE" ? "is-leave" : ""}`}>
-                    <div className="pcard__head">
-                      <span className="pcard__av" style={{ background: avColor(u.id) }}>{initials(u.firstName, u.lastName)}</span>
-                      <div className="pcard__id">
-                        <div className="pcard__name">{[u.firstName, u.lastName].filter(Boolean).join(" ")}</div>
-                        <div className="pcard__role">{u.role?.title ?? "—"}</div>
-                      </div>
-                    </div>
-                    <div className="pcard__meta">
-                      {u.email && (
-                        <a href={`mailto:${u.email}`} className="pcard__email" onClick={(e) => e.stopPropagation()}>
-                          <Mail /> {u.email}
-                        </a>
-                      )}
-                      {u.manager && (
-                        <span className="pcard__reports"><Briefcase /> Reports to {[u.manager.firstName, u.manager.lastName].filter(Boolean).join(" ")}</span>
-                      )}
-                      {u.office?.city && (
-                        <span className="pcard__loc"><MapPin /> {u.office.city}</span>
-                      )}
-                    </div>
-                    <footer className="pcard__foot">
-                      <span className="pcard__tenure">{tenure(u.joinDate)} with us</span>
-                      {(u._count?.directReports ?? 0) > 0 && (
-                        <span className="pcard__direct-reports">{u._count!.directReports} direct report{u._count!.directReports === 1 ? "" : "s"}</span>
-                      )}
-                      {u.status === "ON_LEAVE" && <span className="pcard__leave-chip">On leave</span>}
-                    </footer>
-                  </Link>
-                ))}
+              <div className="ppl__grid">
+                {g.people.map((u) => <PersonCard key={u.id} user={u} />)}
               </div>
             </section>
-          ))}
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+function sortFor(sortKey: SortKey) {
+  return (a: ApiUser, b: ApiUser) => {
+    if (sortKey === "name") return fullName(a).localeCompare(fullName(b));
+    if (sortKey === "recent") {
+      return (b.joinDate ? new Date(b.joinDate).getTime() : 0) - (a.joinDate ? new Date(a.joinDate).getTime() : 0);
+    }
+    if (sortKey === "tenure") {
+      return (a.joinDate ? new Date(a.joinDate).getTime() : Infinity) - (b.joinDate ? new Date(b.joinDate).getTime() : Infinity);
+    }
+    if (sortKey === "reports") {
+      return (b._count?.directReports ?? 0) - (a._count?.directReports ?? 0);
+    }
+    return 0;
+  };
+}
+
+function PersonCard({ user: u }: { user: ApiUser }) {
+  const av = avGradient(u.id);
+  const initials_ = initials(u.firstName, u.lastName);
+  const name = fullName(u);
+  const tone = tenureTone(u.joinDate);
+  const onLeave = u.status === "ON_LEAVE";
+  const isNew = u.joinDate && (Date.now() - new Date(u.joinDate).getTime()) < 90 * MS_DAY;
+  const reports = u._count?.directReports ?? 0;
+
+  return (
+    <Link href={`/people/${u.id}`} className={`ppl__card${onLeave ? " is-leave" : ""}`}>
+      <div className="ppl__card-cover" style={{ background: av }} aria-hidden="true">
+        <span className="ppl__card-init">{initials_}</span>
+        {onLeave && <span className="ppl__card-leave">On leave</span>}
+        {isNew && !onLeave && <span className="ppl__card-new">New</span>}
+      </div>
+
+      <div className="ppl__card-body">
+        <div className="ppl__card-name">{name}</div>
+        {u.role?.title && <div className="ppl__card-role">{u.role.title}</div>}
+
+        <div className="ppl__card-tags">
+          {u.department?.name && (
+            <span className="ppl__card-dept" style={{ ["--dept-c" as unknown as string]: deptColor(u.department.name) }}>
+              {u.department.name}
+            </span>
+          )}
+          {u.office?.city && (
+            <span className="ppl__card-loc">
+              <MapPin /> {u.office.city}
+            </span>
+          )}
         </div>
-      )}
+
+        {u.email && (
+          <a href={`mailto:${u.email}`} className="ppl__card-email" onClick={(e) => e.stopPropagation()}>
+            <Mail /> <span>{u.email}</span>
+          </a>
+        )}
+
+        {u.manager && (
+          <div className="ppl__card-mgr">
+            <Briefcase /> Reports to {[u.manager.firstName, u.manager.lastName].filter(Boolean).join(" ") || "Manager"}
+          </div>
+        )}
+      </div>
+
+      <div className="ppl__card-foot">
+        <span className={`ppl__card-tenure ppl__card-tenure--${tone}`}>{tenure(u.joinDate)}</span>
+        {reports > 0 && (
+          <span className="ppl__card-reports">
+            <Users /> {reports} report{reports === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Users; label: string; value: string; sub: string }) {
+  return (
+    <div className="ppl__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="ppl__kpi-accent" aria-hidden="true" />
+      <div className="ppl__kpi-row">
+        <div className="ppl__kpi-icon"><Icon /></div>
+        <div className="ppl__kpi-label">{label}</div>
+      </div>
+      <div className="ppl__kpi-value">{value}</div>
+      <div className="ppl__kpi-sub">{sub}</div>
     </div>
   );
 }

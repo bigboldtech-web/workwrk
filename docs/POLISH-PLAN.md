@@ -97,7 +97,7 @@ Every page subtask must pass this gate before being marked done:
 
 ## G. People & HR (6 pages)
 
-- [ ] /people — directory with photo cards
+- [x] /people — directory with photo cards
 - [ ] /people/[id] — profile page hero
 - [ ] /people/departments — org tree view
 - [ ] /people/roles — role library with level chips
