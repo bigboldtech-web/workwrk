@@ -77,17 +77,19 @@ Every page subtask must pass this gate before being marked done:
 - [ ] /marketing/content — content calendar grid
 - [x] /marketing/events — events list with date hero
 
-## F. Service — ITSM + Helpdesk (12 pages)
+## F. Service — ITSM + Helpdesk (collapsed: 12 → 8 pages)
+
+**Scope decision (2026-05-30):** ITIL 6-process split (incidents/problems/changes/CMDB as separate pages) is enterprise-IT framing. Target market = Monday/ClickUp end-clients = SMB/mid-market. They need Tickets + KB; the rest is over-spec'd. Incidents and Problems kept as bespoke views (already built). Changes + CMDB dropped — users handle change mgmt in GitHub/Jira and assets in spreadsheets.
 
 - [x] /itsm — service desk overview with SLA tiles
 - [x] /itsm/[id] — ticket detail with timeline
-- [x] /itsm/incidents — severity pills
-- [ ] /itsm/problems — problem-cause card view
-- [ ] /itsm/changes — change calendar
-- [ ] /itsm/tickets — all tickets
-- [ ] /itsm/cmdb — asset directory
+- [x] /itsm/incidents — severity pills (kept; mature-IT use case)
+- [x] /itsm/problems — problem-cause card view (kept; bespoke clusters)
+- [~] /itsm/changes — **DROPPED** (collapse into ticket type=CHANGE)
+- [ ] /itsm/tickets — unified queue with type filter (replaces tickets + standalone changes)
+- [~] /itsm/cmdb — **DROPPED** (enterprise IT only; revisit on customer demand)
 - [ ] /itsm/kb — KB article grid
-- [ ] /helpdesk — customer support overview
+- [ ] /helpdesk — customer support overview (external = different from internal ITSM)
 - [ ] /helpdesk/[id] — chat-like ticket detail
 - [ ] /helpdesk/tickets — ticket queue
 - [ ] /helpdesk/customers — customer cards
