@@ -93,7 +93,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /helpdesk/[id] — chat-like ticket detail
 - [x] /helpdesk/tickets — agent ticket queue with view tabs + multi-axis filters
 - [x] /helpdesk/customers — customer cards
-- [ ] /helpdesk/macros — macro library
+- [x] /helpdesk/macros — macro library
 
 ## G. People & HR (6 pages)
 
