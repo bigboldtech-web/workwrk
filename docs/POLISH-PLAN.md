@@ -81,7 +81,7 @@ Every page subtask must pass this gate before being marked done:
 
 - [x] /itsm — service desk overview with SLA tiles
 - [x] /itsm/[id] — ticket detail with timeline
-- [ ] /itsm/incidents — severity pills
+- [x] /itsm/incidents — severity pills
 - [ ] /itsm/problems — problem-cause card view
 - [ ] /itsm/changes — change calendar
 - [ ] /itsm/tickets — all tickets
