@@ -646,67 +646,101 @@ export default function UserProfilePage() {
   const perf = user.performanceSummary;
   const initials = `${user.firstName[0]}${user.lastName[0]}`;
 
+  // Hero gradient derived from id hash (matches /people directory)
+  const heroGradients = [
+    "linear-gradient(135deg, var(--os-c-blue), var(--os-c-purple))",
+    "linear-gradient(135deg, var(--os-c-green), var(--os-c-teal))",
+    "linear-gradient(135deg, var(--os-c-pink), var(--os-c-purple))",
+    "linear-gradient(135deg, var(--os-c-indigo), var(--os-c-blue))",
+    "linear-gradient(135deg, var(--os-c-orange), var(--os-c-pink))",
+    "linear-gradient(135deg, var(--os-c-purple), var(--os-c-indigo))",
+    "linear-gradient(135deg, var(--os-c-teal), var(--os-c-green))",
+    "linear-gradient(135deg, var(--os-c-yellow), var(--os-c-orange))",
+  ];
+  let _h = 0;
+  const idStr = String(user.id ?? "");
+  for (let i = 0; i < idStr.length; i++) _h = (_h * 31 + idStr.charCodeAt(i)) >>> 0;
+  const heroGradient = heroGradients[_h % heroGradients.length];
+
   return (
     <div className="space-y-3 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => router.push("/people")}>
-          <ArrowLeft size={16} className="mr-1" /> Back
-        </Button>
-      </div>
-
-      {/* Profile Header */}
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-start gap-6">
-            <div className="relative group">
-              <Avatar className="h-20 w-20 text-2xl">
-                {user.avatar ? <AvatarImage src={user.avatar} alt="" /> : null}
-                <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)] text-xl font-bold">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-              <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                <span className="text-[#0a0a0a] text-[10px]">{uploadingAvatar ? "..." : "Upload"}</span>
-                <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} />
-              </label>
+      {/* Bespoke profile hero */}
+      <section className="prfh" style={{ ["--prfh-cover" as unknown as string]: heroGradient }}>
+        <div className="prfh__cover" aria-hidden="true">
+          <span className="prfh__cover-glow" />
+        </div>
+        <div className="prfh__body">
+          <div className="prfh__av-wrap">
+            <div className="prfh__av" style={{ background: heroGradient }}>
+              {user.avatar ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={user.avatar} alt="" />
+              ) : (
+                <span className="prfh__av-init">{initials}</span>
+              )}
             </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold">{user.firstName} {user.lastName}</h1>
-                  <Badge className={getStatusBadge(user.status)}>{user.status.replace(/_/g, " ")}</Badge>
-                  <Badge variant="secondary">{user.accessLevel.replace(/_/g, " ")}</Badge>
-                </div>
-                <Button variant="outline" size="sm" onClick={openEditDialog} className="gap-1.5">
-                  <Edit3 size={14} /> Edit
-                </Button>
-              </div>
-              <p className="text-muted mt-1">{user.role?.title || "No role assigned"}</p>
-              <div className="flex items-center gap-6 mt-3 text-sm text-muted">
-                <span className="flex items-center gap-1"><Mail size={14} /> {user.email}</span>
-                {user.phone && <span className="flex items-center gap-1"><Phone size={14} /> {user.phone}</span>}
-                {user.department && (
-                  <span className="flex items-center gap-1"><Building2 size={14} /> {user.department.name}</span>
-                )}
-                {user.manager && (
-                  <span className="flex items-center gap-1">
-                    <Users size={14} /> Reports to {user.manager.firstName} {user.manager.lastName}
-                  </span>
-                )}
-              </div>
-              {/* Dimensional tags — cost center, business unit, region,
-                  project. Manager+ can edit. Same picker drops onto
-                  Tasks / OKRs / Expenses with a different entity tuple. */}
-              <div className="mt-3">
-                <TagPicker
-                  entityType="USER"
-                  entityId={user.id}
-                  canEdit={isManager}
-                />
-              </div>
+            <label className="prfh__av-upload" title={uploadingAvatar ? "Uploading…" : "Upload photo"}>
+              <span>{uploadingAvatar ? "…" : "Upload"}</span>
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} />
+            </label>
+          </div>
+
+          <div className="prfh__main">
+            <div className="prfh__head-row">
+              <button type="button" className="prfh__back-btn" onClick={() => router.push("/people")}>
+                <ArrowLeft size={12} /> People
+              </button>
+              <button type="button" className="prfh__edit-btn" onClick={openEditDialog}>
+                <Edit3 size={12} /> Edit profile
+              </button>
+            </div>
+            <h1 className="prfh__name">{user.firstName} {user.lastName}</h1>
+            <div className="prfh__pills">
+              <span className={`prfh__status prfh__status--${(user.status as string).toLowerCase()}`}>
+                {user.status.replace(/_/g, " ")}
+              </span>
+              <span className="prfh__access">{user.accessLevel.replace(/_/g, " ")}</span>
+            </div>
+            <p className="prfh__role">{user.role?.title || "No role assigned"}</p>
+
+            <div className="prfh__contacts">
+              <a className="prfh__contact" href={`mailto:${user.email}`}>
+                <Mail size={12} /> <span>{user.email}</span>
+              </a>
+              {user.phone && (
+                <a className="prfh__contact" href={`tel:${user.phone}`}>
+                  <Phone size={12} /> <span>{user.phone}</span>
+                </a>
+              )}
+              {user.department && (
+                <span className="prfh__contact">
+                  <Building2 size={12} /> <span>{user.department.name}</span>
+                </span>
+              )}
+              {user.manager && (
+                <span className="prfh__contact">
+                  <Users size={12} /> <span>Reports to {user.manager.firstName} {user.manager.lastName}</span>
+                </span>
+              )}
             </div>
 
+            {/* Dimensional tags — cost center, business unit, region,
+                project. Manager+ can edit. */}
+            <div className="prfh__tags">
+              <TagPicker
+                entityType="USER"
+                entityId={user.id}
+                canEdit={isManager}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Edit dialog hosted off-hero so the existing Dialog wiring still works */}
+      <Card style={{ display: "none" }}>
+        <CardContent>
+          <div>
             {/* Edit Dialog */}
             <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
               <DialogContent>

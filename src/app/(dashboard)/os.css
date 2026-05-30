@@ -19480,3 +19480,193 @@ table.os-tbl {
 @media (max-width: 1100px) {
   .ppl__kpis { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * PEOPLE · PROFILE HERO — bespoke header on /people/[id]
+ * (functional tabs below keep their existing chrome)
+ * ════════════════════════════════════════════════════════════════ */
+.prfh {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+/* Gradient cover banner */
+.prfh__cover {
+  position: relative;
+  height: 110px;
+  background: var(--prfh-cover);
+  overflow: hidden;
+}
+.prfh__cover::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.18));
+}
+.prfh__cover-glow {
+  position: absolute;
+  top: -40%; right: -10%;
+  width: 50%; height: 200%;
+  background: radial-gradient(ellipse at center, rgba(255,255,255,0.18) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+/* Body sits below cover; avatar overlaps */
+.prfh__body {
+  position: relative;
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 22px;
+  padding: 0 26px 22px;
+  margin-top: -56px;
+}
+
+.prfh__av-wrap {
+  position: relative;
+  width: 112px; height: 112px;
+}
+.prfh__av {
+  position: relative;
+  width: 112px; height: 112px;
+  border-radius: 16px;
+  display: grid; place-items: center;
+  color: white;
+  border: 4px solid var(--os-surface);
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+.prfh__av img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
+.prfh__av-init {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.18);
+}
+.prfh__av-upload {
+  position: absolute;
+  inset: 4px;
+  border-radius: 13px;
+  display: grid; place-items: center;
+  background: rgba(0,0,0,0.55);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms;
+}
+.prfh__av-wrap:hover .prfh__av-upload { opacity: 1; }
+.prfh__av-upload input { display: none; }
+
+/* Main content */
+.prfh__main {
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 56px;
+  min-width: 0;
+}
+.prfh__head-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: -2px;
+}
+.prfh__back-btn, .prfh__edit-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  color: var(--os-ink-2);
+  cursor: pointer;
+  transition: all 120ms;
+  font-family: var(--os-font);
+}
+.prfh__back-btn:hover, .prfh__edit-btn:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+.prfh__edit-btn { margin-left: auto; }
+
+.prfh__name {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--os-ink);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0;
+}
+.prfh__pills { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.prfh__status {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.prfh__status--active { background: color-mix(in srgb, var(--os-c-green) 14%, transparent); color: var(--os-c-green); }
+.prfh__status--on_leave { background: color-mix(in srgb, var(--os-c-orange) 14%, transparent); color: #a4640d; }
+.prfh__status--probation { background: color-mix(in srgb, var(--os-c-yellow) 18%, transparent); color: #6b5605; }
+.prfh__status--pip { background: color-mix(in srgb, var(--os-c-red) 14%, transparent); color: var(--os-c-red); }
+.prfh__status--notice_period { background: color-mix(in srgb, var(--os-c-pink) 14%, transparent); color: var(--os-c-pink); }
+.prfh__status--inactive { background: var(--os-surface-1); color: var(--os-ink-3); }
+
+.prfh__access {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--os-surface-1);
+  color: var(--os-ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--os-line);
+}
+
+.prfh__role {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--os-ink-2);
+  margin: 4px 0 0;
+}
+
+.prfh__contacts {
+  display: flex; gap: 14px; align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  border-radius: 10px;
+}
+.prfh__contact {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px;
+  color: var(--os-ink-2);
+  text-decoration: none;
+  font-weight: 500;
+}
+.prfh__contact svg { color: var(--os-ink-3); flex-shrink: 0; }
+.prfh__contact span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+a.prfh__contact:hover { color: var(--os-brand); }
+
+.prfh__tags { margin-top: 6px; }
+
+@media (max-width: 800px) {
+  .prfh__body { grid-template-columns: 1fr; }
+  .prfh__main { padding-top: 8px; }
+  .prfh__av-wrap, .prfh__av { width: 88px; height: 88px; }
+  .prfh__cover { height: 90px; }
+  .prfh__body { margin-top: -44px; }
+}
