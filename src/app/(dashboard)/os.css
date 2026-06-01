@@ -10059,6 +10059,67 @@ table.os-tbl {
 .var__row.is-unfav .var__row-pct { color: var(--os-c-red); }
 
 /* ════════════════════════════════════════════════════════════════
+ * ANALYTICS — cross-module insights hub
+ * ════════════════════════════════════════════════════════════════ */
+.ana { padding: 14px 28px 60px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.ana__error { padding: 10px 14px; background: color-mix(in srgb, var(--os-c-red) 8%, transparent); color: var(--os-c-red); border: 1px solid color-mix(in srgb, var(--os-c-red) 25%, var(--os-line)); border-radius: 8px; font-size: 12.5px; }
+.ana__head-actions { display: flex; gap: 6px; align-items: center; }
+.ana__nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 11px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; color: var(--os-ink-2);
+  background: var(--os-surface-1); border: 1px solid var(--os-line); text-decoration: none;
+}
+.ana__nav-link svg { width: 12px; height: 12px; }
+.ana__nav-link:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+
+.ana__section { display: flex; flex-direction: column; gap: 10px; }
+.ana__section-head { display: flex; align-items: center; gap: 10px; }
+.ana__section-head h2 {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 700; color: var(--os-ink); margin: 0;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.ana__section-head h2 svg { width: 13px; height: 13px; color: var(--os-ink-3); }
+.ana__section-line { flex: 1; height: 1px; background: var(--os-line); }
+
+.ana__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 1100px) { .ana__grid { grid-template-columns: repeat(2, 1fr); } }
+.ana__tile {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  padding: 14px 14px 12px 60px;
+  text-decoration: none; color: inherit;
+  display: flex; align-items: center; gap: 8px;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  overflow: hidden;
+}
+.ana__tile:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--tile-hue) 32%, var(--os-line));
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+.ana__tile::before {
+  content: ""; position: absolute; top: 0; left: 0; bottom: 0; width: 3px;
+  background: var(--tile-hue);
+}
+.ana__tile-icon {
+  position: absolute; top: 14px; left: 16px;
+  width: 32px; height: 32px; border-radius: 9px;
+  background: color-mix(in srgb, var(--tile-hue) 14%, transparent);
+  color: var(--tile-hue);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.ana__tile-icon svg { width: 17px; height: 17px; }
+.ana__tile-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ana__tile-title { font-size: 11px; font-weight: 700; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.ana__tile-value { font-size: 18px; font-weight: 700; color: var(--os-ink); letter-spacing: -0.01em; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.ana__tile-sub { font-size: 11px; color: var(--os-ink-3); }
+.ana__tile-chev { width: 14px; height: 14px; color: var(--os-ink-3); flex-shrink: 0; }
+
+/* ════════════════════════════════════════════════════════════════
  * PURCHASE ORDERS
  * ════════════════════════════════════════════════════════════════ */
 .pos { padding: 14px 28px 60px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }

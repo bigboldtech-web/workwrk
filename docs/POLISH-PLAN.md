@@ -165,7 +165,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /planning/[id] — wrap with .pland (preserves shadcn spreadsheet editor)
 - [x] /planning/plans — directory with KPI strip + type filters + fiscal year groups
 - [x] /planning/variance — bespoke plan vs actual with KPI strip + favorable/unfavorable colouring
-- [ ] /analytics — analytics dashboard
+- [x] /analytics — cross-module pulse with three sections (Ops / People / Finance)
 - [ ] /workforce-planning — workforce forecasting
 
 ## M. AI & Automation (4 pages)
