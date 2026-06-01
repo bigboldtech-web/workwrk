@@ -163,7 +163,7 @@ Every page subtask must pass this gate before being marked done:
 
 - [x] /planning — hub with KPI strip + workspace tiles
 - [x] /planning/[id] — wrap with .pland (preserves shadcn spreadsheet editor)
-- [ ] /planning/plans — plan list
+- [x] /planning/plans — directory with KPI strip + type filters + fiscal year groups
 - [ ] /planning/variance — variance analysis
 - [ ] /analytics — analytics dashboard
 - [ ] /workforce-planning — workforce forecasting
