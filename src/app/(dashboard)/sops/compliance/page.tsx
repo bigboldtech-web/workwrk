@@ -2,17 +2,18 @@
 
 /* SOPs · Compliance — org compliance dashboard.
  *
- * Top: overall stat strip. Below: 4 panels:
- *   - Compliance by department (heatmap bars)
- *   - Bottom-5 SOPs by completion rate (the ones nobody's doing)
- *   - Top performers (people with highest completion rate)
- *   - Overdue assignments table (who needs a nudge)
- *
  * Reads: GET /api/sop-assignments/compliance
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, AlertCircle, TrendingUp, TrendingDown, Users as UsersIcon, Building } from "lucide-react";
+import Link from "next/link";
+import {
+  ShieldCheck, AlertCircle, TrendingUp, TrendingDown, Users as UsersIcon, Building,
+  Activity, Hash, ClipboardCheck, BookCopy, CheckCircle2, Clock,
+} from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type Overview = { total: number; completed: number; inProgress: number; overdue: number; overallRate: number };
@@ -53,6 +54,7 @@ export default function SopComplianceDashboard() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
       setData(d.data ?? d);
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -65,132 +67,149 @@ export default function SopComplianceDashboard() {
   const topPeople = (data?.personScores ?? []).filter((p) => p.total > 0).slice(0, 8);
 
   return (
-    <div className="cmpl">
-      <header className="cmpl__head">
-        <div className="cmpl__head-l">
-          <div className="cmpl__icon" style={{ background: "linear-gradient(135deg, var(--os-c-red), var(--os-c-orange))" }}><ShieldCheck /></div>
-          <div>
-            <h1 className="cmpl__title">SOP compliance</h1>
-            <div className="cmpl__sub">
-              {data === null ? "Loading…" : `${data.overview.completed} / ${data.overview.total} assignments complete · ${data.overview.overallRate}% org rate · ${data.overview.overdue} overdue`}
-            </div>
+    <>
+      <OsTitleBar
+        title="SOP compliance"
+        Icon={ShieldCheck}
+        iconGradient={GRAD.redPink}
+        description={data === null ? "Loading…" : `${data.overview.completed} / ${data.overview.total} complete · ${data.overview.overallRate}% org rate · ${data.overview.overdue} overdue`}
+        actions={
+          <div className="cmpl__head-actions">
+            <Link href="/sops" className="cmpl__nav-link"><Hash /> All SOPs</Link>
+            <Link href="/sops/my-sops" className="cmpl__nav-link"><ClipboardCheck /> My SOPs</Link>
           </div>
-        </div>
-      </header>
+        }
+      />
 
-      {loadError ? (
-        <div className="cmpl__error">{loadError}</div>
-      ) : data === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-      ) : (
-        <>
-          <section className="cmpl__stats">
-            <div className="cmpl-stat">
-              <span>Overall rate</span>
-              <strong style={{ color: rateHue(data.overview.overallRate) }}>{data.overview.overallRate}%</strong>
+      <div className="cmpl">
+        {loadError ? (
+          <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.redPink} title="Couldn't load compliance" subtitle={loadError} cta="Retry" />
+        ) : data === null ? (
+          <div className="cmpl__loading">Loading…</div>
+        ) : (
+          <>
+            <div className="cmpl__kpis">
+              <KpiTile accent={rateHue(data.overview.overallRate)} Icon={Activity}     label="Org rate"    value={`${data.overview.overallRate}%`} sub={`${data.overview.completed} of ${data.overview.total}`} />
+              <KpiTile accent="var(--os-c-blue)"                  Icon={BookCopy}     label="Assignments" value={`${data.overview.total}`}        sub="across SOPs" />
+              <KpiTile accent="var(--os-c-orange)"                Icon={Clock}        label="In progress" value={`${data.overview.inProgress}`}   sub="active work" />
+              <KpiTile accent={data.overview.overdue > 0 ? "var(--os-c-red)" : "var(--os-c-green)"} Icon={data.overview.overdue > 0 ? AlertCircle : CheckCircle2} label="Overdue" value={`${data.overview.overdue}`} sub={data.overview.overdue > 0 ? "needs attention" : "all on time"} />
             </div>
-            <div className="cmpl-stat">
-              <span>Assignments</span>
-              <strong>{data.overview.total}</strong>
-            </div>
-            <div className="cmpl-stat">
-              <span>In progress</span>
-              <strong>{data.overview.inProgress}</strong>
-            </div>
-            <div className={`cmpl-stat ${data.overview.overdue > 0 ? "is-alert" : ""}`}>
-              <span>Overdue</span>
-              <strong style={{ color: data.overview.overdue > 0 ? "var(--os-c-red)" : undefined }}>{data.overview.overdue}</strong>
-            </div>
-          </section>
 
-          <div className="cmpl__grid">
-            <section className="cmpl__card">
-              <header><Building /> <h2>By department</h2><span>{data.departmentCompliance.length}</span></header>
-              {data.departmentCompliance.length === 0 ? (
-                <div className="cmpl__empty">No department data yet.</div>
-              ) : (
-                <div className="cmpl__heatmap">
-                  {data.departmentCompliance.map((d) => (
-                    <div key={d.departmentId} className="cmpl-bar">
-                      <div className="cmpl-bar__label">
-                        <span>{d.name}</span>
-                        <strong style={{ color: rateHue(d.rate) }}>{d.rate}%</strong>
-                      </div>
-                      <div className="cmpl-bar__track">
-                        <div className="cmpl-bar__fill" style={{ width: `${d.rate}%`, background: rateHue(d.rate) }} />
-                      </div>
-                      <div className="cmpl-bar__sub">{d.completed} / {d.total}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="cmpl__card">
-              <header><TrendingDown style={{ color: "var(--os-c-red)" }} /> <h2>Lowest-completion SOPs</h2><span>{bottomSops.length}</span></header>
-              {bottomSops.length === 0 ? (
-                <div className="cmpl__empty">No SOPs with completion data yet.</div>
-              ) : (
-                <div className="cmpl__list">
-                  {bottomSops.map((s) => (
-                    <div key={s.sopId} className="cmpl-sop">
-                      <div className="cmpl-sop__title">{s.title}{s.category && <em> · {s.category}</em>}</div>
-                      <div className="cmpl-sop__bar">
-                        <div className="cmpl-sop__bar-fill" style={{ width: `${s.rate}%`, background: rateHue(s.rate) }} />
-                      </div>
-                      <span className="cmpl-sop__rate" style={{ color: rateHue(s.rate) }}>{s.rate}% <em>· {s.completed}/{s.total}</em></span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="cmpl__card">
-              <header><TrendingUp style={{ color: "var(--os-c-green)" }} /> <h2>Top performers</h2><span>{topPeople.length}</span></header>
-              {topPeople.length === 0 ? (
-                <div className="cmpl__empty">No person data yet.</div>
-              ) : (
-                <div className="cmpl__list">
-                  {topPeople.map((p) => (
-                    <div key={p.userId} className="cmpl-person">
-                      <span className="cmpl-person__av" style={{ background: avColor(p.userId) }}>{initials(p.name)}</span>
-                      <div className="cmpl-person__main">
-                        <div className="cmpl-person__name">{p.name}</div>
-                        <div className="cmpl-person__meta">{p.department}{p.avgScore != null && ` · avg score ${p.avgScore}`}</div>
-                      </div>
-                      <span className="cmpl-person__rate" style={{ color: rateHue(p.rate) }}>{p.rate}%</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="cmpl__card">
-              <header><AlertCircle style={{ color: "var(--os-c-red)" }} /> <h2>Overdue assignments</h2><span>{data.overdueList.length}</span></header>
-              {data.overdueList.length === 0 ? (
-                <div className="cmpl__empty">
-                  <UsersIcon /> All assignments are on time.
-                </div>
-              ) : (
-                <div className="cmpl__list">
-                  {data.overdueList.slice(0, 10).map((o) => {
-                    const days = Math.floor((Date.now() - new Date(o.dueDate).getTime()) / MS_DAY);
-                    return (
-                      <div key={o.id} className="cmpl-over">
-                        <div>
-                          <div className="cmpl-over__title">{o.sopTitle}</div>
-                          <div className="cmpl-over__meta">{o.userName} · {o.department}</div>
+            <div className="cmpl__grid">
+              <section className="cmpl__card">
+                <header className="cmpl__card-head">
+                  <h2><Building /> By department</h2>
+                  <span className="cmpl__card-count">{data.departmentCompliance.length}</span>
+                </header>
+                {data.departmentCompliance.length === 0 ? (
+                  <div className="cmpl__card-empty">No department data yet.</div>
+                ) : (
+                  <div className="cmpl__heatmap">
+                    {data.departmentCompliance.map((d) => (
+                      <div key={d.departmentId} className="cmpl__bar">
+                        <div className="cmpl__bar-label">
+                          <span>{d.name}</span>
+                          <strong style={{ color: rateHue(d.rate) }}>{d.rate}%</strong>
                         </div>
-                        <span className="cmpl-over__days">{days}d late</span>
+                        <div className="cmpl__bar-track">
+                          <div className="cmpl__bar-fill" style={{ width: `${d.rate}%`, background: rateHue(d.rate) }} />
+                        </div>
+                        <div className="cmpl__bar-sub">{d.completed} / {d.total}</div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          </div>
-        </>
-      )}
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="cmpl__card">
+                <header className="cmpl__card-head">
+                  <h2><TrendingDown style={{ color: "var(--os-c-red)" }} /> Lowest-completion SOPs</h2>
+                  <span className="cmpl__card-count">{bottomSops.length}</span>
+                </header>
+                {bottomSops.length === 0 ? (
+                  <div className="cmpl__card-empty">No SOPs with completion data yet.</div>
+                ) : (
+                  <div className="cmpl__list">
+                    {bottomSops.map((s) => (
+                      <div key={s.sopId} className="cmpl__sop">
+                        <div className="cmpl__sop-title">{s.title}{s.category && <em> · {s.category}</em>}</div>
+                        <div className="cmpl__sop-bar">
+                          <div className="cmpl__sop-bar-fill" style={{ width: `${s.rate}%`, background: rateHue(s.rate) }} />
+                        </div>
+                        <span className="cmpl__sop-rate" style={{ color: rateHue(s.rate) }}>{s.rate}% <em>· {s.completed}/{s.total}</em></span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="cmpl__card">
+                <header className="cmpl__card-head">
+                  <h2><TrendingUp style={{ color: "var(--os-c-green)" }} /> Top performers</h2>
+                  <span className="cmpl__card-count">{topPeople.length}</span>
+                </header>
+                {topPeople.length === 0 ? (
+                  <div className="cmpl__card-empty">No person data yet.</div>
+                ) : (
+                  <div className="cmpl__list">
+                    {topPeople.map((p) => (
+                      <div key={p.userId} className="cmpl__person">
+                        <span className="cmpl__person-av" style={{ background: avColor(p.userId) }}>{initials(p.name)}</span>
+                        <div className="cmpl__person-main">
+                          <div className="cmpl__person-name">{p.name}</div>
+                          <div className="cmpl__person-meta">{p.department}{p.avgScore != null && ` · avg score ${p.avgScore}`}</div>
+                        </div>
+                        <span className="cmpl__person-rate" style={{ color: rateHue(p.rate) }}>{p.rate}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="cmpl__card">
+                <header className="cmpl__card-head">
+                  <h2><AlertCircle style={{ color: "var(--os-c-red)" }} /> Overdue</h2>
+                  <span className="cmpl__card-count">{data.overdueList.length}</span>
+                </header>
+                {data.overdueList.length === 0 ? (
+                  <div className="cmpl__card-empty">
+                    <UsersIcon /> All assignments are on time.
+                  </div>
+                ) : (
+                  <div className="cmpl__list">
+                    {data.overdueList.slice(0, 10).map((o) => {
+                      const days = Math.floor((Date.now() - new Date(o.dueDate).getTime()) / MS_DAY);
+                      return (
+                        <div key={o.id} className="cmpl__over">
+                          <div className="cmpl__over-main">
+                            <div className="cmpl__over-title">{o.sopTitle}</div>
+                            <div className="cmpl__over-meta">{o.userName} · {o.department}</div>
+                          </div>
+                          <span className="cmpl__over-days">{days}d late</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Activity; label: string; value: string; sub: string }) {
+  return (
+    <div className="cmpl__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="cmpl__kpi-accent" aria-hidden="true" />
+      <div className="cmpl__kpi-row">
+        <div className="cmpl__kpi-icon"><Icon /></div>
+        <div className="cmpl__kpi-label">{label}</div>
+      </div>
+      <div className="cmpl__kpi-value">{value}</div>
+      <div className="cmpl__kpi-sub">{sub}</div>
     </div>
   );
 }

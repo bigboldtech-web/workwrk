@@ -155,7 +155,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /sops/new/checklist — wrap checklist builder with OsTitleBar + nav chrome
 - [x] /sops/new/record — wrap recorder with OsTitleBar + nav chrome
 - [x] /sops/my-sops — personal queue with KPI strip + status sections
-- [ ] /sops/compliance — compliance tracking
+- [x] /sops/compliance — KPI strip + dept heatmap + bottom SOPs / top performers / overdue
 - [ ] /process-runs — process execution logs
 - [ ] /policies — policy library
 
