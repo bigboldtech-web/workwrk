@@ -127,8 +127,8 @@ Every page subtask must pass this gate before being marked done:
 - [x] /reviews — featured cycle hero + cycles list
 - [x] /reviews/[id] — bespoke cycle hero (tabs preserved)
 - [x] /kra-kpi — KRA/KPI library grouped by category
-- [ ] /kra-kpi/review — KPI review cycle
-- [ ] /talent — talent marketplace
+- [x] /kra-kpi/review — bespoke header (functional review preserved)
+- [x] /talent — 9-box matrix + segment lists
 
 ## J. Finance & Procurement (13 pages)
 
