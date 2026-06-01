@@ -143,7 +143,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /procurement — bespoke hub with KPI strip + status mix bar + workspace tiles
 - [x] /procurement/[id] — bespoke hero with action row + 6-step flow + timeline
 - [x] /procurement/pos — approval queue + 5-column pipeline + vendor chips
-- [ ] /procurement/invoices — invoice list
+- [x] /procurement/invoices — AP queue with overdue banner + due-date buckets
 - [ ] /procurement/vendors — vendor master
 
 ## K. Knowledge (10 pages)
