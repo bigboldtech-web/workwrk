@@ -1,29 +1,25 @@
 "use client";
 
-/* Real, persistent Compensation Cycles page.
+/* Compensation — comp cycle list with status flow.
  *
  *  GET   /api/comp-cycles
  *  POST  /api/comp-cycles            { name, startDate, endDate, reportingCurrency?, budgetPct? }
- *  PATCH /api/comp-cycles/[id]       { name?, status?, startDate?, endDate?, budgetPct? }
- *
- *  Status enum: DRAFT | OPEN | CLOSED
+ *  PATCH /api/comp-cycles/[id]       { name?, status?, ... }
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Wallet, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  Wallet, Plus, Search, ArrowLeft, ChevronRight, Calendar as CalendarIcon,
+  Loader2, CheckCircle2, Play, ArrowRight, TrendingUp, Users, Receipt,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import type { PickerOption } from "@/components/layout/os/picker-popover";
 
 type CycleStatus = "DRAFT" | "OPEN" | "CLOSED";
-
 type ApiCycle = {
   id: string;
   name: string;
@@ -37,72 +33,22 @@ type ApiCycle = {
   _count?: { decisions?: number };
 };
 
-const STATUS_TO_OS: Record<CycleStatus, StatusValue> = {
-  DRAFT: "planning", OPEN: "working", CLOSED: "done",
-};
-const STATUS_LABELS: Record<CycleStatus, string> = {
-  DRAFT: "Draft", OPEN: "Open", CLOSED: "Closed",
-};
-const STATUS_COLORS: Record<CycleStatus, string> = {
-  DRAFT: C.indigo, OPEN: C.orange, CLOSED: C.green,
-};
-const STATUS_OPTIONS: PickerOption[] = (Object.keys(STATUS_LABELS) as CycleStatus[]).map((s) => ({
-  value: s, label: STATUS_LABELS[s], color: STATUS_COLORS[s],
-}));
+const STATUS_LABELS: Record<CycleStatus, string> = { DRAFT: "Draft", OPEN: "Open", CLOSED: "Closed" };
+const STATUS_COLORS: Record<CycleStatus, string> = { DRAFT: C.indigo, OPEN: C.orange, CLOSED: C.green };
+const FLOW: CycleStatus[] = ["DRAFT", "OPEN", "CLOSED"];
 
-const GROUP_ORDER: CycleStatus[] = ["DRAFT", "OPEN", "CLOSED"];
-
-function cycleToRow(c: ApiCycle): Row {
-  return {
-    id: c.id,
-    name: c.name,
-    done: c.status === "CLOSED",
-    cells: {
-      status: { value: STATUS_TO_OS[c.status], label: STATUS_LABELS[c.status] },
-      decisions: `${c._count?.decisions ?? 0}`,
-      budget: c.budgetPct !== null && c.budgetPct !== undefined ? `${c.budgetPct}%` : "—",
-      currency: c.reportingCurrency,
-      start: c.startDate ? { iso: c.startDate } : undefined,
-      end: c.endDate ? { iso: c.endDate } : undefined,
-    },
-  };
+function fmtShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
-
-function buildGroups(cycles: ApiCycle[]): TableGroup[] {
-  const buckets = new Map<CycleStatus, ApiCycle[]>();
-  for (const s of GROUP_ORDER) buckets.set(s, []);
-  for (const c of cycles) {
-    const b = buckets.get(c.status);
-    if (b) b.push(c);
-  }
-  return GROUP_ORDER
-    .map((s) => ({
-      id: s, title: STATUS_LABELS[s], color: STATUS_COLORS[s],
-      rows: (buckets.get(s) ?? []).map(cycleToRow),
-    }))
-    .filter((g) => g.rows.length > 0 || g.id === "DRAFT" || g.id === "OPEN");
+function daysBetween(start: string, end: string): number {
+  return Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000);
 }
-
-const COLUMNS: Column[] = [
-  { id: "status",    label: "Status",     type: "status" },
-  { id: "decisions", label: "Decisions",  type: "text" },
-  { id: "budget",    label: "Budget %",   type: "text" },
-  { id: "currency",  label: "Currency",   type: "text" },
-  { id: "start",     label: "Starts",     type: "date" },
-  { id: "end",       label: "Ends",       type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function CompensationPage() {
   const [cycles, setCycles] = useState<ApiCycle[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<Set<CycleStatus>>(new Set());
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -112,6 +58,7 @@ export default function CompensationPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setCycles(data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -119,8 +66,6 @@ export default function CompensationPage() {
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("compensation");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
-
-  const groups = useMemo(() => buildGroups(cycles ?? []), [cycles]);
 
   async function patch(id: string, body: Record<string, unknown>): Promise<boolean> {
     try {
@@ -136,54 +81,47 @@ export default function CompensationPage() {
     } catch { return false; }
   }
 
-  const handlers = {
-    onStatusChange: async (rowId: string, _g: string, value: string) => {
-      // Lifecycle is forward-only: DRAFT → OPEN → CLOSED. Picking
-      // something illegal will 400 server-side; rollback handles it.
-      const ok = await patch(rowId, { status: value });
-      if (!ok) throw new Error("invalid");
-    },
-    onRename: async (rowId: string, _g: string, name: string) => {
-      const ok = await patch(rowId, { name });
-      if (!ok) throw new Error("rename failed");
-    },
-    onAdd: async (groupId: string) => {
-      const now = new Date();
-      const end = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  async function quickAdd() {
+    const name = (typeof window !== "undefined" ? window.prompt("Comp cycle name?") : "")?.trim();
+    if (!name) return;
+    const now = new Date();
+    const end = new Date(now.getTime() + 60 * 86_400_000);
+    try {
       const res = await fetch("/api/comp-cycles", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "Untitled cycle",
-          startDate: now.toISOString(),
-          endDate: end.toISOString(),
-        }),
+        body: JSON.stringify({ name, startDate: now.toISOString(), endDate: end.toISOString() }),
       });
       if (!res.ok) {
         if (res.status === 403) toast("Only org admins can create comp cycles");
-        throw new Error(`POST ${res.status}`);
+        else toast("Couldn't create");
+        return;
       }
-      const data = await res.json();
-      const c: ApiCycle = data.data ?? data;
-      if (groupId === "OPEN" && c.status === "DRAFT") {
-        void patch(c.id, { status: "OPEN" });
-      }
-      setTimeout(() => void load(), 200);
-      return { id: c.id, name: c.name };
-    },
-  };
+      toast("Cycle created");
+      void load();
+    } catch { toast("Couldn't create"); }
+  }
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (cycles ?? [])
-      .filter((c) => c.endDate)
-      .map((c): CalendarEvent => ({
-        id: c.id, title: c.name, date: c.endDate,
-        color: STATUS_COLORS[c.status], done: c.status === "CLOSED",
-        payload: cycleToRow(c).cells,
-      })),
-    [cycles],
-  );
+  const filtered = useMemo(() => {
+    let list = cycles ?? [];
+    if (statusFilter.size > 0) list = list.filter((c) => statusFilter.has(c.status));
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter((c) => c.name.toLowerCase().includes(q));
+    return list.slice().sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
+  }, [cycles, statusFilter, search]);
 
-  const openCount = (cycles ?? []).filter((c) => c.status === "OPEN").length;
+  const stats = useMemo(() => {
+    const list = cycles ?? [];
+    const byStatus: Record<CycleStatus, number> = { DRAFT: 0, OPEN: 0, CLOSED: 0 };
+    for (const c of list) byStatus[c.status]++;
+    const totalDecisions = list.reduce((acc, c) => acc + (c._count?.decisions ?? 0), 0);
+    return { total: list.length, byStatus, totalDecisions };
+  }, [cycles]);
+
+  function toggleStatus(s: CycleStatus) {
+    const next = new Set(statusFilter);
+    next.has(s) ? next.delete(s) : next.add(s);
+    setStatusFilter(next);
+  }
 
   return (
     <>
@@ -191,34 +129,134 @@ export default function CompensationPage() {
         title="Compensation"
         Icon={Wallet}
         iconGradient={GRAD.tealGreen}
-        description={cycles === null ? "Loading cycles…" : `${cycles.length} cycle${cycles.length === 1 ? "" : "s"} · ${openCount} open · live-synced`}
-        people={[PEOPLE.bb, PEOPLE.mk]}
-        morePeople={3}
+        description={cycles === null ? "Loading cycles…" : `${stats.total} cycle${stats.total === 1 ? "" : "s"} · ${stats.byStatus.OPEN} open · ${stats.totalDecisions} decisions`}
+        actions={
+          <div className="comp__head-actions">
+            <button type="button" className="comp__back" onClick={() => history.back()}>
+              <ArrowLeft /> Back
+            </button>
+            <button type="button" className="comp__btn-primary" onClick={quickAdd}>
+              <Plus /> New cycle
+            </button>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New cycle" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={Wallet} iconGradient={GRAD.redPink} title="Couldn't load cycles" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : cycles === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : cycles.length === 0 ? (
-            <OsEmptyView Icon={Wallet} iconGradient={GRAD.tealGreen} title="No comp cycles yet" subtitle="Plan your first comp cycle. Managers propose merit + bonus per direct report; HR finalizes." chips={["Annual", "Mid-year", "Bonus", "Promotion"]} cta="New cycle" />
-          ) : (
-            <OsMainTable moduleId="compensation" columns={COLUMNS} groups={groups} statusOptions={STATUS_OPTIONS} handlers={handlers} />
-          )}
-        </>
-      )}
+      <div className="comp">
+        <div className="comp__kpis">
+          <KpiTile accent="var(--os-c-orange)" Icon={Loader2}     label="Open"        value={`${stats.byStatus.OPEN}`}    sub="in flight cycles" />
+          <KpiTile accent="var(--os-c-indigo)" Icon={Play}        label="Draft"       value={`${stats.byStatus.DRAFT}`}   sub="ready to launch" />
+          <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Closed"     value={`${stats.byStatus.CLOSED}`}  sub="historical" />
+          <KpiTile accent="var(--os-c-purple)" Icon={TrendingUp}  label="Decisions"   value={`${stats.totalDecisions}`}   sub="across all cycles" />
+        </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="compensation" events={calendarEvents} newLabel="New cycle" />
-      )}
+        <div className="comp__toolbar">
+          <div className="comp__search">
+            <Search />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search cycle name…" />
+          </div>
+          <div className="comp__chips">
+            {FLOW.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={`comp__chip${statusFilter.has(s) ? " is-active" : ""}`}
+                style={{ ["--chip-c" as unknown as string]: STATUS_COLORS[s] }}
+                onClick={() => toggleStatus(s)}
+              >
+                <span className="comp__chip-dot" />
+                {STATUS_LABELS[s]}
+                <span className="comp__chip-count">{stats.byStatus[s]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={Wallet} iconGradient={GRAD.tealGreen} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data", "Persistent edits"]} cta="Back to Main table" />
-      )}
+        {loadError ? (
+          <OsEmptyView Icon={Wallet} iconGradient={GRAD.redPink} title="Couldn't load cycles" subtitle={loadError} cta="Retry" />
+        ) : cycles === null ? (
+          <div className="comp__loading">Loading…</div>
+        ) : stats.total === 0 ? (
+          <OsEmptyView Icon={Wallet} iconGradient={GRAD.tealGreen} title="No comp cycles yet" subtitle="Plan your first comp cycle. Managers propose merit + bonus per direct report; HR finalizes." chips={["Annual", "Mid-year", "Bonus", "Promotion"]} cta="New cycle" />
+        ) : filtered.length === 0 ? (
+          <div className="comp__empty">
+            <Search />
+            <div>No cycles match these filters.</div>
+            <button type="button" className="comp__empty-reset" onClick={() => { setSearch(""); setStatusFilter(new Set()); }}>Clear</button>
+          </div>
+        ) : (
+          <div className="comp__list">
+            {filtered.map((c) => <CycleRow key={c.id} cycle={c} onAdvance={patch} />)}
+          </div>
+        )}
+      </div>
     </>
+  );
+}
+
+function CycleRow({ cycle: c, onAdvance }: { cycle: ApiCycle; onAdvance: (id: string, body: Record<string, unknown>) => Promise<boolean> }) {
+  const statusColor = STATUS_COLORS[c.status];
+  const currentIdx = FLOW.indexOf(c.status);
+  const next = c.status === "DRAFT" ? "OPEN" : c.status === "OPEN" ? "CLOSED" : null;
+  const days = daysBetween(c.startDate, c.endDate);
+  const decisions = c._count?.decisions ?? 0;
+
+  return (
+    <article className="comp__cycle" style={{ ["--row-c" as unknown as string]: statusColor }}>
+      <span className="comp__cycle-accent" aria-hidden="true" />
+
+      <Link href={`/compensation/${c.id}`} className="comp__cycle-main">
+        <div className="comp__cycle-head">
+          <span className="comp__cycle-status">
+            {c.status === "OPEN" ? <Loader2 /> : c.status === "CLOSED" ? <CheckCircle2 /> : <Play />}
+            {STATUS_LABELS[c.status]}
+          </span>
+          <h3 className="comp__cycle-name">{c.name}</h3>
+        </div>
+        <div className="comp__cycle-flow">
+          {FLOW.map((s, i) => {
+            const isCurrent = s === c.status;
+            const isPast = currentIdx >= 0 && i < currentIdx;
+            const tone = isCurrent ? "current" : isPast ? "past" : "future";
+            return (
+              <span key={s} className={`comp__flow-step comp__flow-step--${tone}`} style={{ ["--step-c" as unknown as string]: STATUS_COLORS[s] }}>
+                <span className="comp__flow-dot">{i + 1}</span>
+                <span>{STATUS_LABELS[s]}</span>
+              </span>
+            );
+          })}
+        </div>
+        <div className="comp__cycle-meta">
+          <span><CalendarIcon /> {fmtShortDate(c.startDate)} → {fmtShortDate(c.endDate)} <em>({days}d)</em></span>
+          <span><Receipt /> Budget {c.budgetPct ?? "—"}% · {c.reportingCurrency}</span>
+          <span><Users /> {decisions} decision{decisions === 1 ? "" : "s"}</span>
+        </div>
+      </Link>
+
+      <div className="comp__cycle-actions">
+        {next && (
+          <button type="button" className="comp__cycle-advance" onClick={() => onAdvance(c.id, { status: next })} title={`Move to ${STATUS_LABELS[next]}`}>
+            <ChevronRight /> {STATUS_LABELS[next]}
+          </button>
+        )}
+        <Link href={`/compensation/${c.id}`} className="comp__cycle-open" title="Open">
+          <ArrowRight />
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Wallet; label: string; value: string; sub: string }) {
+  return (
+    <div className="comp__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="comp__kpi-accent" aria-hidden="true" />
+      <div className="comp__kpi-row">
+        <div className="comp__kpi-icon"><Icon /></div>
+        <div className="comp__kpi-label">{label}</div>
+      </div>
+      <div className="comp__kpi-value">{value}</div>
+      <div className="comp__kpi-sub">{sub}</div>
+    </div>
   );
 }

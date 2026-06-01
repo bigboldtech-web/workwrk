@@ -110,7 +110,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /payroll/[id] — payroll run detail
 - [x] /payroll/runs — historical runs ledger
 - [x] /payroll/groups — pay group config cards
-- [ ] /payroll/payslip/[id] — printable payslip
+- [x] /payroll/payslip/[id] — printable payslip
 - [ ] /compensation — comp plan list
 - [ ] /compensation/[id] — comp plan detail
 - [ ] /benefits — benefits hub
