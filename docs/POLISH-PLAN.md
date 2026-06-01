@@ -157,7 +157,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /sops/my-sops — personal queue with KPI strip + status sections
 - [x] /sops/compliance — KPI strip + dept heatmap + bottom SOPs / top performers / overdue
 - [x] /process-runs — execution log with KPI strip + status sections + progress bars
-- [ ] /policies — policy library
+- [x] /policies — library grouped by category with ack tracking + adoption bars
 
 ## L. Planning & Analytics (6 pages)
 

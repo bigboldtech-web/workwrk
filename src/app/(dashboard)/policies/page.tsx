@@ -1,27 +1,22 @@
 "use client";
 
-/* Real Policies page.
+/* Policies — bespoke library grouped by category with KPI strip + ack tracking.
  *
  *  GET   /api/policies            list PUBLISHED policies (with my-ack state)
  *  POST  /api/policies            { title, content, status? }
- *  PATCH /api/policies/[id]       { title?, status?, requiresAck?, ... }
- *
- *  Status (string): DRAFT | PUBLISHED | ARCHIVED
- *  GET only returns PUBLISHED, so the board shows published policies.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  ShieldCheck, Plus, Search, Hash, ChevronRight, FileText, CheckCircle2,
+  AlertTriangle, Layers, Activity, Calendar as CalendarIcon, BadgeCheck,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import type { PickerOption } from "@/components/layout/os/picker-popover";
 
 type PolStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 
@@ -41,80 +36,30 @@ type ApiPolicy = {
   totalUsers?: number;
 };
 
-const STATUS_TO_OS: Record<PolStatus, StatusValue> = {
-  DRAFT: "planning", PUBLISHED: "done", ARCHIVED: "empty",
-};
-const STATUS_LABELS: Record<PolStatus, string> = {
-  DRAFT: "Draft", PUBLISHED: "Published", ARCHIVED: "Archived",
-};
-const STATUS_COLORS: Record<PolStatus, string> = {
-  DRAFT: C.indigo, PUBLISHED: C.green, ARCHIVED: C.gray,
-};
-const STATUS_OPTIONS: PickerOption[] = (Object.keys(STATUS_LABELS) as PolStatus[]).map((s) => ({
-  value: s, label: STATUS_LABELS[s], color: STATUS_COLORS[s],
-}));
-
-// Categories per the schema comment: HR / Security / Compliance / Operations / Code of Conduct / Leave / Expense
 const CATEGORY_COLORS: Record<string, string> = {
   HR: C.pink, Security: C.red, Compliance: C.purple, Operations: C.orange,
   "Code of Conduct": C.blue, Leave: C.teal, Expense: C.brown,
-  default: C.indigo,
 };
-
-function policyToRow(p: ApiPolicy): Row {
-  return {
-    id: p.id,
-    name: p.title,
-    done: p.status === "ARCHIVED",
-    cells: {
-      status: { value: STATUS_TO_OS[p.status], label: STATUS_LABELS[p.status] },
-      category: p.category ?? "—",
-      version: `v${p.version}`,
-      ack: p.acknowledged ? "✓ You've acked" : (p.requiresAck ? "Required" : "—"),
-      ackRate: p.ackRate !== undefined ? { pct: p.ackRate, color: p.ackRate >= 90 ? "green" : p.ackRate >= 50 ? "blue" : "warning" } : undefined,
-      effective: p.effectiveDate ? { iso: p.effectiveDate } : undefined,
-      updated: { iso: p.updatedAt },
-    },
-  };
+function categoryColor(name: string): string {
+  if (CATEGORY_COLORS[name]) return CATEGORY_COLORS[name];
+  let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const palette = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
+  return palette[h % palette.length];
 }
 
-function buildGroups(rows: ApiPolicy[]): TableGroup[] {
-  const byCategory = new Map<string, ApiPolicy[]>();
-  for (const p of rows) {
-    const k = p.category ?? "Uncategorized";
-    if (!byCategory.has(k)) byCategory.set(k, []);
-    byCategory.get(k)!.push(p);
-  }
-  return Array.from(byCategory.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([cat, items]) => ({
-      id: cat, title: cat,
-      color: CATEGORY_COLORS[cat] ?? CATEGORY_COLORS.default,
-      rows: items.map(policyToRow),
-    }));
+function rateHue(pct: number): string {
+  if (pct >= 90) return "var(--os-c-green)";
+  if (pct >= 70) return "var(--os-c-teal)";
+  if (pct >= 40) return "var(--os-c-orange)";
+  return "var(--os-c-red)";
 }
-
-const COLUMNS: Column[] = [
-  { id: "status",    label: "Status",      type: "status" },
-  { id: "category",  label: "Category",    type: "text" },
-  { id: "version",   label: "Version",     type: "text" },
-  { id: "ack",       label: "Your ack",    type: "text" },
-  { id: "ackRate",   label: "Org ack rate", type: "progress" },
-  { id: "effective", label: "Effective",   type: "date" },
-  { id: "updated",   label: "Updated",     type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function PoliciesPage() {
   const [rows, setRows] = useState<ApiPolicy[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [onlyMyAck, setOnlyMyAck] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -124,6 +69,7 @@ export default function PoliciesPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRows(data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -132,32 +78,8 @@ export default function PoliciesPage() {
   const v = rowVersion("policies");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(rows ?? []), [rows]);
-
-  async function patch(id: string, body: Record<string, unknown>): Promise<boolean> {
+  async function quickAdd() {
     try {
-      const res = await fetch(`/api/policies/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        if (res.status === 403) toast("Only managers can edit policies");
-        return false;
-      }
-      void load();
-      return true;
-    } catch { return false; }
-  }
-
-  const handlers = {
-    onStatusChange: async (rowId: string, _g: string, value: string) => {
-      const ok = await patch(rowId, { status: value });
-      if (!ok) throw new Error("save failed");
-    },
-    onRename: async (rowId: string, _g: string, name: string) => {
-      const ok = await patch(rowId, { title: name });
-      if (!ok) throw new Error("save failed");
-    },
-    onAdd: async (_g: string) => {
       const res = await fetch("/api/policies", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -166,31 +88,63 @@ export default function PoliciesPage() {
           status: "PUBLISHED",
         }),
       });
-      if (!res.ok) {
-        if (res.status === 403) toast("Only managers can create policies");
-        throw new Error(`POST ${res.status}`);
-      }
-      const data = await res.json();
-      const p: ApiPolicy = data.data ?? data;
-      setTimeout(() => void load(), 200);
-      return { id: p.id, name: p.title };
-    },
-  };
+      if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't create"); return; }
+      toast("Policy created");
+      void load();
+    } catch { toast("Couldn't create"); }
+  }
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (rows ?? [])
-      .filter((p) => p.effectiveDate)
-      .map((p): CalendarEvent => ({
-        id: p.id,
-        title: `${p.title} effective`,
-        date: p.effectiveDate as string,
-        color: STATUS_COLORS[p.status],
-        payload: policyToRow(p).cells,
-      })),
-    [rows],
-  );
+  const stats = useMemo(() => {
+    const list = rows ?? [];
+    const requiresAck = list.filter((p) => p.requiresAck);
+    const pendingMyAck = requiresAck.filter((p) => !p.acknowledged).length;
+    const ackedMine = requiresAck.filter((p) => p.acknowledged).length;
+    const orgAckRate = list.length
+      ? Math.round(list.reduce((a, p) => a + (p.ackRate ?? 0), 0) / list.length)
+      : 0;
+    const lowAdoption = list.filter((p) => (p.ackRate ?? 0) < 50 && p.requiresAck).length;
+    return {
+      total: list.length,
+      pendingMyAck, ackedMine, requiresAck: requiresAck.length,
+      orgAckRate, lowAdoption,
+    };
+  }, [rows]);
 
-  const ackPending = (rows ?? []).filter((p) => p.requiresAck && !p.acknowledged).length;
+  const categories = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of rows ?? []) {
+      const cat = p.category ?? "Uncategorized";
+      m.set(cat, (m.get(cat) ?? 0) + 1);
+    }
+    return Array.from(m.entries()).sort(([, a], [, b]) => b - a);
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    let list = rows ?? [];
+    if (activeCategory) list = list.filter((p) => (p.category ?? "Uncategorized") === activeCategory);
+    if (onlyMyAck) list = list.filter((p) => p.requiresAck && !p.acknowledged);
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter((p) =>
+      p.title.toLowerCase().includes(q) ||
+      (p.category ?? "").toLowerCase().includes(q));
+    return list;
+  }, [rows, search, activeCategory, onlyMyAck]);
+
+  const grouped = useMemo(() => {
+    const m = new Map<string, ApiPolicy[]>();
+    for (const p of filtered) {
+      const cat = p.category ?? "Uncategorized";
+      if (!m.has(cat)) m.set(cat, []);
+      m.get(cat)!.push(p);
+    }
+    return Array.from(m.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, items]) => ({
+        name,
+        color: categoryColor(name),
+        items: items.slice().sort((a, b) => a.title.localeCompare(b.title)),
+      }));
+  }, [filtered]);
 
   return (
     <>
@@ -198,34 +152,158 @@ export default function PoliciesPage() {
         title="Policies"
         Icon={ShieldCheck}
         iconGradient={GRAD.indigoBlue}
-        description={rows === null ? "Loading policies…" : `${rows.length} policy${rows.length === 1 ? "" : "ies"}${ackPending > 0 ? ` · ${ackPending} need your ack` : ""} · live-synced`}
-        people={[PEOPLE.bb, PEOPLE.mk]}
-        morePeople={3}
+        description={rows === null ? "Loading…" : `${stats.total} polic${stats.total === 1 ? "y" : "ies"}${stats.pendingMyAck > 0 ? ` · ${stats.pendingMyAck} need your ack` : ""} · ${stats.orgAckRate}% org ack rate`}
+        actions={
+          <div className="pol__head-actions">
+            <Link href="/sops" className="pol__nav-link"><FileText /> SOPs</Link>
+            <Link href="/sops/compliance" className="pol__nav-link"><Activity /> Compliance</Link>
+            <button type="button" className="pol__btn-primary" onClick={quickAdd}>
+              <Plus /> New policy
+            </button>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New policy" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.redPink} title="Couldn't load policies" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : rows === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : rows.length === 0 ? (
-            <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.indigoBlue} title="No published policies yet" subtitle="Document the rules. Policies require employee acknowledgment by default." chips={["HR", "Security", "Compliance", "Code of Conduct"]} cta="New policy" />
-          ) : (
-            <OsMainTable moduleId="policies" columns={COLUMNS} groups={groups} statusOptions={STATUS_OPTIONS} handlers={handlers} />
+      <div className="pol">
+        <div className="pol__kpis">
+          <KpiTile accent="var(--os-c-orange)" Icon={AlertTriangle} label="Pending your ack" value={`${stats.pendingMyAck}`} sub={`of ${stats.requiresAck} required`} />
+          <KpiTile accent="var(--os-c-green)"  Icon={BadgeCheck}    label="You've acked"    value={`${stats.ackedMine}`}     sub="recorded on you" />
+          <KpiTile accent={rateHue(stats.orgAckRate)} Icon={Activity} label="Org ack rate"   value={`${stats.orgAckRate}%`}    sub="weighted average" />
+          <KpiTile accent="var(--os-c-red)"    Icon={AlertTriangle} label="Low adoption"    value={`${stats.lowAdoption}`}   sub="< 50% ack" />
+        </div>
+
+        {stats.pendingMyAck > 0 && (
+          <div className="pol__banner">
+            <AlertTriangle />
+            <span><strong>{stats.pendingMyAck} polic{stats.pendingMyAck === 1 ? "y" : "ies"}</strong> require your acknowledgment.</span>
+            <button type="button" onClick={() => setOnlyMyAck((v) => !v)} className="pol__banner-btn">
+              {onlyMyAck ? "Show all" : "Show only mine"}
+            </button>
+          </div>
+        )}
+
+        <div className="pol__toolbar">
+          <div className="pol__search">
+            <Search />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search policy, category…" />
+          </div>
+          {(search.trim() || activeCategory || onlyMyAck) && (
+            <button type="button" className="pol__clear" onClick={() => { setSearch(""); setActiveCategory(null); setOnlyMyAck(false); }}>
+              Clear filters
+            </button>
           )}
-        </>
-      )}
+        </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="policies" events={calendarEvents} newLabel="New policy" />
-      )}
+        {categories.length > 0 && (
+          <div className="pol__cats">
+            <button type="button" className={`pol__cat${activeCategory === null ? " is-active" : ""}`} onClick={() => setActiveCategory(null)}>
+              <Layers /> All <span>{stats.total}</span>
+            </button>
+            {categories.map(([cat, n]) => (
+              <button
+                key={cat}
+                type="button"
+                className={`pol__cat${activeCategory === cat ? " is-active" : ""}`}
+                style={{ ["--cat-c" as unknown as string]: categoryColor(cat) }}
+                onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
+              >
+                <span className="pol__cat-dot" />
+                {cat}
+                <span>{n}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.indigoBlue} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
-      )}
+        {loadError ? (
+          <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.redPink} title="Couldn't load policies" subtitle={loadError} cta="Retry" />
+        ) : rows === null ? (
+          <div className="pol__loading">Loading…</div>
+        ) : stats.total === 0 ? (
+          <OsEmptyView
+            Icon={ShieldCheck}
+            iconGradient={GRAD.indigoBlue}
+            title="No published policies yet"
+            subtitle="Document the rules. Policies require employee acknowledgment by default."
+            chips={["HR", "Security", "Compliance", "Code of Conduct"]}
+            cta="New policy"
+          />
+        ) : grouped.length === 0 ? (
+          <div className="pol__no-match"><Search /> No policies match the current filter.</div>
+        ) : (
+          grouped.map((g) => (
+            <section key={g.name} className="pol__group" style={{ ["--g-c" as unknown as string]: g.color }}>
+              <header className="pol__group-head">
+                <span className="pol__group-dot" />
+                <h2>{g.name}</h2>
+                <span className="pol__group-count">{g.items.length} polic{g.items.length === 1 ? "y" : "ies"}</span>
+                <span className="pol__group-line" />
+              </header>
+              <div className="pol__grid">
+                {g.items.map((p) => <PolicyCard key={p.id} p={p} />)}
+              </div>
+            </section>
+          ))
+        )}
+      </div>
     </>
+  );
+}
+
+function PolicyCard({ p }: { p: ApiPolicy }) {
+  const cat = p.category ?? "Uncategorized";
+  const color = categoryColor(cat);
+  const ackRate = p.ackRate ?? 0;
+  return (
+    <Link href={`/policies/${p.id}`} className="pol__card" style={{ ["--card-c" as unknown as string]: color }}>
+      <header className="pol__card-head">
+        <h3>{p.title}</h3>
+        <span className="pol__card-ver">v{p.version}</span>
+      </header>
+      <div className="pol__card-meta">
+        {p.requiresAck && (
+          p.acknowledged ? (
+            <span className="pol__card-ack pol__card-ack--ok"><CheckCircle2 /> You've acked</span>
+          ) : (
+            <span className="pol__card-ack pol__card-ack--pending"><AlertTriangle /> Ack required</span>
+          )
+        )}
+        {p.effectiveDate && (
+          <span className="pol__card-eff"><CalendarIcon /> Effective {new Date(p.effectiveDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+        )}
+      </div>
+      {p.requiresAck && (
+        <div className="pol__card-rate">
+          <div className="pol__card-rate-label">
+            <span>Org ack rate</span>
+            <strong style={{ color: rateHue(ackRate) }}>{ackRate}%</strong>
+          </div>
+          <div className="pol__card-rate-track">
+            <div className="pol__card-rate-fill" style={{ width: `${ackRate}%`, background: rateHue(ackRate) }} />
+          </div>
+          {p.totalAcks != null && p.totalUsers != null && (
+            <div className="pol__card-rate-sub">{p.totalAcks} of {p.totalUsers} acknowledged</div>
+          )}
+        </div>
+      )}
+      <footer className="pol__card-foot">
+        <span>Updated {new Date(p.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+        <ChevronRight />
+      </footer>
+    </Link>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof ShieldCheck; label: string; value: string; sub: string }) {
+  return (
+    <div className="pol__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="pol__kpi-accent" aria-hidden="true" />
+      <div className="pol__kpi-row">
+        <div className="pol__kpi-icon"><Icon /></div>
+        <div className="pol__kpi-label">{label}</div>
+      </div>
+      <div className="pol__kpi-value">{value}</div>
+      <div className="pol__kpi-sub">{sub}</div>
+    </div>
   );
 }
