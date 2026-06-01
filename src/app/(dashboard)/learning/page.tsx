@@ -1,96 +1,60 @@
 "use client";
 
-/* Real Learning page.
+/* Learning hub — overview with KPI strip, category breakdown, and workspace tiles.
  *
- *  GET  /api/courses              list catalog (any role)
- *  POST /api/courses              { title, mandatory?, category?, duration? } (manager+)
- *
- *  Courses have no status enum. We bucket by `mandatory` (Mandatory vs
- *  Optional) and a third "Recent" group for items added in the last
- *  14 days, surfaced first so newly-added courses are visible at a glance.
+ *  GET  /api/courses
+ *  GET  /api/enrollments?scope=all
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GraduationCap, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  GraduationCap, BookOpen, Settings as SettingsIcon, Layers, Hash, ChevronRight,
+  TrendingUp, Users as UsersIcon, BadgeAlert, Trophy, Activity, ClipboardCheck,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { useOsToast } from "@/components/layout/os/toast";
 
 type ApiCourse = {
   id: string;
   title: string;
-  description?: string | null;
   category?: string | null;
   duration?: number | null;
   mandatory: boolean;
   createdAt: string;
   _count?: { enrollments?: number };
 };
+type ApiEnrol = { id: string; courseId: string; completedAt?: string | null; progress: number };
 
-const MS_DAY = 86400_000;
-
-function courseToRow(c: ApiCourse): Row {
-  const hours = c.duration ? Math.round((c.duration / 60) * 10) / 10 : null;
-  return {
-    id: c.id,
-    name: c.title,
-    cells: {
-      status: { value: (c.mandatory ? "critical" : "progress") as StatusValue, label: c.mandatory ? "Mandatory" : "Optional" },
-      category: c.category ?? "—",
-      duration: hours ? `${hours}h` : "—",
-      enrollments: `${c._count?.enrollments ?? 0}`,
-      added: { iso: c.createdAt },
-    },
-  };
+function rateHue(pct: number) {
+  if (pct >= 90) return "var(--os-c-green)";
+  if (pct >= 70) return "var(--os-c-teal)";
+  if (pct >= 40) return "var(--os-c-orange)";
+  return "var(--os-c-red)";
 }
 
-function buildGroups(courses: ApiCourse[]): TableGroup[] {
-  const recentCutoff = Date.now() - 14 * MS_DAY;
-  const recent = courses.filter((c) => new Date(c.createdAt).getTime() >= recentCutoff);
-  const mandatory = courses.filter((c) => c.mandatory && new Date(c.createdAt).getTime() < recentCutoff);
-  const optional = courses.filter((c) => !c.mandatory && new Date(c.createdAt).getTime() < recentCutoff);
-
-  return [
-    { id: "recent",    title: "Recent (last 14 days)", color: C.orange,  rows: recent.map(courseToRow) },
-    { id: "mandatory", title: "Mandatory",              color: C.pink,    rows: mandatory.map(courseToRow) },
-    { id: "optional",  title: "Optional",               color: C.teal,    rows: optional.map(courseToRow) },
-  ].filter((g) => g.rows.length > 0 || g.id === "mandatory" || g.id === "optional");
-}
-
-const COLUMNS: Column[] = [
-  { id: "status",      label: "Type",        type: "status" },
-  { id: "category",    label: "Category",    type: "text" },
-  { id: "duration",    label: "Duration",    type: "text" },
-  { id: "enrollments", label: "Enrolled",    type: "text" },
-  { id: "added",       label: "Added",       type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
-
-export default function LearningPage() {
+export default function LearningHubPage() {
   const [courses, setCourses] = useState<ApiCourse[] | null>(null);
+  const [enrols, setEnrols] = useState<ApiEnrol[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
   const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/courses");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setCourses(data.data ?? (Array.isArray(data) ? data : []));
+      const [cR, eR] = await Promise.all([
+        fetch("/api/courses"),
+        fetch("/api/enrollments?scope=all&limit=500").catch(() => null),
+      ]);
+      if (!cR.ok) throw new Error(`courses ${cR.status}`);
+      const c = await cR.json();
+      setCourses(c.data ?? (Array.isArray(c) ? c : []));
+      if (eR && eR.ok) {
+        const e = await eR.json();
+        setEnrols(e.data ?? (Array.isArray(e) ? e : []));
+      }
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -99,44 +63,43 @@ export default function LearningPage() {
   const v = rowVersion("learning");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(courses ?? []), [courses]);
+  const stats = useMemo(() => {
+    const list = courses ?? [];
+    const mandatory = list.filter((c) => c.mandatory).length;
+    const enrolTotal = enrols.length;
+    const done = enrols.filter((e) => e.completedAt).length;
+    const completionRate = enrolTotal > 0 ? Math.round((done / enrolTotal) * 100) : 0;
+    const cats = new Set(list.map((c) => c.category ?? "Uncategorized"));
+    return { total: list.length, mandatory, enrolTotal, done, completionRate, catCount: cats.size };
+  }, [courses, enrols]);
 
-  const handlers = {
-    onRename: async (rowId: string, _g: string, name: string) => {
-      // No PATCH endpoint exists for courses yet — block rename gracefully.
-      toast("Course editing isn't wired yet");
-      throw new Error("not supported");
-    },
-    onAdd: async (groupId: string) => {
-      const mandatory = groupId === "mandatory";
-      const res = await fetch("/api/courses", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled course", mandatory }),
-      });
-      if (!res.ok) {
-        if (res.status === 403) toast("Only managers can create courses");
-        throw new Error(`POST ${res.status}`);
-      }
-      const data = await res.json();
-      const c: ApiCourse = data.data ?? data;
-      setTimeout(() => void load(), 200);
-      return { id: c.id, name: c.title };
-    },
-  };
+  const categories = useMemo(() => {
+    const m = new Map<string, { courses: number; done: number; enrolled: number }>();
+    for (const c of courses ?? []) {
+      const k = c.category ?? "Uncategorized";
+      if (!m.has(k)) m.set(k, { courses: 0, done: 0, enrolled: 0 });
+      const e = m.get(k)!;
+      e.courses += 1;
+    }
+    for (const e of enrols) {
+      const course = (courses ?? []).find((c) => c.id === e.courseId);
+      if (!course) continue;
+      const k = course.category ?? "Uncategorized";
+      const row = m.get(k);
+      if (!row) continue;
+      row.enrolled += 1;
+      if (e.completedAt) row.done += 1;
+    }
+    return Array.from(m.entries())
+      .sort(([, a], [, b]) => b.courses - a.courses)
+      .slice(0, 6);
+  }, [courses, enrols]);
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (courses ?? []).map((c): CalendarEvent => ({
-      id: c.id,
-      title: `${c.mandatory ? "★ " : ""}${c.title}`,
-      date: c.createdAt,
-      color: c.mandatory ? C.pink : C.teal,
-      payload: courseToRow(c).cells,
-    })),
-    [courses],
-  );
+  const recentCourses = useMemo(() => {
+    return (courses ?? []).slice().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
+  }, [courses]);
 
-  const mandatoryCount = (courses ?? []).filter((c) => c.mandatory).length;
-  const totalEnrolled = (courses ?? []).reduce((acc, c) => acc + (c._count?.enrollments ?? 0), 0);
+  const loading = courses === null;
 
   return (
     <>
@@ -144,34 +107,133 @@ export default function LearningPage() {
         title="Learning"
         Icon={GraduationCap}
         iconGradient={GRAD.indigoBlue}
-        description={courses === null ? "Loading catalog…" : `${courses.length} course${courses.length === 1 ? "" : "s"} · ${mandatoryCount} mandatory · ${totalEnrolled} enrollments`}
-        people={[PEOPLE.bb, PEOPLE.mk]}
-        morePeople={5}
+        description={loading ? "Loading catalog…" : `${stats.total} course${stats.total === 1 ? "" : "s"} · ${stats.mandatory} mandatory · ${stats.completionRate}% completion rate`}
+        actions={
+          <div className="lhub__head-actions">
+            <Link href="/learning/catalog" className="lhub__nav-link"><Layers /> Catalog</Link>
+            <Link href="/learning/mine" className="lhub__nav-link"><BookOpen /> My learning</Link>
+            <Link href="/learning/manage" className="lhub__btn-primary"><SettingsIcon /> Manage</Link>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New course" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={GraduationCap} iconGradient={GRAD.redPink} title="Couldn't load courses" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : courses === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : courses.length === 0 ? (
-            <OsEmptyView Icon={GraduationCap} iconGradient={GRAD.indigoBlue} title="No courses yet" subtitle="Publish your first course. Mandatory courses appear at the top of each employee's training tab." chips={["Compliance", "Onboarding", "Security", "Leadership"]} cta="New course" />
-          ) : (
-            <OsMainTable moduleId="learning" columns={COLUMNS} groups={groups} handlers={handlers} />
-          )}
-        </>
-      )}
+      <div className="lhub">
+        {loadError ? (
+          <OsEmptyView Icon={GraduationCap} iconGradient={GRAD.redPink} title="Couldn't load learning" subtitle={loadError} cta="Retry" />
+        ) : (
+          <>
+            <div className="lhub__kpis">
+              <KpiTile accent="var(--os-c-indigo)" Icon={GraduationCap} label="Courses"        value={`${stats.total}`}        sub={`${stats.catCount} categor${stats.catCount === 1 ? "y" : "ies"}`} />
+              <KpiTile accent="var(--os-c-red)"    Icon={BadgeAlert}    label="Mandatory"      value={`${stats.mandatory}`}    sub="org-wide required" />
+              <KpiTile accent="var(--os-c-blue)"   Icon={UsersIcon}     label="Enrollments"    value={`${stats.enrolTotal}`}   sub={`${stats.done} completed`} />
+              <KpiTile accent={rateHue(stats.completionRate)} Icon={Trophy} label="Completion rate" value={`${stats.completionRate}%`} sub="org-wide" />
+            </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="learning" events={calendarEvents} newLabel="New course" />
-      )}
+            <section className="lhub__section">
+              <header className="lhub__section-head">
+                <h2><Hash /> Workspaces</h2>
+                <span className="lhub__section-line" />
+              </header>
+              <div className="lhub__grid">
+                <HubTile href="/learning/catalog" Icon={Layers} hue="var(--os-c-pink)"
+                  title="Course catalog" stat={`${stats.total}`} sub="self-enroll" />
+                <HubTile href="/learning/mine" Icon={BookOpen} hue="var(--os-c-teal)"
+                  title="My learning" stat="In progress" sub="continue where you left off" />
+                <HubTile href="/learning/manage" Icon={SettingsIcon} hue="var(--os-c-purple)"
+                  title="Course admin" stat={`${stats.total}`} sub="create + assign" />
+                <HubTile href="/onboarding" Icon={ClipboardCheck} hue="var(--os-c-orange)"
+                  title="Onboarding" stat="Program" sub="new hire path" />
+              </div>
+            </section>
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={GraduationCap} iconGradient={GRAD.indigoBlue} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
-      )}
+            {categories.length > 0 && (
+              <section className="lhub__section">
+                <header className="lhub__section-head">
+                  <h2><TrendingUp /> Top categories</h2>
+                  <span className="lhub__section-line" />
+                </header>
+                <div className="lhub__cats">
+                  {categories.map(([cat, c]) => {
+                    const pct = c.enrolled > 0 ? Math.round((c.done / c.enrolled) * 100) : 0;
+                    return (
+                      <article key={cat} className="lhub__cat-card">
+                        <header>
+                          <h3>{cat}</h3>
+                          <span style={{ color: rateHue(pct) }}>{pct}%</span>
+                        </header>
+                        <div className="lhub__cat-bar">
+                          <div className="lhub__cat-bar-fill" style={{ width: `${pct}%`, background: rateHue(pct) }} />
+                        </div>
+                        <div className="lhub__cat-meta">
+                          <span>{c.courses} course{c.courses === 1 ? "" : "s"}</span>
+                          <span>{c.enrolled} enrolled</span>
+                          <span>{c.done} done</span>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {recentCourses.length > 0 && (
+              <section className="lhub__section">
+                <header className="lhub__section-head">
+                  <h2><Activity /> Recently added</h2>
+                  <span className="lhub__section-line" />
+                  <Link href="/learning/catalog" className="lhub__section-more">all <ChevronRight /></Link>
+                </header>
+                <div className="lhub__recent">
+                  {recentCourses.map((c) => (
+                    <Link key={c.id} href="/learning/catalog" className="lhub__course">
+                      <span className="lhub__course-icon"><GraduationCap /></span>
+                      <div className="lhub__course-main">
+                        <div className="lhub__course-title">{c.title}{c.mandatory && <span className="lhub__course-mand"><BadgeAlert /> Mandatory</span>}</div>
+                        <div className="lhub__course-meta">
+                          {c.category && <span>{c.category}</span>}
+                          {c.duration && <span>· {c.duration}min</span>}
+                          <span>· {c._count?.enrollments ?? 0} enrolled</span>
+                          <span>· added {new Date(c.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                        </div>
+                      </div>
+                      <ChevronRight className="lhub__course-arrow" />
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
+      </div>
     </>
   );
 }
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof GraduationCap; label: string; value: string; sub: string }) {
+  return (
+    <div className="lhub__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="lhub__kpi-accent" aria-hidden="true" />
+      <div className="lhub__kpi-row">
+        <div className="lhub__kpi-icon"><Icon /></div>
+        <div className="lhub__kpi-label">{label}</div>
+      </div>
+      <div className="lhub__kpi-value">{value}</div>
+      <div className="lhub__kpi-sub">{sub}</div>
+    </div>
+  );
+}
+
+function HubTile({ href, Icon, hue, title, stat, sub }: { href: string; Icon: typeof GraduationCap; hue: string; title: string; stat: string; sub: string }) {
+  return (
+    <Link href={href} className="lhub__tile" style={{ ["--tile-hue" as unknown as string]: hue }}>
+      <span className="lhub__tile-icon"><Icon /></span>
+      <div className="lhub__tile-body">
+        <div className="lhub__tile-title">{title}</div>
+        <div className="lhub__tile-stat">{stat}</div>
+        <div className="lhub__tile-sub">{sub}</div>
+      </div>
+      <ChevronRight className="lhub__tile-chev" />
+    </Link>
+  );
+}
+

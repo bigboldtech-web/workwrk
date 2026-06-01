@@ -184,10 +184,10 @@ Every page subtask must pass this gate before being marked done:
 
 ## O. Learning & Development (7 pages)
 
-- [ ] /learning — learning hub
-- [ ] /learning/catalog — course catalog
-- [ ] /learning/manage — course admin
-- [ ] /learning/mine — my courses
+- [x] /learning — hub with KPI strip + workspace tiles + category breakdown
+- [x] /learning/catalog — bespoke catalog with KPI strip + category groups
+- [x] /learning/manage — admin table with KPI strip + completion bars
+- [x] /learning/mine — personal queue with KPI strip + mandatory section
 - [ ] /onboarding — onboarding program
 - [ ] /onboarding/course/[id] — course detail
 - [ ] /onboarding/me — my onboarding
