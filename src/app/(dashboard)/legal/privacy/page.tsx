@@ -12,7 +12,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Shield, Plus, Search, AlertTriangle, Calendar, Mail, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { Shield, Plus, Search, AlertTriangle, Calendar, Mail, ShieldCheck, Hash, FileSignature, Lock } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -125,26 +128,29 @@ export default function PrivacyLibrary() {
     return d != null && d >= 0 && d <= 7;
   });
 
-  return (
+  return (<>
+    <OsTitleBar
+      title="Privacy requests"
+      Icon={Shield}
+      iconGradient={GRAD.redPink}
+      description={items === null ? "Loading…" : `${open.length} open · ${dueSoon.length} due this week${overdueOpen.length > 0 ? ` · ${overdueOpen.length} overdue` : ""}`}
+      actions={
+        <div className="lib__head-actions">
+          <Link href="/legal" className="lib__nav-link"><Hash /> Legal</Link>
+          <Link href="/legal/contracts" className="lib__nav-link"><FileSignature /> Contracts</Link>
+          <Link href="/legal/ip" className="lib__nav-link"><Lock /> IP</Link>
+          <button type="button" className="lib__btn-primary" onClick={quickAdd}><Plus /> Log request</button>
+        </div>
+      }
+    />
+
     <div className="lib">
-      <header className="lib__head">
-        <div className="lib__head-l">
-          <div className="lib__icon" style={{ background: "linear-gradient(135deg, var(--os-c-red), var(--os-c-orange))" }}><Shield /></div>
-          <div>
-            <h1 className="lib__title">Privacy requests</h1>
-            <div className="lib__sub">
-              {items === null ? "Loading…" : `${open.length} open · ${dueSoon.length} due this week${overdueOpen.length > 0 ? ` · ${overdueOpen.length} overdue` : ""}`}
-            </div>
-          </div>
+      <div className="lib__toolbar">
+        <div className="lib__search">
+          <Search />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search email, jurisdiction…" />
         </div>
-        <div className="lib__actions">
-          <div className="lib__search">
-            <Search />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search email, jurisdiction…" />
-          </div>
-          <button type="button" className="lib__new" onClick={quickAdd}><Plus /> Log request</button>
-        </div>
-      </header>
+      </div>
 
       {jurisdictions.length > 0 && (
         <nav className="lib__types">
@@ -190,7 +196,7 @@ export default function PrivacyLibrary() {
         </>
       )}
     </div>
-  );
+  </>);
 }
 
 function PrivacyRow({ r, dim }: { r: ApiReq; dim?: boolean }) {

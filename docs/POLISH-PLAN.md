@@ -194,10 +194,10 @@ Every page subtask must pass this gate before being marked done:
 
 ## P. Legal & Compliance (4 pages)
 
-- [ ] /legal — legal hub
-- [ ] /legal/contracts — contract repository
-- [ ] /legal/privacy — privacy policies
-- [ ] /legal/ip — IP & trademark
+- [x] /legal — hub with KPI strip + alerts banner + workspace tiles
+- [x] /legal/contracts — wrap with OsTitleBar + nav chrome (.lib body preserved)
+- [x] /legal/privacy — wrap with OsTitleBar + nav chrome (.lib body preserved)
+- [x] /legal/ip — wrap with OsTitleBar + nav chrome (.lib body preserved)
 
 ## Q. Product & Dev (6 pages)
 

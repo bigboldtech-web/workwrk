@@ -11,7 +11,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Lock, Plus, Search, AlertTriangle, Calendar } from "lucide-react";
+import Link from "next/link";
+import { Lock, Plus, Search, AlertTriangle, Calendar, Hash, FileSignature, Shield } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -125,26 +128,29 @@ export default function IpLibrary() {
     return d != null && d >= 0 && d <= 90;
   }).length;
 
-  return (
+  return (<>
+    <OsTitleBar
+      title="IP register"
+      Icon={Lock}
+      iconGradient={GRAD.pinkPurple}
+      description={items === null ? "Loading…" : `${total} item${total === 1 ? "" : "s"} · ${registered} registered${renewing > 0 ? ` · ${renewing} need renewal in 90d` : ""}`}
+      actions={
+        <div className="lib__head-actions">
+          <Link href="/legal" className="lib__nav-link"><Hash /> Legal</Link>
+          <Link href="/legal/contracts" className="lib__nav-link"><FileSignature /> Contracts</Link>
+          <Link href="/legal/privacy" className="lib__nav-link"><Shield /> Privacy</Link>
+          <button type="button" className="lib__btn-primary" onClick={quickAdd}><Plus /> Add IP item</button>
+        </div>
+      }
+    />
+
     <div className="lib">
-      <header className="lib__head">
-        <div className="lib__head-l">
-          <div className="lib__icon" style={{ background: "linear-gradient(135deg, var(--os-c-purple), var(--os-c-pink))" }}><Lock /></div>
-          <div>
-            <h1 className="lib__title">IP register</h1>
-            <div className="lib__sub">
-              {items === null ? "Loading…" : `${total} item${total === 1 ? "" : "s"} · ${registered} registered${renewing > 0 ? ` · ${renewing} need renewal in 90d` : ""}`}
-            </div>
-          </div>
+      <div className="lib__toolbar">
+        <div className="lib__search">
+          <Search />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search marks, reg #, jurisdiction…" />
         </div>
-        <div className="lib__actions">
-          <div className="lib__search">
-            <Search />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search marks, reg #, jurisdiction…" />
-          </div>
-          <button type="button" className="lib__new" onClick={quickAdd}><Plus /> Add IP item</button>
-        </div>
-      </header>
+      </div>
 
       {types.length > 0 && (
         <nav className="lib__types">
@@ -215,5 +221,5 @@ export default function IpLibrary() {
         </div>
       )}
     </div>
-  );
+  </>);
 }

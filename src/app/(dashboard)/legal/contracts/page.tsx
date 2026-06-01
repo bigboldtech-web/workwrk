@@ -13,7 +13,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileSignature, Plus, Search, Calendar, ExternalLink, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { FileSignature, Plus, Search, Calendar, ExternalLink, AlertTriangle, Hash, Lock, Shield } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -132,26 +135,29 @@ export default function ContractsLibrary() {
     return d != null && d >= 0 && d <= 90;
   }).length;
 
-  return (
+  return (<>
+    <OsTitleBar
+      title="Contracts"
+      Icon={FileSignature}
+      iconGradient={GRAD.purpleIndigo}
+      description={items === null ? "Loading…" : `${total} contract${total === 1 ? "" : "s"} · ${active} active${expiringIn90 > 0 ? ` · ${expiringIn90} expiring in 90d` : ""}`}
+      actions={
+        <div className="lib__head-actions">
+          <Link href="/legal" className="lib__nav-link"><Hash /> Legal</Link>
+          <Link href="/legal/ip" className="lib__nav-link"><Lock /> IP</Link>
+          <Link href="/legal/privacy" className="lib__nav-link"><Shield /> Privacy</Link>
+          <button type="button" className="lib__btn-primary" onClick={quickAdd}><Plus /> Add contract</button>
+        </div>
+      }
+    />
+
     <div className="lib">
-      <header className="lib__head">
-        <div className="lib__head-l">
-          <div className="lib__icon" style={{ background: "linear-gradient(135deg, var(--os-c-brown), var(--os-c-purple))" }}><FileSignature /></div>
-          <div>
-            <h1 className="lib__title">Contracts</h1>
-            <div className="lib__sub">
-              {items === null ? "Loading…" : `${total} contract${total === 1 ? "" : "s"} · ${active} active${expiringIn90 > 0 ? ` · ${expiringIn90} expiring in 90d` : ""}`}
-            </div>
-          </div>
+      <div className="lib__toolbar">
+        <div className="lib__search">
+          <Search />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search contracts…" />
         </div>
-        <div className="lib__actions">
-          <div className="lib__search">
-            <Search />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search contracts…" />
-          </div>
-          <button type="button" className="lib__new" onClick={quickAdd}><Plus /> Add contract</button>
-        </div>
-      </header>
+      </div>
 
       {knownTypes.length > 0 && (
         <nav className="lib__types">
@@ -217,5 +223,5 @@ export default function ContractsLibrary() {
         </div>
       )}
     </div>
-  );
+  </>);
 }
