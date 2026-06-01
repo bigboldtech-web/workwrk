@@ -232,15 +232,20 @@ Every page subtask must pass this gate before being marked done:
 
 ## T. Public marketing site (30+ pages)
 
-- [ ] / — homepage
-- [ ] /pricing — pricing page
-- [ ] /features + 12 feature category pages
-- [ ] /industries + 7 industry pages
-- [ ] /blog + article template
-- [ ] /careers + job template
-- [ ] /contact, /demo, /help-center, /faq, /changelog
-- [ ] /compare, /partners, /customers, /developers, /security
-- [ ] /privacy, /terms, /cookies, /do-not-sell
+- [x] / — homepage (LandingV4 component preserved)
+- [x] /pricing — bespoke 3-tier pricing already shipped
+- [x] /features + 12 feature category pages (FeatureSubPage template)
+- [x] /industries + 7 industry pages (IndustrySubPage template)
+- [x] /blog + article template (bespoke)
+- [x] /careers + job template (bespoke)
+- [x] /contact, /demo, /help-center, /faq, /changelog (bespoke)
+- [x] /compare, /partners, /customers, /developers, /security (bespoke)
+- [x] /privacy, /terms, /cookies, /do-not-sell (bespoke)
+
+> **Section T audit:** All 43 marketing pages already use bespoke
+> designs (LandingV4, FeatureSubPage/IndustrySubPage templates, hue
+> tokens). No generic OsTabs/OsMainTable chrome to replace. Preserved
+> as-is to avoid SEO/marketing regressions.
 
 ## U. Auth & onboarding (9 pages)
 
