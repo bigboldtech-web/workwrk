@@ -10,7 +10,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Zap, Calendar, Target, FileText, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { Zap, Calendar, Target, FileText, Hash, Rocket, Code2, Map as MapIcon } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type Status = "PLANNED" | "ACTIVE" | "COMPLETED" | "CANCELLED";
@@ -72,19 +75,22 @@ export default function DevSprintsPage() {
     ? velocity.sprints.reduce((a, s) => a + (s.completedPoints ?? 0), 0) / velocity.sprints.length
     : 0;
 
-  return (
-    <div className="devsp">
-      <header className="devsp__head">
-        <div className="devsp__head-l">
-          <div className="devsp__icon"><Zap /></div>
-          <div>
-            <h1 className="devsp__title">Sprints</h1>
-            <div className="devsp__sub">
-              {sprints === null ? "Loading…" : `${active.length} active · ${planned.length} planned · avg velocity ${avgVelocity.toFixed(0)} pts`}
-            </div>
-          </div>
+  return (<>
+    <OsTitleBar
+      title="Sprints"
+      Icon={Zap}
+      iconGradient={GRAD.purpleIndigo}
+      description={sprints === null ? "Loading…" : `${active.length} active · ${planned.length} planned · avg velocity ${avgVelocity.toFixed(0)} pts`}
+      actions={
+        <div className="devsp__head-actions">
+          <Link href="/dev" className="devsp__nav-link"><Code2 /> Dev</Link>
+          <Link href="/dev/releases" className="devsp__nav-link"><Rocket /> Releases</Link>
+          <Link href="/dev/roadmap" className="devsp__nav-link"><MapIcon /> Roadmap</Link>
         </div>
-      </header>
+      }
+    />
+
+    <div className="devsp">
 
       {loadError ? (
         <div className="devsp__error">{loadError}</div>
@@ -149,7 +155,7 @@ export default function DevSprintsPage() {
         </>
       )}
     </div>
-  );
+  </>);
 }
 
 function SprintCard({ s }: { s: ApiSprint }) {

@@ -201,14 +201,14 @@ Every page subtask must pass this gate before being marked done:
 
 ## Q. Product & Dev (6 pages)
 
-- [ ] /dev — dev hub
-- [ ] /dev/sprints — sprint planning
-- [ ] /dev/releases — release management
-- [ ] /dev/roadmap — product roadmap
-- [ ] /build — workflows hub
-- [ ] /build/[slug] — workflow detail
+- [x] /dev — hub with KPI strip + Sprint/Delivery sections
+- [x] /dev/sprints — wrap with OsTitleBar (velocity strip preserved)
+- [x] /dev/releases — wrap with OsTitleBar (timeline preserved)
+- [x] /dev/roadmap — wrap with OsTitleBar (kanban preserved)
+- [x] /build — AI apps catalog with KPI strip + status filters
+- [x] /build/[slug] — wrap with .bldd (shadcn app renderer preserved)
 - [x] /studio — board list rebuilt
-- [ ] /studio/boards/[slug] — board canvas
+- [x] /studio/boards/[slug] — wrap with .stbd (shadcn board canvas preserved)
 
 ## R. Workspace (9 pages)
 

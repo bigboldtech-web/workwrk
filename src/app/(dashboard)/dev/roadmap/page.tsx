@@ -10,7 +10,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Map as MapIcon, Plus, Sparkles, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { Map as MapIcon, Plus, Sparkles, Code2, Zap, Rocket } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type Priority = "P0" | "P1" | "P2" | "P3";
@@ -87,20 +90,23 @@ export default function DevRoadmapPage() {
   const total = items?.length ?? 0;
   const shippedThisQ = (items ?? []).filter((i) => i.status === "SHIPPED").length;
 
-  return (
-    <div className="rmap">
-      <header className="rmap__head">
-        <div className="rmap__head-l">
-          <div className="rmap__icon"><MapIcon /></div>
-          <div>
-            <h1 className="rmap__title">Roadmap</h1>
-            <div className="rmap__sub">
-              {items === null ? "Loading…" : `${total} item${total === 1 ? "" : "s"} · ${shippedThisQ} shipped · ${themes.length} theme${themes.length === 1 ? "" : "s"}`}
-            </div>
-          </div>
+  return (<>
+    <OsTitleBar
+      title="Roadmap"
+      Icon={MapIcon}
+      iconGradient={GRAD.indigoBlue}
+      description={items === null ? "Loading…" : `${total} item${total === 1 ? "" : "s"} · ${shippedThisQ} shipped · ${themes.length} theme${themes.length === 1 ? "" : "s"}`}
+      actions={
+        <div className="rmap__head-actions">
+          <Link href="/dev" className="rmap__nav-link"><Code2 /> Dev</Link>
+          <Link href="/dev/sprints" className="rmap__nav-link"><Zap /> Sprints</Link>
+          <Link href="/dev/releases" className="rmap__nav-link"><Rocket /> Releases</Link>
+          <button type="button" className="rmap__btn-primary"><Plus /> New item</button>
         </div>
-        <button type="button" className="rmap__new"><Plus /> New item</button>
-      </header>
+      }
+    />
+
+    <div className="rmap">
 
       {themes.length > 0 && (
         <nav className="rmap__themes">
@@ -158,5 +164,5 @@ export default function DevRoadmapPage() {
         </div>
       )}
     </div>
-  );
+  </>);
 }

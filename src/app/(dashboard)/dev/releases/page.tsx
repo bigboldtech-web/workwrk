@@ -11,7 +11,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Rocket, Plus, Globe, AlertTriangle, ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { Rocket, Plus, Globe, AlertTriangle, ExternalLink, Code2, Zap, Map as MapIcon } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type Status = "PLANNED" | "BUILDING" | "STAGED" | "SHIPPED" | "ROLLED_BACK" | "CANCELLED";
@@ -74,20 +77,23 @@ export default function DevReleasesPage() {
   const shippedCount = (items ?? []).filter((r) => r.status === "SHIPPED").length;
   const planned = (items ?? []).filter((r) => r.status === "PLANNED" || r.status === "BUILDING" || r.status === "STAGED").length;
 
-  return (
-    <div className="rels">
-      <header className="rels__head">
-        <div className="rels__head-l">
-          <div className="rels__icon"><Rocket /></div>
-          <div>
-            <h1 className="rels__title">Releases</h1>
-            <div className="rels__sub">
-              {items === null ? "Loading…" : `${shippedCount} shipped · ${planned} in flight · changelog history`}
-            </div>
-          </div>
+  return (<>
+    <OsTitleBar
+      title="Releases"
+      Icon={Rocket}
+      iconGradient={GRAD.greenTeal}
+      description={items === null ? "Loading…" : `${shippedCount} shipped · ${planned} in flight · changelog history`}
+      actions={
+        <div className="rels__head-actions">
+          <Link href="/dev" className="rels__nav-link"><Code2 /> Dev</Link>
+          <Link href="/dev/sprints" className="rels__nav-link"><Zap /> Sprints</Link>
+          <Link href="/dev/roadmap" className="rels__nav-link"><MapIcon /> Roadmap</Link>
+          <button type="button" className="rels__btn-primary"><Plus /> New release</button>
         </div>
-        <button type="button" className="rels__new"><Plus /> New release</button>
-      </header>
+      }
+    />
+
+    <div className="rels">
 
       <nav className="rels__filters">
         <button type="button" className={filter === "all" ? "is-active" : ""} onClick={() => setFilter("all")}>All <em>{items?.length ?? 0}</em></button>
@@ -155,5 +161,5 @@ export default function DevReleasesPage() {
         </div>
       )}
     </div>
-  );
+  </>);
 }

@@ -192,7 +192,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
   const editableKeys = renderFields.map((f) => f.key);
 
   return (
-    <div className="p-6 max-w-[1800px] mx-auto">
+    <div className="stbd p-6 max-w-[1800px] mx-auto">
       <div className="flex items-start justify-between mb-4 gap-4">
         <div className="min-w-0 flex-1">
           <Link href="/studio" className="text-xs text-muted-2 hover:text-foreground inline-flex items-center gap-1 mb-2">

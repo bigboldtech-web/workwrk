@@ -124,7 +124,7 @@ export default function BuildAppPage() {
   const rows = app.ui.rows ?? [];
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto">
+    <div className="bldd p-6 max-w-[1600px] mx-auto">
       <Link href="/build" className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground mb-3">
         <ArrowLeft size={12} /> All apps
       </Link>
