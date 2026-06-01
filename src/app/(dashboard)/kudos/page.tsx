@@ -1,24 +1,20 @@
 "use client";
 
-/* Real Kudos page.
+/* Kudos — peer-recognition feed with KPI strip + reaction chips.
  *
- *  GET  /api/kudos             list (shaped: { giver, receiver, reactionCounts, ... })
- *  POST /api/kudos             { receiverId, message, companyValue? }
- *
- *  No status field — kudos are immutable shout-outs. We bucket by
- *  "Recent" (last 7 days) and then by month, so the feed reads
- *  chronologically.
+ *  GET  /api/kudos
+ *  POST /api/kudos
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Heart, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  Heart, Plus, Hash, ChevronRight, Trophy, Sparkles, Users, Calendar as CalendarIcon,
+  Search, TrendingUp,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -36,60 +32,42 @@ type ApiKudos = {
 
 const AV = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV[h % AV.length]; }
-function initials(f?: string | null, l?: string | null) { const a = (f ?? "")[0] ?? ""; const b = (l ?? "")[0] ?? ""; return ((a + b) || "?").toUpperCase(); }
+function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
 function fullName(u?: { firstName?: string | null; lastName?: string | null } | null) {
-  if (!u) return "—";
+  if (!u) return "Unknown";
   return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Unknown";
 }
 
 const MS_DAY = 86400_000;
 
-function kudosToRow(k: ApiKudos): Row {
-  const reactionsSummary = k.reactionCounts.slice(0, 3).map((r) => `${r.emoji} ${r.count}`).join(" ");
-  return {
-    id: k.id,
-    name: k.message,
-    cells: {
-      from: k.giver ? [{ initials: initials(k.giver.firstName, k.giver.lastName), color: avColor(k.giver.id) }] : [],
-      to:   k.receiver ? [{ initials: initials(k.receiver.firstName, k.receiver.lastName), color: avColor(k.receiver.id) }] : [],
-      receiverName: fullName(k.receiver),
-      value: k.companyValue ?? "—",
-      reactions: reactionsSummary || (k.totalReactions ? `${k.totalReactions} 👏` : "—"),
-      date: { iso: k.createdAt },
-    },
-  };
+function relativeDate(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60 * 1000) return "just now";
+  if (ms < 60 * 60 * 1000) return `${Math.floor(ms / 60000)}m ago`;
+  if (ms < 24 * 60 * 60 * 1000) return `${Math.floor(ms / (60 * 60 * 1000))}h ago`;
+  if (ms < 7 * MS_DAY) return `${Math.floor(ms / MS_DAY)}d ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function buildGroups(rows: ApiKudos[]): TableGroup[] {
-  const now = Date.now();
-  const recent = rows.filter((k) => now - new Date(k.createdAt).getTime() <= 7 * MS_DAY);
-  const older = rows.filter((k) => now - new Date(k.createdAt).getTime() > 7 * MS_DAY);
-  return [
-    { id: "recent", title: "Recent (last 7 days)", color: C.pink,   rows: recent.map(kudosToRow) },
-    { id: "older",  title: "Earlier",              color: C.purple, rows: older.map(kudosToRow) },
-  ].filter((g) => g.rows.length > 0 || g.id === "recent");
+const VALUE_HUE: Record<string, string> = {
+  "Customer First": C.pink,
+  "Ownership": C.indigo,
+  "Teamwork": C.green,
+  "Boldness": C.orange,
+  "Excellence": C.purple,
+  "Innovation": C.teal,
+};
+function valueColor(v: string): string {
+  if (VALUE_HUE[v]) return VALUE_HUE[v];
+  let h = 0; for (let i = 0; i < v.length; i++) h = (h * 31 + v.charCodeAt(i)) >>> 0;
+  return AV[h % AV.length];
 }
-
-const COLUMNS: Column[] = [
-  { id: "from",         label: "From",          type: "person" },
-  { id: "to",           label: "To",            type: "person" },
-  { id: "receiverName", label: "Receiver",      type: "text" },
-  { id: "value",        label: "Company value", type: "text" },
-  { id: "reactions",    label: "Reactions",     type: "text" },
-  { id: "date",         label: "Given",         type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Feed",       Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function KudosPage() {
   const [rows, setRows] = useState<ApiKudos[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [search, setSearch] = useState("");
+  const [activeValue, setActiveValue] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -98,9 +76,9 @@ export default function KudosPage() {
       const res = await fetch("/api/kudos?limit=50");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      // Kudos GET returns { data, pagination }
       const list: ApiKudos[] = data?.data ?? (Array.isArray(data) ? data : []);
       setRows(list);
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -109,27 +87,46 @@ export default function KudosPage() {
   const v = rowVersion("kudos");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(rows ?? []), [rows]);
+  const stats = useMemo(() => {
+    const list = rows ?? [];
+    const week = list.filter((k) => Date.now() - new Date(k.createdAt).getTime() <= 7 * MS_DAY).length;
+    const month = list.filter((k) => Date.now() - new Date(k.createdAt).getTime() <= 30 * MS_DAY).length;
+    const totalReactions = list.reduce((a, k) => a + k.totalReactions, 0);
+    const receiverCounts = new Map<string, { id: string; name: string; n: number }>();
+    for (const k of list) {
+      if (!k.receiver?.id) continue;
+      const cur = receiverCounts.get(k.receiver.id);
+      const name = fullName(k.receiver);
+      if (cur) cur.n += 1;
+      else receiverCounts.set(k.receiver.id, { id: k.receiver.id, name, n: 1 });
+    }
+    const topReceivers = Array.from(receiverCounts.values()).sort((a, b) => b.n - a.n).slice(0, 5);
+    return { total: list.length, week, month, totalReactions, topReceivers };
+  }, [rows]);
 
-  const handlers = {
-    onAdd: async (_g: string) => {
-      toast("Sending kudos needs a receiver — use the +Kudos button on People");
-      throw new Error("not supported");
-    },
-  };
+  const values = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const k of rows ?? []) {
+      if (!k.companyValue) continue;
+      m.set(k.companyValue, (m.get(k.companyValue) ?? 0) + 1);
+    }
+    return Array.from(m.entries()).sort(([, a], [, b]) => b - a);
+  }, [rows]);
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (rows ?? []).map((k): CalendarEvent => ({
-      id: k.id,
-      title: `${initials(k.giver?.firstName, k.giver?.lastName)} → ${fullName(k.receiver)}`,
-      date: k.createdAt,
-      color: C.pink,
-      payload: kudosToRow(k).cells,
-    })),
-    [rows],
-  );
+  const filtered = useMemo(() => {
+    let list = rows ?? [];
+    if (activeValue) list = list.filter((k) => k.companyValue === activeValue);
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter((k) =>
+      k.message.toLowerCase().includes(q) ||
+      fullName(k.giver).toLowerCase().includes(q) ||
+      fullName(k.receiver).toLowerCase().includes(q) ||
+      (k.companyValue ?? "").toLowerCase().includes(q));
+    return list;
+  }, [rows, search, activeValue]);
 
-  const weekCount = (rows ?? []).filter((k) => Date.now() - new Date(k.createdAt).getTime() <= 7 * MS_DAY).length;
+  const recent = filtered.filter((k) => Date.now() - new Date(k.createdAt).getTime() <= 7 * MS_DAY);
+  const older = filtered.filter((k) => Date.now() - new Date(k.createdAt).getTime() > 7 * MS_DAY);
 
   return (
     <>
@@ -137,34 +134,152 @@ export default function KudosPage() {
         title="Kudos"
         Icon={Heart}
         iconGradient={GRAD.redPink}
-        description={rows === null ? "Loading kudos…" : `${rows.length} kudos${rows.length === 1 ? "" : "s"} · ${weekCount} this week · live-synced`}
-        people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.pr]}
-        morePeople={9}
+        description={rows === null ? "Loading…" : `${stats.total} kudos · ${stats.week} this week · ${stats.totalReactions} reactions`}
+        actions={
+          <div className="kud__head-actions">
+            <Link href="/people" className="kud__nav-link"><Users /> People</Link>
+            <button type="button" className="kud__btn-primary" onClick={() => toast("Send kudos from any person's profile page")}>
+              <Plus /> Send kudos
+            </button>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="Send kudos" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={Heart} iconGradient={GRAD.redPink} title="Couldn't load kudos" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : rows === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : rows.length === 0 ? (
-            <OsEmptyView Icon={Heart} iconGradient={GRAD.redPink} title="No kudos yet" subtitle="Recognize a teammate's work. Pick a company value to reinforce the behavior you want to celebrate." chips={["Customer First", "Ownership", "Teamwork", "Boldness"]} cta="Send kudos" />
-          ) : (
-            <OsMainTable moduleId="kudos" columns={COLUMNS} groups={groups} handlers={handlers} />
+      <div className="kud">
+        <div className="kud__kpis">
+          <KpiTile accent="var(--os-c-pink)"   Icon={Heart}      label="Kudos given"  value={`${stats.total}`}    sub="all time" />
+          <KpiTile accent="var(--os-c-orange)" Icon={Sparkles}   label="This week"    value={`${stats.week}`}      sub={`${stats.month} this month`} />
+          <KpiTile accent="var(--os-c-purple)" Icon={TrendingUp} label="Reactions"    value={`${stats.totalReactions}`} sub="cumulative" />
+          <KpiTile accent="var(--os-c-green)"  Icon={Trophy}     label="Top receiver" value={stats.topReceivers[0]?.name.split(" ")[0] ?? "—"} sub={`${stats.topReceivers[0]?.n ?? 0} kudos`} />
+        </div>
+
+        <div className="kud__toolbar">
+          <div className="kud__search">
+            <Search />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search message, giver, receiver, value…" />
+          </div>
+          {(search.trim() || activeValue) && (
+            <button type="button" className="kud__clear" onClick={() => { setSearch(""); setActiveValue(null); }}>Clear</button>
           )}
-        </>
-      )}
+        </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="kudos" events={calendarEvents} newLabel="Send kudos" />
-      )}
+        {values.length > 0 && (
+          <div className="kud__values">
+            <button type="button" className={`kud__value${activeValue === null ? " is-active" : ""}`} onClick={() => setActiveValue(null)}>
+              <Hash /> All values
+            </button>
+            {values.map(([v, n]) => (
+              <button
+                key={v}
+                type="button"
+                className={`kud__value${activeValue === v ? " is-active" : ""}`}
+                style={{ ["--v-c" as unknown as string]: valueColor(v) }}
+                onClick={() => setActiveValue(activeValue === v ? null : v)}
+              >
+                <span className="kud__value-dot" />
+                {v}
+                <span>{n}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={Heart} iconGradient={GRAD.redPink} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with the feed." chips={["Live data"]} cta="Back to Feed" />
-      )}
+        {loadError ? (
+          <OsEmptyView Icon={Heart} iconGradient={GRAD.redPink} title="Couldn't load kudos" subtitle={loadError} cta="Retry" />
+        ) : rows === null ? (
+          <div className="kud__loading">Loading…</div>
+        ) : stats.total === 0 ? (
+          <OsEmptyView
+            Icon={Heart}
+            iconGradient={GRAD.redPink}
+            title="No kudos yet"
+            subtitle="Recognize a teammate's work. Pick a company value to reinforce the behavior you want to celebrate."
+            chips={["Customer First", "Ownership", "Teamwork", "Boldness"]}
+            cta="Send kudos"
+          />
+        ) : filtered.length === 0 ? (
+          <div className="kud__no-match"><Search /> No kudos match the current filter.</div>
+        ) : (
+          <>
+            {recent.length > 0 && (
+              <section className="kud__section">
+                <header className="kud__section-head">
+                  <span className="kud__section-tag"><Sparkles /> Recent (last 7 days)</span>
+                  <span className="kud__section-count">{recent.length}</span>
+                  <span className="kud__section-line" />
+                </header>
+                <div className="kud__feed">
+                  {recent.map((k) => <KudosCard key={k.id} k={k} />)}
+                </div>
+              </section>
+            )}
+            {older.length > 0 && (
+              <section className="kud__section">
+                <header className="kud__section-head">
+                  <span className="kud__section-tag"><CalendarIcon /> Earlier</span>
+                  <span className="kud__section-count">{older.length}</span>
+                  <span className="kud__section-line" />
+                </header>
+                <div className="kud__feed">
+                  {older.map((k) => <KudosCard key={k.id} k={k} />)}
+                </div>
+              </section>
+            )}
+          </>
+        )}
+      </div>
     </>
+  );
+}
+
+function KudosCard({ k }: { k: ApiKudos }) {
+  const giverColor = k.giver ? avColor(k.giver.id) : "var(--os-ink-3)";
+  const receiverColor = k.receiver ? avColor(k.receiver.id) : "var(--os-ink-3)";
+  const vColor = k.companyValue ? valueColor(k.companyValue) : "var(--os-c-pink)";
+  return (
+    <article className="kud__card" style={{ ["--c-c" as unknown as string]: vColor }}>
+      <header className="kud__card-head">
+        <span className="kud__card-av" style={{ background: giverColor }}>{initials(k.giver?.firstName, k.giver?.lastName)}</span>
+        <div className="kud__card-flow">
+          <span className="kud__card-from">{fullName(k.giver)}</span>
+          <Heart />
+          <span className="kud__card-to">{fullName(k.receiver)}</span>
+          {k.receiver?.department?.name && <span className="kud__card-dept">· {k.receiver.department.name}</span>}
+        </div>
+        <span className="kud__card-av" style={{ background: receiverColor }}>{initials(k.receiver?.firstName, k.receiver?.lastName)}</span>
+      </header>
+      <p className="kud__card-msg">{k.message}</p>
+      <footer className="kud__card-foot">
+        {k.companyValue && (
+          <span className="kud__card-value"><Trophy /> {k.companyValue}</span>
+        )}
+        {k.reactionCounts.length > 0 && (
+          <div className="kud__card-reactions">
+            {k.reactionCounts.slice(0, 5).map((r) => (
+              <span key={r.emoji} className={`kud__card-reaction${k.myReactions.includes(r.emoji) ? " is-mine" : ""}`}>
+                {r.emoji} {r.count}
+              </span>
+            ))}
+            {k.reactionCounts.length > 5 && <span className="kud__card-reaction">+{k.reactionCounts.length - 5}</span>}
+          </div>
+        )}
+        <span className="kud__card-time">{relativeDate(k.createdAt)}</span>
+        <ChevronRight className="kud__card-arrow" />
+      </footer>
+    </article>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Heart; label: string; value: string; sub: string }) {
+  return (
+    <div className="kud__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="kud__kpi-accent" aria-hidden="true" />
+      <div className="kud__kpi-row">
+        <div className="kud__kpi-icon"><Icon /></div>
+        <div className="kud__kpi-label">{label}</div>
+      </div>
+      <div className="kud__kpi-value">{value}</div>
+      <div className="kud__kpi-sub">{sub}</div>
+    </div>
   );
 }

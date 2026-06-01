@@ -177,7 +177,7 @@ Every page subtask must pass this gate before being marked done:
 
 ## N. Brand & Culture (4 pages)
 
-- [ ] /kudos — kudos feed
+- [x] /kudos — feed with KPI strip + value chips + reaction pills
 - [ ] /candor — anonymous feedback
 - [ ] /announcements — announcement list (popover already done)
 - [ ] /brand-guide — brand guidelines
