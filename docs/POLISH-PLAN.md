@@ -180,7 +180,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /kudos — feed with KPI strip + value chips + reaction pills
 - [x] /candor — sessions with KPI strip + privacy banner + launch/close actions
 - [x] /announcements — broadcast feed with KPI strip + priority sections + ack action
-- [ ] /brand-guide — brand guidelines
+- [x] /brand-guide — bespoke showcase with color swatches + type specimens + narrative
 
 ## O. Learning & Development (7 pages)
 
