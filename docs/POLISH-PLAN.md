@@ -162,7 +162,7 @@ Every page subtask must pass this gate before being marked done:
 ## L. Planning & Analytics (6 pages)
 
 - [x] /planning — hub with KPI strip + workspace tiles
-- [ ] /planning/[id] — plan detail
+- [x] /planning/[id] — wrap with .pland (preserves shadcn spreadsheet editor)
 - [ ] /planning/plans — plan list
 - [ ] /planning/variance — variance analysis
 - [ ] /analytics — analytics dashboard

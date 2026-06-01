@@ -155,7 +155,7 @@ export default function PlanDetailPage() {
   const scenario = plan.scenarios.find((s) => s.id === scenarioId);
 
   return (
-    <div className="space-y-4">
+    <div className="pland space-y-4">
       {/* Header */}
       <div>
         <Link href="/planning" className="text-xs text-slate-500 hover:text-slate-900 inline-flex items-center gap-1 mb-3">

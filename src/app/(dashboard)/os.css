@@ -9795,6 +9795,9 @@ table.os-tbl {
 .plan__tile-sub { font-size: 11.5px; color: var(--os-ink-3); }
 .plan__tile-chev { width: 14px; height: 14px; color: var(--os-ink-3); flex-shrink: 0; }
 
+/* Plan detail wrapper — preserves shadcn spreadsheet editor */
+.pland { padding: 14px 28px 60px; max-width: 1500px; margin: 0 auto; }
+
 /* ════════════════════════════════════════════════════════════════
  * PURCHASE ORDERS
  * ════════════════════════════════════════════════════════════════ */
