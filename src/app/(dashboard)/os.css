@@ -22647,3 +22647,304 @@ a.prfh__contact:hover { color: var(--os-brand); }
 @media (max-width: 900px) {
   .pyrg__kpis { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * PAYROLL · PAYSLIP — printable paystub
+ * ════════════════════════════════════════════════════════════════ */
+.pyps { padding: 14px 28px 60px; max-width: 1100px; margin: 0 auto; }
+.pyps__loading { padding: 60px 24px; text-align: center; color: var(--os-ink-3); font-size: 13px; }
+
+.pyps__head-actions { display: flex; gap: 6px; align-items: center; }
+.pyps__back, .pyps__btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  color: var(--os-ink-2);
+  cursor: pointer;
+  transition: all 120ms;
+}
+.pyps__back svg, .pyps__btn svg { width: 13px; height: 13px; }
+.pyps__back:hover, .pyps__btn:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+.pyps__btn--icon { padding: 0; width: 30px; justify-content: center; }
+.pyps__btn--primary {
+  background: linear-gradient(135deg, var(--os-c-green), var(--os-c-teal));
+  color: white;
+  border-color: transparent;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.16);
+}
+.pyps__btn--primary:hover { color: white; border-color: transparent; transform: translateY(-1px); box-shadow: 0 4px 12px color-mix(in srgb, var(--os-c-green) 24%, transparent), inset 0 1px 0 rgba(255,255,255,0.16); }
+
+/* ─── Document ─── */
+.pyps__doc {
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  display: flex; flex-direction: column;
+}
+
+.pyps__doc-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
+  padding: 22px 28px 18px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--os-c-green) 4%, var(--os-surface)), var(--os-surface));
+  border-bottom: 2px solid var(--os-line);
+}
+.pyps__doc-org { display: flex; align-items: center; gap: 14px; }
+.pyps__doc-mark {
+  width: 46px; height: 46px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--os-c-green), var(--os-c-teal));
+  color: white;
+  display: grid; place-items: center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08);
+}
+.pyps__doc-mark svg { width: 22px; height: 22px; }
+.pyps__doc-org-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--os-ink);
+  letter-spacing: -0.01em;
+}
+.pyps__doc-org-sub {
+  font-size: 11.5px;
+  color: var(--os-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.pyps__doc-meta { display: flex; flex-direction: column; gap: 4px; text-align: right; }
+.pyps__doc-meta-row { display: flex; gap: 8px; align-items: center; justify-content: flex-end; font-size: 11.5px; }
+.pyps__doc-meta-label { color: var(--os-ink-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+.pyps__doc-meta-val { color: var(--os-ink); font-weight: 700; font-family: ui-monospace, SFMono-Regular, monospace; letter-spacing: 0.04em; }
+.pyps__doc-status {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--os-surface-1);
+  color: var(--os-ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pyps__doc-status.is-posted { background: color-mix(in srgb, var(--os-c-green) 14%, transparent); color: var(--os-c-green); }
+.pyps__doc-status svg { width: 11px; height: 11px; }
+
+/* ─── Subject + period ─── */
+.pyps__subject {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 20px 28px;
+  border-bottom: 1px solid var(--os-line);
+}
+.pyps__subject-info { display: flex; align-items: center; gap: 14px; }
+.pyps__subject-av {
+  width: 56px; height: 56px;
+  border-radius: 14px;
+  display: grid; place-items: center;
+  color: white;
+  font-size: 18px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.pyps__subject-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--os-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.pyps__subject-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--os-ink);
+  margin-top: 2px;
+  letter-spacing: -0.01em;
+}
+.pyps__subject-email {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px;
+  color: var(--os-ink-3);
+  margin-top: 3px;
+}
+.pyps__subject-email svg { width: 11px; height: 11px; }
+
+.pyps__period { display: flex; flex-direction: column; gap: 8px; }
+.pyps__period-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 6px 12px; background: var(--os-surface-1); border-radius: 8px; }
+.pyps__period-label { font-size: 10.5px; color: var(--os-ink-3); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.pyps__period-val { font-size: 12px; color: var(--os-ink); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.pyps__period-val--strong { font-weight: 700; }
+
+/* ─── 3 columns ─── */
+.pyps__columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding: 18px 28px;
+}
+.pyps__col {
+  display: flex; flex-direction: column;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-top: 3px solid var(--col-c);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.pyps__col-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--col-c) 6%, transparent);
+  border-bottom: 1px solid var(--os-line);
+}
+.pyps__col-head svg { width: 12px; height: 12px; color: var(--col-c); }
+.pyps__col-head h3 {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--os-ink);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex: 1;
+}
+.pyps__col-count {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--os-surface);
+  color: var(--col-c);
+  font-variant-numeric: tabular-nums;
+}
+
+.pyps__col-empty { padding: 18px 12px; text-align: center; font-size: 11.5px; color: var(--os-ink-3); font-style: italic; }
+.pyps__col-lines { list-style: none; padding: 6px 0; margin: 0; flex: 1; }
+.pyps__col-line {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  padding: 7px 12px;
+}
+.pyps__col-line-main { min-width: 0; flex: 1; }
+.pyps__col-line-name { font-size: 12px; color: var(--os-ink); font-weight: 600; line-height: 1.3; }
+.pyps__col-line-rate { font-size: 10.5px; color: var(--os-ink-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pyps__col-line-amounts { text-align: right; }
+.pyps__col-line-amt { font-size: 12px; font-weight: 700; color: var(--os-ink); font-family: ui-monospace, SFMono-Regular, monospace; font-variant-numeric: tabular-nums; }
+.pyps__col-line-ytd { font-size: 10px; color: var(--os-ink-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+.pyps__col-total {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--os-surface);
+  border-top: 1px solid var(--os-line);
+}
+.pyps__col-total span {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--os-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pyps__col-total strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--col-c);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Net summary ─── */
+.pyps__summary {
+  margin: 0 28px 18px;
+  background: linear-gradient(135deg, var(--os-surface-1), color-mix(in srgb, var(--os-c-green) 5%, var(--os-surface-1)));
+  border: 1px solid color-mix(in srgb, var(--os-c-green) 22%, var(--os-line));
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.pyps__summary-grid {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+}
+.pyps__summary-cell {
+  display: flex; flex-direction: column; gap: 2px;
+  flex: 1; min-width: 110px;
+}
+.pyps__summary-cell span {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--os-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pyps__summary-cell strong {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--os-ink);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.pyps__summary-tax { color: var(--os-c-orange) !important; }
+.pyps__summary-ded { color: var(--os-c-red) !important; }
+.pyps__summary-cell--net strong { color: var(--os-c-green); font-size: 26px; }
+.pyps__summary-op {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--os-ink-3);
+  padding: 0 4px;
+}
+
+.pyps__pay-method {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--os-ink-2);
+  padding: 6px 12px;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 7px;
+}
+.pyps__pay-method svg { width: 12px; height: 12px; color: var(--os-ink-3); }
+.pyps__pay-method strong { color: var(--os-ink); font-weight: 700; }
+
+/* ─── Footer ─── */
+.pyps__doc-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px;
+  border-top: 1px solid var(--os-line);
+  font-size: 11px;
+  color: var(--os-ink-3);
+  background: var(--os-surface-1);
+}
+.pyps__doc-foot-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--os-brand);
+  text-decoration: none;
+}
+.pyps__doc-foot-link svg { width: 12px; height: 12px; }
+
+/* ─── Print ─── */
+@media print {
+  .pyps__hide-print { display: none !important; }
+  body, html { background: white !important; }
+  .pyps { padding: 0; max-width: none; }
+  .pyps__doc { border: none; box-shadow: none; border-radius: 0; }
+  .pyps__doc-head { background: white; }
+  .pyps__columns { padding-top: 8px; padding-bottom: 8px; }
+  .pyps__summary { margin: 0 28px 8px; }
+  .pyps__doc-foot { background: white; }
+  .pyps__col { break-inside: avoid; }
+}
+
+@media (max-width: 900px) {
+  .pyps__columns { grid-template-columns: 1fr; }
+  .pyps__subject { grid-template-columns: 1fr; }
+}
