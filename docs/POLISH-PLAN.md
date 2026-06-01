@@ -136,7 +136,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /financials/accounts — chart of accounts with KPI strip + search
 - [x] /financials/entries — journal ledger with status filters + expandable lines
 - [x] /financials/reports — statement launchpad with live aggregates + health pill
-- [ ] /financials/statements — P&L + balance sheet
+- [x] /financials/statements — P&L/BS/CF generator with period info + print
 - [ ] /financials/calendar — financial calendar
 - [ ] /expenses — expense report list
 - [ ] /expenses/[id] — expense detail

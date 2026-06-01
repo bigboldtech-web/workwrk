@@ -5,18 +5,24 @@
  * Toolbar: pick a period (from accounting-periods list) + a statement
  * kind. Body renders the rollup from /api/financials/statements.
  *
- * P&L: revenue table + expense table + net income headline.
- * BS:  assets + liabilities + equity columns, with balance check.
- * CF:  v1 shell (operating/investing/financing buckets) — the API
- *      flags this as "wire when accounts are CF-tagged".
+ * Accepts ?report=income-statement|balance-sheet|trial-balance from
+ * the reports launchpad and maps to internal kinds (P&L / BS / CF).
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Receipt, FileBarChart, ChevronRight, AlertTriangle } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import {
+  Receipt, FileBarChart, ChevronRight, AlertTriangle, Coins, BookText,
+  CalendarRange, Printer, CheckCircle2, Clock, Activity,
+} from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type AcctRow = { id: string; code: string; name: string; balance: number };
-type Period = { id: string; label: string; status?: string };
+type Period = { id: string; label: string; status?: string; startDate?: string; endDate?: string };
 
 type Pnl = { period: Period; kind: "pnl"; revenue: AcctRow[]; expense: AcctRow[]; totals: { revenue: number; expense: number; netIncome: number } };
 type Bs  = { period: Period; kind: "bs"; assets: AcctRow[]; liabilities: AcctRow[]; equity: AcctRow[]; totals: { assets: number; liabilities: number; equity: number } };
@@ -25,6 +31,16 @@ type Statement = Pnl | Bs | Cf;
 
 type Kind = "pnl" | "bs" | "cf";
 const KIND_LABEL: Record<Kind, string> = { pnl: "Profit & Loss", bs: "Balance Sheet", cf: "Cash Flow" };
+const KIND_HUE: Record<Kind, string> = { pnl: "var(--os-c-green)", bs: "var(--os-c-blue)", cf: "var(--os-c-purple)" };
+
+function mapReportParam(rep: string | null): Kind {
+  switch (rep) {
+    case "balance-sheet": return "bs";
+    case "income-statement": return "pnl";
+    case "cash-flow": return "cf";
+    default: return "pnl";
+  }
+}
 
 function money(n: number): string {
   const sign = n < 0 ? "-" : "";
@@ -35,13 +51,20 @@ function money(n: number): string {
 }
 
 export default function StatementsPage() {
+  const sp = useSearchParams();
   const [periods, setPeriods] = useState<Period[] | null>(null);
   const [periodId, setPeriodId] = useState<string>("");
-  const [kind, setKind] = useState<Kind>("pnl");
+  const [kind, setKind] = useState<Kind>(() => mapReportParam(sp.get("report")));
   const [stmt, setStmt] = useState<Statement | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { rowVersion } = useOsShell();
+
+  // Sync URL param when it changes externally
+  useEffect(() => {
+    const rep = sp.get("report");
+    if (rep) setKind(mapReportParam(rep));
+  }, [sp]);
 
   const loadPeriods = useCallback(async () => {
     try {
@@ -51,7 +74,15 @@ export default function StatementsPage() {
       const d = await res.json();
       const list: Period[] = d.data ?? (Array.isArray(d) ? d : []);
       setPeriods(list);
-      if (list.length > 0 && !periodId) setPeriodId(list[list.length - 1].id);
+      if (list.length > 0 && !periodId) {
+        const now = Date.now();
+        const current = list.find((p) =>
+          p.startDate && p.endDate &&
+          new Date(p.startDate).getTime() <= now && now <= new Date(p.endDate).getTime()
+        );
+        setPeriodId((current ?? list[list.length - 1]).id);
+      }
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -68,58 +99,90 @@ export default function StatementsPage() {
       if (!res.ok) throw new Error(`statement ${res.status}`);
       const d = await res.json();
       setStmt(d.data ?? d);
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
     setBusy(false);
   }, [periodId, kind]);
 
-  // Auto-generate when period+kind change
   useEffect(() => { if (periodId) void generate(); }, [periodId, kind, generate]);
 
+  const activePeriod = useMemo(() => (periods ?? []).find((p) => p.id === periodId), [periods, periodId]);
+
   return (
-    <div className="stmt">
-      <header className="stmt__head">
-        <div className="stmt__head-l">
-          <div className="stmt__icon"><FileBarChart /></div>
-          <div>
-            <h1 className="stmt__title">Financial statements</h1>
-            <div className="stmt__sub">Generate P&L, Balance Sheet, and Cash Flow for any accounting period.</div>
-          </div>
-        </div>
-      </header>
-
-      <section className="stmt__toolbar">
-        <label className="stmt__field">
-          <span>Period</span>
-          <select value={periodId} onChange={(e) => setPeriodId(e.target.value)}>
-            {periods === null ? <option>Loading…</option> : periods.length === 0 ? <option>No periods</option> :
-              periods.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
-        </label>
-        <div className="stmt__kinds">
-          {(["pnl", "bs", "cf"] as Kind[]).map((k) => (
-            <button key={k} type="button" className={kind === k ? "is-active" : ""} onClick={() => setKind(k)}>
-              {KIND_LABEL[k]}
+    <>
+      <OsTitleBar
+        title="Financial statements"
+        Icon={FileBarChart}
+        iconGradient={GRAD.pinkPurple}
+        description={activePeriod ? `${KIND_LABEL[kind]} · ${activePeriod.label}` : "Pick a period to generate"}
+        actions={
+          <div className="stmt__head-actions">
+            <Link href="/financials" className="stmt__nav-link"><Coins /> Finance</Link>
+            <Link href="/financials/reports" className="stmt__nav-link"><FileBarChart /> Reports</Link>
+            <Link href="/financials/entries" className="stmt__nav-link"><BookText /> Journal</Link>
+            <button type="button" className="stmt__btn-primary" onClick={() => window.print()} disabled={!stmt}>
+              <Printer /> Print
             </button>
-          ))}
-        </div>
-      </section>
+          </div>
+        }
+      />
 
-      {loadError ? (
-        <div className="stmt__error">{loadError}</div>
-      ) : busy ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Computing…</div>
-      ) : !stmt ? (
-        <div className="stmt__empty">Pick a period to generate the statement.</div>
-      ) : stmt.kind === "pnl" ? (
-        <PnlView s={stmt} />
-      ) : stmt.kind === "bs" ? (
-        <BsView s={stmt} />
-      ) : (
-        <CfView s={stmt} />
-      )}
-    </div>
+      <div className="stmt">
+        <section className="stmt__toolbar">
+          <label className="stmt__field">
+            <span>Period</span>
+            <select value={periodId} onChange={(e) => setPeriodId(e.target.value)}>
+              {periods === null ? <option>Loading…</option> : periods.length === 0 ? <option>No periods</option> :
+                periods.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </label>
+          <div className="stmt__kinds">
+            {(["pnl", "bs", "cf"] as Kind[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={`stmt__kind${kind === k ? " is-active" : ""}`}
+                style={{ ["--k-c" as unknown as string]: KIND_HUE[k] }}
+                onClick={() => setKind(k)}
+              >
+                <Receipt /> {KIND_LABEL[k]}
+              </button>
+            ))}
+          </div>
+          {activePeriod && (
+            <div className="stmt__period-info">
+              {activePeriod.startDate && activePeriod.endDate && (
+                <span className="stmt__period-dates">
+                  <CalendarRange /> {new Date(activePeriod.startDate).toLocaleDateString()} → {new Date(activePeriod.endDate).toLocaleDateString()}
+                </span>
+              )}
+              {activePeriod.status && (
+                <span className={`stmt__period-status stmt__period-status--${activePeriod.status.toLowerCase()}`}>
+                  {activePeriod.status === "OPEN" ? <CheckCircle2 /> : activePeriod.status === "CLOSED" ? <Activity /> : <Clock />}
+                  {activePeriod.status}
+                </span>
+              )}
+            </div>
+          )}
+        </section>
+
+        {loadError ? (
+          <OsEmptyView Icon={FileBarChart} iconGradient={GRAD.redPink} title="Couldn't generate statement" subtitle={loadError} cta="Retry" />
+        ) : busy ? (
+          <div className="stmt__loading">Computing statement…</div>
+        ) : !stmt ? (
+          <div className="stmt__empty-pick">Pick a period to generate the statement.</div>
+        ) : stmt.kind === "pnl" ? (
+          <PnlView s={stmt} />
+        ) : stmt.kind === "bs" ? (
+          <BsView s={stmt} />
+        ) : (
+          <CfView s={stmt} />
+        )}
+      </div>
+    </>
   );
 }
 
