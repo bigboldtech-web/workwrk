@@ -14,7 +14,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Box, Search, AlertTriangle, Plus, ChevronRight, Calendar } from "lucide-react";
+import { Box, Search, AlertTriangle, Plus, Calendar, Hash, Server } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type AssetCondition = "NEW" | "GOOD" | "FAIR" | "POOR" | "DAMAGED";
@@ -113,23 +115,22 @@ export default function AssetsPage() {
     return list;
   }, [assets, filter, search]);
 
-  return (
+  return (<>
+    <OsTitleBar
+      title="Asset register"
+      Icon={Box}
+      iconGradient={GRAD.bluePurple}
+      description={assets === null ? "Loading…" : `${stats.total} asset${stats.total === 1 ? "" : "s"} on the books${stats.totalValue > 0 ? ` · ${fmtMoney(stats.totalValue)} total value` : ""}`}
+      actions={
+        <div className="ast__head-actions">
+          <Link href="/settings" className="ast__nav-link"><Hash /> Settings</Link>
+          <Link href="/itsm/cmdb" className="ast__nav-link"><Server /> CMDB view</Link>
+          <button type="button" className="ast__btn-primary"><Plus /> Add asset</button>
+        </div>
+      }
+    />
+
     <div className="ast">
-      <header className="ast__head">
-        <div className="ast__head-l">
-          <div className="ast__icon"><Box /></div>
-          <div>
-            <h1 className="ast__title">Asset register</h1>
-            <div className="ast__sub">
-              {assets === null ? "Loading…" : `${stats.total} asset${stats.total === 1 ? "" : "s"} on the books${stats.totalValue > 0 ? ` · ${fmtMoney(stats.totalValue)} total value` : ""}`}
-            </div>
-          </div>
-        </div>
-        <div className="ast__actions">
-          <Link href="/itsm/cmdb" className="ast__link">CMDB view →</Link>
-          <button type="button" className="ast__new"><Plus /> Add asset</button>
-        </div>
-      </header>
 
       {loadError ? (
         <div className="ast__error">{loadError}</div>
@@ -221,5 +222,5 @@ export default function AssetsPage() {
         </>
       )}
     </div>
-  );
+  </>);
 }

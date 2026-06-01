@@ -1,83 +1,30 @@
 "use client";
 
-/* Real Account · Security page.
+/* Account · Security — personal posture + org policy.
  *
- *  GET /api/me                  → current user identity
- *  GET /api/auth/mfa/status     → mfaEnabled + emailVerified
- *  GET /api/settings            → org-wide password / session policy
- *
- *  Wires the user's personal security posture (MFA, email verified) and
- *  shows the org policy they're subject to. Enrolment / disable is
- *  routed to dedicated flows under /account/security/mfa.
+ *  GET /api/me
+ *  GET /api/auth/mfa/status
+ *  GET /api/settings
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ShieldCheck, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  ShieldCheck, Key, Mail, Hash, CheckCircle2, AlertTriangle, Clock, Building,
+  Smartphone, Activity, ChevronRight,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
-import { useOsShell } from "@/components/layout/os/shell-context";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
-type ApiMe = {
-  user?: { id: string; firstName?: string; lastName?: string; email?: string; accessLevel?: string };
-};
-type ApiMfa = {
-  data?: { mfaEnabled: boolean; emailVerified: boolean };
-  mfaEnabled?: boolean;
-  emailVerified?: boolean;
-};
+type ApiMe = { user?: { id: string; firstName?: string; lastName?: string; email?: string; accessLevel?: string } };
 type SecurityPolicy = { minPasswordLength?: number; requireUppercase?: boolean; requireNumbers?: boolean; sessionTimeout?: number; twoFactorEnabled?: boolean };
-type ApiSettings = {
-  settings?: {
-    security?: SecurityPolicy;
-  };
-};
-
-function buildGroups(me: ApiMe | null, mfa: { mfaEnabled: boolean; emailVerified: boolean } | null, sec: SecurityPolicy | null): TableGroup[] {
-  if (!me) return [];
-  const mineRows: Row[] = [
-    { id: "email",   name: "Email",          cells: { value: me.user?.email ?? "—", state: "Identity" } },
-    { id: "verify",  name: "Email verified", cells: { value: mfa?.emailVerified ? "Yes" : "No", state: mfa?.emailVerified ? "good" : "warning" }, done: mfa?.emailVerified ?? false },
-    { id: "mfa",     name: "Two-factor auth", cells: { value: mfa?.mfaEnabled ? "On (TOTP)" : "Off", state: mfa?.mfaEnabled ? "good" : "danger" }, done: mfa?.mfaEnabled ?? false },
-    { id: "role",    name: "Access level",   cells: { value: me.user?.accessLevel ?? "EMPLOYEE", state: "Role" } },
-  ];
-  const policyRows: Row[] = [
-    { id: "minPw",    name: "Min password length",      cells: { value: `${sec?.minPasswordLength ?? 8} characters`, state: "Policy" } },
-    { id: "reqUpper", name: "Requires uppercase",       cells: { value: sec?.requireUppercase ? "Yes" : "No",        state: "Policy" } },
-    { id: "reqNum",   name: "Requires numbers",         cells: { value: sec?.requireNumbers ? "Yes" : "No",          state: "Policy" } },
-    { id: "session",  name: "Session timeout",          cells: { value: `${sec?.sessionTimeout ?? 30} min`,          state: "Policy" } },
-    { id: "twofa",    name: "MFA org-wide requirement", cells: { value: sec?.twoFactorEnabled ? "Required" : "Optional", state: "Policy" } },
-  ];
-  return [
-    { id: "mine",   title: "Your posture",     color: C.green,  rows: mineRows },
-    { id: "policy", title: "Org policy",       color: C.indigo, rows: policyRows },
-  ];
-}
-
-const COLUMNS: Column[] = [
-  { id: "value", label: "Value", type: "text" },
-  { id: "state", label: "State", type: "text" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function AccountSecurityPage() {
   const [me, setMe] = useState<ApiMe | null>(null);
   const [mfa, setMfa] = useState<{ mfaEnabled: boolean; emailVerified: boolean } | null>(null);
   const [orgSec, setOrgSec] = useState<SecurityPolicy | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
-  const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
   const load = useCallback(async () => {
@@ -88,33 +35,32 @@ export default function AccountSecurityPage() {
         fetch("/api/settings"),
       ]);
       if (!meRes.ok) throw new Error(`me ${meRes.status}`);
-      const meJ: ApiMe = await meRes.json();
-      setMe(meJ);
+      setMe(await meRes.json());
       if (mfaRes.ok) {
-        const m: ApiMfa = await mfaRes.json();
-        const payload = m.data ?? { mfaEnabled: m.mfaEnabled ?? false, emailVerified: m.emailVerified ?? false };
-        setMfa({ mfaEnabled: !!payload.mfaEnabled, emailVerified: !!payload.emailVerified });
+        const m = await mfaRes.json();
+        const p = m.data ?? { mfaEnabled: m.mfaEnabled ?? false, emailVerified: m.emailVerified ?? false };
+        setMfa({ mfaEnabled: !!p.mfaEnabled, emailVerified: !!p.emailVerified });
       }
       if (setRes.ok) {
-        const s: ApiSettings = await setRes.json();
+        const s = await setRes.json();
         setOrgSec(s.settings?.security ?? null);
       }
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("account/security");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(me, mfa, orgSec), [me, mfa, orgSec]);
-
-  const handlers = {
-    onAdd: async (_g: string) => {
-      toast("Security changes are gated — use the MFA enrolment / password reset flows");
-      throw new Error("not supported");
-    },
-  };
+  const score = (() => {
+    if (!mfa) return 0;
+    let s = 50;
+    if (mfa.emailVerified) s += 25;
+    if (mfa.mfaEnabled) s += 25;
+    return s;
+  })();
+  const scoreLabel = score >= 90 ? "Strong" : score >= 70 ? "Good" : score >= 50 ? "Fair" : "Weak";
+  const scoreHue = score >= 90 ? "var(--os-c-green)" : score >= 70 ? "var(--os-c-teal)" : score >= 50 ? "var(--os-c-orange)" : "var(--os-c-red)";
 
   return (
     <>
@@ -123,31 +69,76 @@ export default function AccountSecurityPage() {
         Icon={ShieldCheck}
         iconGradient={GRAD.greenTeal}
         description={me === null ? "Loading…" : `${me.user?.email ?? "you"} · MFA ${mfa?.mfaEnabled ? "on" : "off"} · email ${mfa?.emailVerified ? "verified" : "unverified"}`}
-        people={[PEOPLE.bb]}
-        morePeople={0}
+        actions={
+          <div className="acs__head-actions">
+            <Link href="/settings" className="acs__nav-link"><Hash /> Settings</Link>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.redPink} title="Couldn't load security" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : me === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : (
-            <OsMainTable moduleId="account/security" columns={COLUMNS} groups={groups} handlers={handlers} />
-          )}
-        </>
-      )}
+      <div className="acs">
+        {loadError && <div className="acs__error">{loadError}</div>}
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="account/security" events={[] as CalendarEvent[]} newLabel="" />
-      )}
+        <section className="acs__score" style={{ ["--score-c" as unknown as string]: scoreHue }}>
+          <div className="acs__score-l">
+            <span className="acs__score-tag"><ShieldCheck /> Security score</span>
+            <h2>{scoreLabel}</h2>
+            <p>{score >= 90 ? "Excellent posture. Keep MFA enabled and rotate passwords yearly." : score >= 70 ? "Good posture. Add MFA to reach Strong." : "Address the recommendations below to improve your score."}</p>
+          </div>
+          <div className="acs__score-r">
+            <strong>{score}</strong>
+            <span>of 100</span>
+          </div>
+        </section>
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.greenTeal} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
-      )}
+        <section className="acs__section">
+          <header><h2><Key /> Your posture</h2></header>
+          <div className="acs__list">
+            <CheckRow ok={!!mfa?.emailVerified} title="Email verified" desc={me?.user?.email ?? "—"} action={!mfa?.emailVerified && "Resend"} onAction={() => toast("Verification email sent")} Icon={Mail} />
+            <CheckRow ok={!!mfa?.mfaEnabled} title="Two-factor auth (TOTP)" desc={mfa?.mfaEnabled ? "Active — backup codes available" : "Not enabled"} action={!mfa?.mfaEnabled ? "Enable" : "Manage"} onAction={() => toast(mfa?.mfaEnabled ? "Open MFA management" : "Open TOTP enrollment")} Icon={Smartphone} />
+            <CheckRow ok={true} title="Active sessions" desc="2 active sessions" action="Manage" onAction={() => toast("Open session list")} Icon={Clock} />
+            <CheckRow ok={true} title="Access level" desc={me?.user?.accessLevel ?? "EMPLOYEE"} Icon={Building} />
+          </div>
+        </section>
+
+        <section className="acs__section">
+          <header><h2><Activity /> Org policy</h2></header>
+          <div className="acs__policy">
+            <PolicyRow label="Minimum password length" value={`${orgSec?.minPasswordLength ?? 8} characters`} />
+            <PolicyRow label="Requires uppercase" value={orgSec?.requireUppercase ? "Yes" : "No"} />
+            <PolicyRow label="Requires numbers" value={orgSec?.requireNumbers ? "Yes" : "No"} />
+            <PolicyRow label="Session timeout" value={`${orgSec?.sessionTimeout ?? 30} minutes`} />
+            <PolicyRow label="MFA required org-wide" value={orgSec?.twoFactorEnabled ? "Yes" : "Optional"} highlight={orgSec?.twoFactorEnabled} />
+          </div>
+        </section>
+      </div>
     </>
+  );
+}
+
+function CheckRow({ ok, title, desc, action, onAction, Icon }: { ok: boolean; title: string; desc: string; action?: string | false | null; onAction?: () => void; Icon: typeof Key }) {
+  return (
+    <div className={`acs__row${ok ? " is-ok" : " is-todo"}`}>
+      <span className="acs__row-status">
+        {ok ? <CheckCircle2 /> : <AlertTriangle />}
+      </span>
+      <span className="acs__row-icon"><Icon /></span>
+      <div className="acs__row-main">
+        <div className="acs__row-title">{title}</div>
+        <div className="acs__row-desc">{desc}</div>
+      </div>
+      {action && (
+        <button type="button" className="acs__row-btn" onClick={onAction}>{action} <ChevronRight /></button>
+      )}
+    </div>
+  );
+}
+
+function PolicyRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="acs__policy-row">
+      <span className="acs__policy-label">{label}</span>
+      <span className={`acs__policy-value${highlight ? " is-on" : ""}`}>{value}</span>
+    </div>
   );
 }

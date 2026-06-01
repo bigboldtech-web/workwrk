@@ -213,14 +213,14 @@ Every page subtask must pass this gate before being marked done:
 ## R. Workspace (9 pages)
 
 - [x] /settings — category grid rebuilt
-- [ ] /settings/identity — identity form
-- [ ] /settings/api — API keys list
-- [ ] /settings/audit — audit log feed
-- [ ] /settings/tags — tag manager
-- [ ] /settings/calendar — calendar integrations
-- [ ] /integrations — third-party integrations
-- [ ] /account/security — security settings
-- [ ] /assets — digital assets
+- [x] /settings/identity — bespoke org identity form (brand + locale + summary)
+- [x] /settings/api — API keys table with KPI strip + scope chips
+- [x] /settings/audit — feed with KPI strip + action filter chips
+- [x] /settings/tags — tag manager with hue chips grouped by category
+- [x] /settings/calendar — provider grid + active connections + sync indicator
+- [x] /integrations — marketplace with category chips + connect/disconnect
+- [x] /account/security — security score + posture checks + org policy
+- [x] /assets — wrap with OsTitleBar (bespoke table preserved)
 
 ## S. Engagement & Tools (5 pages)
 
