@@ -140,7 +140,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /financials/calendar — fiscal calendar with current spotlight + status filters
 - [x] /expenses — submitter/approver list with KPI strip + status filters + inline actions
 - [x] /expenses/[id] — bespoke hero with status flow + timeline + tag picker
-- [ ] /procurement — procurement overview
+- [x] /procurement — bespoke hub with KPI strip + status mix bar + workspace tiles
 - [ ] /procurement/[id] — PO detail
 - [ ] /procurement/pos — PO list
 - [ ] /procurement/invoices — invoice list
