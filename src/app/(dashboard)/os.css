@@ -22374,3 +22374,276 @@ a.prfh__contact:hover { color: var(--os-brand); }
   .pyrr__row { grid-template-columns: 110px 1fr auto; }
   .pyrr__row-paydate, .pyrr__row-totals { display: none; }
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * PAYROLL · PAY GROUPS — config catalog
+ * ════════════════════════════════════════════════════════════════ */
+.pyrg { padding: 14px 28px 60px; max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.pyrg__loading { padding: 60px 24px; text-align: center; color: var(--os-ink-3); font-size: 13px; }
+
+/* ─── Header actions ─── */
+.pyrg__head-actions { display: flex; gap: 6px; align-items: center; }
+.pyrg__back, .pyrg__nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--os-ink-2);
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 120ms;
+}
+.pyrg__back svg, .pyrg__nav-link svg { width: 12px; height: 12px; }
+.pyrg__back:hover, .pyrg__nav-link:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+.pyrg__btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--os-c-green), var(--os-c-teal));
+  color: white;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-left: 4px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.16);
+  transition: all 120ms;
+}
+.pyrg__btn-primary svg { width: 13px; height: 13px; }
+.pyrg__btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px color-mix(in srgb, var(--os-c-green) 24%, transparent), inset 0 1px 0 rgba(255,255,255,0.16); }
+
+/* ─── KPIs ─── */
+.pyrg__kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.pyrg__kpi {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+.pyrg__kpi-accent { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--kpi-accent); }
+.pyrg__kpi-row { display: flex; align-items: center; gap: 8px; }
+.pyrg__kpi-icon {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--kpi-accent) 14%, transparent);
+  color: var(--kpi-accent);
+}
+.pyrg__kpi-icon svg { width: 13px; height: 13px; }
+.pyrg__kpi-label { font-size: 11px; font-weight: 700; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.pyrg__kpi-value { font-size: 22px; font-weight: 700; color: var(--os-ink); font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; }
+.pyrg__kpi-sub { font-size: 11.5px; color: var(--os-ink-3); }
+
+/* ─── Toolbar ─── */
+.pyrg__toolbar {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  flex-wrap: wrap;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+.pyrg__search {
+  display: flex; align-items: center; gap: 8px;
+  flex: 1;
+  min-width: 240px;
+  height: 34px;
+  padding: 0 12px;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: 8px;
+  transition: all 120ms;
+}
+.pyrg__search:focus-within { border-color: var(--os-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--os-brand) 14%, transparent); }
+.pyrg__search svg { width: 14px; height: 14px; color: var(--os-ink-3); flex-shrink: 0; }
+.pyrg__search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--os-font);
+  font-size: 12.5px;
+  color: var(--os-ink);
+}
+.pyrg__search input::placeholder { color: var(--os-ink-3); }
+
+.pyrg__inactive-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--os-ink-2);
+  cursor: pointer;
+}
+.pyrg__inactive-toggle input { width: 14px; height: 14px; accent-color: var(--os-brand); cursor: pointer; }
+
+/* ─── Cards ─── */
+.pyrg__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.pyrg__card {
+  display: flex; flex-direction: column;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 140ms;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+.pyrg__card:hover {
+  transform: translateY(-2px);
+  border-color: var(--os-line-strong);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+.pyrg__card.is-inactive { opacity: 0.72; }
+
+.pyrg__card-cover {
+  position: relative;
+  height: 70px;
+  display: flex; align-items: center; padding: 0 16px;
+  color: white;
+}
+.pyrg__card-cover::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.18));
+  pointer-events: none;
+}
+.pyrg__card-flag {
+  font-size: 32px;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+}
+.pyrg__card-currency {
+  margin-left: auto;
+  position: relative;
+  z-index: 1;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.22);
+  color: white;
+  letter-spacing: 0.06em;
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.pyrg__card-state-pill {
+  position: absolute;
+  top: 10px; left: 16px;
+  z-index: 1;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.32);
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  backdrop-filter: blur(6px);
+}
+
+.pyrg__card-body { padding: 14px 16px 12px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.pyrg__card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.pyrg__card-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--os-ink);
+  line-height: 1.25;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.pyrg__card-freq {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--freq-c) 14%, transparent);
+  color: var(--freq-c);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pyrg__card-lines { display: flex; flex-direction: column; gap: 5px; }
+.pyrg__card-line {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px;
+  color: var(--os-ink-2);
+}
+.pyrg__card-line svg { width: 11px; height: 11px; color: var(--os-ink-3); flex-shrink: 0; }
+.pyrg__card-sep { color: var(--os-line-strong); }
+
+.pyrg__card-foot {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--os-line);
+  background: var(--os-surface-1);
+}
+.pyrg__card-stat {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px;
+  color: var(--os-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.pyrg__card-stat svg { width: 12px; height: 12px; color: var(--os-ink-3); }
+.pyrg__card-stat strong { color: var(--os-ink); font-weight: 700; }
+
+.pyrg__card-active {
+  margin-left: auto;
+  display: grid; place-items: center;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--os-c-green) 14%, transparent);
+  color: var(--os-c-green);
+}
+.pyrg__card-active.is-off {
+  background: var(--os-surface);
+  color: var(--os-ink-3);
+  border: 1px solid var(--os-line);
+}
+.pyrg__card-active svg { width: 12px; height: 12px; }
+
+/* ─── Empty (filtered) ─── */
+.pyrg__empty {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--os-ink-3);
+  font-size: 13px;
+  background: var(--os-surface);
+  border: 1px dashed var(--os-line);
+  border-radius: 12px;
+}
+.pyrg__empty svg { width: 24px; height: 24px; opacity: 0.6; }
+.pyrg__empty-reset {
+  margin-top: 4px;
+  background: var(--os-brand);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .pyrg__kpis { grid-template-columns: repeat(2, 1fr); }
+}
