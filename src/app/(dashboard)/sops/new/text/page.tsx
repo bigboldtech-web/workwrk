@@ -11,7 +11,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FileText, Eye, EyeOff, Send, Save, ArrowLeft } from "lucide-react";
+import Link from "next/link";
+import { FileText, Eye, EyeOff, Send, Save, ArrowLeft, Hash, BookCopy } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
 export default function WrittenSopEditor() {
@@ -92,35 +95,42 @@ export default function WrittenSopEditor() {
     });
   }
 
-  if (!id) return <div className="sop-edit__error">Missing SOP id. <a href="/sops">Back to SOPs</a></div>;
+  if (!id) return (<>
+    <OsTitleBar title="New written SOP" Icon={FileText} iconGradient={GRAD.tealGreen} showInvite={false} />
+    <div className="sop-edit__error">Missing SOP id. <a href="/sops">Back to SOPs</a></div>
+  </>);
 
-  return (
-    <div className="sop-edit">
-      <header className="sop-edit__head">
-        <div className="sop-edit__head-l">
-          <button type="button" className="sop-edit__back" onClick={() => router.push("/sops")} aria-label="Back">
-            <ArrowLeft />
-          </button>
-          <div className="sop-edit__type"><FileText /> Written SOP</div>
-          <div className="sop-edit__save-state">
-            {saving ? "Saving…" : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "—"}
-          </div>
-        </div>
-        <div className="sop-edit__actions">
-          <button type="button" onClick={() => setPreview((p) => !p)} className="sop-edit__btn">
+  return (<>
+    <OsTitleBar
+      title="Written SOP"
+      Icon={FileText}
+      iconGradient={GRAD.tealGreen}
+      description={saving ? "Saving…" : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Auto-saves every 5s"}
+      actions={
+        <div className="sop-edit__head-actions">
+          <Link href="/sops" className="sop-edit__nav-link"><Hash /> SOPs</Link>
+          <Link href="/sops/new" className="sop-edit__nav-link"><BookCopy /> Pick type</Link>
+          <button type="button" onClick={() => setPreview((p) => !p)} className="sop-edit__nav-link">
             {preview ? <EyeOff /> : <Eye />} {preview ? "Edit" : "Preview"}
           </button>
-          <button type="button" onClick={() => save()} className="sop-edit__btn" disabled={saving}>
+          <button type="button" onClick={() => save()} className="sop-edit__nav-link" disabled={saving}>
             <Save /> Save
           </button>
-          {status !== "PUBLISHED" && (
-            <button type="button" onClick={() => save({ publish: true })} className="sop-edit__btn sop-edit__btn--primary" disabled={saving}>
+          {status !== "PUBLISHED" ? (
+            <button type="button" onClick={() => save({ publish: true })} className="sop-edit__btn-primary" disabled={saving}>
               <Send /> Publish
             </button>
+          ) : (
+            <span className="sop-edit__pub">Published</span>
           )}
-          {status === "PUBLISHED" && <span className="sop-edit__pub">Published</span>}
         </div>
-      </header>
+      }
+    />
+
+    <div className="sop-edit">
+      <button type="button" className="sop-edit__back" onClick={() => router.push("/sops")}>
+        <ArrowLeft /> All SOPs
+      </button>
 
       <input
         type="text"
@@ -146,5 +156,5 @@ export default function WrittenSopEditor() {
         Auto-saves while you type. Switch to <strong>Preview</strong> to see formatting.
       </footer>
     </div>
-  );
+  </>);
 }

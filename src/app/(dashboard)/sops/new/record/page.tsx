@@ -17,7 +17,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Video, Circle, Square, Mic, MicOff, Download, Send, ArrowLeft, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { Video, Circle, Square, Mic, MicOff, Download, Send, ArrowLeft, AlertTriangle, Hash, BookCopy } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type Status = "DRAFT" | "PUBLISHED" | "ARCHIVED" | "IN_REVIEW" | "APPROVED";
@@ -176,9 +179,13 @@ export default function ScreenRecordSopEditor() {
 
   useEffect(() => () => { stopAll(); recordings.forEach((r) => URL.revokeObjectURL(r.url)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!id) return <div className="sop-edit__error">Missing SOP id. <a href="/sops">Back to SOPs</a></div>;
+  if (!id) return (<>
+    <OsTitleBar title="New recorded SOP" Icon={Video} iconGradient={GRAD.pinkPurple} showInvite={false} />
+    <div className="sop-edit__error">Missing SOP id. <a href="/sops">Back to SOPs</a></div>
+  </>);
   if (!supported) {
-    return (
+    return (<>
+      <OsTitleBar title="Screen recording" Icon={Video} iconGradient={GRAD.pinkPurple} showInvite={false} />
       <div className="rec">
         <div className="rec__unsupported">
           <AlertTriangle />
@@ -189,26 +196,39 @@ export default function ScreenRecordSopEditor() {
           </div>
         </div>
       </div>
-    );
+    </>);
   }
 
-  return (
-    <div className="rec">
-      <header className="rec__head">
-        <div className="rec__head-l">
-          <button type="button" className="sop-edit__back" onClick={() => router.push("/sops")} aria-label="Back"><ArrowLeft /></button>
-          <div className="sop-edit__type"><Video /> Screen recording</div>
-          {recording && <span className="rec__live"><span className="rec__live-dot" /> Live · {fmtDur(elapsedSec)}</span>}
-        </div>
-        <div className="sop-edit__actions">
-          {status !== "PUBLISHED" && (
-            <button type="button" onClick={publish} className="sop-edit__btn sop-edit__btn--primary" disabled={recordings.length === 0}>
+  return (<>
+    <OsTitleBar
+      title="Screen-recorded SOP"
+      Icon={Video}
+      iconGradient={GRAD.pinkPurple}
+      description={recording ? `Live · ${fmtDur(elapsedSec)}` : `${recordings.length} clip${recordings.length === 1 ? "" : "s"} captured`}
+      actions={
+        <div className="sop-edit__head-actions">
+          <Link href="/sops" className="sop-edit__nav-link"><Hash /> SOPs</Link>
+          <Link href="/sops/new" className="sop-edit__nav-link"><BookCopy /> Pick type</Link>
+          {status !== "PUBLISHED" ? (
+            <button type="button" onClick={publish} className="sop-edit__btn-primary" disabled={recordings.length === 0}>
               <Send /> Publish
             </button>
+          ) : (
+            <span className="sop-edit__pub">Published</span>
           )}
-          {status === "PUBLISHED" && <span className="sop-edit__pub">Published</span>}
         </div>
-      </header>
+      }
+    />
+
+    <div className="rec">
+      {recording && (
+        <header className="rec__head">
+          <span className="rec__live"><span className="rec__live-dot" /> Live · {fmtDur(elapsedSec)}</span>
+        </header>
+      )}
+      <button type="button" className="sop-edit__back" onClick={() => router.push("/sops")}>
+        <ArrowLeft /> All SOPs
+      </button>
 
       <input type="text" className="sop-edit__title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What does this SOP show?" />
 
@@ -250,5 +270,5 @@ export default function ScreenRecordSopEditor() {
         </section>
       )}
     </div>
-  );
+  </>);
 }

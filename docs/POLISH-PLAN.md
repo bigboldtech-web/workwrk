@@ -151,9 +151,9 @@ Every page subtask must pass this gate before being marked done:
 - [x] /sops — library grouped by category with KPI strip + status filters
 - [x] /sops/[id] — wrap with .sopd (complex multi-mode editor preserved)
 - [x] /sops/new — type picker with hue-coded cards (Written / Checklist / Recorded)
-- [ ] /sops/new/text — text SOP builder
-- [ ] /sops/new/checklist — checklist SOP builder
-- [ ] /sops/new/record — video SOP builder
+- [x] /sops/new/text — wrap text builder with OsTitleBar + nav chrome
+- [x] /sops/new/checklist — wrap checklist builder with OsTitleBar + nav chrome
+- [x] /sops/new/record — wrap recorder with OsTitleBar + nav chrome
 - [ ] /sops/my-sops — assigned SOPs
 - [ ] /sops/compliance — compliance tracking
 - [ ] /process-runs — process execution logs
