@@ -120,7 +120,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /time-off — PTO tracker with approval queue
 - [x] /time-off/policies — policy catalog cards
 - [x] /timesheets — week log with approval flow
-- [ ] /clock — punch in/out hero
+- [x] /clock — punch in/out hero (Section H complete)
 
 ## I. Performance & Goals (5 pages)
 
