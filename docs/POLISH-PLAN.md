@@ -170,10 +170,10 @@ Every page subtask must pass this gate before being marked done:
 
 ## M. AI & Automation (4 pages)
 
-- [ ] /ai — AI assistant interface
-- [ ] /agents — agent builder list
+- [x] /ai — prompt playground with hero input + curated templates + recent runs
+- [x] /agents — bespoke marketplace (already polished — preserved)
 - [x] /sidekick — chat polished
-- [ ] /autopilot — automation rules
+- [x] /autopilot — workflow rules with KPI strip + when-if-then flow cards
 
 ## N. Brand & Culture (4 pages)
 
