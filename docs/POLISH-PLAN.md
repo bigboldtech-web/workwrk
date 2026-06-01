@@ -149,7 +149,7 @@ Every page subtask must pass this gate before being marked done:
 ## K. Knowledge (10 pages)
 
 - [x] /sops — library grouped by category with KPI strip + status filters
-- [ ] /sops/[id] — SOP detail
+- [x] /sops/[id] — wrap with .sopd (complex multi-mode editor preserved)
 - [ ] /sops/new — type picker
 - [ ] /sops/new/text — text SOP builder
 - [ ] /sops/new/checklist — checklist SOP builder

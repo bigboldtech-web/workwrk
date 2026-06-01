@@ -960,7 +960,7 @@ export default function SOPDetailPage() {
   const assignOverdue = assignments.filter((a: any) => a.status !== "COMPLETED" && a.dueDate && new Date(a.dueDate) < new Date()).length;
 
   return (
-    <div className="space-y-3 animate-fade-in">
+    <div className="sopd space-y-3 animate-fade-in">
       {/* Unsaved-backup restore banner */}
       {restorePrompt && (
         <Card className="border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.04)]">

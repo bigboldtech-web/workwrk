@@ -9990,6 +9990,11 @@ table.os-tbl {
 .sop__card-foot svg { width: 11px; height: 11px; }
 .sop__card-updated { margin-left: auto; font-variant-numeric: tabular-nums; }
 .sop__card-arrow { width: 13px; height: 13px; color: var(--os-ink-3); flex-shrink: 0; }
+
+/* ════════════════════════════════════════════════════════════════
+ * SOP DETAIL — thin polish wrapper (preserves shadcn editor body)
+ * ════════════════════════════════════════════════════════════════ */
+.sopd { padding: 14px 28px 60px; max-width: 1400px; margin: 0 auto; }
 .vnd__head-l { display: flex; gap: 14px; align-items: center; }
 .vnd__icon { width: 40px; height: 40px; border-radius: 9px; background: linear-gradient(135deg, var(--os-c-indigo), var(--os-c-blue)); display: grid; place-items: center; color: white; }
 .vnd__icon svg { width: 20px; height: 20px; }
