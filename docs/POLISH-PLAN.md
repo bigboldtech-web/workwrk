@@ -126,7 +126,7 @@ Every page subtask must pass this gate before being marked done:
 
 - [x] /reviews — featured cycle hero + cycles list
 - [x] /reviews/[id] — bespoke cycle hero (tabs preserved)
-- [ ] /kra-kpi — KRA/KPI definitions
+- [x] /kra-kpi — KRA/KPI library grouped by category
 - [ ] /kra-kpi/review — KPI review cycle
 - [ ] /talent — talent marketplace
 

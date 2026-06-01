@@ -24286,3 +24286,30 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .kra__empty svg { width: 24px; height: 24px; opacity: 0.6; }
 
 @media (max-width: 900px) { .kra__kpis { grid-template-columns: repeat(2, 1fr); } }
+
+/* ════════════════════════════════════════════════════════════════
+ * KRA/KPI · REVIEW header chrome (.review body styles preserved)
+ * ════════════════════════════════════════════════════════════════ */
+.krar__head-actions { display: flex; gap: 8px; align-items: center; }
+.krar__nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 11px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; color: var(--os-ink-2);
+  background: var(--os-surface-1); border: 1px solid var(--os-line); text-decoration: none;
+}
+.krar__nav-link svg { width: 12px; height: 12px; }
+.krar__nav-link:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+.krar__period {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--os-surface-1); border: 1px solid var(--os-line);
+  border-radius: 8px; padding: 2px 4px 2px 8px;
+  height: 30px;
+}
+.krar__period > svg { width: 12px; height: 12px; color: var(--os-ink-3); }
+.krar__period button {
+  height: 24px; padding: 0 10px; background: transparent; border: none;
+  border-radius: 6px; color: var(--os-ink-2);
+  font-size: 11px; font-weight: 600; cursor: pointer; font-family: var(--os-font);
+}
+.krar__period button:hover { color: var(--os-ink); }
+.krar__period button.is-active { background: var(--os-ink); color: white; }

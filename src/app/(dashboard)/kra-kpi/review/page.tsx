@@ -22,7 +22,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChartLine, Save, AlertCircle, CheckCircle2, Calendar, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { ChartLine, Save, AlertCircle, Calendar, ChevronRight, Target } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -232,26 +235,27 @@ export default function ReviewPage() {
   }, [reports, subjectMap, period$]);
 
   return (
-    <div className="review">
-      <header className="review__head">
-        <div className="review__head-l">
-          <div className="review__icon"><ChartLine /></div>
-          <div>
-            <h1 className="review__title">People reviews · {period === "week" ? "Weekly" : period === "month" ? "Monthly" : "Quarterly"}</h1>
-            <div className="review__sub">
-              {reports === null ? "Loading…" : `${reports.length} direct report${reports.length === 1 ? "" : "s"} · period ${period$}`}
+    <>
+      <OsTitleBar
+        title="KPI review"
+        Icon={ChartLine}
+        iconGradient={GRAD.purpleIndigo}
+        description={reports === null ? "Loading…" : `${reports.length} direct report${reports.length === 1 ? "" : "s"} · period ${period$}`}
+        actions={
+          <div className="krar__head-actions">
+            <Link href="/kra-kpi" className="krar__nav-link"><Target /> KRA library</Link>
+            <div className="krar__period">
+              <Calendar />
+              {(["week", "month", "quarter"] as Period[]).map((p) => (
+                <button key={p} type="button" className={period === p ? "is-active" : ""} onClick={() => setPeriod(p)}>
+                  {p === "week" ? "Weekly" : p === "month" ? "Monthly" : "Quarterly"}
+                </button>
+              ))}
             </div>
           </div>
-        </div>
-        <div className="review__period">
-          <Calendar />
-          {(["week", "month", "quarter"] as Period[]).map((p) => (
-            <button key={p} type="button" className={period === p ? "is-active" : ""} onClick={() => setPeriod(p)}>
-              {p === "week" ? "Weekly" : p === "month" ? "Monthly" : "Quarterly"}
-            </button>
-          ))}
-        </div>
-      </header>
+        }
+      />
+      <div className="review">
 
       {loadError ? (
         <div className="review__error">{loadError}</div>
@@ -385,6 +389,7 @@ export default function ReviewPage() {
         <span><span className="review-person__dot review-person__dot--partial" /> Some scored</span>
         <span><span className="review-person__dot review-person__dot--empty" /> Not started</span>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
