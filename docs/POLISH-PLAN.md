@@ -138,7 +138,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /financials/reports — statement launchpad with live aggregates + health pill
 - [x] /financials/statements — P&L/BS/CF generator with period info + print
 - [x] /financials/calendar — fiscal calendar with current spotlight + status filters
-- [ ] /expenses — expense report list
+- [x] /expenses — submitter/approver list with KPI strip + status filters + inline actions
 - [ ] /expenses/[id] — expense detail
 - [ ] /procurement — procurement overview
 - [ ] /procurement/[id] — PO detail
