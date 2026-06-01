@@ -1,17 +1,20 @@
 "use client";
 
-/* Finance · Accounting Periods — fiscal calendar ribbon.
- *
- * Vertical timeline of every accounting period grouped by fiscal year.
- * Each period shows its label, date span, status (Open / Closed),
- * journal-entry count, and a close/reopen action.
+/* Finance · Accounting Periods — fiscal calendar grouped by year.
  *
  * Reads:  GET   /api/accounting-periods
  * Writes: PATCH /api/accounting-periods/[id]  { action: "close"|"reopen" }
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarRange, Lock, Unlock, FileCheck2, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import {
+  CalendarRange, Lock, Unlock, FileCheck2, AlertTriangle, Coins, BookText,
+  CheckCircle2, Clock, Activity, Hash, Layers,
+} from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -29,10 +32,13 @@ type ApiPeriod = {
 
 const STATUS_HUE: Record<Status, string> = {
   OPEN: "var(--os-c-green)", LOCKED: "var(--os-c-orange)",
-  CLOSED: "var(--os-c-darkgray)", REOPENED: "var(--os-c-purple)",
+  CLOSED: "var(--os-c-ink-3)", REOPENED: "var(--os-c-purple)",
 };
 const STATUS_LABEL: Record<Status, string> = {
   OPEN: "Open", LOCKED: "Locked", CLOSED: "Closed", REOPENED: "Reopened",
+};
+const STATUS_ICON: Record<Status, typeof Clock> = {
+  OPEN: CheckCircle2, LOCKED: Lock, CLOSED: Lock, REOPENED: Activity,
 };
 
 function fmtSpan(start: string, end: string): string {
@@ -47,6 +53,7 @@ function isCurrent(p: ApiPeriod): boolean {
 export default function PeriodsPage() {
   const [periods, setPeriods] = useState<ApiPeriod[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<"ALL" | Status>("ALL");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -57,6 +64,7 @@ export default function PeriodsPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setPeriods(data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -76,92 +84,171 @@ export default function PeriodsPage() {
     } catch { toast("Couldn't update period"); }
   }
 
+  const stats = useMemo(() => {
+    const list = periods ?? [];
+    const open = list.filter((p) => p.status === "OPEN").length;
+    const closed = list.filter((p) => p.status === "CLOSED").length;
+    const locked = list.filter((p) => p.status === "LOCKED").length;
+    const reopened = list.filter((p) => p.status === "REOPENED").length;
+    const totalEntries = list.reduce((acc, p) => acc + (p._count?.journalEntries ?? 0), 0);
+    const current = list.find(isCurrent);
+    return { total: list.length, open, closed, locked, reopened, totalEntries, current };
+  }, [periods]);
+
+  const filtered = useMemo(() => {
+    if (activeFilter === "ALL") return periods ?? [];
+    return (periods ?? []).filter((p) => p.status === activeFilter);
+  }, [periods, activeFilter]);
+
   const grouped = useMemo(() => {
     const m = new Map<string, { fy: string; periods: ApiPeriod[] }>();
-    for (const p of periods ?? []) {
+    for (const p of filtered) {
       const k = p.fiscalYear?.label ?? "Unassigned";
       if (!m.has(k)) m.set(k, { fy: k, periods: [] });
       m.get(k)!.periods.push(p);
     }
     return Array.from(m.values()).sort((a, b) => b.fy.localeCompare(a.fy));
-  }, [periods]);
-
-  const total = periods?.length ?? 0;
-  const openCount = (periods ?? []).filter((p) => p.status === "OPEN" || p.status === "REOPENED").length;
-  const closedCount = (periods ?? []).filter((p) => p.status === "CLOSED" || p.status === "LOCKED").length;
+  }, [filtered]);
 
   return (
-    <div className="periods">
-      <header className="periods__head">
-        <div className="periods__head-l">
-          <div className="periods__icon"><CalendarRange /></div>
-          <div>
-            <h1 className="periods__title">Accounting periods</h1>
-            <div className="periods__sub">{periods === null ? "Loading…" : `${total} period${total === 1 ? "" : "s"} · ${openCount} open · ${closedCount} closed · ${grouped.length} fiscal year${grouped.length === 1 ? "" : "s"}`}</div>
+    <>
+      <OsTitleBar
+        title="Accounting periods"
+        Icon={CalendarRange}
+        iconGradient={GRAD.orangePink}
+        description={periods === null ? "Loading…" : `${stats.total} period${stats.total === 1 ? "" : "s"} · ${stats.open + stats.reopened} open · ${stats.closed + stats.locked} closed · ${stats.totalEntries} journal entries`}
+        actions={
+          <div className="prd__head-actions">
+            <Link href="/financials" className="prd__nav-link"><Coins /> Finance</Link>
+            <Link href="/financials/entries" className="prd__nav-link"><BookText /> Journal</Link>
           </div>
-        </div>
-        <p className="periods__caption">Closing a period freezes every entry inside it. Reopen is allowed but is recorded on the audit log.</p>
-      </header>
+        }
+      />
 
-      {loadError ? (
-        <div className="periods__error">{loadError}</div>
-      ) : periods === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-      ) : grouped.length === 0 ? (
-        <div className="periods__empty">
-          <CalendarRange />
-          <div>
-            <h3>No fiscal year set up yet</h3>
-            <p>Configure your fiscal year in Settings → Profile, then the system seeds monthly accounting periods for you.</p>
+      <div className="prd">
+        <div className="prd__kpis">
+          <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Open"      value={`${stats.open}`}      sub="ready to post" />
+          <KpiTile accent="var(--os-c-purple)" Icon={Activity}     label="Reopened"  value={`${stats.reopened}`}  sub="audit logged" />
+          <KpiTile accent="var(--os-c-orange)" Icon={Lock}         label="Locked"    value={`${stats.locked}`}    sub="awaiting close" />
+          <KpiTile accent="var(--os-c-ink-3)"  Icon={FileCheck2}   label="Closed"    value={`${stats.closed}`}    sub={`${stats.totalEntries} entries posted`} />
+        </div>
+
+        {stats.current && (
+          <section className="prd__current">
+            <span className="prd__current-tag"><Activity /> Current period</span>
+            <h2>{stats.current.label}</h2>
+            <span className="prd__current-span">{fmtSpan(stats.current.startDate, stats.current.endDate)}</span>
+            <span className={`prd__current-status prd__current-status--${stats.current.status.toLowerCase()}`}>
+              {(() => { const I = STATUS_ICON[stats.current.status]; return <I />; })()} {STATUS_LABEL[stats.current.status]}
+            </span>
+            <span className="prd__current-entries"><FileCheck2 /> {stats.current._count?.journalEntries ?? 0} entries</span>
+          </section>
+        )}
+
+        <div className="prd__toolbar">
+          <div className="prd__filters">
+            {(["ALL", "OPEN", "REOPENED", "LOCKED", "CLOSED"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={`prd__filter${activeFilter === s ? " is-active" : ""}`}
+                style={s !== "ALL" ? { ["--f-c" as unknown as string]: STATUS_HUE[s as Status] } : undefined}
+                onClick={() => setActiveFilter(s)}
+              >
+                {s === "ALL" ? <Hash /> : (() => { const I = STATUS_ICON[s as Status]; return <I />; })()}
+                {s === "ALL" ? "All" : STATUS_LABEL[s as Status]}
+                <span className="prd__filter-n">
+                  {s === "ALL" ? stats.total : s === "OPEN" ? stats.open : s === "REOPENED" ? stats.reopened : s === "LOCKED" ? stats.locked : stats.closed}
+                </span>
+              </button>
+            ))}
           </div>
+          <span className="prd__caption">Closing a period freezes every entry inside it. Reopen is recorded on the audit log.</span>
         </div>
-      ) : (
-        <div className="periods__years">
-          {grouped.map((g) => (
-            <section key={g.fy} className="periods__year">
-              <header className="periods__year-head">
-                <h2>{g.fy}</h2>
-                <span>{g.periods.length} periods</span>
-              </header>
-              <div className="periods__ribbon">
-                {g.periods.map((p) => {
-                  const current = isCurrent(p);
-                  const isOpen = p.status === "OPEN" || p.status === "REOPENED";
-                  const entries = p._count?.journalEntries ?? 0;
-                  return (
-                    <article key={p.id} className={`period ${current ? "is-current" : ""}`}>
-                      <header className="period__head">
-                        <span className="period__label">{p.label}</span>
-                        <span className="period__status" style={{ background: STATUS_HUE[p.status] }}>{STATUS_LABEL[p.status]}</span>
-                      </header>
-                      <div className="period__span">{fmtSpan(p.startDate, p.endDate)}</div>
-                      <div className="period__entries">
-                        <FileCheck2 /> {entries} journal entr{entries === 1 ? "y" : "ies"}
-                      </div>
-                      {current && <div className="period__current">Current period</div>}
-                      {p.closedAt && <div className="period__closed">Closed {new Date(p.closedAt).toLocaleDateString()}</div>}
-                      <div className="period__actions">
-                        {isOpen ? (
-                          <button type="button" className="period__btn period__btn--close" onClick={() => act(p.id, "close")}>
-                            <Lock /> Close period
-                          </button>
-                        ) : (
-                          <button type="button" className="period__btn period__btn--reopen" onClick={() => act(p.id, "reopen")}>
-                            <Unlock /> Reopen
-                          </button>
+
+        {loadError ? (
+          <OsEmptyView Icon={CalendarRange} iconGradient={GRAD.redPink} title="Couldn't load periods" subtitle={loadError} cta="Retry" />
+        ) : periods === null ? (
+          <div className="prd__loading">Loading…</div>
+        ) : stats.total === 0 ? (
+          <OsEmptyView
+            Icon={CalendarRange}
+            iconGradient={GRAD.orangePink}
+            title="No fiscal year set up yet"
+            subtitle="Configure your fiscal year in Settings → Profile, then the system seeds monthly accounting periods for you."
+            chips={["Open", "Locked", "Closed", "Reopened"]}
+            cta="Open settings"
+          />
+        ) : grouped.length === 0 ? (
+          <div className="prd__no-match"><Layers /> No periods in this status.</div>
+        ) : (
+          <div className="prd__years">
+            {grouped.map((g) => (
+              <section key={g.fy} className="prd__year">
+                <header className="prd__year-head">
+                  <h2>{g.fy}</h2>
+                  <span className="prd__year-count">{g.periods.length} period{g.periods.length === 1 ? "" : "s"}</span>
+                  <span className="prd__year-line" />
+                </header>
+                <div className="prd__ribbon">
+                  {g.periods.map((p) => {
+                    const current = isCurrent(p);
+                    const isOpen = p.status === "OPEN" || p.status === "REOPENED";
+                    const entries = p._count?.journalEntries ?? 0;
+                    const Icon = STATUS_ICON[p.status];
+                    return (
+                      <article
+                        key={p.id}
+                        className={`prd__period${current ? " is-current" : ""}`}
+                        style={{ ["--s-c" as unknown as string]: STATUS_HUE[p.status] }}
+                      >
+                        <header className="prd__period-head">
+                          <span className="prd__period-label">{p.label}</span>
+                          <span className="prd__period-status"><Icon /> {STATUS_LABEL[p.status]}</span>
+                        </header>
+                        <div className="prd__period-span">{fmtSpan(p.startDate, p.endDate)}</div>
+                        <div className="prd__period-entries">
+                          <FileCheck2 /> {entries} journal entr{entries === 1 ? "y" : "ies"}
+                        </div>
+                        {current && <div className="prd__period-current">Current period</div>}
+                        {p.closedAt && <div className="prd__period-closed">Closed {new Date(p.closedAt).toLocaleDateString()}</div>}
+                        <div className="prd__period-actions">
+                          {isOpen ? (
+                            <button type="button" className="prd__period-btn prd__period-btn--close" onClick={() => act(p.id, "close")}>
+                              <Lock /> Close
+                            </button>
+                          ) : (
+                            <button type="button" className="prd__period-btn prd__period-btn--reopen" onClick={() => act(p.id, "reopen")}>
+                              <Unlock /> Reopen
+                            </button>
+                          )}
+                        </div>
+                        {!isOpen && entries === 0 && (
+                          <div className="prd__period-warn"><AlertTriangle /> Closed with no entries</div>
                         )}
-                      </div>
-                      {!isOpen && entries === 0 ? (
-                        <div className="period__warn"><AlertTriangle /> Closed with no entries posted</div>
-                      ) : null}
-                    </article>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof CalendarRange; label: string; value: string; sub: string }) {
+  return (
+    <div className="prd__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="prd__kpi-accent" aria-hidden="true" />
+      <div className="prd__kpi-row">
+        <div className="prd__kpi-icon"><Icon /></div>
+        <div className="prd__kpi-label">{label}</div>
+      </div>
+      <div className="prd__kpi-value">{value}</div>
+      <div className="prd__kpi-sub">{sub}</div>
     </div>
   );
 }

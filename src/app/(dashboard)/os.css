@@ -9389,6 +9389,199 @@ table.os-tbl {
   .stmt__doc { border: none !important; box-shadow: none !important; padding: 0; }
 }
 
+/* ════════════════════════════════════════════════════════════════
+ * FINANCE · ACCOUNTING PERIODS — fiscal calendar
+ * ════════════════════════════════════════════════════════════════ */
+.prd { padding: 14px 28px 60px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.prd__loading { padding: 60px 24px; text-align: center; color: var(--os-ink-3); font-size: 13px; }
+.prd__no-match {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 40px 20px; color: var(--os-ink-3); font-size: 13px;
+  background: var(--os-surface); border: 1px dashed var(--os-line); border-radius: 12px;
+}
+.prd__no-match svg { width: 15px; height: 15px; }
+.prd__head-actions { display: flex; gap: 6px; align-items: center; }
+.prd__nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 11px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; color: var(--os-ink-2);
+  background: var(--os-surface-1); border: 1px solid var(--os-line); text-decoration: none;
+}
+.prd__nav-link svg { width: 12px; height: 12px; }
+.prd__nav-link:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+
+/* KPIs */
+.prd__kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 900px) { .prd__kpis { grid-template-columns: repeat(2, 1fr); } }
+.prd__kpi {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.prd__kpi-accent { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--kpi-accent); }
+.prd__kpi-row { display: flex; align-items: center; gap: 10px; }
+.prd__kpi-icon {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: color-mix(in srgb, var(--kpi-accent) 14%, transparent);
+  color: var(--kpi-accent);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.prd__kpi-icon svg { width: 15px; height: 15px; }
+.prd__kpi-label { font-size: 11px; font-weight: 700; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.prd__kpi-value { font-size: 26px; font-weight: 700; color: var(--os-ink); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.prd__kpi-sub { font-size: 11.5px; color: var(--os-ink-3); }
+
+/* Current period spotlight */
+.prd__current {
+  position: relative;
+  background: linear-gradient(135deg, var(--os-surface), color-mix(in srgb, var(--os-c-orange) 6%, var(--os-surface)));
+  border: 1px solid color-mix(in srgb, var(--os-c-orange) 28%, var(--os-line));
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  overflow: hidden;
+}
+.prd__current::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--os-c-orange);
+}
+.prd__current-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-weight: 700; padding: 3px 10px;
+  border-radius: 999px; background: var(--os-c-orange); color: white;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.prd__current-tag svg { width: 11px; height: 11px; }
+.prd__current h2 { font-size: 20px; font-weight: 700; color: var(--os-ink); margin: 0; letter-spacing: -0.01em; }
+.prd__current-span { font-size: 12.5px; color: var(--os-ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.prd__current-status {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; font-weight: 700; padding: 3px 9px;
+  border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.prd__current-status svg { width: 11px; height: 11px; }
+.prd__current-status--open { background: color-mix(in srgb, var(--os-c-green) 14%, transparent); color: var(--os-c-green); }
+.prd__current-status--reopened { background: color-mix(in srgb, var(--os-c-purple) 14%, transparent); color: var(--os-c-purple); }
+.prd__current-status--locked { background: color-mix(in srgb, var(--os-c-orange) 14%, transparent); color: var(--os-c-orange); }
+.prd__current-status--closed { background: color-mix(in srgb, var(--os-ink-3) 14%, transparent); color: var(--os-ink-3); }
+.prd__current-entries {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--os-ink-2); font-weight: 600;
+  margin-left: auto;
+}
+.prd__current-entries svg { width: 12px; height: 12px; color: var(--os-ink-3); }
+
+/* Toolbar */
+.prd__toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.prd__filters { display: flex; gap: 4px; background: var(--os-surface-1); border: 1px solid var(--os-line); border-radius: 9px; padding: 3px; }
+.prd__filter {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; padding: 0 10px; border-radius: 6px;
+  background: transparent; border: none;
+  font-size: 11.5px; font-weight: 600; color: var(--os-ink-2);
+  cursor: pointer; font-family: var(--os-font);
+}
+.prd__filter svg { width: 12px; height: 12px; }
+.prd__filter:hover { color: var(--os-ink); background: white; }
+.prd__filter.is-active {
+  background: white;
+  color: var(--f-c, var(--os-brand));
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.prd__filter-n {
+  font-size: 10px; font-weight: 700; padding: 1px 6px;
+  background: var(--os-surface-1); border-radius: 999px;
+  color: var(--os-ink-3); font-variant-numeric: tabular-nums;
+}
+.prd__filter.is-active .prd__filter-n {
+  background: color-mix(in srgb, var(--f-c, var(--os-brand)) 14%, transparent);
+  color: var(--f-c, var(--os-brand));
+}
+.prd__caption { margin-left: auto; font-size: 11.5px; color: var(--os-ink-3); }
+
+/* Fiscal year groups */
+.prd__years { display: flex; flex-direction: column; gap: 14px; }
+.prd__year { display: flex; flex-direction: column; gap: 10px; }
+.prd__year-head { display: flex; align-items: center; gap: 10px; }
+.prd__year-head h2 {
+  font-size: 14px; font-weight: 700; color: var(--os-ink); margin: 0;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.prd__year-count {
+  font-size: 11px; font-weight: 600; color: var(--os-ink-3);
+  padding: 2px 8px; background: var(--os-surface-1); border: 1px solid var(--os-line);
+  border-radius: 999px;
+}
+.prd__year-line { flex: 1; height: 1px; background: var(--os-line); }
+
+/* Period cards ribbon */
+.prd__ribbon {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.prd__period {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-left: 3px solid var(--s-c);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 5px;
+  overflow: hidden;
+  transition: transform 120ms ease, border-color 120ms ease;
+}
+.prd__period:hover { transform: translateY(-1px); }
+.prd__period.is-current {
+  background: linear-gradient(135deg, var(--os-surface), color-mix(in srgb, var(--s-c) 6%, var(--os-surface)));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--s-c) 22%, transparent);
+}
+.prd__period-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prd__period-label { font-size: 13px; font-weight: 700; color: var(--os-ink); }
+.prd__period-status {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 9.5px; font-weight: 700; padding: 3px 8px;
+  border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--s-c) 14%, transparent);
+  color: var(--s-c);
+}
+.prd__period-status svg { width: 10px; height: 10px; }
+.prd__period-span { font-size: 11px; color: var(--os-ink-3); font-variant-numeric: tabular-nums; }
+.prd__period-entries {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--os-ink-2); font-weight: 600;
+}
+.prd__period-entries svg { width: 12px; height: 12px; color: var(--os-ink-3); }
+.prd__period-current {
+  font-size: 10px; font-weight: 700; color: var(--s-c);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.prd__period-closed { font-size: 10.5px; color: var(--os-ink-3); font-style: italic; font-variant-numeric: tabular-nums; }
+.prd__period-actions { margin-top: 4px; }
+.prd__period-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 26px; padding: 0 10px; border-radius: 6px;
+  font-size: 11px; font-weight: 600;
+  cursor: pointer; font-family: var(--os-font);
+  border: 1px solid var(--os-line);
+  background: var(--os-surface-1); color: var(--os-ink-2);
+}
+.prd__period-btn svg { width: 11px; height: 11px; }
+.prd__period-btn--close { background: color-mix(in srgb, var(--os-c-orange) 12%, transparent); border-color: color-mix(in srgb, var(--os-c-orange) 28%, var(--os-line)); color: var(--os-c-orange); }
+.prd__period-btn--close:hover { background: color-mix(in srgb, var(--os-c-orange) 18%, transparent); }
+.prd__period-btn--reopen { background: color-mix(in srgb, var(--os-c-purple) 12%, transparent); border-color: color-mix(in srgb, var(--os-c-purple) 28%, var(--os-line)); color: var(--os-c-purple); }
+.prd__period-btn--reopen:hover { background: color-mix(in srgb, var(--os-c-purple) 18%, transparent); }
+.prd__period-warn {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-top: 4px;
+  font-size: 10.5px; font-weight: 600; color: var(--os-c-red);
+}
+.prd__period-warn svg { width: 12px; height: 12px; }
+
 .stmt__doc { background: white; border: 1px solid var(--os-line); border-radius: 12px; padding: 28px 32px; }
 .stmt-doc__head { display: flex; align-items: center; gap: 14px; padding-bottom: 18px; border-bottom: 2px solid var(--os-ink); margin-bottom: 24px; }
 .stmt-doc__head h2 { font-size: 22px; font-weight: 700; color: var(--os-ink); margin: 0; flex: 1; }
