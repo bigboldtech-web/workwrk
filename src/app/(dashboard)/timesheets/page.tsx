@@ -1,32 +1,25 @@
 "use client";
 
-/* Real, persistent Timesheets page.
+/* Timesheets — week log with approval flow.
  *
- *  GET   /api/timesheets?scope=team|mine|approve|all
- *  POST  /api/timesheets               idempotent upsert for current week
- *  PATCH /api/timesheets/[id]          { action: submit | retract | decide }
- *
- *  Status enum: DRAFT | SUBMITTED | APPROVED | REJECTED
- *  Transitions (action-based):
- *    DRAFT → SUBMITTED                  { action: submit }
- *    SUBMITTED → DRAFT                  { action: retract }
- *    SUBMITTED → APPROVED | REJECTED    { action: decide, decision: APPROVE|REJECT }
+ *  GET  /api/timesheets?scope=mine|team|approve|all
+ *  POST /api/timesheets               idempotent upsert for current week
+ *  PATCH /api/timesheets/[id]         { action: submit | retract | decide }
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import {
+  Clock, Plus, Calendar as CalendarIcon, CheckCircle2, XCircle,
+  Send, RotateCcw, ChevronRight, Loader2, Play,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import type { PickerOption } from "@/components/layout/os/picker-popover";
 
 type TsStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+type Scope = "mine" | "approve" | "team" | "all";
 
 type ApiTimesheet = {
   id: string;
@@ -40,153 +33,76 @@ type ApiTimesheet = {
   _count?: { entries?: number };
 };
 
-const STATUS_TO_OS: Record<TsStatus, StatusValue> = {
-  DRAFT: "planning", SUBMITTED: "pending", APPROVED: "done", REJECTED: "stuck",
-};
-const STATUS_LABELS: Record<TsStatus, string> = {
-  DRAFT: "Draft", SUBMITTED: "Submitted", APPROVED: "Approved", REJECTED: "Rejected",
-};
-const STATUS_COLORS: Record<TsStatus, string> = {
-  DRAFT: C.indigo, SUBMITTED: C.yellow, APPROVED: C.green, REJECTED: C.red,
-};
-const STATUS_OPTIONS: PickerOption[] = (Object.keys(STATUS_LABELS) as TsStatus[]).map((s) => ({
-  value: s, label: STATUS_LABELS[s], color: STATUS_COLORS[s],
-}));
+const STATUS_LABELS: Record<TsStatus, string> = { DRAFT: "Draft", SUBMITTED: "Submitted", APPROVED: "Approved", REJECTED: "Rejected" };
+const STATUS_COLORS: Record<TsStatus, string> = { DRAFT: C.indigo, SUBMITTED: C.yellow, APPROVED: C.green, REJECTED: C.red };
 
 const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) { const a = (f ?? "")[0] ?? ""; const b = (l ?? "")[0] ?? ""; return ((a + b) || "?").toUpperCase(); }
 
-const GROUP_ORDER: TsStatus[] = ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED"];
-
-function tsToRow(t: ApiTimesheet): Row {
-  const totalH = Math.round(((t.totalMinutes ?? 0) / 60) * 10) / 10;
-  const weekStart = new Date(t.weekStartDate);
-  const weekLabel = `Week of ${weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-  return {
-    id: t.id,
-    name: `${t.user ? `${t.user.firstName ?? ""} ${t.user.lastName ?? ""}`.trim() : "—"} · ${weekLabel}`,
-    done: t.status === "APPROVED",
-    cells: {
-      status: { value: STATUS_TO_OS[t.status], label: STATUS_LABELS[t.status] },
-      employee: t.user ? [{ initials: initials(t.user.firstName, t.user.lastName), color: avColor(t.user.id) }] : [],
-      approver: t.approver ? [{ initials: initials(t.approver.firstName, t.approver.lastName), color: avColor(t.approver.id) }] : [],
-      total: `${totalH}h`,
-      entries: `${t._count?.entries ?? 0}`,
-      week: { iso: t.weekStartDate },
-    },
-  };
+function weekLabel(iso: string): string {
+  const d = new Date(iso);
+  const end = new Date(d.getTime() + 6 * 86_400_000);
+  return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
-
-function buildGroups(rows: ApiTimesheet[]): TableGroup[] {
-  const buckets = new Map<TsStatus, ApiTimesheet[]>();
-  for (const s of GROUP_ORDER) buckets.set(s, []);
-  for (const t of rows) {
-    const b = buckets.get(t.status);
-    if (b) b.push(t);
-  }
-  return GROUP_ORDER
-    .map((s) => ({
-      id: s, title: STATUS_LABELS[s], color: STATUS_COLORS[s],
-      rows: (buckets.get(s) ?? []).map(tsToRow),
-    }))
-    .filter((g) => g.rows.length > 0 || g.id === "DRAFT" || g.id === "SUBMITTED");
-}
-
-const COLUMNS: Column[] = [
-  { id: "status",   label: "Status",   type: "status" },
-  { id: "employee", label: "Employee", type: "person" },
-  { id: "approver", label: "Approver", type: "person" },
-  { id: "total",    label: "Hours",    type: "text" },
-  { id: "entries",  label: "Entries",  type: "text" },
-  { id: "week",     label: "Week",     type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function TimesheetsPage() {
-  const [rows, setRows] = useState<ApiTimesheet[] | null>(null);
+  const [sheets, setSheets] = useState<ApiTimesheet[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [scope, setScope] = useState<Scope>("mine");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
-      let res = await fetch("/api/timesheets?scope=team&limit=100");
-      if (res.status === 403) {
-        res = await fetch("/api/timesheets?scope=mine&limit=100");
-      }
+      const res = await fetch(`/api/timesheets?scope=${scope}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setRows(data.data ?? (Array.isArray(data) ? data : []));
+      setSheets(data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
-  }, []);
+  }, [scope]);
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("timesheets");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(rows ?? []), [rows]);
-
-  async function transition(id: string, from: TsStatus, to: TsStatus): Promise<boolean> {
-    if (from === to) return true;
-    let body: Record<string, unknown> | null = null;
-    if (from === "DRAFT" && to === "SUBMITTED") body = { action: "submit" };
-    else if (from === "SUBMITTED" && to === "DRAFT") body = { action: "retract" };
-    else if (from === "SUBMITTED" && to === "APPROVED") body = { action: "decide", decision: "APPROVE" };
-    else if (from === "SUBMITTED" && to === "REJECTED") body = { action: "decide", decision: "REJECT" };
-    if (!body) {
-      toast(`Can't go from ${STATUS_LABELS[from]} → ${STATUS_LABELS[to]}`);
-      return false;
-    }
+  async function act(id: string, action: string, decision?: "APPROVE" | "REJECT") {
     try {
       const res = await fetch(`/api/timesheets/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(decision ? { action, decision } : { action }),
       });
-      if (!res.ok) return false;
+      if (!res.ok) {
+        if (res.status === 403) toast("Permission denied");
+        else toast("Couldn't update");
+        return;
+      }
+      toast(action === "submit" ? "Submitted" : action === "retract" ? "Retracted to draft" : decision === "APPROVE" ? "Approved" : "Rejected");
       void load();
-      return true;
-    } catch { return false; }
+    } catch { toast("Couldn't update"); }
   }
 
-  const handlers = {
-    onStatusChange: async (rowId: string, _g: string, value: string) => {
-      const r = (rows ?? []).find((x) => x.id === rowId);
-      if (!r) return;
-      const ok = await transition(rowId, r.status, value as TsStatus);
-      if (!ok) throw new Error("illegal");
-    },
-    onAdd: async (_g: string) => {
-      // Idempotent — upserts the current week's timesheet for the caller.
+  async function startCurrentWeek() {
+    try {
       const res = await fetch("/api/timesheets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-      if (!res.ok) { toast("Couldn't create"); throw new Error(`POST ${res.status}`); }
-      const data = await res.json();
-      const t: ApiTimesheet = data.data ?? data;
-      setTimeout(() => void load(), 200);
-      return { id: t.id };
-    },
-  };
+      if (!res.ok) { toast("Couldn't start"); return; }
+      toast("This week's timesheet is open");
+      void load();
+    } catch { toast("Couldn't start"); }
+  }
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (rows ?? []).map((r): CalendarEvent => ({
-      id: r.id,
-      title: `${r.user?.firstName ?? ""} · ${Math.round(((r.totalMinutes ?? 0) / 60) * 10) / 10}h`.trim(),
-      date: r.weekStartDate,
-      color: STATUS_COLORS[r.status],
-      done: r.status === "APPROVED",
-      payload: tsToRow(r).cells,
-    })),
-    [rows],
-  );
+  const filtered = useMemo(() => (sheets ?? []).slice().sort((a, b) => new Date(b.weekStartDate).getTime() - new Date(a.weekStartDate).getTime()), [sheets]);
 
-  const pendingCount = (rows ?? []).filter((r) => r.status === "SUBMITTED").length;
+  const stats = useMemo(() => {
+    const list = sheets ?? [];
+    const draft = list.filter((s) => s.status === "DRAFT").length;
+    const submitted = list.filter((s) => s.status === "SUBMITTED").length;
+    const approved = list.filter((s) => s.status === "APPROVED").length;
+    const totalHours = Math.round(list.reduce((acc, s) => acc + (s.totalMinutes ?? 0), 0) / 60);
+    return { draft, submitted, approved, totalHours };
+  }, [sheets]);
 
   return (
     <>
@@ -194,34 +110,94 @@ export default function TimesheetsPage() {
         title="Timesheets"
         Icon={Clock}
         iconGradient={GRAD.indigoBlue}
-        description={rows === null ? "Loading timesheets…" : `${rows.length} sheet${rows.length === 1 ? "" : "s"} · ${pendingCount} pending approval · live-synced`}
-        people={[PEOPLE.bb, PEOPLE.mk]}
-        morePeople={5}
+        description={sheets === null ? "Loading…" : `${filtered.length} timesheet${filtered.length === 1 ? "" : "s"} · ${stats.submitted} submitted · ${stats.totalHours}h logged`}
+        actions={
+          <div className="tsh__head-actions">
+            <button type="button" className="tsh__btn-primary" onClick={startCurrentWeek}>
+              <Plus /> Start this week
+            </button>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="New entry" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={Clock} iconGradient={GRAD.redPink} title="Couldn't load timesheets" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : rows === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : rows.length === 0 ? (
-            <OsEmptyView Icon={Clock} iconGradient={GRAD.indigoBlue} title="No timesheets yet" subtitle="Start your weekly timesheet with '+ New entry' below. Add hours via the web grid or clock in/out on Clock." chips={["Web entry", "Clock in/out", "Mobile", "Kiosk"]} cta="New entry" />
-          ) : (
-            <OsMainTable moduleId="timesheets" columns={COLUMNS} groups={groups} statusOptions={STATUS_OPTIONS} handlers={handlers} />
-          )}
-        </>
-      )}
+      <div className="tsh">
+        <div className="tsh__kpis">
+          <KpiTile accent="var(--os-c-indigo)" Icon={Play}         label="Drafts"    value={`${stats.draft}`}     sub="in progress" />
+          <KpiTile accent="var(--os-c-yellow)" Icon={Loader2}      label="Submitted" value={`${stats.submitted}`} sub="awaiting approval" />
+          <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Approved"  value={`${stats.approved}`}  sub="finalised" />
+          <KpiTile accent="var(--os-c-blue)"   Icon={Clock}        label="Hours logged" value={`${stats.totalHours}`} sub="across all sheets" />
+        </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="timesheets" events={calendarEvents} newLabel="New entry" />
-      )}
+        <div className="tsh__scope">
+          {(["mine", "approve", "team", "all"] as Scope[]).map((s) => (
+            <button key={s} type="button" className={scope === s ? "is-active" : ""} onClick={() => setScope(s)}>
+              {s === "mine" ? "Mine" : s === "approve" ? "Approve queue" : s === "team" ? "Team" : "All"}
+            </button>
+          ))}
+        </div>
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={Clock} iconGradient={GRAD.indigoBlue} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data", "Persistent edits"]} cta="Back to Main table" />
-      )}
+        {loadError ? (
+          <OsEmptyView Icon={Clock} iconGradient={GRAD.redPink} title="Couldn't load timesheets" subtitle={loadError} cta="Retry" />
+        ) : sheets === null ? (
+          <div className="tsh__loading">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <OsEmptyView Icon={Clock} iconGradient={GRAD.indigoBlue} title="No timesheets in this view" subtitle="Start a new week's timesheet to begin logging time entries." cta="Start this week" />
+        ) : (
+          <div className="tsh__list">
+            {filtered.map((t) => {
+              const statusColor = STATUS_COLORS[t.status];
+              const totalH = Math.round(((t.totalMinutes ?? 0) / 60) * 10) / 10;
+              const av = t.user ? { initials: initials(t.user.firstName, t.user.lastName), color: avColor(t.user.id) } : null;
+              const canSubmit = t.status === "DRAFT";
+              const canRetract = t.status === "SUBMITTED";
+              const canDecide = t.status === "SUBMITTED" && scope === "approve";
+              return (
+                <article key={t.id} className="tsh__row" style={{ ["--row-c" as unknown as string]: statusColor }}>
+                  <span className="tsh__row-accent" aria-hidden="true" />
+                  {av && <span className="tsh__row-av" style={{ background: av.color }}>{av.initials}</span>}
+                  <div className="tsh__row-main">
+                    <div className="tsh__row-head">
+                      <span className={`tsh__row-status tsh__row-status--${t.status.toLowerCase()}`}>{STATUS_LABELS[t.status]}</span>
+                      <span className="tsh__row-week"><CalendarIcon /> {weekLabel(t.weekStartDate)}</span>
+                    </div>
+                    {t.user && <div className="tsh__row-name">{[t.user.firstName, t.user.lastName].filter(Boolean).join(" ")}</div>}
+                    <div className="tsh__row-meta">
+                      <span><Clock /> {totalH}h logged</span>
+                      <span>{t._count?.entries ?? 0} entries</span>
+                      {t.approver && <span>· Approved by {[t.approver.firstName, t.approver.lastName].filter(Boolean).join(" ")}</span>}
+                    </div>
+                  </div>
+                  <div className="tsh__row-actions">
+                    {canSubmit && <button type="button" className="tsh__act tsh__act--submit" onClick={() => act(t.id, "submit")}><Send /> Submit</button>}
+                    {canRetract && <button type="button" className="tsh__act" onClick={() => act(t.id, "retract")}><RotateCcw /> Retract</button>}
+                    {canDecide && (
+                      <>
+                        <button type="button" className="tsh__act tsh__act--approve" onClick={() => act(t.id, "decide", "APPROVE")}><CheckCircle2 /> Approve</button>
+                        <button type="button" className="tsh__act tsh__act--reject" onClick={() => act(t.id, "decide", "REJECT")}><XCircle /> Reject</button>
+                      </>
+                    )}
+                  </div>
+                  <ChevronRight className="tsh__row-arrow" />
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Clock; label: string; value: string; sub: string }) {
+  return (
+    <div className="tsh__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="tsh__kpi-accent" aria-hidden="true" />
+      <div className="tsh__kpi-row">
+        <div className="tsh__kpi-icon"><Icon /></div>
+        <div className="tsh__kpi-label">{label}</div>
+      </div>
+      <div className="tsh__kpi-value">{value}</div>
+      <div className="tsh__kpi-sub">{sub}</div>
+    </div>
   );
 }

@@ -118,7 +118,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /benefits/oe — open enrollment wizard with checklist
 - [x] /my-benefits — personal enrollment summary
 - [x] /time-off — PTO tracker with approval queue
-- [ ] /time-off/policies — policy list
+- [x] /time-off/policies — policy catalog cards
 - [ ] /timesheets — timesheet log
 - [ ] /clock — punch in/out hero
 
