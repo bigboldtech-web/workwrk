@@ -156,7 +156,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /sops/new/record — wrap recorder with OsTitleBar + nav chrome
 - [x] /sops/my-sops — personal queue with KPI strip + status sections
 - [x] /sops/compliance — KPI strip + dept heatmap + bottom SOPs / top performers / overdue
-- [ ] /process-runs — process execution logs
+- [x] /process-runs — execution log with KPI strip + status sections + progress bars
 - [ ] /policies — policy library
 
 ## L. Planning & Analytics (6 pages)
