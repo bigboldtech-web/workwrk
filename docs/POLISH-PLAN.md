@@ -142,7 +142,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /expenses/[id] — bespoke hero with status flow + timeline + tag picker
 - [x] /procurement — bespoke hub with KPI strip + status mix bar + workspace tiles
 - [x] /procurement/[id] — bespoke hero with action row + 6-step flow + timeline
-- [ ] /procurement/pos — PO list
+- [x] /procurement/pos — approval queue + 5-column pipeline + vendor chips
 - [ ] /procurement/invoices — invoice list
 - [ ] /procurement/vendors — vendor master
 
