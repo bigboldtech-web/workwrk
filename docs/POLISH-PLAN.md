@@ -224,11 +224,11 @@ Every page subtask must pass this gate before being marked done:
 
 ## S. Engagement & Tools (5 pages)
 
-- [ ] /surveys — survey list
-- [ ] /redeem — reward redemption
-- [ ] /store — reward marketplace
+- [x] /surveys — pulse surveys with KPI strip + participation bars + launch/close
+- [x] /redeem — points balance hero + reward catalog + redemption history
+- [x] /store — marketplace (already polished — preserved)
 - [x] /templates — workspace templates done
-- [ ] /tools — embedded tools
+- [x] /tools — catalog with KPI strip + category groups + shared-cred chips
 
 ## T. Public marketing site (30+ pages)
 

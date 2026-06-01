@@ -1,23 +1,21 @@
 "use client";
 
-/* Real Tools page (org tool catalog + shared credentials).
+/* Tools — org tool catalog with shared credentials, grouped by category.
  *
- *  GET  /api/tools                  list visible tools (admins: all; employees: shared)
- *  POST /api/tools                  { name, url, category?, credentials?, ... } — admin
- *  PATCH /api/tools/[id]            updates
- *
- *  Groups by category (e.g. Productivity, Design, Engineering).
+ *  GET   /api/tools
+ *  POST  /api/tools
+ *  PATCH /api/tools/[id]
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Wrench, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  Wrench, Plus, Search, Hash, ChevronRight, ExternalLink, Lock, Users,
+  Layers, Activity, Globe,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -37,57 +35,25 @@ type ApiTool = {
 const CATEGORY_COLORS: Record<string, string> = {
   Productivity: C.blue, Design: C.pink, Engineering: C.purple,
   Marketing: C.orange, Finance: C.green, HR: C.teal, Sales: C.indigo,
-  Support: C.red, Communication: C.brown, Uncategorized: C.gray, default: C.indigo,
+  Support: C.red, Communication: C.brown, Uncategorized: C.gray,
 };
-
-function toolToRow(t: ApiTool): Row {
-  const sharedCount = t.shares?.length ?? 0;
-  return {
-    id: t.id,
-    name: t.name,
-    cells: {
-      url: t.url ? (t.url.length > 40 ? t.url.slice(0, 40) + "…" : t.url) : "—",
-      description: t.description ? (t.description.length > 60 ? t.description.slice(0, 60) + "…" : t.description) : "—",
-      shared: t.sharedAt ? "✓ Shared with you" : `${sharedCount} member${sharedCount === 1 ? "" : "s"}`,
-      added: t.createdAt ? { iso: t.createdAt } : (t.sharedAt ? { iso: t.sharedAt } : undefined),
-    },
-  };
+function categoryColor(name: string) {
+  if (CATEGORY_COLORS[name]) return CATEGORY_COLORS[name];
+  let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const palette = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
+  return palette[h % palette.length];
 }
 
-function buildGroups(rows: ApiTool[]): TableGroup[] {
-  const byCat = new Map<string, ApiTool[]>();
-  for (const t of rows) {
-    const key = t.category ?? "Uncategorized";
-    if (!byCat.has(key)) byCat.set(key, []);
-    byCat.get(key)!.push(t);
-  }
-  return Array.from(byCat.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([cat, items]) => ({
-      id: cat, title: cat,
-      color: CATEGORY_COLORS[cat] ?? CATEGORY_COLORS.default,
-      rows: items.map(toolToRow),
-    }));
+function getDomain(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, ""); }
+  catch { return url; }
 }
-
-const COLUMNS: Column[] = [
-  { id: "url",         label: "URL",         type: "text" },
-  { id: "description", label: "Description", type: "text" },
-  { id: "shared",      label: "Sharing",     type: "text" },
-  { id: "added",       label: "Added",       type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
 
 export default function ToolsPage() {
   const [rows, setRows] = useState<ApiTool[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -97,6 +63,7 @@ export default function ToolsPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRows(data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -105,48 +72,61 @@ export default function ToolsPage() {
   const v = rowVersion("tools");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(rows ?? []), [rows]);
-
-  const handlers = {
-    onAdd: async (groupId: string) => {
-      const category = groupId && groupId !== "Uncategorized" ? groupId : null;
+  async function quickAdd() {
+    const name = window.prompt("Tool name?")?.trim();
+    if (!name) return;
+    const url = window.prompt("URL?")?.trim();
+    if (!url) return;
+    try {
       const res = await fetch("/api/tools", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Untitled tool", url: "https://", category }),
+        body: JSON.stringify({ name, url, category: "Uncategorized" }),
       });
-      if (!res.ok) {
-        if (res.status === 403) toast("Only admins can add tools to the catalog");
-        throw new Error(`POST ${res.status}`);
-      }
-      const data = await res.json();
-      const t: ApiTool = data.data ?? data;
-      setTimeout(() => void load(), 200);
-      return { id: t.id, name: t.name };
-    },
-    onRename: async (rowId: string, _g: string, name: string) => {
-      const res = await fetch(`/api/tools/${rowId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      if (!res.ok) {
-        if (res.status === 403) toast("Only admins can rename tools");
-        throw new Error(`PATCH ${res.status}`);
-      }
-    },
-  };
+      if (!res.ok) { toast(res.status === 403 ? "Admin access required" : "Couldn't add"); return; }
+      toast("Tool added");
+      void load();
+    } catch { toast("Couldn't add"); }
+  }
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (rows ?? [])
-      .filter((t) => t.createdAt || t.sharedAt)
-      .map((t): CalendarEvent => ({
-        id: t.id,
-        title: `${t.name} added`,
-        date: (t.createdAt ?? t.sharedAt) as string,
-        color: CATEGORY_COLORS[t.category ?? "Uncategorized"] ?? CATEGORY_COLORS.default,
-        payload: toolToRow(t).cells,
-      })),
-    [rows],
-  );
+  const stats = useMemo(() => {
+    const list = rows ?? [];
+    const sharedToMe = list.filter((t) => t.sharedAt).length;
+    const withCreds = list.filter((t) => (t.shares?.length ?? 0) > 0).length;
+    const cats = new Set(list.map((t) => t.category ?? "Uncategorized"));
+    return { total: list.length, sharedToMe, withCreds, categories: cats.size };
+  }, [rows]);
+
+  const cats = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of rows ?? []) {
+      const k = t.category ?? "Uncategorized";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return Array.from(m.entries()).sort(([, a], [, b]) => b - a);
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    let list = rows ?? [];
+    if (activeCategory) list = list.filter((t) => (t.category ?? "Uncategorized") === activeCategory);
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter((t) =>
+      t.name.toLowerCase().includes(q) ||
+      (t.description ?? "").toLowerCase().includes(q) ||
+      t.url.toLowerCase().includes(q));
+    return list;
+  }, [rows, search, activeCategory]);
+
+  const grouped = useMemo(() => {
+    const m = new Map<string, ApiTool[]>();
+    for (const t of filtered) {
+      const k = t.category ?? "Uncategorized";
+      if (!m.has(k)) m.set(k, []);
+      m.get(k)!.push(t);
+    }
+    return Array.from(m.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([cat, items]) => ({ cat, color: categoryColor(cat), items: items.slice().sort((a, b) => a.name.localeCompare(b.name)) }));
+  }, [filtered]);
 
   return (
     <>
@@ -154,34 +134,124 @@ export default function ToolsPage() {
         title="Tools"
         Icon={Wrench}
         iconGradient={GRAD.brownOrange}
-        description={rows === null ? "Loading tools…" : `${rows.length} tool${rows.length === 1 ? "" : "s"} in catalog · shared credentials supported`}
-        people={[PEOPLE.bb, PEOPLE.mk]}
-        morePeople={3}
+        description={rows === null ? "Loading…" : `${stats.total} tool${stats.total === 1 ? "" : "s"} · ${stats.categories} categor${stats.categories === 1 ? "y" : "ies"} · ${stats.withCreds} with shared creds`}
+        actions={
+          <div className="tls__head-actions">
+            <Link href="/settings" className="tls__nav-link"><Hash /> Settings</Link>
+            <button type="button" className="tls__btn-primary" onClick={quickAdd}>
+              <Plus /> Add tool
+            </button>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="Add tool" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={Wrench} iconGradient={GRAD.redPink} title="Couldn't load tools" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : rows === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : rows.length === 0 ? (
-            <OsEmptyView Icon={Wrench} iconGradient={GRAD.brownOrange} title="No tools yet" subtitle="Build the team's tool catalog. Add Figma, Notion, GitHub — share credentials with specific people, audit access." chips={["Productivity", "Design", "Engineering", "Marketing"]} cta="Add tool" />
-          ) : (
-            <OsMainTable moduleId="tools" columns={COLUMNS} groups={groups} handlers={handlers} />
-          )}
-        </>
-      )}
+      <div className="tls">
+        <div className="tls__kpis">
+          <KpiTile accent="var(--os-c-brown)"  Icon={Wrench}    label="Tools"        value={`${stats.total}`}      sub="in catalog" />
+          <KpiTile accent="var(--os-c-purple)" Icon={Layers}    label="Categories"   value={`${stats.categories}`} sub="organized" />
+          <KpiTile accent="var(--os-c-orange)" Icon={Users}     label="With creds"   value={`${stats.withCreds}`}  sub="shared access" />
+          <KpiTile accent="var(--os-c-blue)"   Icon={Activity}  label="Shared to me" value={`${stats.sharedToMe}`} sub="you have access" />
+        </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="tools" events={calendarEvents} newLabel="Add tool" />
-      )}
+        <div className="tls__toolbar">
+          <div className="tls__search">
+            <Search />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tools, URLs, descriptions…" />
+          </div>
+        </div>
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={Wrench} iconGradient={GRAD.brownOrange} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
-      )}
+        {cats.length > 0 && (
+          <div className="tls__cats">
+            <button type="button" className={`tls__cat${activeCategory === null ? " is-active" : ""}`} onClick={() => setActiveCategory(null)}>
+              <Layers /> All <span>{stats.total}</span>
+            </button>
+            {cats.map(([cat, n]) => (
+              <button
+                key={cat}
+                type="button"
+                className={`tls__cat${activeCategory === cat ? " is-active" : ""}`}
+                style={{ ["--cat-c" as unknown as string]: categoryColor(cat) }}
+                onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
+              >
+                <span className="tls__cat-dot" />
+                {cat}
+                <span>{n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {loadError ? (
+          <OsEmptyView Icon={Wrench} iconGradient={GRAD.redPink} title="Couldn't load tools" subtitle={loadError} cta="Retry" />
+        ) : rows === null ? (
+          <div className="tls__loading">Loading…</div>
+        ) : stats.total === 0 ? (
+          <OsEmptyView
+            Icon={Wrench}
+            iconGradient={GRAD.brownOrange}
+            title="No tools yet"
+            subtitle="Build the team's tool catalog. Add Figma, Notion, GitHub — share credentials with specific people, audit access."
+            chips={["Productivity", "Design", "Engineering", "Marketing"]}
+            cta="Add tool"
+          />
+        ) : grouped.length === 0 ? (
+          <div className="tls__no-match"><Search /> No tools match.</div>
+        ) : (
+          grouped.map((g) => (
+            <section key={g.cat} className="tls__section" style={{ ["--g-c" as unknown as string]: g.color }}>
+              <header className="tls__section-head">
+                <span className="tls__section-dot" />
+                <h2>{g.cat}</h2>
+                <span className="tls__section-count">{g.items.length}</span>
+                <span className="tls__section-line" />
+              </header>
+              <div className="tls__grid">
+                {g.items.map((t) => {
+                  const sharedCount = t.shares?.length ?? 0;
+                  const isShared = !!t.sharedAt;
+                  return (
+                    <a key={t.id} href={t.url} target="_blank" rel="noopener noreferrer" className="tls__tool" style={{ ["--t-c" as unknown as string]: g.color }}>
+                      <header className="tls__tool-head">
+                        <span className="tls__tool-icon"><Globe /></span>
+                        <div className="tls__tool-id">
+                          <h3>{t.name}</h3>
+                          <span>{getDomain(t.url)}</span>
+                        </div>
+                        <ExternalLink className="tls__tool-ext" />
+                      </header>
+                      {t.description && <p className="tls__tool-desc">{t.description.length > 120 ? t.description.slice(0, 120) + "…" : t.description}</p>}
+                      <footer className="tls__tool-foot">
+                        {isShared ? (
+                          <span className="tls__tool-shared"><Lock /> Shared with you</span>
+                        ) : sharedCount > 0 ? (
+                          <span className="tls__tool-team"><Users /> {sharedCount} member{sharedCount === 1 ? "" : "s"}</span>
+                        ) : (
+                          <span className="tls__tool-public"><Globe /> Public</span>
+                        )}
+                        <ChevronRight />
+                      </footer>
+                    </a>
+                  );
+                })}
+              </div>
+            </section>
+          ))
+        )}
+      </div>
     </>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Wrench; label: string; value: string; sub: string }) {
+  return (
+    <div className="tls__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="tls__kpi-accent" aria-hidden="true" />
+      <div className="tls__kpi-row">
+        <div className="tls__kpi-icon"><Icon /></div>
+        <div className="tls__kpi-label">{label}</div>
+      </div>
+      <div className="tls__kpi-value">{value}</div>
+      <div className="tls__kpi-sub">{sub}</div>
+    </div>
   );
 }
