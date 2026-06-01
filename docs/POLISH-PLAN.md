@@ -161,7 +161,7 @@ Every page subtask must pass this gate before being marked done:
 
 ## L. Planning & Analytics (6 pages)
 
-- [ ] /planning — business planning overview
+- [x] /planning — hub with KPI strip + workspace tiles
 - [ ] /planning/[id] — plan detail
 - [ ] /planning/plans — plan list
 - [ ] /planning/variance — variance analysis

@@ -9711,6 +9711,91 @@ table.os-tbl {
 .pol__card-foot svg { width: 13px; height: 13px; color: var(--os-ink-3); }
 
 /* ════════════════════════════════════════════════════════════════
+ * PLANNING — hub overview
+ * ════════════════════════════════════════════════════════════════ */
+.plan { padding: 14px 28px 60px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.plan__head-actions { display: flex; gap: 6px; align-items: center; }
+.plan__nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 11px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; color: var(--os-ink-2);
+  background: var(--os-surface-1); border: 1px solid var(--os-line); text-decoration: none;
+}
+.plan__nav-link svg { width: 12px; height: 12px; }
+.plan__nav-link:hover { color: var(--os-ink); background: white; border-color: var(--os-line-strong); }
+
+/* KPIs */
+.plan__kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 900px) { .plan__kpis { grid-template-columns: repeat(2, 1fr); } }
+.plan__kpi {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.plan__kpi-accent { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--kpi-accent); }
+.plan__kpi-row { display: flex; align-items: center; gap: 10px; }
+.plan__kpi-icon {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: color-mix(in srgb, var(--kpi-accent) 14%, transparent);
+  color: var(--kpi-accent);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.plan__kpi-icon svg { width: 15px; height: 15px; }
+.plan__kpi-label { font-size: 11px; font-weight: 700; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.plan__kpi-value { font-size: 24px; font-weight: 700; color: var(--os-ink); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.plan__kpi-sub { font-size: 11.5px; color: var(--os-ink-3); }
+
+.plan__section { display: flex; flex-direction: column; gap: 10px; }
+.plan__section-head { display: flex; align-items: center; gap: 10px; }
+.plan__section-head h2 {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 700; color: var(--os-ink); margin: 0;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.plan__section-head h2 svg { width: 13px; height: 13px; color: var(--os-ink-3); }
+.plan__section-line { flex: 1; height: 1px; background: var(--os-line); }
+
+.plan__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 1100px) { .plan__grid { grid-template-columns: repeat(2, 1fr); } }
+.plan__tile {
+  position: relative;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  padding: 14px 14px 12px 56px;
+  text-decoration: none; color: inherit;
+  display: flex; align-items: center; gap: 8px;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  overflow: hidden;
+}
+.plan__tile:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--tile-hue) 32%, var(--os-line));
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+.plan__tile::before {
+  content: ""; position: absolute; top: 0; left: 0; bottom: 0; width: 3px;
+  background: var(--tile-hue);
+}
+.plan__tile-icon {
+  position: absolute; top: 14px; left: 14px;
+  width: 30px; height: 30px; border-radius: 9px;
+  background: color-mix(in srgb, var(--tile-hue) 14%, transparent);
+  color: var(--tile-hue);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.plan__tile-icon svg { width: 16px; height: 16px; }
+.plan__tile-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.plan__tile-title { font-size: 12px; font-weight: 700; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.plan__tile-stat { font-size: 15px; font-weight: 700; color: var(--os-ink); letter-spacing: -0.01em; line-height: 1.15; }
+.plan__tile-sub { font-size: 11.5px; color: var(--os-ink-3); }
+.plan__tile-chev { width: 14px; height: 14px; color: var(--os-ink-3); flex-shrink: 0; }
+
+/* ════════════════════════════════════════════════════════════════
  * PURCHASE ORDERS
  * ════════════════════════════════════════════════════════════════ */
 .pos { padding: 14px 28px 60px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
