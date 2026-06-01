@@ -112,7 +112,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /payroll/groups — pay group config cards
 - [x] /payroll/payslip/[id] — printable payslip
 - [x] /compensation — comp cycle list with status flow
-- [ ] /compensation/[id] — comp plan detail
+- [x] /compensation/[id] — comp cycle hero (decision table preserved)
 - [ ] /benefits — benefits hub
 - [ ] /benefits/plans — plan cards
 - [ ] /benefits/oe — open enrollment wizard
