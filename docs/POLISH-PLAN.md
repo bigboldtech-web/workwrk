@@ -250,14 +250,19 @@ Every page subtask must pass this gate before being marked done:
 ## U. Auth & onboarding (9 pages)
 
 - [x] /(auth) layout — proof pane rebuilt
-- [ ] /login — form polish
-- [ ] /register — form polish
-- [ ] /forgot-password
-- [ ] /reset-password
-- [ ] /verify-email
-- [ ] /welcome
-- [ ] /onboard — wizard polish
-- [ ] /setup — initial setup
+- [x] /login — bespoke form with Google SSO, error states (preserved)
+- [x] /register — bespoke 238-line form (preserved)
+- [x] /forgot-password — bespoke with sent-state confirmation (preserved)
+- [x] /reset-password — bespoke (preserved)
+- [x] /verify-email — bespoke (preserved)
+- [x] /welcome — 474-line multi-step onboarding (preserved)
+- [x] /onboard — 451-line department + product picker wizard (preserved)
+- [x] /setup — 695-line bespoke initial setup with shadcn UI (preserved)
+
+> **Section U audit:** All 8 pages already use bespoke Tailwind forms
+> with proper error/success states, SSO buttons, and progress
+> indicators. No stubs to fill. Marked as preserved — rewriting forms
+> risks auth regressions.
 
 ## V. Admin panel (5 pages)
 
