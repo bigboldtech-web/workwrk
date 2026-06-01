@@ -199,49 +199,42 @@ export default function CompCycleDetailPage() {
   const proposedCount = decisions.filter((d) => d.status === "PROPOSED").length;
   const approvedCount = decisions.filter((d) => d.status === "APPROVED").length;
 
+  const statusColor = cycle.status === "OPEN" ? "var(--os-c-orange)" : cycle.status === "CLOSED" ? "var(--os-c-green)" : "var(--os-c-indigo)";
   return (
     <div className="space-y-3 animate-fade-in">
-      <PageHeader
-        breadcrumbs={[
-          { label: "Home", href: "/dashboard" },
-          { label: "Compensation", href: "/compensation" },
-          { label: cycle.name },
-        ]}
-        kicker={`Cycle · ${cycle.status.toLowerCase()}`}
-        title={
-          <span className="inline-flex items-center gap-2">
-            {cycle.name}
-            <Badge variant="outline" className="text-[10px]">{cycle.status}</Badge>
+      <section className="compd__hero" style={{ ["--hero-c" as unknown as string]: statusColor }}>
+        <span className="compd__hero-accent" aria-hidden="true" />
+        <div className="compd__hero-meta">
+          <span className="compd__hero-status">{cycle.status}</span>
+          <span className="compd__hero-dates">
+            {new Date(cycle.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            {" → "}
+            {new Date(cycle.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
           </span>
-        }
-        subtitle={
-          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>
-              {new Date(cycle.startDate).toLocaleDateString()} → {new Date(cycle.endDate).toLocaleDateString()}
-            </span>
-            <span>·</span>
-            <span>{cycle.reportingCurrency}</span>
-            {cycle.budgetPct !== null && (
-              <>
-                <span>·</span>
-                <span>budget {cycle.budgetPct}%</span>
-              </>
-            )}
-            {cycle.description && (
-              <>
-                <span>·</span>
-                <span className="opacity-80">{cycle.description}</span>
-              </>
-            )}
-          </span>
-        }
-        stats={[
-          { label: "Decisions", value: decisions.length },
-          { label: "Proposed", value: proposedCount },
-          { label: "Approved", value: approvedCount },
-          { label: `Proposed sum (${cycle.reportingCurrency})`, value: fmtMoney(proposedSum, cycle.reportingCurrency) },
-        ]}
-      />
+          {cycle.budgetPct !== null && <span className="compd__hero-budget">Budget {cycle.budgetPct}%</span>}
+          <span className="compd__hero-currency">{cycle.reportingCurrency}</span>
+        </div>
+        <h1 className="compd__hero-name">{cycle.name}</h1>
+        {cycle.description && <p className="compd__hero-desc">{cycle.description}</p>}
+        <div className="compd__hero-stats">
+          <div className="compd__stat">
+            <span>Decisions</span>
+            <strong>{decisions.length}</strong>
+          </div>
+          <div className="compd__stat">
+            <span>Proposed</span>
+            <strong>{proposedCount}</strong>
+          </div>
+          <div className="compd__stat">
+            <span>Approved</span>
+            <strong>{approvedCount}</strong>
+          </div>
+          <div className="compd__stat compd__stat--hero">
+            <span>Proposed sum</span>
+            <strong>{fmtMoney(proposedSum, cycle.reportingCurrency)}</strong>
+          </div>
+        </div>
+      </section>
       {isAdmin && (
         <div className="flex flex-wrap gap-2 justify-end">
           {cycle.status === "DRAFT" && decisions.length === 0 && (
