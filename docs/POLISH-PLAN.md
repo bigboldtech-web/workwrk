@@ -116,7 +116,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /benefits — hub grouped by benefit type
 - [x] /benefits/plans — plan catalog with type filter
 - [x] /benefits/oe — open enrollment wizard with checklist
-- [ ] /my-benefits — personal benefits
+- [x] /my-benefits — personal enrollment summary
 - [ ] /time-off — PTO tracker
 - [ ] /time-off/policies — policy list
 - [ ] /timesheets — timesheet log
