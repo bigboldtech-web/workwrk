@@ -114,7 +114,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /compensation — comp cycle list with status flow
 - [x] /compensation/[id] — comp cycle hero (decision table preserved)
 - [x] /benefits — hub grouped by benefit type
-- [ ] /benefits/plans — plan cards
+- [x] /benefits/plans — plan catalog with type filter
 - [ ] /benefits/oe — open enrollment wizard
 - [ ] /my-benefits — personal benefits
 - [ ] /time-off — PTO tracker
