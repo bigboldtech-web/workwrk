@@ -113,7 +113,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /payroll/payslip/[id] — printable payslip
 - [x] /compensation — comp cycle list with status flow
 - [x] /compensation/[id] — comp cycle hero (decision table preserved)
-- [ ] /benefits — benefits hub
+- [x] /benefits — hub grouped by benefit type
 - [ ] /benefits/plans — plan cards
 - [ ] /benefits/oe — open enrollment wizard
 - [ ] /my-benefits — personal benefits
