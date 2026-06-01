@@ -133,7 +133,7 @@ Every page subtask must pass this gate before being marked done:
 ## J. Finance & Procurement (13 pages)
 
 - [x] /financials — bespoke hub with KPI strip + statement tiles + period status
-- [ ] /financials/accounts — chart of accounts
+- [x] /financials/accounts — chart of accounts with KPI strip + search
 - [ ] /financials/entries — journal entry list
 - [ ] /financials/reports — financial reports hub
 - [ ] /financials/statements — P&L + balance sheet
