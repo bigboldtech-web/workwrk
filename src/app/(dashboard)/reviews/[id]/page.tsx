@@ -394,42 +394,40 @@ export default function ReviewCycleDetailPage() {
   const myReview = selfData?.review;
   const canSelfAssess = myReview && (myReview.status === "PENDING" || myReview.status === "SELF_ASSESSMENT");
 
+  const cycleStatusColor = cycle.status === "ACTIVE" ? "var(--os-c-orange)"
+                         : cycle.status === "IN_CALIBRATION" ? "var(--os-c-purple)"
+                         : cycle.status === "COMPLETED" ? "var(--os-c-green)"
+                         : "var(--os-c-indigo)";
+  const cycleProgress = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
   return (
     <div className="space-y-3 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => router.push("/reviews")}>
-          <ArrowLeft size={16} className="mr-1" /> Back
-        </Button>
-      </div>
-
-      {/* Cycle Info Banner */}
-      <Card className="border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.06)]">
-        <CardContent className="p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h1 className="text-xl font-bold">{cycle.name}</h1>
-              <p className="text-xs text-muted">
-                {new Date(cycle.startDate).toLocaleDateString()} — {new Date(cycle.endDate).toLocaleDateString()}
-                <span className="mx-2">&middot;</span>
-                {cycle.type.replace(/_/g, " ")}
-              </p>
-            </div>
-            {getStatusBadge(cycle.status)}
-          </div>
-          <div className="flex items-center gap-2 mb-2">
-            <Progress value={stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0} className="h-2 flex-1" indicatorClassName="bg-violet-600" />
-            <span className="text-sm font-mono text-[color:var(--accent-strong)]">{stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%</span>
-          </div>
-          <div className="flex items-center gap-4 text-xs text-muted">
-            <span className="flex items-center gap-1"><Users size={12} /> {stats.total} total</span>
-            <span className="flex items-center gap-1"><CheckCircle size={12} className="text-blue-400" /> {stats.selfDone} self done</span>
-            <span className="flex items-center gap-1"><Star size={12} className="text-[color:var(--accent-strong)]" /> {stats.managerDone} mgr done</span>
-            <span className="flex items-center gap-1"><BarChart3 size={12} className="text-orange-400" /> {stats.calibrated} calibrated</span>
-            <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-400" /> {stats.completed} completed</span>
-          </div>
-        </CardContent>
-      </Card>
+      <section className="rvwd__hero" style={{ ["--hero-c" as unknown as string]: cycleStatusColor }}>
+        <span className="rvwd__hero-accent" aria-hidden="true" />
+        <button type="button" className="rvwd__hero-back" onClick={() => router.push("/reviews")}>
+          <ArrowLeft size={12} /> Reviews
+        </button>
+        <div className="rvwd__hero-meta">
+          <span className="rvwd__hero-status">{cycle.status.replace(/_/g, " ")}</span>
+          <span className="rvwd__hero-type">{cycle.type.replace(/_/g, " ")}</span>
+          <span className="rvwd__hero-dates">
+            {new Date(cycle.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            {" → "}
+            {new Date(cycle.endDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          </span>
+        </div>
+        <h1 className="rvwd__hero-name">{cycle.name}</h1>
+        <div className="rvwd__hero-progress">
+          <div className="rvwd__hero-bar"><div className="rvwd__hero-bar-fill" style={{ width: `${cycleProgress}%` }} /></div>
+          <span className="rvwd__hero-pct">{cycleProgress}%</span>
+        </div>
+        <div className="rvwd__hero-stats">
+          <div><span>Total</span><strong>{stats.total ?? 0}</strong></div>
+          <div className="rvwd__hero-stat--self"><span>Self done</span><strong>{stats.selfDone ?? 0}</strong></div>
+          <div className="rvwd__hero-stat--mgr"><span>Mgr done</span><strong>{stats.managerDone ?? 0}</strong></div>
+          <div className="rvwd__hero-stat--cal"><span>Calibrated</span><strong>{stats.calibrated ?? 0}</strong></div>
+          <div className="rvwd__hero-stat--done"><span>Completed</span><strong>{stats.completed ?? 0}</strong></div>
+        </div>
+      </section>
 
       {/* Tabs */}
       <Tabs defaultValue="self-assessment">
