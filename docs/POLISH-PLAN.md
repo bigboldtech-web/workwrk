@@ -119,7 +119,7 @@ Every page subtask must pass this gate before being marked done:
 - [x] /my-benefits — personal enrollment summary
 - [x] /time-off — PTO tracker with approval queue
 - [x] /time-off/policies — policy catalog cards
-- [ ] /timesheets — timesheet log
+- [x] /timesheets — week log with approval flow
 - [ ] /clock — punch in/out hero
 
 ## I. Performance & Goals (5 pages)
