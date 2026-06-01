@@ -15,7 +15,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IdCard, CheckCircle2, Circle, Sparkles, Calendar, User, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { IdCard, CheckCircle2, Circle, Sparkles, Calendar, AlertTriangle, Hash, Users } from "lucide-react";
+import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type ObStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE";
@@ -124,15 +127,21 @@ export default function OnboardingMePage() {
   const daysLeft = inst?.targetDate ? Math.ceil((new Date(inst.targetDate).getTime() - Date.now()) / MS_DAY) : null;
 
   return (
-    <div className="obme">
-      <header className="obme__head">
-        <div className="obme__icon"><IdCard /></div>
-        <div className="obme__head-text">
-          <div className="obme__greet">Welcome aboard,</div>
-          <h1>{meName}.</h1>
-        </div>
-      </header>
+    <>
+      <OsTitleBar
+        title={`Welcome, ${meName}`}
+        Icon={IdCard}
+        iconGradient={GRAD.orangePink}
+        description={inst ? `${inst.template?.name ?? "Your onboarding"} · day ${daysIn + 1}${inst.template?.durationDays ? ` of ${inst.template.durationDays}` : ""} · ${pct}% complete` : "Loading your journey…"}
+        actions={
+          <div className="obme__head-actions">
+            <Link href="/onboarding" className="obme__nav-link"><Hash /> All journeys</Link>
+            <Link href="/people" className="obme__nav-link"><Users /> People</Link>
+          </div>
+        }
+      />
 
+      <div className="obme">
       {loadError ? (
         <div className="obme__error">{loadError}</div>
       ) : instances === null ? (
@@ -232,7 +241,8 @@ export default function OnboardingMePage() {
           </footer>
         </>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

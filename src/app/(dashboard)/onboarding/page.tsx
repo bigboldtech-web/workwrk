@@ -1,28 +1,20 @@
 "use client";
 
-/* Real (read-mostly) Onboarding page.
+/* Onboarding — new-hire journeys with KPI strip + status sections.
  *
- *  GET  /api/onboarding             list instances (and ?type=templates)
- *  POST /api/onboarding             create instance ({ templateId, userId, buddyId? })
- *                                   or template  ({ type: "template", name, steps, ... })
- *
- *  No PATCH endpoint for instances exists. The `progress` field is a
- *  JSON array of step states. Status enum: NOT_STARTED | IN_PROGRESS |
- *  COMPLETED | OVERDUE. We render read-only with progress + buddy info.
- *  Adding requires picking a template + user — surface friendly toast.
+ *  GET /api/onboarding
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IdCard, ClipboardList, ChartPie, BarChart, Calendar as CalendarIcon } from "lucide-react";
+import Link from "next/link";
+import {
+  IdCard, Search, Hash, ChevronRight, Activity, CheckCircle2, AlertTriangle,
+  Clock, Users, Building, Calendar as CalendarIcon, Award, Sparkles,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsTabs, type TabDef } from "@/components/layout/os/tabs";
-import { OsFilterBar } from "@/components/layout/os/filter-bar";
-import { OsMainTable, type Column, type TableGroup, type Row, type StatusValue } from "@/components/layout/os/main-table";
-import { OsCalendar, type CalendarEvent } from "@/components/layout/os/calendar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { useOsToast } from "@/components/layout/os/toast";
 
 type ObStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE";
 
@@ -38,21 +30,25 @@ type ApiInstance = {
   template?: { name: string; steps?: unknown[]; durationDays?: number } | null;
 };
 
-const STATUS_TO_OS: Record<ObStatus, StatusValue> = {
-  NOT_STARTED: "planning", IN_PROGRESS: "working", COMPLETED: "done", OVERDUE: "stuck",
-};
-const STATUS_LABELS: Record<ObStatus, string> = {
+const STATUS_LABEL: Record<ObStatus, string> = {
   NOT_STARTED: "Not started", IN_PROGRESS: "In progress", COMPLETED: "Completed", OVERDUE: "Overdue",
 };
-const STATUS_COLORS: Record<ObStatus, string> = {
-  NOT_STARTED: C.indigo, IN_PROGRESS: C.orange, COMPLETED: C.green, OVERDUE: C.red,
+const STATUS_HUE: Record<ObStatus, string> = {
+  NOT_STARTED: "var(--os-c-indigo)", IN_PROGRESS: "var(--os-c-orange)",
+  COMPLETED: "var(--os-c-green)", OVERDUE: "var(--os-c-red)",
 };
+const STATUS_ICON: Record<ObStatus, typeof Clock> = {
+  NOT_STARTED: Clock, IN_PROGRESS: Activity, COMPLETED: CheckCircle2, OVERDUE: AlertTriangle,
+};
+const GROUP_ORDER: ObStatus[] = ["OVERDUE", "IN_PROGRESS", "NOT_STARTED", "COMPLETED"];
 
 const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
-function initials(f?: string | null, l?: string | null) { const a = (f ?? "")[0] ?? ""; const b = (l ?? "")[0] ?? ""; return ((a + b) || "?").toUpperCase(); }
-
-const GROUP_ORDER: ObStatus[] = ["NOT_STARTED", "IN_PROGRESS", "OVERDUE", "COMPLETED"];
+function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
+function fullName(u?: { firstName?: string | null; lastName?: string | null } | null) {
+  if (!u) return "Unknown";
+  return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Unknown";
+}
 
 function progressPct(inst: ApiInstance): number {
   const totalSteps = Array.isArray(inst.template?.steps) ? inst.template.steps.length : 0;
@@ -62,64 +58,14 @@ function progressPct(inst: ApiInstance): number {
   return Math.round((doneSteps / totalSteps) * 100);
 }
 
-function instToRow(i: ApiInstance): Row {
-  const userName = i.user ? `${i.user.firstName ?? ""} ${i.user.lastName ?? ""}`.trim() || "Unknown" : "—";
-  const tplName = i.template?.name ?? "Onboarding";
-  const pct = progressPct(i);
-  return {
-    id: i.id,
-    name: `${userName} · ${tplName}`,
-    done: i.status === "COMPLETED",
-    cells: {
-      status: { value: STATUS_TO_OS[i.status], label: STATUS_LABELS[i.status] },
-      employee: i.user ? [{ initials: initials(i.user.firstName, i.user.lastName), color: avColor(i.user.id) }] : [],
-      buddy: i.buddy ? [{ initials: initials(i.buddy.firstName, i.buddy.lastName), color: avColor(i.buddy.id) }] : [],
-      department: i.user?.department?.name ?? "—",
-      progress: { pct, color: pct >= 100 ? "green" : pct >= 50 ? "blue" : pct >= 25 ? "warning" : "danger" },
-      started: { iso: i.startDate },
-      target: i.targetDate ? { iso: i.targetDate } : undefined,
-    },
-  };
-}
-
-function buildGroups(rows: ApiInstance[]): TableGroup[] {
-  const buckets = new Map<ObStatus, ApiInstance[]>();
-  for (const s of GROUP_ORDER) buckets.set(s, []);
-  for (const r of rows) {
-    const b = buckets.get(r.status);
-    if (b) b.push(r);
-  }
-  return GROUP_ORDER
-    .map((s) => ({
-      id: s, title: STATUS_LABELS[s], color: STATUS_COLORS[s],
-      rows: (buckets.get(s) ?? []).map(instToRow),
-    }))
-    .filter((g) => g.rows.length > 0 || g.id === "IN_PROGRESS");
-}
-
-const COLUMNS: Column[] = [
-  { id: "status",     label: "Status",     type: "status" },
-  { id: "employee",   label: "Employee",   type: "person" },
-  { id: "buddy",      label: "Buddy",      type: "person" },
-  { id: "department", label: "Department", type: "text" },
-  { id: "progress",   label: "Progress",   type: "progress" },
-  { id: "started",    label: "Started",    type: "date" },
-  { id: "target",     label: "Target",     type: "date" },
-];
-
-const TABS: TabDef[] = [
-  { id: "table",     label: "Main table", Icon: ClipboardList },
-  { id: "calendar",  label: "Calendar",   Icon: CalendarIcon },
-  { id: "gantt",     label: "Gantt",      Icon: BarChart },
-  { id: "dashboard", label: "Dashboard",  Icon: ChartPie },
-];
+const MS_DAY = 86_400_000;
 
 export default function OnboardingPage() {
   const [rows, setRows] = useState<ApiInstance[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("table");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | ObStatus>("ALL");
   const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
@@ -127,6 +73,7 @@ export default function OnboardingPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRows(data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -135,29 +82,31 @@ export default function OnboardingPage() {
   const v = rowVersion("onboarding");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const groups = useMemo(() => buildGroups(rows ?? []), [rows]);
+  const stats = useMemo(() => {
+    const list = rows ?? [];
+    const counts: Record<ObStatus, number> = { NOT_STARTED: 0, IN_PROGRESS: 0, COMPLETED: 0, OVERDUE: 0 };
+    for (const r of list) counts[r.status] = (counts[r.status] ?? 0) + 1;
+    const totalPct = list.length > 0 ? list.reduce((a, r) => a + progressPct(r), 0) / list.length : 0;
+    return { total: list.length, counts, avgPct: Math.round(totalPct) };
+  }, [rows]);
 
-  const handlers = {
-    onAdd: async (_g: string) => {
-      toast("Starting an onboarding needs a template + new-hire — use the recruiting → hired flow");
-      throw new Error("not supported");
-    },
-  };
+  const filtered = useMemo(() => {
+    let list = rows ?? [];
+    if (statusFilter !== "ALL") list = list.filter((r) => r.status === statusFilter);
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter((r) =>
+      fullName(r.user).toLowerCase().includes(q) ||
+      (r.template?.name ?? "").toLowerCase().includes(q) ||
+      (r.user?.department?.name ?? "").toLowerCase().includes(q));
+    return list;
+  }, [rows, search, statusFilter]);
 
-  const calendarEvents = useMemo<CalendarEvent[]>(
-    () => (rows ?? []).map((r): CalendarEvent => ({
-      id: r.id,
-      title: `${r.user?.firstName ?? ""}'s onboarding`.trim(),
-      date: r.targetDate ?? r.startDate,
-      color: STATUS_COLORS[r.status],
-      done: r.status === "COMPLETED",
-      payload: instToRow(r).cells,
-    })),
-    [rows],
-  );
-
-  const activeCount = (rows ?? []).filter((r) => r.status === "IN_PROGRESS").length;
-  const overdueCount = (rows ?? []).filter((r) => r.status === "OVERDUE").length;
+  const grouped = useMemo(() => {
+    const m = new Map<ObStatus, ApiInstance[]>();
+    for (const s of GROUP_ORDER) m.set(s, []);
+    for (const r of filtered) m.get(r.status)?.push(r);
+    return GROUP_ORDER.map((s) => ({ status: s, items: m.get(s) ?? [] })).filter((g) => g.items.length > 0);
+  }, [filtered]);
 
   return (
     <>
@@ -165,34 +114,126 @@ export default function OnboardingPage() {
         title="Onboarding"
         Icon={IdCard}
         iconGradient={GRAD.orangePink}
-        description={rows === null ? "Loading journeys…" : `${rows.length} journey${rows.length === 1 ? "" : "s"} · ${activeCount} active · ${overdueCount} overdue`}
-        people={[PEOPLE.mk, PEOPLE.bb]}
-        morePeople={3}
+        description={rows === null ? "Loading…" : `${stats.total} journey${stats.total === 1 ? "" : "s"} · ${stats.counts.IN_PROGRESS} active · ${stats.counts.OVERDUE} overdue · ${stats.avgPct}% avg progress`}
+        actions={
+          <div className="onb__head-actions">
+            <Link href="/onboarding/me" className="onb__nav-link"><Sparkles /> My onboarding</Link>
+            <Link href="/people" className="onb__nav-link"><Users /> People</Link>
+          </div>
+        }
       />
-      <OsTabs tabs={TABS} active={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "table" && (
-        <>
-          <OsFilterBar newLabel="Start onboarding" activeFilters={0} />
-          {loadError ? (
-            <OsEmptyView Icon={IdCard} iconGradient={GRAD.redPink} title="Couldn't load onboarding" subtitle={`API error: ${loadError}.`} cta="Retry" />
-          ) : rows === null ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-          ) : rows.length === 0 ? (
-            <OsEmptyView Icon={IdCard} iconGradient={GRAD.orangePink} title="No onboarding journeys yet" subtitle="When you hire someone in Recruiting, an onboarding instance auto-starts from the matching template." chips={["Templates", "Buddies", "Checklists"]} cta="Set up templates" />
-          ) : (
-            <OsMainTable moduleId="onboarding" columns={COLUMNS} groups={groups} handlers={handlers} />
-          )}
-        </>
-      )}
+      <div className="onb">
+        <div className="onb__kpis">
+          <KpiTile accent="var(--os-c-orange)" Icon={Activity}     label="In progress"  value={`${stats.counts.IN_PROGRESS}`} sub={`${stats.avgPct}% avg`} />
+          <KpiTile accent="var(--os-c-red)"    Icon={AlertTriangle} label="Overdue"      value={`${stats.counts.OVERDUE}`}     sub="needs attention" />
+          <KpiTile accent="var(--os-c-indigo)" Icon={Clock}        label="Not started"  value={`${stats.counts.NOT_STARTED}`} sub="upcoming" />
+          <KpiTile accent="var(--os-c-green)"  Icon={Award}        label="Completed"    value={`${stats.counts.COMPLETED}`}   sub="this cycle" />
+        </div>
 
-      {activeTab === "calendar" && (
-        <OsCalendar moduleId="onboarding" events={calendarEvents} newLabel="Start onboarding" />
-      )}
+        <div className="onb__toolbar">
+          <div className="onb__search">
+            <Search />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, template, department…" />
+          </div>
+          <div className="onb__filters">
+            {(["ALL", "IN_PROGRESS", "OVERDUE", "NOT_STARTED", "COMPLETED"] as const).map((s) => {
+              const Icon = s === "ALL" ? Hash : STATUS_ICON[s as ObStatus];
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  className={`onb__filter${statusFilter === s ? " is-active" : ""}`}
+                  style={s !== "ALL" ? { ["--f-c" as unknown as string]: STATUS_HUE[s as ObStatus] } : undefined}
+                  onClick={() => setStatusFilter(s)}
+                >
+                  <Icon /> {s === "ALL" ? "All" : STATUS_LABEL[s as ObStatus]}
+                  <span>{s === "ALL" ? stats.total : stats.counts[s as ObStatus]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-      {activeTab !== "table" && activeTab !== "calendar" && (
-        <OsEmptyView Icon={IdCard} iconGradient={GRAD.orangePink} title={`${TABS.find((t) => t.id === activeTab)?.label ?? "View"} coming soon`} subtitle="Shares live data with Main table." chips={["Live data"]} cta="Back to Main table" />
-      )}
+        {loadError ? (
+          <OsEmptyView Icon={IdCard} iconGradient={GRAD.redPink} title="Couldn't load" subtitle={loadError} cta="Retry" />
+        ) : rows === null ? (
+          <div className="onb__loading">Loading…</div>
+        ) : stats.total === 0 ? (
+          <OsEmptyView
+            Icon={IdCard}
+            iconGradient={GRAD.orangePink}
+            title="No onboarding journeys yet"
+            subtitle="When you hire someone in Recruiting, an onboarding instance auto-starts from the matching template."
+            chips={["Templates", "Buddies", "Checklists"]}
+            cta="Set up templates"
+          />
+        ) : (
+          grouped.map((g) => {
+            const Icon = STATUS_ICON[g.status];
+            return (
+              <section key={g.status} className="onb__section" style={{ ["--s-c" as unknown as string]: STATUS_HUE[g.status] }}>
+                <header className="onb__section-head">
+                  <span className="onb__section-tag"><Icon /> {STATUS_LABEL[g.status]}</span>
+                  <span className="onb__section-count">{g.items.length}</span>
+                  <span className="onb__section-line" />
+                </header>
+                <div className="onb__list">
+                  {g.items.map((i) => <OnboardRow key={i.id} i={i} />)}
+                </div>
+              </section>
+            );
+          })
+        )}
+      </div>
     </>
+  );
+}
+
+function OnboardRow({ i }: { i: ApiInstance }) {
+  const pct = progressPct(i);
+  const userColor = i.user ? avColor(i.user.id) : "var(--os-ink-3)";
+  const days = i.targetDate ? Math.ceil((new Date(i.targetDate).getTime() - Date.now()) / MS_DAY) : null;
+  const targetLabel = !i.targetDate ? null :
+    i.status === "COMPLETED" ? null :
+    days !== null && days < 0 ? `${-days}d late` :
+    days === 0 ? "Due today" :
+    days !== null && days <= 7 ? `Due in ${days}d` :
+    `Target ${new Date(i.targetDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  const targetTone = !days ? "" : days < 0 ? "is-late" : days <= 7 ? "is-soon" : "";
+  return (
+    <Link href={i.user?.id ? `/people/${i.user.id}` : "/onboarding"} className={`onb__row${i.status === "COMPLETED" ? " is-done" : ""}`}>
+      <span className="onb__row-av" style={{ background: userColor }}>{initials(i.user?.firstName, i.user?.lastName)}</span>
+      <div className="onb__row-main">
+        <div className="onb__row-name">{fullName(i.user)}</div>
+        <div className="onb__row-meta">
+          <span>{i.template?.name ?? "Onboarding"}</span>
+          {i.user?.department?.name && <span><Building /> {i.user.department.name}</span>}
+          {i.buddy && <span>Buddy: {fullName(i.buddy)}</span>}
+          {targetLabel && <span className={`onb__row-target ${targetTone}`}><CalendarIcon /> {targetLabel}</span>}
+        </div>
+        {i.status !== "COMPLETED" && (
+          <div className="onb__row-bar"><div className="onb__row-bar-fill" style={{ width: `${pct}%` }} /></div>
+        )}
+      </div>
+      <div className="onb__row-right">
+        <span className="onb__row-pct">{pct}%</span>
+        <ChevronRight className="onb__row-arrow" />
+      </div>
+    </Link>
+  );
+}
+
+function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof IdCard; label: string; value: string; sub: string }) {
+  return (
+    <div className="onb__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
+      <span className="onb__kpi-accent" aria-hidden="true" />
+      <div className="onb__kpi-row">
+        <div className="onb__kpi-icon"><Icon /></div>
+        <div className="onb__kpi-label">{label}</div>
+      </div>
+      <div className="onb__kpi-value">{value}</div>
+      <div className="onb__kpi-sub">{sub}</div>
+    </div>
   );
 }

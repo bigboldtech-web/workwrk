@@ -188,9 +188,9 @@ Every page subtask must pass this gate before being marked done:
 - [x] /learning/catalog — bespoke catalog with KPI strip + category groups
 - [x] /learning/manage — admin table with KPI strip + completion bars
 - [x] /learning/mine — personal queue with KPI strip + mandatory section
-- [ ] /onboarding — onboarding program
-- [ ] /onboarding/course/[id] — course detail
-- [ ] /onboarding/me — my onboarding
+- [x] /onboarding — admin journey list with KPI strip + status sections
+- [x] /onboarding/course/[id] — wrap with .onbc (preserves shadcn editor)
+- [x] /onboarding/me — wrap personal journey with OsTitleBar
 
 ## P. Legal & Compliance (4 pages)
 
