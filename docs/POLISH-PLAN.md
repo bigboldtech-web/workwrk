@@ -125,7 +125,7 @@ Every page subtask must pass this gate before being marked done:
 ## I. Performance & Goals (5 pages)
 
 - [x] /reviews — featured cycle hero + cycles list
-- [ ] /reviews/[id] — review detail
+- [x] /reviews/[id] — bespoke cycle hero (tabs preserved)
 - [ ] /kra-kpi — KRA/KPI definitions
 - [ ] /kra-kpi/review — KPI review cycle
 - [ ] /talent — talent marketplace
