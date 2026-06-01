@@ -150,7 +150,7 @@ Every page subtask must pass this gate before being marked done:
 
 - [x] /sops — library grouped by category with KPI strip + status filters
 - [x] /sops/[id] — wrap with .sopd (complex multi-mode editor preserved)
-- [ ] /sops/new — type picker
+- [x] /sops/new — type picker with hue-coded cards (Written / Checklist / Recorded)
 - [ ] /sops/new/text — text SOP builder
 - [ ] /sops/new/checklist — checklist SOP builder
 - [ ] /sops/new/record — video SOP builder
