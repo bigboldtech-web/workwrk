@@ -4,7 +4,9 @@
  * ═════════════════════════════════════════════════════════════════ */
 
 .workwrk-os {
-  /* Brand */
+  /* Brand — default; per-accent overrides below key off
+     `:root[data-accent="<key>"]` so the CustomizePanel theme picker
+     re-paints chrome instantly (set by ThemeApplier on <html>). */
   --os-brand:        #0073EA;
   --os-brand-hover:  #0060B9;
   --os-brand-soft:   #E6F1FB;
@@ -104,6 +106,33 @@
 }
 .workwrk-os ::-webkit-scrollbar-thumb:hover { background: var(--os-ink-4); }
 .workwrk-os ::selection { background: var(--os-brand-soft); color: var(--os-brand-deep); }
+
+/* ─────────── Accent overrides — keyed by ThemeApplier ────────────
+   When the user picks an accent in the CustomizePanel, ThemeApplier
+   writes `data-accent="<key>"` on <html>. We override --os-brand
+   inside `.workwrk-os` so every existing rule that reads --os-brand
+   re-paints. `-soft` is a 14% tint of the same hue; `-hover` is
+   ~12% darker; `-deep` matches `-hover` for readable foregrounds. */
+:root[data-accent="mint"]   .workwrk-os { --os-brand: #3AB39E; --os-brand-hover: #2E9080; --os-brand-soft: #E0F2EE; --os-brand-deep: #2E9080; }
+:root[data-accent="black"]  .workwrk-os { --os-brand: #1F2024; --os-brand-hover: #111317; --os-brand-soft: #E6E7EA; --os-brand-deep: #111317; }
+:root[data-accent="purple"] .workwrk-os { --os-brand: #7C3AED; --os-brand-hover: #6328C8; --os-brand-soft: #EFE7FC; --os-brand-deep: #6328C8; }
+:root[data-accent="blue"]   .workwrk-os { --os-brand: #3B82F6; --os-brand-hover: #2563EB; --os-brand-soft: #E2EBFD; --os-brand-deep: #2563EB; }
+:root[data-accent="pink"]   .workwrk-os { --os-brand: #EC4899; --os-brand-hover: #D63584; --os-brand-soft: #FCE2EF; --os-brand-deep: #D63584; }
+:root[data-accent="violet"] .workwrk-os { --os-brand: #A855F7; --os-brand-hover: #8B3FDB; --os-brand-soft: #F1E4FD; --os-brand-deep: #8B3FDB; }
+:root[data-accent="indigo"] .workwrk-os { --os-brand: #6366F1; --os-brand-hover: #4F52D8; --os-brand-soft: #E5E6FB; --os-brand-deep: #4F52D8; }
+:root[data-accent="orange"] .workwrk-os { --os-brand: #F59E0B; --os-brand-hover: #D58503; --os-brand-soft: #FCEFCE; --os-brand-deep: #D58503; }
+:root[data-accent="teal"]   .workwrk-os { --os-brand: #14B8A6; --os-brand-hover: #0F968A; --os-brand-soft: #D6F3F0; --os-brand-deep: #0F968A; }
+:root[data-accent="bronze"] .workwrk-os { --os-brand: #A78B6C; --os-brand-hover: #8A7253; --os-brand-soft: #F1EAE0; --os-brand-deep: #8A7253; }
+
+/* ─── Icons-only sidebar mode (toggled in CustomizePanel → Navigation) ─── */
+.os-side__scroll[data-icons-only="1"] .os-side__item-text,
+.os-side__scroll[data-icons-only="1"] .os-side__item-count,
+.os-side__scroll[data-icons-only="1"] .os-side__space-label,
+.os-side__scroll[data-icons-only="1"] .os-side__space-count {
+  display: none;
+}
+.os-side__scroll[data-icons-only="1"] .os-side__section-head { justify-content: center; }
+.os-side__scroll[data-icons-only="1"] .os-side__section-head > span:first-child { display: none; }
 
 /* ─── APP SHELL ─── */
 .os-shell {

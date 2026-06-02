@@ -14,27 +14,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Check,
-  Home as HomeIcon,
   Inbox,
   MessageSquare,
   CheckSquare,
   Send,
   Globe,
   ListTodo,
-  Calendar as CalendarIcon,
-  Sparkles,
-  Users,
-  FileText,
-  BarChart3,
-  Brush,
-  ClipboardCheck,
-  Video,
-  Trophy,
-  Clock,
   PanelsLeftBottom,
   Layers,
   Star,
 } from "lucide-react";
+import { NAV_ITEMS } from "@/lib/sidebar-catalog";
 import {
   Dialog,
   DialogContent,
@@ -50,25 +40,10 @@ import type {
   DensityPref,
 } from "@/lib/preferences";
 
-/* ─────────────── Catalog: nav + home + section keys ─────────────── */
+/* ─────────────── Catalog: home + section keys ─────────────── */
 
-// Matches the screenshots — every key here is a nav surface the user
-// can toggle. Order is the default order; user can reorder via the
-// "Sections" tab or future drag-reorder in the sidebar itself.
-const NAV_ITEMS: Array<{ key: string; label: string; Icon: React.ComponentType<{ className?: string }>; alwaysOn?: boolean }> = [
-  { key: "home",        label: "Home",        Icon: HomeIcon, alwaysOn: true },
-  { key: "spaces",      label: "Spaces",      Icon: Layers },
-  { key: "planner",     label: "Planner",     Icon: CalendarIcon },
-  { key: "ai",          label: "AI",          Icon: Sparkles },
-  { key: "teams",       label: "Teams",       Icon: Users },
-  { key: "docs",        label: "Docs",        Icon: FileText },
-  { key: "dashboards",  label: "Dashboards",  Icon: BarChart3 },
-  { key: "whiteboards", label: "Whiteboards", Icon: Brush },
-  { key: "forms",       label: "Forms",       Icon: ClipboardCheck },
-  { key: "clips",       label: "Clips",       Icon: Video },
-  { key: "goals",       label: "Goals",       Icon: Trophy },
-  { key: "timesheets",  label: "Timesheets",  Icon: Clock },
-];
+// NAV_ITEMS imported from src/lib/sidebar-catalog so the sidebar and
+// this panel render the same source of truth.
 
 const HOME_CARDS: Array<{ key: string; label: string; Icon: React.ComponentType<{ className?: string }>; alwaysOn?: boolean }> = [
   { key: "inbox",             label: "Inbox",             Icon: Inbox, alwaysOn: true },

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -31,11 +31,29 @@ import {
   Building2,
   HardDrive,
   FormInput,
+  Layers,
+  Lock,
   Table as TableIcon,
   type LucideIcon,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { SidebarOrgSwitcher } from "./sidebar-org-switcher";
+import { NAV_ITEMS, arrangeNavItems } from "@/lib/sidebar-catalog";
+import { NewSpaceDialog } from "./new-space-dialog";
+import type { EffectivePreferences } from "@/lib/preferences";
+import type { Visibility } from "@/generated/prisma";
+
+interface SpaceRow {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  visibility: Visibility;
+  memberCount: number;
+  folderCount: number;
+  boardCount: number;
+}
 
 type Leaf = {
   href: string;
@@ -59,8 +77,12 @@ type Space = {
   items: Leaf[];
 };
 
-/* ─────────────── Pinned (always visible) ─────────────── */
-const PINNED: Leaf[] = [
+/* ─────────────── Pinned (always visible — pre-customize defaults) ───
+ * Used as the fallback list before preferences load. After load, we
+ * derive the pinned strip from src/lib/sidebar-catalog so the
+ * CustomizePanel's Navigation tab and the sidebar share the same
+ * source of truth. */
+const PINNED_FALLBACK: Leaf[] = [
   { href: "/today",     label: "Today",        Icon: Home,      color: "var(--os-c-orange)", pulse: true },
   { href: "/inbox",     label: "Inbox",        Icon: Inbox,     color: "var(--os-c-indigo)" },
   { href: "/activity",  label: "Activity",     Icon: Activity,  color: "var(--os-c-brown)" },
@@ -70,6 +92,17 @@ const PINNED: Leaf[] = [
   { href: "/forms",     label: "Forms",        Icon: FormInput, color: "var(--os-c-purple)" },
   { href: "/tables",    label: "Tables",       Icon: TableIcon, color: "var(--os-c-teal)" },
 ];
+
+const ACCENT_COLORS = [
+  "var(--os-c-orange)", "var(--os-c-indigo)", "var(--os-c-brown)", "var(--os-c-yellow)",
+  "var(--os-c-pink)", "var(--os-c-blue)", "var(--os-c-purple)", "var(--os-c-teal)",
+  "var(--os-c-green)", "var(--os-c-red)",
+];
+function colorForKey(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return ACCENT_COLORS[h % ACCENT_COLORS.length];
+}
 
 /* ─────────────── Spaces (collapsible clusters) ─────────────── */
 const SPACES: Space[] = [
@@ -309,6 +342,66 @@ export function OsSidebar() {
   const pathname = usePathname() || "";
   const { openPalette, openCustomize } = useOsShell();
 
+  // ── DB-backed user Spaces + preferences ────────────────────────
+  const [prefs, setPrefs] = useState<EffectivePreferences | null>(null);
+  const [userSpaces, setUserSpaces] = useState<SpaceRow[] | null>(null);
+  const [newSpaceOpen, setNewSpaceOpen] = useState(false);
+
+  const reloadSpaces = useCallback(async () => {
+    try {
+      const res = await fetch("/api/spaces", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { spaces: SpaceRow[] };
+      setUserSpaces(data.spaces);
+    } catch {
+      // Leave userSpaces null on error; the section won't render.
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadSpaces();
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/preferences", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { effective: EffectivePreferences };
+        if (active) setPrefs(data.effective);
+      } catch {}
+    })();
+    const onPrefsChanged = async () => {
+      try {
+        const res = await fetch("/api/preferences", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { effective: EffectivePreferences };
+        setPrefs(data.effective);
+      } catch {}
+    };
+    window.addEventListener("workwrk:prefs-changed", onPrefsChanged);
+    return () => {
+      active = false;
+      window.removeEventListener("workwrk:prefs-changed", onPrefsChanged);
+    };
+  }, [reloadSpaces]);
+
+  const sidebarHidden = prefs?.sidebar.hidden ?? [];
+  const sidebarOrder = prefs?.sidebar.order ?? [];
+  const iconsOnly = prefs?.sidebar.iconsOnly ?? false;
+
+  // Pinned items come from the shared catalog, filtered + ordered by
+  // the user's preferences. We render the same Leaf shape used by the
+  // existing rendering pipeline so the visual stays consistent.
+  const pinned = useMemo<Leaf[]>(() => {
+    if (!prefs) return PINNED_FALLBACK;
+    const arranged = arrangeNavItems(NAV_ITEMS, sidebarHidden, sidebarOrder);
+    return arranged.map((it) => ({
+      href: it.href,
+      label: it.label,
+      Icon: it.Icon,
+      color: colorForKey(it.key),
+    }));
+  }, [prefs, sidebarHidden, sidebarOrder]);
+
   const currentSpaceId = useMemo(
     () => SPACES.find((s) => spaceContainsPath(s, pathname))?.id ?? null,
     [pathname],
@@ -354,7 +447,7 @@ export function OsSidebar() {
         </button>
       </div>
 
-      <div className="os-side__scroll">
+      <div className="os-side__scroll" data-icons-only={iconsOnly ? "1" : "0"}>
         <section className="os-side__section">
           <div className="os-side__section-head">
             <span>★ Pinned</span>
@@ -362,15 +455,67 @@ export function OsSidebar() {
               <Plus />
             </button>
           </div>
-          {PINNED.map((it) => <LeafItem key={it.href} item={it} pathname={pathname} />)}
+          {pinned.map((it) => <LeafItem key={it.href} item={it} pathname={pathname} />)}
         </section>
 
+        {/* User-defined Spaces (DB-backed, ClickUp model — Decision D1=B) */}
         <section className="os-side__section">
           <div className="os-side__section-head">
             <span>Spaces</span>
-            <button type="button" className="os-side__section-head-btn" aria-label="New space">
+            <button
+              type="button"
+              className="os-side__section-head-btn"
+              aria-label="New space"
+              onClick={() => setNewSpaceOpen(true)}
+            >
               <Plus />
             </button>
+          </div>
+          {userSpaces === null ? null : userSpaces.length === 0 ? (
+            <button
+              type="button"
+              onClick={() => setNewSpaceOpen(true)}
+              className="os-side__item os-side__item--ghost"
+              style={{ fontStyle: "italic", color: "var(--os-ink-2)" }}
+            >
+              <span className="os-side__item-mark" style={{ background: "var(--os-surface-3)", color: "var(--os-ink-2)" }}>+</span>
+              <span className="os-side__item-text">New Space</span>
+            </button>
+          ) : (
+            userSpaces.map((s) => {
+              const initials = (s.icon ?? s.name.trim().charAt(0)).toUpperCase();
+              const tint = s.color ?? colorForKey(s.id);
+              return (
+                <Link
+                  key={s.id}
+                  href={`/spaces/${s.slug}`}
+                  className="os-side__item"
+                >
+                  <span
+                    className="os-side__item-icon"
+                    style={{
+                      background: `color-mix(in srgb, ${tint} 12%, transparent)`,
+                      color: tint,
+                    }}
+                  >
+                    {s.visibility === "PRIVATE" ? <Lock /> : <Layers />}
+                  </span>
+                  <span className="os-side__item-text">{s.name}</span>
+                  {s.boardCount > 0 ? (
+                    <span className="os-side__item-count">{s.boardCount}</span>
+                  ) : null}
+                </Link>
+              );
+            })
+          )}
+        </section>
+
+        {/* Legacy product groupings — kept until the workspace-nav refactor.
+            These are the "Apps" (CRM, Dev, ITSM, ...). The DB-backed Spaces
+            section above is the new ClickUp-style user-defined grouping. */}
+        <section className="os-side__section">
+          <div className="os-side__section-head">
+            <span>Apps</span>
           </div>
           {SPACES.map((space) => {
             const open = openSpaces.has(space.id);
@@ -402,6 +547,12 @@ export function OsSidebar() {
           })}
         </section>
       </div>
+
+      <NewSpaceDialog
+        open={newSpaceOpen}
+        onOpenChange={setNewSpaceOpen}
+        onCreated={() => void reloadSpaces()}
+      />
 
       <div className="os-side__foot">
         <button type="button" className="os-side__foot-btn" onClick={openCustomize}>
