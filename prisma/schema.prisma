@@ -103,70 +103,74 @@ model Organization {
   memberships           OrganizationMembership[] @relation("OrgMembershipOrg")
 
   // 🆕 Phase A — universal primitives
-  productInstallations  ProductInstallation[]
-  spaces                Space[]
-  boards                Board[]
-  items                 Item[]
-  agents                Agent[]
-  apps                  App[]
+  productInstallations ProductInstallation[]
+  spaces               Space[]
+  boards               Board[]
+  items                Item[]
+  agents               Agent[]
+  apps                 App[]
   // 🆕 Phase E2 — WorkwrK CRM
-  crmLeads              Lead[]
-  crmAccounts           Account[]
-  crmOpportunities      Opportunity[]
-  pipelineStages        PipelineStage[]
+  crmLeads             Lead[]
+  crmAccounts          Account[]
+  crmOpportunities     Opportunity[]
+  pipelineStages       PipelineStage[]
   // 🆕 Phase E3 — WorkwrK ITSM
-  itsmTickets           Ticket[]
-  itsmIncidents         Incident[]
-  itsmKbArticles        KbArticle[]
+  itsmTickets          Ticket[]
+  itsmIncidents        Incident[]
+  itsmKbArticles       KbArticle[]
   // 🆕 Phase E4 — WorkwrK Marketing
-  mktCampaigns          Campaign[]
-  mktContentItems       ContentItem[]
-  mktEventBriefs        EventBrief[]
+  mktCampaigns         Campaign[]
+  mktContentItems      ContentItem[]
+  mktEventBriefs       EventBrief[]
   // 🆕 Phase E5 — WorkwrK Dev
-  devSprints            Sprint[]
-  devReleases           Release[]
-  devRoadmapItems       RoadmapItem[]
+  devSprints           Sprint[]
+  devReleases          Release[]
+  devRoadmapItems      RoadmapItem[]
   // 🆕 Phase E6 — WorkwrK Legal
-  legalContracts        Contract[]
-  legalPrivacyRequests  PrivacyRequest[]
-  legalTrademarks       Trademark[]
+  legalContracts       Contract[]
+  legalPrivacyRequests PrivacyRequest[]
+  legalTrademarks      Trademark[]
   // 🆕 Phase D1 — Sidekick chat
-  chatSessions          ChatSession[]
+  chatSessions         ChatSession[]
   // 🆕 Whiteboards (Excalidraw-powered canvases)
-  whiteboards           Whiteboard[]
+  whiteboards          Whiteboard[]
   // 🆕 Phase 4 — universal Doc + version history. Polymorphic; can
   // attach to any entity (task, ticket, board row) OR stand alone.
-  docs                  Doc[]
+  docs                 Doc[]
   // 🆕 Phase 5 — universal Updates feed + Activity log.
-  itemUpdates           ItemUpdate[]
-  itemActivities        ItemActivity[]
+  itemUpdates          ItemUpdate[]
+  itemActivities       ItemActivity[]
   // 🆕 Phase 7 — polymorphic time-tracking sessions.
-  timerSessions         TimerSession[]
+  timerSessions        TimerSession[]
   // 🆕 Phase E7 — WorkwrK Helpdesk
-  helpdeskCustomers     SupportCustomer[]
-  helpdeskTickets       SupportTicket[]
-  helpdeskMacros        SupportMacro[]
+  helpdeskCustomers    SupportCustomer[]
+  helpdeskTickets      SupportTicket[]
+  helpdeskMacros       SupportMacro[]
   // 🆕 Workspaces — per-(org,product) named spaces for "Sales Team A"
   // vs "Sales Team B" customization, the foundation for Studio + the
   // "teams build their own town" vision pillar.
-  workspaces            Workspace[]
+  workspaces           Workspace[]
   // 🆕 Studio boards — user-built tables/kanbans scoped to a workspace.
-  studioBoards          StudioBoard[]
+  studioBoards         StudioBoard[]
   // 🆕 Templates this org has published to the marketplace.
-  boardTemplates        BoardTemplate[]
+  boardTemplates       BoardTemplate[]
   // 🆕 Files primitive — generic drive surface where users compose
   // their own structure (folders + uploaded files). Used by /files
   // and embeddable in any block-based doc / page.
-  fileFolders           FileFolder[]
-  fileEntries           FileEntry[]
+  fileFolders          FileFolder[]
+  fileEntries          FileEntry[]
   // 🆕 Forms primitive — user-built forms (any team), submissions
   // pile up in an inbox + can target a Studio board for row inserts.
-  formDefinitions       FormDefinition[]
-  formSubmissions       FormSubmission[]
+  formDefinitions      FormDefinition[]
+  formSubmissions      FormSubmission[]
   // 🆕 Tables primitive — lightweight Airtable-style data tables.
   // No workspace/permission friction, embeddable in any doc.
-  dataTables            DataTable[]
-  dataTableRows         DataTableRow[]
+  dataTables           DataTable[]
+  dataTableRows        DataTableRow[]
+  // 🆕 Phase 1 shell — ClickUp parity substrate
+  folders              Folder[]
+  preference           OrgPreference?
+  hrSegments           HRSegment[]
 
   @@index([slug])
 }
@@ -197,10 +201,10 @@ model FileEntry {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name           String       // display name (original filename)
+  name           String // display name (original filename)
   mimeType       String
-  size           Int          // bytes
-  url            String       // resolvable URL: /api/uploads/<key> or S3
+  size           Int // bytes
+  url            String // resolvable URL: /api/uploads/<key> or S3
   folderId       String?
   folder         FileFolder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
   uploadedById   String
@@ -245,7 +249,7 @@ model FormDefinition {
   //     table?: { [formFieldId]: tableColumnId } }
   // When absent for a given form field, the submission handler falls
   // back to case-insensitive label matching.
-  fieldMappings  Json           @default("{}")
+  fieldMappings  Json             @default("{}")
   createdById    String
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
@@ -516,6 +520,12 @@ model User {
   announcementAcks        AnnouncementAcknowledgment[] @relation("AnnouncementAckUser")
   organizationMemberships OrganizationMembership[]     @relation("OrgMembershipUser")
 
+  // 🆕 Phase 1 shell — ClickUp parity substrate
+  preference            UserPreference?
+  spaceMemberships      SpaceMember[]
+  dottedLineToManagers  UserDottedLine[] @relation("DottedLineFromUser")
+  dottedLineFromReports UserDottedLine[] @relation("DottedLineToManager")
+
   @@unique([email, organizationId])
   @@index([organizationId])
   @@index([departmentId])
@@ -616,9 +626,9 @@ model Workspace {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  productSlug    String       // workwrk-crm, workwrk-dev, workwrk-itsm, …
-  name           String       // "Sales Team A", "Main workspace"
-  slug           String       // url-safe, unique within (org, product)
+  productSlug    String // workwrk-crm, workwrk-dev, workwrk-itsm, …
+  name           String // "Sales Team A", "Main workspace"
+  slug           String // url-safe, unique within (org, product)
   isDefault      Boolean      @default(false)
   // Optional visual accent so two workspaces inside the same product
   // can be distinguished in the switcher at a glance.
@@ -630,8 +640,8 @@ model Workspace {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  members        WorkspaceMember[]
-  studioBoards   StudioBoard[]
+  members      WorkspaceMember[]
+  studioBoards StudioBoard[]
 
   @@unique([organizationId, productSlug, slug])
   @@index([organizationId, productSlug])
@@ -676,12 +686,12 @@ enum WorkspaceMemberRole {
 //   color the workspace nav consistently with the surrounding app).
 //   Null = a free-standing Studio board not nested under any product.
 model StudioBoard {
-  id             String      @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   workspaceId    String?
-  workspace      Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
-  productSlug    String?     // workwrk-crm, workwrk-dev, … (or null)
+  workspace      Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  productSlug    String? // workwrk-crm, workwrk-dev, … (or null)
   name           String
   slug           String
   description    String?
@@ -692,11 +702,11 @@ model StudioBoard {
   fields         Json         @default("[]")
   color          String?
   createdById    String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  items          StudioItem[]
-  templates      BoardTemplate[]
+  items     StudioItem[]
+  templates BoardTemplate[]
 
   @@unique([organizationId, slug])
   @@index([organizationId, workspaceId])
@@ -743,7 +753,7 @@ enum StudioLayout {
 // empty StudioBoard with the same shape — your team fills it in.
 model BoardTemplate {
   id             String                  @id @default(cuid())
-  organizationId String                  // org that published it
+  organizationId String // org that published it
   organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Optional pointer back to the source board (lets the publisher
   // re-sync changes later). Nullable because the source board can be
@@ -752,8 +762,8 @@ model BoardTemplate {
   sourceBoard    StudioBoard?            @relation(fields: [sourceBoardId], references: [id], onDelete: SetNull)
   name           String
   description    String?
-  category       String?                 // freeform tag e.g. "Sales", "PM", "HR"
-  productSlug    String?                 // suggested host app
+  category       String? // freeform tag e.g. "Sales", "PM", "HR"
+  productSlug    String? // suggested host app
   layout         StudioLayout            @default(TABLE)
   fields         Json                    @default("[]")
   color          String?
@@ -1654,19 +1664,19 @@ model AIQuery {
 // ==========================================
 
 model Notification {
-  id        String   @id @default(cuid())
-  title     String
-  message   String
-  type      String
-  read      Boolean  @default(false)
-  link      String?
+  id           String    @id @default(cuid())
+  title        String
+  message      String
+  type         String
+  read         Boolean   @default(false)
+  link         String?
   // Snoozed-until — if set and in the future, the bell + inbox
   // suppress this row. Reads via `(snoozedUntil IS NULL OR
   // snoozedUntil <= now())`. Clearing snooze = set NULL.
   snoozedUntil DateTime?
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
 
   @@index([userId, read])
   @@index([userId, snoozedUntil])
@@ -3144,7 +3154,7 @@ model Job {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?      // nullable: legacy rows are workspace-agnostic
+  workspaceId    String? // nullable: legacy rows are workspace-agnostic
 
   title          String
   description    String?
@@ -3184,7 +3194,7 @@ model Candidate {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?      // nullable: legacy rows are workspace-agnostic
+  workspaceId    String? // nullable: legacy rows are workspace-agnostic
 
   firstName String
   lastName  String
@@ -4562,25 +4572,25 @@ model JournalLine {
 // org-scoped — every org sees the same catalog and picks what to
 // install (ProductInstallation).
 model Product {
-  id                 String   @id @default(cuid())
-  slug               String   @unique
+  id                 String        @id @default(cuid())
+  slug               String        @unique
   name               String
   tagline            String?
-  description        String   @db.Text
+  description        String        @db.Text
   iconKey            String?
   hue                String?
   suite              ProductSuite  @default(CROSS)
   tier               ProductTier   @default(CORE)
   status             ProductStatus @default(LIVE)
-  defaultEnabled     Boolean  @default(false)
-  displayOrder       Int      @default(0)
+  defaultEnabled     Boolean       @default(false)
+  displayOrder       Int           @default(0)
   legacyModuleKey    String?
   pathPrefix         String?
-  seededAgents       Json     @default("[]")
-  seededTemplates    Json     @default("[]")
-  seededIntegrations Json     @default("[]")
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  seededAgents       Json          @default("[]")
+  seededTemplates    Json          @default("[]")
+  seededIntegrations Json          @default("[]")
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   installations ProductInstallation[]
 
@@ -4657,13 +4667,20 @@ model Space {
   displayOrder   Int          @default(0)
   archivedAt     DateTime?
   settings       Json         @default("{}")
+  // 🆕 Phase 1 shell — who can see this Space. Defaults to WORKSPACE
+  // (visible to SpaceMembers + org admins), can be widened to ORG
+  // (anyone in the org) or narrowed to PRIVATE (members only).
+  visibility     Visibility   @default(WORKSPACE)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  boards Board[]
+  boards  Board[]
+  folders Folder[]
+  members SpaceMember[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
+  @@index([organizationId, archivedAt])
   @@index([parentSpaceId])
 }
 
@@ -4673,6 +4690,11 @@ model Board {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   spaceId        String?
   space          Space?       @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  // 🆕 Phase 1 shell — Boards can sit inside a Folder for the
+  // Space > Folder > Board nesting the ClickUp shell expects. Nullable
+  // so a Board can still hang directly off a Space (no folder).
+  folderId       String?
+  folder         Folder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
   slug           String
   name           String
   description    String?
@@ -4685,6 +4707,10 @@ model Board {
   archivedAt     DateTime?
   schema         Json         @default("{}")
   settings       Json         @default("{}")
+  // 🆕 Phase 1 shell — Board-level visibility. Resolver in Phase 6
+  // composes this with Space.visibility + SpaceMember + reporting
+  // line + org role to decide whether the viewer can read/edit.
+  visibility     Visibility   @default(WORKSPACE)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -4693,7 +4719,9 @@ model Board {
 
   @@unique([organizationId, slug])
   @@index([organizationId, productSlug])
+  @@index([organizationId, archivedAt])
   @@index([spaceId])
+  @@index([folderId])
   @@index([itemType])
 }
 
@@ -4756,28 +4784,179 @@ model Item {
   @@index([ownerId])
 }
 
-model Agent {
+// ==========================================
+// 🆕 PHASE 1 SHELL — ClickUp parity substrate
+// Folders inside Spaces; per-Space membership; per-user + per-org
+// shell preferences; matrix reporting (dotted lines) + HR segment
+// ownership. Strictly schema additions — no UI consumes these yet;
+// Phase 2 wires the customize panel + sidebar tree on top.
+// ==========================================
+
+// Visibility — the three-tier read scope used by Space and Board.
+// PRIVATE: only explicit members can see.
+// WORKSPACE: visible to SpaceMembers + org admins (the default;
+//            keeps things scoped without ceremony).
+// ORG: visible to every member of the organization.
+// The Phase 6 access resolver composes this with reporting-line
+// and role checks for the final read/edit decision.
+enum Visibility {
+  PRIVATE
+  WORKSPACE
+  ORG
+}
+
+// Folder — Space > Folder > Board nesting. Folders can nest inside
+// other Folders (parentFolderId), capped at 6 levels in app code.
+// Soft-deletable via archivedAt; deletedAt-style hard delete is
+// out of scope for Phase 1 (Phase 2 ships a trash bin UI).
+model Folder {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  slug           String
+  spaceId        String
+  space          Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  parentFolderId String?
+  parentFolder   Folder?      @relation("FolderTree", fields: [parentFolderId], references: [id], onDelete: SetNull)
+  childFolders   Folder[]     @relation("FolderTree")
   name           String
-  persona        String?
-  avatar         String?
-  description    String       @db.Text
-  systemPrompt   String       @db.Text
-  productSlug    String?
-  tools          Json         @default("[]")
-  modelOverride  String?
-  isPrebuilt     Boolean      @default(false)
-  prebuiltSlug   String?
-  status         AgentStatus  @default(ENABLED)
+  description    String?
+  icon           String?
+  color          String?
+  ownerId        String?
+  position       Float        @default(0) // fractional ordering — Linear pattern, no renumber on drop
+  archivedAt     DateTime?
+  settings       Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  boards Board[]
+
+  @@index([organizationId, archivedAt])
+  @@index([spaceId, parentFolderId, position])
+  @@index([parentFolderId])
+}
+
+// SpaceMember — per-Space ACL. Org admins implicitly access every
+// Space without a row here; explicit rows are the membership grant
+// for non-admin users. role is a coarse OWNER/ADMIN/MEMBER/GUEST;
+// fine-grained per-Board permissions land in Phase 6 (BoardACL).
+model SpaceMember {
+  id        String    @id @default(cuid())
+  spaceId   String
+  space     Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      SpaceRole @default(MEMBER)
+  invitedBy String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([spaceId, userId])
+  @@index([userId])
+  @@index([spaceId, role])
+}
+
+enum SpaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  GUEST
+}
+
+// UserPreference — per-user shell state. One row per user. JSON
+// blobs for now (sidebar/home/theme); typed columns extracted in
+// Phase 2 once we know the exact shape we want to query on.
+//
+// Resolver merges this with OrgPreference defaults and clamps
+// against OrgPreference.lockedKeys so admin-locked keys can't be
+// overridden by individual users.
+model UserPreference {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sidebar   Json? // { pinned:[], hidden:[], order:[], iconsOnly:false, sectionsOrder:[] }
+  home      Json? // { cards:[], order:[] }
+  theme     Json? // { appearance:'LIGHT'|'DARK'|'AUTO', accent:'mint' }
+  density   String? // 'compact' | 'cozy'
+  updatedAt DateTime @updatedAt
+}
+
+// OrgPreference — org-level defaults for the customize panel. Admin
+// can also freeze specific dot-paths via lockedKeys so users can't
+// hide compliance-critical surfaces (e.g. "sidebar.pinned.kra-kpi").
+model OrgPreference {
+  organizationId String       @id
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sidebarDefault Json?
+  homeDefault    Json?
+  themeDefault   Json?
+  densityDefault String?
+  lockedKeys     String[]     @default([]) // dot-paths admin has frozen
+  updatedAt      DateTime     @updatedAt
+}
+
+// UserDottedLine — matrix reporting. Beyond the solid managerId on
+// User, a person can have any number of dotted-line managers (project
+// leads, matrix managers, regional dotted-lines). The reporting-line
+// helper unions solid + dotted for "everyone I report to" queries.
+model UserDottedLine {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation("DottedLineFromUser", fields: [userId], references: [id], onDelete: Cascade)
+  managerId String
+  manager   User      @relation("DottedLineToManager", fields: [managerId], references: [id], onDelete: Cascade)
+  role      String? // free-form note: "project lead", "matrix manager", "skip-level"
+  weight    Float? // optional weight for partial reporting (e.g. 0.5 = half-time on this line)
+  startDate DateTime?
+  endDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([userId, managerId])
+  @@index([managerId])
+  @@index([userId])
+}
+
+// HRSegment — which slice of the org an HR user owns. HR people in
+// large companies own specific business units, regions, role tiers,
+// or departments rather than the whole org. The access resolver
+// uses these rows to scope HR's read access at query time.
+model HRSegment {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerId        String // the HR user
+  name           String // "APAC HR", "Engineering HR", ...
+  scope          Json         @default("{}") // { departmentIds?:[], businessUnitIds?:[], regionIds?:[], roleLevels?:[] }
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, ownerId])
+  @@index([organizationId, isActive])
+}
+
+model Agent {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  slug              String
+  name              String
+  persona           String?
+  avatar            String?
+  description       String       @db.Text
+  systemPrompt      String       @db.Text
+  productSlug       String?
+  tools             Json         @default("[]")
+  modelOverride     String?
+  isPrebuilt        Boolean      @default(false)
+  prebuiltSlug      String?
+  status            AgentStatus  @default(ENABLED)
   // Autonomous-run config — the "AI controls the people" vision pillar.
   // When `autonomousEnabled = true` and `scheduleCron` is set, the
   // cron-tickable endpoint /api/cron/run-due-agents fires this agent
   // every cycle without a user prompt. Output is captured as an
   // AgentRun row and surfaced on /dashboard.
-  autonomousEnabled Boolean   @default(false)
+  autonomousEnabled Boolean      @default(false)
   // Cron-style expression OR a coarse interval ("hourly", "daily",
   // "weekly"). Keeping it a free-form string for v1 so we don't lock
   // ourselves into a cron lib choice yet — `nextRunAt` is recomputed
@@ -4788,15 +4967,15 @@ model Agent {
   // you do every hour?" instruction; with it, the agent has a recurring
   // brief (e.g. "Review yesterday's deals and flag anything stuck >5
   // days in the same stage").
-  autonomousPrompt  String?   @db.Text
+  autonomousPrompt  String?      @db.Text
   lastRunAt         DateTime?
   nextRunAt         DateTime?
-  createdById    String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdById       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
-  runs     AgentRun[]
-  memories AgentMemory[]
+  runs         AgentRun[]
+  memories     AgentMemory[]
   chatSessions ChatSession[]
 
   @@unique([organizationId, slug])
@@ -4883,31 +5062,31 @@ enum AppStatus {
 // ==========================================
 
 model Lead {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id                       String       @id @default(cuid())
+  organizationId           String
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Workspace this lead belongs to — Sales Team A vs Sales Team B
   // inside the same CRM. Nullable so legacy rows (pre-workspaces)
   // show up under every workspace's view (org-wide visibility). New
   // leads default to the active workspace at creation time.
-  workspaceId    String?
-  firstName      String
-  lastName       String?
-  email          String?
-  phone          String?
-  company        String?
-  title          String?
-  source         String?       // "website" | "referral" | "outbound" | "linkedin" | "event" | "import"
-  status         LeadStatus    @default(NEW)
-  score          Int           @default(0)
-  notes          String?       @db.Text
-  ownerId        String?       // assigned SDR/AE
-  convertedAt    DateTime?
-  convertedToAccountId    String?
+  workspaceId              String?
+  firstName                String
+  lastName                 String?
+  email                    String?
+  phone                    String?
+  company                  String?
+  title                    String?
+  source                   String? // "website" | "referral" | "outbound" | "linkedin" | "event" | "import"
+  status                   LeadStatus   @default(NEW)
+  score                    Int          @default(0)
+  notes                    String?      @db.Text
+  ownerId                  String? // assigned SDR/AE
+  convertedAt              DateTime?
+  convertedToAccountId     String?
   convertedToOpportunityId String?
-  customFields   Json          @default("{}")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  customFields             Json         @default("{}")
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, ownerId])
@@ -4925,26 +5104,26 @@ enum LeadStatus {
 }
 
 model Account {
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Workspace this account belongs to — see Lead.workspaceId for the
   // nullable-for-back-compat rationale.
   workspaceId    String?
   name           String
   domain         String?
   industry       String?
-  size           String?       // "1-10", "11-50", etc.
+  size           String? // "1-10", "11-50", etc.
   website        String?
   phone          String?
-  description    String?       @db.Text
-  type           AccountType   @default(PROSPECT)
+  description    String?      @db.Text
+  type           AccountType  @default(PROSPECT)
   ownerId        String?
-  customFields   Json          @default("{}")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  customFields   Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  opportunities  Opportunity[]
+  opportunities Opportunity[]
 
   @@unique([organizationId, name])
   @@index([organizationId, type])
@@ -4961,51 +5140,51 @@ enum AccountType {
 }
 
 model PipelineStage {
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
-  position       Int           @default(0)
+  position       Int          @default(0)
   // Default % chance the deal closes when in this stage. Drives weighted
   // forecast on the kanban board.
-  probability    Int           @default(50)
+  probability    Int          @default(50)
   color          String?
-  isWon          Boolean       @default(false)
-  isLost         Boolean       @default(false)
+  isWon          Boolean      @default(false)
+  isLost         Boolean      @default(false)
   archivedAt     DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  opportunities  Opportunity[]
+  opportunities Opportunity[]
 
   @@unique([organizationId, name])
   @@index([organizationId, position])
 }
 
 model Opportunity {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id                String         @id @default(cuid())
+  organizationId    String
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Workspace this deal belongs to — see Lead.workspaceId for the
   // nullable-for-back-compat rationale.
-  workspaceId    String?
-  name           String
-  accountId      String?
-  account        Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  pipelineStageId String?
-  pipelineStage  PipelineStage? @relation(fields: [pipelineStageId], references: [id], onDelete: SetNull)
-  amount         Decimal?      @db.Decimal(14, 2)
-  currency       String        @default("USD")
+  workspaceId       String?
+  name              String
+  accountId         String?
+  account           Account?       @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  pipelineStageId   String?
+  pipelineStage     PipelineStage? @relation(fields: [pipelineStageId], references: [id], onDelete: SetNull)
+  amount            Decimal?       @db.Decimal(14, 2)
+  currency          String         @default("USD")
   // Expected close date drives quarter buckets + age-in-stage alerts.
   expectedCloseDate DateTime?
-  closedAt       DateTime?     // set by the Won/Lost transition
-  isWon          Boolean?      // null = open
-  lossReason     String?
-  description    String?       @db.Text
-  ownerId        String?       // assigned AE
-  customFields   Json          @default("{}")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  closedAt          DateTime? // set by the Won/Lost transition
+  isWon             Boolean? // null = open
+  lossReason        String?
+  description       String?        @db.Text
+  ownerId           String? // assigned AE
+  customFields      Json           @default("{}")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@index([organizationId, pipelineStageId])
   @@index([organizationId, ownerId])
@@ -5023,27 +5202,27 @@ model Opportunity {
 // ==========================================
 
 model Ticket {
-  id             String          @id @default(cuid())
-  organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?         // nullable: legacy rows are workspace-agnostic
-  title          String
-  description    String?         @db.Text
-  status         TicketStatus    @default(OPEN)
-  priority       TicketPriority  @default(NORMAL)
-  category       String?         // "Access" | "Hardware" | "Software" | "Network" | ...
-  source         TicketSource    @default(PORTAL)
-  requesterId    String?         // user who filed it (usually employee)
-  assigneeId     String?         // IT staff handling it
-  slaTier        String?         // "P1" | "Standard" | "VIP"
-  dueAt          DateTime?
-  acknowledgedAt DateTime?
-  resolvedAt     DateTime?
-  closedAt       DateTime?
+  id              String         @id @default(cuid())
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId     String? // nullable: legacy rows are workspace-agnostic
+  title           String
+  description     String?        @db.Text
+  status          TicketStatus   @default(OPEN)
+  priority        TicketPriority @default(NORMAL)
+  category        String? // "Access" | "Hardware" | "Software" | "Network" | ...
+  source          TicketSource   @default(PORTAL)
+  requesterId     String? // user who filed it (usually employee)
+  assigneeId      String? // IT staff handling it
+  slaTier         String? // "P1" | "Standard" | "VIP"
+  dueAt           DateTime?
+  acknowledgedAt  DateTime?
+  resolvedAt      DateTime?
+  closedAt        DateTime?
   resolutionNotes String?        @db.Text
-  customFields   Json            @default("{}")
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  customFields    Json           @default("{}")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, assigneeId])
@@ -5082,24 +5261,24 @@ enum TicketSource {
 }
 
 model Incident {
-  id              String           @id @default(cuid())
-  organizationId  String
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId     String?          // nullable: legacy rows are workspace-agnostic
-  title           String
-  summary         String?          @db.Text
-  severity        IncidentSeverity @default(SEV3)
-  status          IncidentStatus   @default(DETECTED)
-  commanderId     String?          // incident commander
-  affectedServices Json            @default("[]")    // string[] of service names
-  startedAt       DateTime         @default(now())
-  acknowledgedAt  DateTime?
-  resolvedAt      DateTime?
-  postmortemUrl   String?
-  rootCause       String?          @db.Text
-  customFields    Json             @default("{}")
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id               String           @id @default(cuid())
+  organizationId   String
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId      String? // nullable: legacy rows are workspace-agnostic
+  title            String
+  summary          String?          @db.Text
+  severity         IncidentSeverity @default(SEV3)
+  status           IncidentStatus   @default(DETECTED)
+  commanderId      String? // incident commander
+  affectedServices Json             @default("[]") // string[] of service names
+  startedAt        DateTime         @default(now())
+  acknowledgedAt   DateTime?
+  resolvedAt       DateTime?
+  postmortemUrl    String?
+  rootCause        String?          @db.Text
+  customFields     Json             @default("{}")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, severity])
@@ -5126,24 +5305,24 @@ enum IncidentStatus {
 }
 
 model KbArticle {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?      // nullable: legacy rows are workspace-agnostic
-  slug           String
-  title          String
-  body           String       @db.Text
-  excerpt        String?
-  category       String?
-  tags           Json         @default("[]")
-  authorId       String?
-  publishedAt    DateTime?
-  viewCount      Int          @default(0)
-  helpfulCount   Int          @default(0)
-  notHelpfulCount Int         @default(0)
-  archivedAt     DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId     String? // nullable: legacy rows are workspace-agnostic
+  slug            String
+  title           String
+  body            String       @db.Text
+  excerpt         String?
+  category        String?
+  tags            Json         @default("[]")
+  authorId        String?
+  publishedAt     DateTime?
+  viewCount       Int          @default(0)
+  helpfulCount    Int          @default(0)
+  notHelpfulCount Int          @default(0)
+  archivedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@unique([organizationId, slug])
   @@index([organizationId, category])
@@ -5162,18 +5341,18 @@ model Campaign {
   id             String         @id @default(cuid())
   organizationId String
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?        // nullable: legacy rows are workspace-agnostic
+  workspaceId    String? // nullable: legacy rows are workspace-agnostic
   name           String
   description    String?        @db.Text
   status         CampaignStatus @default(PLANNING)
-  channel        String?        // "Email" | "Paid Search" | "Social" | "Outbound" | "Event" | "Content" | "Webinar"
+  channel        String? // "Email" | "Paid Search" | "Social" | "Outbound" | "Event" | "Content" | "Webinar"
   budget         Decimal?       @db.Decimal(12, 2)
   spent          Decimal?       @db.Decimal(12, 2)
   currency       String         @default("USD")
   startDate      DateTime?
   endDate        DateTime?
   ownerId        String?
-  goalMetric     String?        // "Leads" | "MQLs" | "Pipeline" | "Brand"
+  goalMetric     String? // "Leads" | "MQLs" | "Pipeline" | "Brand"
   goalTarget     Int?
   goalActual     Int?
   utmCampaign    String?
@@ -5200,19 +5379,19 @@ model ContentItem {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?       // nullable: legacy rows are workspace-agnostic
+  workspaceId    String? // nullable: legacy rows are workspace-agnostic
   title          String
   type           ContentType   @default(BLOG_POST)
   status         ContentStatus @default(IDEA)
-  channel        String?       // "Blog" | "LinkedIn" | "Twitter" | "Email" | "YouTube" | "TikTok"
+  channel        String? // "Blog" | "LinkedIn" | "Twitter" | "Email" | "YouTube" | "TikTok"
   ownerId        String?
-  authorId       String?       // can differ from owner
+  authorId       String? // can differ from owner
   briefUrl       String?
   draftUrl       String?
   publishedUrl   String?
   scheduledFor   DateTime?
   publishedAt    DateTime?
-  campaignId     String?       // optional link to parent Campaign
+  campaignId     String? // optional link to parent Campaign
   notes          String?       @db.Text
   customFields   Json          @default("{}")
   createdAt      DateTime      @default(now())
@@ -5251,30 +5430,30 @@ enum ContentStatus {
 }
 
 model EventBrief {
-  id             String         @id @default(cuid())
-  organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?        // nullable: legacy rows are workspace-agnostic
-  name           String
-  description    String?        @db.Text
-  type           String?        // "Conference" | "Trade Show" | "Webinar" | "Customer Event" | "Field Event"
-  format         String?        // "In-person" | "Virtual" | "Hybrid"
-  startDate      DateTime?
-  endDate        DateTime?
-  location       String?
-  capacity       Int?
-  registeredCount Int?          @default(0)
-  attendedCount  Int?           @default(0)
-  budget         Decimal?       @db.Decimal(12, 2)
-  spent          Decimal?       @db.Decimal(12, 2)
-  status         EventStatus    @default(PLANNING)
-  ownerId        String?
-  campaignId     String?
-  url            String?
-  notes          String?        @db.Text
-  customFields   Json           @default("{}")
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId     String? // nullable: legacy rows are workspace-agnostic
+  name            String
+  description     String?      @db.Text
+  type            String? // "Conference" | "Trade Show" | "Webinar" | "Customer Event" | "Field Event"
+  format          String? // "In-person" | "Virtual" | "Hybrid"
+  startDate       DateTime?
+  endDate         DateTime?
+  location        String?
+  capacity        Int?
+  registeredCount Int?         @default(0)
+  attendedCount   Int?         @default(0)
+  budget          Decimal?     @db.Decimal(12, 2)
+  spent           Decimal?     @db.Decimal(12, 2)
+  status          EventStatus  @default(PLANNING)
+  ownerId         String?
+  campaignId      String?
+  url             String?
+  notes           String?      @db.Text
+  customFields    Json         @default("{}")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, workspaceId])
@@ -5300,24 +5479,24 @@ enum EventStatus {
 // ==========================================
 
 model Sprint {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?      // nullable: legacy rows are workspace-agnostic
-  name           String       // "Sprint 23" | "Q1 W3"
-  goal           String?      @db.Text
-  startDate      DateTime
-  endDate        DateTime
-  status         SprintStatus @default(PLANNED)
-  teamId         String?      // optional team/squad assignment
-  capacityPoints Int?         // story points the team can absorb
-  committedPoints Int?
-  completedPoints Int?
-  velocityRolling7 Decimal?   @db.Decimal(8, 2)
-  retroNotes     String?      @db.Text
-  customFields   Json         @default("{}")
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id               String       @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId      String? // nullable: legacy rows are workspace-agnostic
+  name             String // "Sprint 23" | "Q1 W3"
+  goal             String?      @db.Text
+  startDate        DateTime
+  endDate          DateTime
+  status           SprintStatus @default(PLANNED)
+  teamId           String? // optional team/squad assignment
+  capacityPoints   Int? // story points the team can absorb
+  committedPoints  Int?
+  completedPoints  Int?
+  velocityRolling7 Decimal?     @db.Decimal(8, 2)
+  retroNotes       String?      @db.Text
+  customFields     Json         @default("{}")
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, startDate])
@@ -5336,18 +5515,18 @@ model Release {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?       // nullable: legacy rows are workspace-agnostic
-  version        String        // "2024.11.3" | "v3.0.0-beta.2"
+  workspaceId    String? // nullable: legacy rows are workspace-agnostic
+  version        String // "2024.11.3" | "v3.0.0-beta.2"
   name           String?
   description    String?       @db.Text
   changelog      String?       @db.Text
   status         ReleaseStatus @default(PLANNED)
-  releaseType    String?       // "Major" | "Minor" | "Patch" | "Hotfix"
+  releaseType    String? // "Major" | "Minor" | "Patch" | "Hotfix"
   scheduledFor   DateTime?
   shippedAt      DateTime?
   rolledBackAt   DateTime?
   shipNotesUrl   String?
-  isPublic       Boolean       @default(false)  // public changelog page
+  isPublic       Boolean       @default(false) // public changelog page
   customFields   Json          @default("{}")
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -5372,16 +5551,16 @@ model RoadmapItem {
   id             String          @id @default(cuid())
   organizationId String
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?         // nullable: legacy rows are workspace-agnostic
+  workspaceId    String? // nullable: legacy rows are workspace-agnostic
   title          String
   description    String?         @db.Text
-  theme          String?         // "Performance" | "AI" | "Mobile" | "Enterprise" | ...
+  theme          String? // "Performance" | "AI" | "Mobile" | "Enterprise" | ...
   priority       RoadmapPriority @default(P2)
   status         RoadmapStatus   @default(EXPLORING)
-  quarter        String?         // "2024-Q4" | "2025-Q1"
+  quarter        String? // "2024-Q4" | "2025-Q1"
   ownerId        String?
-  effortPoints   Int?            // T-shirt sized in points
-  impactScore    Int?            // 1-10
+  effortPoints   Int? // T-shirt sized in points
+  impactScore    Int? // 1-10
   parentId       String?
   parent         RoadmapItem?    @relation("RoadmapTree", fields: [parentId], references: [id], onDelete: SetNull)
   children       RoadmapItem[]   @relation("RoadmapTree")
@@ -5421,31 +5600,31 @@ enum RoadmapStatus {
 // ==========================================
 
 model Contract {
-  id              String         @id @default(cuid())
-  organizationId  String
-  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId     String?        // nullable: legacy rows are workspace-agnostic
-  title           String
-  counterparty    String         // the other party's name
-  counterpartyType String?       // "Customer" | "Vendor" | "Partner" | "Investor" | "Employee" | ...
-  type            String?        // "MSA" | "DPA" | "NDA" | "SOW" | "Order Form" | ...
-  status          ContractStatus @default(DRAFT)
-  value           Decimal?       @db.Decimal(14, 2)
-  currency        String         @default("USD")
-  signedAt        DateTime?
-  effectiveDate   DateTime?
-  expiresAt       DateTime?
+  id                String         @id @default(cuid())
+  organizationId    String
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId       String? // nullable: legacy rows are workspace-agnostic
+  title             String
+  counterparty      String // the other party's name
+  counterpartyType  String? // "Customer" | "Vendor" | "Partner" | "Investor" | "Employee" | ...
+  type              String? // "MSA" | "DPA" | "NDA" | "SOW" | "Order Form" | ...
+  status            ContractStatus @default(DRAFT)
+  value             Decimal?       @db.Decimal(14, 2)
+  currency          String         @default("USD")
+  signedAt          DateTime?
+  effectiveDate     DateTime?
+  expiresAt         DateTime?
   // Auto-renew alert. Each contract has a renewal notice date; legal
   // gets pinged this many days before expiry.
-  renewalNoticeDays Int?         @default(60)
-  autoRenew       Boolean        @default(false)
-  ownerId         String?        // legal lead on this contract
-  documentUrl     String?
-  description     String?        @db.Text
-  terms           Json           @default("{}")    // key clauses / extracted terms
-  customFields    Json           @default("{}")
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  renewalNoticeDays Int?           @default(60)
+  autoRenew         Boolean        @default(false)
+  ownerId           String? // legal lead on this contract
+  documentUrl       String?
+  description       String?        @db.Text
+  terms             Json           @default("{}") // key clauses / extracted terms
+  customFields      Json           @default("{}")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, counterparty])
@@ -5467,29 +5646,29 @@ enum ContractStatus {
 }
 
 model PrivacyRequest {
-  id             String                @id @default(cuid())
-  organizationId String
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id              String               @id @default(cuid())
+  organizationId  String
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Type of request — GDPR/CCPA-aligned.
-  type           PrivacyRequestType
-  status         PrivacyRequestStatus  @default(RECEIVED)
-  subjectEmail   String
-  subjectName    String?
-  subjectId      String?               // optional User id if matched to an internal account
+  type            PrivacyRequestType
+  status          PrivacyRequestStatus @default(RECEIVED)
+  subjectEmail    String
+  subjectName     String?
+  subjectId       String? // optional User id if matched to an internal account
   // The legal framework the request was filed under (drives the SLA).
-  jurisdiction   String?               // "GDPR" | "CCPA" | "LGPD" | "PIPEDA" | "Other"
+  jurisdiction    String? // "GDPR" | "CCPA" | "LGPD" | "PIPEDA" | "Other"
   // Verification status — anti-fraud measure. Identity must be verified
   // before fulfilling Access/Deletion requests.
-  verifiedAt     DateTime?
-  receivedAt     DateTime              @default(now())
-  dueAt          DateTime?             // computed from jurisdiction SLA
-  completedAt    DateTime?
-  assigneeId     String?
-  notes          String?               @db.Text
+  verifiedAt      DateTime?
+  receivedAt      DateTime             @default(now())
+  dueAt           DateTime? // computed from jurisdiction SLA
+  completedAt     DateTime?
+  assigneeId      String?
+  notes           String?              @db.Text
   resolutionNotes String?              @db.Text
-  customFields   Json                  @default("{}")
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  customFields    Json                 @default("{}")
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, type])
@@ -5518,28 +5697,28 @@ enum PrivacyRequestStatus {
 }
 
 model Trademark {
-  id             String           @id @default(cuid())
-  organizationId String
-  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  mark           String           // the actual word/logo/phrase
-  type           IpAssetType      @default(WORD_MARK)
-  status         TrademarkStatus  @default(PROPOSED)
+  id                  String          @id @default(cuid())
+  organizationId      String
+  organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mark                String // the actual word/logo/phrase
+  type                IpAssetType     @default(WORD_MARK)
+  status              TrademarkStatus @default(PROPOSED)
   // Jurisdictions where the mark is registered or applied for. Stored as
   // a string[] in JSON so legal can add new ones without schema changes.
-  jurisdictions  Json             @default("[]")
-  classes        Json             @default("[]")  // Nice Classification class numbers
-  registrationNumber String?
-  applicationNumber  String?
-  filedAt        DateTime?
-  registeredAt   DateTime?
-  expiresAt      DateTime?
-  renewalDueAt   DateTime?
-  ownerId        String?          // internal owner (paralegal/IP counsel)
-  externalCounselFirm String?     // outside counsel handling this
-  notes          String?          @db.Text
-  customFields   Json             @default("{}")
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  jurisdictions       Json            @default("[]")
+  classes             Json            @default("[]") // Nice Classification class numbers
+  registrationNumber  String?
+  applicationNumber   String?
+  filedAt             DateTime?
+  registeredAt        DateTime?
+  expiresAt           DateTime?
+  renewalDueAt        DateTime?
+  ownerId             String? // internal owner (paralegal/IP counsel)
+  externalCounselFirm String? // outside counsel handling this
+  notes               String?         @db.Text
+  customFields        Json            @default("{}")
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
   @@index([organizationId, status])
   @@index([renewalDueAt])
@@ -5580,17 +5759,17 @@ enum TrademarkStatus {
 // ==========================================
 
 model ChatSession {
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  userId         String        // the person whose chat this is
-  title          String?       // auto-derived from first user message (truncated)
-  pinned         Boolean       @default(false)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String // the person whose chat this is
+  title          String? // auto-derived from first user message (truncated)
+  pinned         Boolean      @default(false)
   archivedAt     DateTime?
   // Optional agent this session is scoped to. Null = general Sidekick.
   // When set, /api/sidekick/chat uses that agent's systemPrompt instead.
   agentId        String?
-  agent          Agent?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agent          Agent?       @relation(fields: [agentId], references: [id], onDelete: SetNull)
   // Board-level context — when the session was opened from inside an
   // app surface (e.g. clicking the Sidekick link on /crm/pipeline),
   // we stash the product slug and the active board key here. The chat
@@ -5603,13 +5782,13 @@ model ChatSession {
   // Last assistant model used for this session — handy for "the model
   // changed mid-thread" diagnostics + cost analytics.
   lastModel      String?
-  totalTokensIn  Int           @default(0)
-  totalTokensOut Int           @default(0)
-  totalCostCents Int           @default(0)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  totalTokensIn  Int          @default(0)
+  totalTokensOut Int          @default(0)
+  totalCostCents Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  messages       ChatMessage[]
+  messages ChatMessage[]
 
   @@index([organizationId, userId, updatedAt])
   @@index([userId, pinned, updatedAt])
@@ -5617,20 +5796,20 @@ model ChatSession {
 }
 
 model ChatMessage {
-  id          String         @id @default(cuid())
-  sessionId   String
-  session     ChatSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  role        ChatRole
-  content     String         @db.Text
+  id           String      @id @default(cuid())
+  sessionId    String
+  session      ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role         ChatRole
+  content      String      @db.Text
   // Anthropic SDK response telemetry. Null on user/system messages.
-  modelUsed   String?
-  tokensIn    Int?
-  tokensOut   Int?
-  costCents   Int?
+  modelUsed    String?
+  tokensIn     Int?
+  tokensOut    Int?
+  costCents    Int?
   // Future: tool calls + tool results. For now stored as opaque JSON.
-  toolCalls   Json?
-  finishReason String?       // "stop_reason" from the SDK response
-  createdAt   DateTime       @default(now())
+  toolCalls    Json?
+  finishReason String? // "stop_reason" from the SDK response
+  createdAt    DateTime    @default(now())
 
   @@index([sessionId, createdAt])
 }
@@ -5690,9 +5869,9 @@ model Whiteboard {
 // ==========================================
 
 model SupportCustomer {
-  id              String          @id @default(cuid())
+  id              String       @id @default(cuid())
   organizationId  String
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name            String?
   email           String
   companyName     String?
@@ -5700,12 +5879,12 @@ model SupportCustomer {
   // Optional CRM Account link — when a support customer matches a CRM
   // account by domain or name, we surface the relationship.
   linkedAccountId String?
-  notes           String?         @db.Text
-  customFields    Json            @default("{}")
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  notes           String?      @db.Text
+  customFields    Json         @default("{}")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
-  tickets         SupportTicket[]
+  tickets SupportTicket[]
 
   @@unique([organizationId, email])
   @@index([organizationId, companyName])
@@ -5713,32 +5892,32 @@ model SupportCustomer {
 }
 
 model SupportTicket {
-  id              String                 @id @default(cuid())
-  organizationId  String
-  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subject         String
-  body            String?                @db.Text
-  customerId      String
-  customer        SupportCustomer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  channel         SupportChannel         @default(EMAIL)
-  status          SupportTicketStatus    @default(NEW)
-  priority        SupportPriority        @default(NORMAL)
-  category        String?                // "Billing" | "Product" | "Bug" | "Feature Request" | "Onboarding"
-  assigneeId      String?                // internal support agent
+  id                 String              @id @default(cuid())
+  organizationId     String
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subject            String
+  body               String?             @db.Text
+  customerId         String
+  customer           SupportCustomer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel            SupportChannel      @default(EMAIL)
+  status             SupportTicketStatus @default(NEW)
+  priority           SupportPriority     @default(NORMAL)
+  category           String? // "Billing" | "Product" | "Bug" | "Feature Request" | "Onboarding"
+  assigneeId         String? // internal support agent
   // SLA driven by tier: free customers get longer SLAs than enterprise.
-  slaTier         String?                // "Free" | "Standard" | "Premium" | "Enterprise"
+  slaTier            String? // "Free" | "Standard" | "Premium" | "Enterprise"
   firstResponseDueAt DateTime?
   firstResponseAt    DateTime?
-  resolvedAt      DateTime?
-  closedAt        DateTime?
+  resolvedAt         DateTime?
+  closedAt           DateTime?
   // CSAT (0-5) collected after resolution.
-  csatScore       Int?
-  csatComment     String?                @db.Text
+  csatScore          Int?
+  csatComment        String?             @db.Text
   // Tags for filtering (e.g. "shipping-bug", "v2024.11-issue").
-  tags            Json                   @default("[]")
-  customFields    Json                   @default("{}")
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
+  tags               Json                @default("[]")
+  customFields       Json                @default("{}")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, assigneeId])
@@ -5782,7 +5961,7 @@ model SupportMacro {
   slug           String
   title          String
   body           String       @db.Text
-  category       String?      // "Billing" | "Product" | "Onboarding" | ...
+  category       String? // "Billing" | "Product" | "Onboarding" | ...
   // If true, applying this macro also moves the ticket to RESOLVED.
   resolves       Boolean      @default(false)
   archivedAt     DateTime?
@@ -5813,29 +5992,29 @@ model Doc {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  title          String
+  title   String
   // TipTap JSON document. Starts as empty doc; every save updates.
-  content        Json         @default("{}")
+  content Json    @default("{}")
   // Plain-text excerpt for search/list previews — derived on save.
-  excerpt        String?      @db.Text
+  excerpt String? @db.Text
 
   // Polymorphic owner. Both null = standalone doc.
-  entityType     String?      // "TASK" | "TICKET" | "BOARD_ROW" | …
-  entityId       String?
+  entityType String? // "TASK" | "TICKET" | "BOARD_ROW" | …
+  entityId   String?
 
-  createdById    String?
-  archivedAt     DateTime?    // soft-archive only; never hard-delete
+  createdById String?
+  archivedAt  DateTime? // soft-archive only; never hard-delete
 
   // 🆕 AI-generated summary (Claude) — populated on demand from
   // /api/docs/[id]/summarize. Useful in list views to show what a
   // doc is about without opening it.
-  summary        String?      @db.Text
-  summarizedAt   DateTime?
+  summary      String?   @db.Text
+  summarizedAt DateTime?
 
-  versions       DocVersion[]
+  versions DocVersion[]
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId])
   @@index([entityType, entityId])
@@ -5843,19 +6022,19 @@ model Doc {
 }
 
 model DocVersion {
-  id        String   @id @default(cuid())
-  docId     String
-  doc       Doc      @relation(fields: [docId], references: [id], onDelete: Cascade)
+  id    String @id @default(cuid())
+  docId String
+  doc   Doc    @relation(fields: [docId], references: [id], onDelete: Cascade)
 
   // Monotonically incremented per Doc. Doc.versions[0] = v1.
-  version   Int
-  title     String
+  version Int
+  title   String
   // Frozen snapshot of TipTap JSON at this version.
-  content   Json
+  content Json
 
   // Who saved this version. Null only for system-generated snapshots
   // (e.g. an import or a migration).
-  authorId  String?
+  authorId String?
 
   createdAt DateTime @default(now())
 
@@ -5880,16 +6059,16 @@ model ItemUpdate {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  entityType     String       // "TASK" | "LEAD" | "TICKET" | "CONTRACT" | …
-  entityId       String
+  entityType String // "TASK" | "LEAD" | "TICKET" | "CONTRACT" | …
+  entityId   String
 
-  authorId       String?
-  body           String       @db.Text   // rich HTML — TipTap output
+  authorId String?
+  body     String  @db.Text // rich HTML — TipTap output
 
-  archivedAt     DateTime?
+  archivedAt DateTime?
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId, entityType, entityId])
   @@index([authorId])
@@ -5900,17 +6079,17 @@ model ItemActivity {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  entityType     String
-  entityId       String
+  entityType String
+  entityId   String
 
-  actorId        String?      // null = system-emitted (cron, webhook)
-  action         String       // "CREATED" | "STATUS_CHANGED" | "ASSIGNED" | …
+  actorId String? // null = system-emitted (cron, webhook)
+  action  String // "CREATED" | "STATUS_CHANGED" | "ASSIGNED" | …
   // Arbitrary detail — e.g. { from: "OPEN", to: "RESOLVED" } for
   // status changes, { field: "priority", from: "LOW", to: "HIGH" }
   // for field edits. Renderable client-side per `action` kind.
-  meta           Json         @default("{}")
+  meta    Json    @default("{}")
 
-  createdAt      DateTime     @default(now())
+  createdAt DateTime @default(now())
 
   @@index([organizationId, entityType, entityId])
   @@index([createdAt])
@@ -5931,18 +6110,18 @@ model TimerSession {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  entityType     String       // "TICKET" | "TASK" | "LEAD" | …
-  entityId       String
+  entityType String // "TICKET" | "TASK" | "LEAD" | …
+  entityId   String
 
-  userId         String
-  startedAt      DateTime     @default(now())
-  stoppedAt      DateTime?    // null = currently running
+  userId     String
+  startedAt  DateTime  @default(now())
+  stoppedAt  DateTime? // null = currently running
   // Cached so list views don't have to compute it. Set on stop.
-  durationMs     Int          @default(0)
-  notes          String?
+  durationMs Int       @default(0)
+  notes      String?
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([organizationId, entityType, entityId])
   @@index([userId, stoppedAt])
