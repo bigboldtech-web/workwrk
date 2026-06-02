@@ -9,6 +9,7 @@ import {
   Search,
   Plus,
   Settings as SettingsIcon,
+  SlidersHorizontal,
   Trash2,
   UserPlus,
   Home,
@@ -306,7 +307,7 @@ function LeafItem({ item, pathname }: { item: Leaf; pathname: string }) {
 
 export function OsSidebar() {
   const pathname = usePathname() || "";
-  const { openPalette } = useOsShell();
+  const { openPalette, openCustomize } = useOsShell();
 
   const currentSpaceId = useMemo(
     () => SPACES.find((s) => spaceContainsPath(s, pathname))?.id ?? null,
@@ -403,6 +404,10 @@ export function OsSidebar() {
       </div>
 
       <div className="os-side__foot">
+        <button type="button" className="os-side__foot-btn" onClick={openCustomize}>
+          <SlidersHorizontal />
+          <span>Customize sidebar</span>
+        </button>
         <button type="button" className="os-side__foot-btn">
           <SettingsIcon />
           <span>Workspace settings</span>

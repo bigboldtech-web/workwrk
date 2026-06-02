@@ -28,6 +28,13 @@ type ShellState = {
   closeSidekick: () => void;
   toggleSidekick: () => void;
 
+  // 🆕 Phase 2 — ClickUp-style "Customize" modal. Opened from the
+  // sidebar foot button; mounted once at the OsShell level.
+  customizeOpen: boolean;
+  openCustomize: () => void;
+  closeCustomize: () => void;
+  setCustomizeOpen: (v: boolean) => void;
+
   lens: Lens;
   setLens: (l: Lens) => void;
 
@@ -52,6 +59,7 @@ const LENS_KEY = "workwrk:os:lens";
 export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidekickOpen, setSidekickOpen] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [lens, setLensState] = useState<Lens>("me");
   const [openItem, setOpenItem] = useState<OpenItem | null>(null);
   const [rowVersions, setRowVersions] = useState<Record<string, number>>({});
@@ -73,6 +81,8 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const openSidekick = useCallback(() => setSidekickOpen(true), []);
   const closeSidekick = useCallback(() => setSidekickOpen(false), []);
   const toggleSidekick = useCallback(() => setSidekickOpen((v) => !v), []);
+  const openCustomize = useCallback(() => setCustomizeOpen(true), []);
+  const closeCustomize = useCallback(() => setCustomizeOpen(false), []);
   const openItemDrawer = useCallback((it: OpenItem) => setOpenItem(it), []);
   const closeItemDrawer = useCallback(() => setOpenItem(null), []);
   const bumpRowVersion = useCallback((moduleId: string) => {
@@ -101,11 +111,12 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     () => ({
       paletteOpen, openPalette, closePalette,
       sidekickOpen, openSidekick, closeSidekick, toggleSidekick,
+      customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
       lens, setLens,
       openItem, openItemDrawer, closeItemDrawer,
       bumpRowVersion, rowVersion,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, customizeOpen, openCustomize, closeCustomize, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
