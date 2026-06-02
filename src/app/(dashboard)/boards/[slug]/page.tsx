@@ -14,6 +14,10 @@ import {
   ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
+import { listBoardItems } from "@/lib/board-items";
+import { canEditSpace } from "@/lib/space";
+import { BoardCanvas } from "@/components/board-view/board-canvas";
+import { parseBoardSchema } from "@/lib/field-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +65,15 @@ export default async function BoardPage(props: { params: Promise<{ slug: string 
   }
 
   const defaultView = board.views.find((v) => v.isDefault) ?? board.views[0];
+
+  // Phase 3b — fetch items + edit gate for the TABLE renderer.
+  // Phase 3f — also parse Board.schema.fields so custom columns render
+  // on the initial paint without a client round-trip.
+  const [items, canEdit] = await Promise.all([
+    listBoardItems(board.id),
+    canEditSpace(board.space.id, u.id, u.accessLevel),
+  ]);
+  const initialFields = parseBoardSchema(board.schema).fields;
 
   return (
     <div className="px-8 py-5 max-w-[1400px]">
@@ -133,16 +146,17 @@ export default async function BoardPage(props: { params: Promise<{ slug: string 
         </button>
       </div>
 
-      {/* Body — placeholder for Phase 3b renderer */}
-      <div className="border border-border rounded-xl px-8 py-16 text-center bg-surface">
-        <div className="text-base font-medium mb-1">
-          {defaultView?.name ?? "View"} renderer coming next
-        </div>
-        <p className="text-sm text-muted max-w-[460px] mx-auto">
-          The board is created and the default <span className="font-mono text-xs">{defaultView?.type ?? "TABLE"}</span> view is wired.
-          Phase 3b adds the actual renderer: rows, columns, kanban swimlanes, and the 30-type field shelf.
-        </p>
-      </div>
+      {/* Renderer + drawer live in BoardCanvas (client). The drawer is
+          shared across all view types so a row clicked in TABLE opens
+          the same panel as a card clicked in KANBAN. */}
+      <BoardCanvas
+        boardId={board.id}
+        viewType={defaultView?.type ?? "TABLE"}
+        initialItems={items}
+        initialFields={initialFields}
+        canEdit={canEdit}
+        currentUserId={u.id}
+      />
     </div>
   );
 }

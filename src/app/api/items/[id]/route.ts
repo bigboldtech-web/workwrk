@@ -1,0 +1,127 @@
+// PATCH  /api/items/[id] — update title / status / owner / metadata
+// DELETE /api/items/[id] — archive (soft); ?hard=1 hard-deletes
+
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { z } from "zod";
+import { archiveBoardItem, deleteBoardItem, updateBoardItem } from "@/lib/board-items";
+import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { prisma } from "@/lib/prisma";
+
+async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    include: { board: { select: { id: true, spaceId: true, organizationId: true } } },
+  });
+  if (!item || item.organizationId !== c.organizationId || !item.board.spaceId) {
+    return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  }
+  const space = await getSpaceForReader(item.board.spaceId, c.userId, c.accessLevel);
+  if (!space) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  return { item };
+}
+
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const c = await ctx();
+  if ("error" in c) return c.error;
+  const { id } = await params;
+  const gate = await loadAndGateRead(id, c);
+  if ("error" in gate) return gate.error;
+  const owner = gate.item.ownerId
+    ? await prisma.user.findUnique({
+        where: { id: gate.item.ownerId },
+        select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+      })
+    : null;
+  return NextResponse.json({
+    item: {
+      id: gate.item.id,
+      boardId: gate.item.boardId,
+      title: gate.item.title,
+      status: gate.item.status,
+      ownerId: gate.item.ownerId,
+      groupKey: gate.item.groupKey,
+      position: gate.item.position,
+      metadata: gate.item.metadata,
+      archivedAt: gate.item.archivedAt,
+      createdAt: gate.item.createdAt,
+      updatedAt: gate.item.updatedAt,
+      owner,
+    },
+  });
+}
+
+async function ctx() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
+  if (!u.id || !u.organizationId) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
+}
+
+async function loadAndGate(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    include: { board: { select: { id: true, spaceId: true, organizationId: true } } },
+  });
+  if (!item || item.organizationId !== c.organizationId || !item.board.spaceId) {
+    return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  }
+  const space = await getSpaceForReader(item.board.spaceId, c.userId, c.accessLevel);
+  if (!space) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  const canEdit = await canEditSpace(item.board.spaceId, c.userId, c.accessLevel);
+  if (!canEdit) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  return { item };
+}
+
+const patchSchema = z.object({
+  title: z.string().min(1).max(280).optional(),
+  status: z.string().max(40).nullable().optional(),
+  ownerId: z.string().min(1).nullable().optional(),
+  groupKey: z.string().max(80).nullable().optional(),
+  position: z.number().finite().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const c = await ctx();
+  if ("error" in c) return c.error;
+  const { id } = await params;
+  const gate = await loadAndGate(id, c);
+  if ("error" in gate) return gate.error;
+  const body = await req.json().catch(() => null);
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
+  }
+  try {
+    const updated = await updateBoardItem(id, parsed.data, c.userId);
+    return NextResponse.json({ item: updated });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to update item" },
+      { status: 400 },
+    );
+  }
+}
+
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const c = await ctx();
+  if ("error" in c) return c.error;
+  const { id } = await params;
+  const gate = await loadAndGate(id, c);
+  if ("error" in gate) return gate.error;
+  const url = new URL(req.url);
+  const hard = url.searchParams.get("hard") === "1";
+  if (hard) {
+    await deleteBoardItem(id);
+    return NextResponse.json({ ok: true });
+  }
+  const archived = await archiveBoardItem(id, c.userId);
+  return NextResponse.json({ item: archived });
+}
