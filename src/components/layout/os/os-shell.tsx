@@ -1,14 +1,35 @@
 "use client";
 
+// OsShell — ClickUp-style three-column shell rebuilt 2026-06-03.
+// Layout (top to bottom, left to right):
+//
+//   ┌─────────────────────────── Top bar (48px) ──────────────────────────┐
+//   │ [Workspace] [📅] [    Search ⌘K          ] [👥 avatars]            │
+//   ├──────┬──────────────┬──────────────────────────────────────────────┤
+//   │ App  │  Sidebar     │  Main content                                │
+//   │ Rail │  (Home /     │  (page renders here)                         │
+//   │ 88px │  Favorites / │                                              │
+//   │      │  Spaces)     │                                              │
+//   │      │  280px       │                                              │
+//   └──────┴──────────────┴──────────────────────────────────────────────┘
+//
+// Old components (OsTopbar / OsSidebar in topbar.tsx / sidebar.tsx) are
+// untouched in case we want to revert; this shell uses the new Click*
+// variants in click-topbar.tsx / click-app-rail.tsx / click-sidebar.tsx.
+
 import { OsShellProvider, useOsShell } from "./shell-context";
-import { OsSidebar } from "./sidebar";
-import { OsTopbar } from "./topbar";
-import { OsSidekickPanel } from "./sidekick-panel";
 import { OsCommandPalette } from "./command-palette";
 import { OsItemDrawer } from "./item-drawer";
 import { OsToastProvider } from "./toast";
 import { CustomizePanel } from "./customize-panel";
 import { ThemeApplier } from "./theme-applier";
+import { ClickAppRail } from "./click-app-rail";
+import { ClickSidebar } from "./click-sidebar";
+import { ClickTopbar } from "./click-topbar";
+import { AppsMorePopover } from "./apps-more-popover";
+import { NotificationBanner } from "./notification-banner";
+import { OsSidekickPanel } from "./sidekick-panel";
+import { SetStatusModal } from "./set-status-modal";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -16,22 +37,31 @@ function CustomizeMount() {
 }
 
 export function OsShell({ children }: { children: React.ReactNode }) {
+  // Cards-style shell: the outer container is the "page" (zinc-100 in light,
+  // very-dark in dark). Each major surface — topbar groups, rail, sidebar,
+  // main canvas — is a rounded card floating on top. `gap-1.5` (6px) is
+  // the visible seam between cards. The topbar is split into 3 sibling
+  // cards (workspace+calendar / search / icons+avatar) inside ClickTopbar.
   return (
     <OsShellProvider>
       <OsToastProvider>
         <ThemeApplier />
-        <div className="workwrk-os">
-          <div className="os-shell">
-            <OsSidebar />
-            <main className="os-main">
-              <OsTopbar />
-              <div className="os-canvas">{children}</div>
+        <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5">
+          <ClickTopbar />
+          <NotificationBanner />
+          <div className="flex-1 flex min-h-0 relative gap-1.5">
+            <ClickAppRail />
+            <ClickSidebar />
+            <AppsMorePopover />
+            <main className="flex-1 min-w-0 overflow-y-auto bg-white rounded-xl border border-zinc-200">
+              {children}
             </main>
             <OsSidekickPanel />
           </div>
           <OsCommandPalette />
           <OsItemDrawer />
           <CustomizeMount />
+          <SetStatusModal />
         </div>
       </OsToastProvider>
     </OsShellProvider>

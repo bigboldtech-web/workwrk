@@ -53,10 +53,10 @@ export function BoardCanvas({ boardId, viewType, initialItems, initialFields, ca
         <button
           type="button"
           onClick={() => setShelfOpen(true)}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-border hover:bg-surface-2"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50"
         >
           <Settings2 className="w-3.5 h-3.5" />
-          Fields {fields.length > 0 ? <span className="text-xs text-muted">({fields.length})</span> : null}
+          Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
         </button>
       </div>
 
@@ -76,11 +76,11 @@ export function BoardCanvas({ boardId, viewType, initialItems, initialFields, ca
           onOpenItem={(id) => setOpenItemId(id)}
         />
       ) : (
-        <div className="border border-border rounded-xl px-8 py-16 text-center bg-surface">
+        <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center bg-white">
           <div className="text-base font-medium mb-1">
             {viewType} renderer coming next
           </div>
-          <p className="text-sm text-muted max-w-[460px] mx-auto">
+          <p className="text-sm text-zinc-500 max-w-[460px] mx-auto">
             TABLE and KANBAN are live; CALENDAR / GANTT / FORM / TIMELINE / WORKLOAD / MAP / DOC / DASHBOARD follow.
             Add a List or Board view via the "+ View" tab to use the rendered surface today.
           </p>

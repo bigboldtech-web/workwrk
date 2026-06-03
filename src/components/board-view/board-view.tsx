@@ -460,7 +460,7 @@ export function BoardView<T>(props: Props<T>) {
     <div>
       {/* Tab strip — saved views per board. "Main" is permanent.
           Right-click or use the X to delete (except Main). + to add. */}
-      <div className="flex items-end gap-0.5 mb-3 border-b border-border">
+      <div className="flex items-end gap-0.5 mb-3 border-b border-zinc-200">
         {tabs.map((t) => {
           const active = t.id === activeTabId;
           const isMain = t.id === "main";
@@ -475,7 +475,7 @@ export function BoardView<T>(props: Props<T>) {
                   if (e.key === "Enter") renameTab(t.id, (e.target as HTMLInputElement).value);
                   if (e.key === "Escape") setRenamingTabId(null);
                 }}
-                className="px-2.5 py-1.5 text-xs font-medium border border-violet-300 bg-surface rounded-t-md outline-none"
+                className="px-2.5 py-1.5 text-xs font-medium border border-violet-300 bg-white rounded-t-md outline-none"
               />
             );
           }
@@ -488,8 +488,8 @@ export function BoardView<T>(props: Props<T>) {
               className={
                 "group inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px " +
                 (active
-                  ? "border-violet-500 text-violet-700 dark:text-violet-300 bg-surface-2"
-                  : "border-transparent text-muted hover:text-foreground hover:bg-surface-2")
+                  ? "border-violet-500 text-violet-700 dark:text-violet-300 bg-zinc-50"
+                  : "border-transparent text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50")
               }
               title={isMain ? "Main table — always present" : "Double-click to rename"}
             >
@@ -509,7 +509,7 @@ export function BoardView<T>(props: Props<T>) {
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); saveTabFromCurrent(t.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-[9px] uppercase tracking-wider text-muted-2 hover:text-violet-600"
+                  className="opacity-0 group-hover:opacity-100 text-[9px] uppercase tracking-wider text-zinc-500-2 hover:text-violet-600"
                   tabIndex={-1}
                   title="Save current view to this tab"
                 >
@@ -522,7 +522,7 @@ export function BoardView<T>(props: Props<T>) {
         <button
           type="button"
           onClick={addTab}
-          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs text-muted hover:text-violet-600 -mb-px"
+          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs text-zinc-500 hover:text-violet-600 -mb-px"
           title="Save current view as a new tab"
         >
           <Plus size={11} /> Tab
@@ -532,7 +532,7 @@ export function BoardView<T>(props: Props<T>) {
       {/* Toolbar: view switcher · search · filter · extraToolbar */}
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-lg border border-border bg-surface p-0.5">
+          <div className="inline-flex rounded-lg border border-zinc-200 bg-white p-0.5">
             {VIEW_OPTIONS.map(({ id, label, Icon }) => {
               const disabled = (id === "kanban" && !kanbanField) || (id === "calendar" && !calendarField);
               return (
@@ -546,7 +546,7 @@ export function BoardView<T>(props: Props<T>) {
                     "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors " +
                     (view === id
                       ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
-                      : "text-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed")
+                      : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed")
                   }
                 >
                   <Icon size={12} /> {label}
@@ -557,19 +557,19 @@ export function BoardView<T>(props: Props<T>) {
 
           {!props.hideSearch && (
             <div className="relative">
-              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none" aria-hidden />
+              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500-2 pointer-events-none" aria-hidden />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={props.searchPlaceholder ?? `Search ${props.items.length} row${props.items.length === 1 ? "" : "s"}…`}
-                className="pl-7 pr-7 py-1.5 rounded-md border border-border bg-surface text-xs w-56 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="pl-7 pr-7 py-1.5 rounded-md border border-zinc-200 bg-white text-xs w-56 focus:outline-none focus:ring-1 focus:ring-violet-500"
               />
               {query && (
                 <button
                   type="button"
                   onClick={() => setQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 hover:text-foreground"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500-2 hover:text-zinc-900"
                   aria-label="Clear search"
                 >
                   <X size={11} />
@@ -586,7 +586,7 @@ export function BoardView<T>(props: Props<T>) {
                 "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors " +
                 (activeFilterCount > 0 || showFilters
                   ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700 dark:text-violet-300"
-                  : "border-border text-muted hover:text-foreground hover:bg-surface-2")
+                  : "border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50")
               }
             >
               <Filter size={11} /> Filter
@@ -600,7 +600,7 @@ export function BoardView<T>(props: Props<T>) {
             <button
               type="button"
               onClick={clearAllFilters}
-              className="text-[11px] text-muted hover:text-foreground"
+              className="text-[11px] text-zinc-500 hover:text-zinc-900"
             >
               Clear
             </button>
@@ -612,13 +612,13 @@ export function BoardView<T>(props: Props<T>) {
 
       {/* Filter chip panel — expanded when "Filter" toggled */}
       {showFilters && selectFields.length > 0 && (
-        <div className="mb-3 rounded-lg border border-border bg-surface-2 p-3 space-y-2">
+        <div className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 space-y-2">
           {selectFields.map((field) => {
             const choices = field.options?.choices ?? [];
             const selected = filters[field.key] ?? new Set<string>();
             return (
               <div key={field.key} className="flex items-start gap-2 flex-wrap">
-                <span className="text-[10px] uppercase tracking-wider text-muted-2 font-semibold pt-1.5 min-w-[80px]">{field.label}</span>
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500-2 font-semibold pt-1.5 min-w-[80px]">{field.label}</span>
                 <div className="flex flex-wrap gap-1">
                   {choices.map((c) => {
                     const isOn = selected.has(c.value);
@@ -631,7 +631,7 @@ export function BoardView<T>(props: Props<T>) {
                           "text-[11px] px-2 py-0.5 rounded-md border transition-colors " +
                           (isOn
                             ? "bg-violet-600 border-violet-600 text-white"
-                            : "bg-surface border-border text-muted hover:border-violet-300")
+                            : "bg-white border-zinc-200 text-zinc-500 hover:border-violet-300")
                         }
                       >
                         {c.label ?? c.value}
@@ -647,7 +647,7 @@ export function BoardView<T>(props: Props<T>) {
 
       {/* Result count when filtered */}
       {(query || activeFilterCount > 0) && (
-        <div className="text-[11px] text-muted-2 mb-2">
+        <div className="text-[11px] text-zinc-500-2 mb-2">
           Showing {filteredItems.length} of {props.items.length}
         </div>
       )}
@@ -668,21 +668,21 @@ export function BoardView<T>(props: Props<T>) {
                   type="button"
                   onClick={() => setShowBulkUpdate((v) => v ? null : selectFields[0]?.key ?? null)}
                   disabled={bulking}
-                  className="text-xs px-3 py-1.5 rounded-md border border-violet-300 bg-surface text-violet-700 hover:bg-violet-100 dark:hover:bg-violet-950/60 disabled:opacity-50"
+                  className="text-xs px-3 py-1.5 rounded-md border border-violet-300 bg-white text-violet-700 hover:bg-violet-100 dark:hover:bg-violet-950/60 disabled:opacity-50"
                 >
                   Update {selectFields.find((f) => f.key === showBulkUpdate)?.label ?? selectFields[0]?.label} ▾
                 </button>
                 {showBulkUpdate && (
-                  <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg bg-surface border border-border shadow-lg py-1 max-h-72 overflow-y-auto">
-                    <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-muted-2">
+                  <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg bg-white border border-zinc-200 shadow-lg py-1 max-h-72 overflow-y-auto">
+                    <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-zinc-500-2">
                       Set <span className="font-mono normal-case">{selectFields.find((f) => f.key === showBulkUpdate)?.label}</span> for {selectedIds.size}
                     </div>
                     {selectFields.length > 1 && (
-                      <div className="px-2 py-1 border-b border-border">
+                      <div className="px-2 py-1 border-b border-zinc-200">
                         <select
                           value={showBulkUpdate}
                           onChange={(e) => setShowBulkUpdate(e.target.value)}
-                          className="w-full text-xs px-2 py-1 rounded border border-border bg-surface"
+                          className="w-full text-xs px-2 py-1 rounded border border-zinc-200 bg-white"
                         >
                           {selectFields.map((f) => (
                             <option key={f.key} value={f.key}>{f.label}</option>
@@ -696,7 +696,7 @@ export function BoardView<T>(props: Props<T>) {
                         type="button"
                         onClick={() => runBulkChange(showBulkUpdate!, c.value)}
                         disabled={bulking}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 disabled:opacity-40 inline-flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-50 disabled:opacity-40 inline-flex items-center gap-2"
                       >
                         <span className="w-2 h-2 rounded-full" style={{ background: c.color ?? "#94a3b8" }} aria-hidden />
                         {c.label ?? c.value}
@@ -711,7 +711,7 @@ export function BoardView<T>(props: Props<T>) {
                 type="button"
                 onClick={runBulkDelete}
                 disabled={bulking}
-                className="text-xs px-3 py-1.5 rounded-md border border-rose-300 bg-surface text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
+                className="text-xs px-3 py-1.5 rounded-md border border-rose-300 bg-white text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
               >
                 Delete {selectedIds.size}
               </button>
@@ -720,7 +720,7 @@ export function BoardView<T>(props: Props<T>) {
               type="button"
               onClick={clearSelection}
               disabled={bulking}
-              className="text-xs px-3 py-1.5 rounded-md text-muted hover:bg-surface-2"
+              className="text-xs px-3 py-1.5 rounded-md text-zinc-500 hover:bg-zinc-50"
             >
               Clear
             </button>
@@ -804,10 +804,10 @@ function StatusDistributionBar<T>({ items, field, getValue }: StatusBarProps<T>)
 
   return (
     <div className="mt-3 flex items-center gap-3" aria-label={`${field.label} distribution across ${total} rows`}>
-      <span className="text-[10px] uppercase tracking-wider text-muted-2 font-semibold w-20 flex-shrink-0">
+      <span className="text-[10px] uppercase tracking-wider text-zinc-500-2 font-semibold w-20 flex-shrink-0">
         {field.label}
       </span>
-      <div className="flex-1 h-3 rounded-full overflow-hidden flex bg-surface-2 border border-border">
+      <div className="flex-1 h-3 rounded-full overflow-hidden flex bg-zinc-50 border border-zinc-200">
         {segments.map((seg) => (
           <div
             key={seg.key}
@@ -817,7 +817,7 @@ function StatusDistributionBar<T>({ items, field, getValue }: StatusBarProps<T>)
           />
         ))}
       </div>
-      <span className="text-[10px] text-muted-2 font-mono tabular-nums flex-shrink-0">{total}</span>
+      <span className="text-[10px] text-zinc-500-2 font-mono tabular-nums flex-shrink-0">{total}</span>
     </div>
   );
 }
@@ -891,10 +891,10 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
   };
 
   return (
-    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+    <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-surface-2 text-xs uppercase tracking-wider text-muted-2">
+          <thead className="bg-zinc-50 text-xs uppercase tracking-wider text-zinc-500-2">
             <tr>
               {selectable && (
                 <th className="w-8 px-3 py-2.5">
@@ -924,7 +924,7 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
                         onClick={() => onSortClick!(f.key)}
                         className={
                           "inline-flex items-center gap-1 -ml-1 px-1 py-0.5 rounded transition-colors " +
-                          (isSorted ? "text-violet-700 dark:text-violet-300" : "hover:bg-surface")
+                          (isSorted ? "text-violet-700 dark:text-violet-300" : "hover:bg-white")
                         }
                         title={isSorted ? `Sorted ${sortDir} · click to ${sortDir === "asc" ? "reverse" : "clear"}` : "Click to sort"}
                       >
@@ -951,8 +951,8 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
                 <tr
                   key={id}
                   className={
-                    "border-t border-border group " +
-                    (isSelected ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-surface-2")
+                    "border-t border-zinc-200 group " +
+                    (isSelected ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-zinc-50")
                   }
                 >
                   {selectable && (
@@ -1024,7 +1024,7 @@ function InlineEditor({
 }) {
   const [local, setLocal] = useState<unknown>(value);
 
-  const baseInputClass = "w-full px-2 py-1 rounded border border-violet-400 bg-surface text-sm focus:outline-none focus:ring-1 focus:ring-violet-500";
+  const baseInputClass = "w-full px-2 py-1 rounded border border-violet-400 bg-white text-sm focus:outline-none focus:ring-1 focus:ring-violet-500";
 
   // Stop click bubbling so clicks inside the editor don't trigger the
   // td onClick (which would re-enter edit mode).
@@ -1124,7 +1124,7 @@ function InlineEditor({
                 key={c.value}
                 type="button"
                 onClick={() => toggle(c.value)}
-                className={"text-[10px] px-1.5 py-0.5 rounded border " + (on ? "bg-violet-600 text-white border-violet-600" : "bg-surface border-border text-muted")}
+                className={"text-[10px] px-1.5 py-0.5 rounded border " + (on ? "bg-violet-600 text-white border-violet-600" : "bg-white border-zinc-200 text-zinc-500")}
               >
                 {c.label ?? c.value}
               </button>
@@ -1140,7 +1140,7 @@ function InlineEditor({
           <button
             type="button"
             onClick={onCancel}
-            className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted"
+            className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-200 text-zinc-500"
           >
             ×
           </button>
@@ -1313,17 +1313,17 @@ function KanbanView<T>({
       {columns.map((col) => {
         const colItems = byCol.get(col.value) ?? [];
         return (
-          <div key={col.value} className="flex-shrink-0 w-[260px] rounded-xl bg-surface-2 p-3">
+          <div key={col.value} className="flex-shrink-0 w-[260px] rounded-xl bg-zinc-50 p-3">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full" style={{ background: col.color ?? "#94a3b8" }} aria-hidden />
                 <span className="text-sm font-semibold">{col.label}</span>
               </div>
-              <span className="text-xs text-muted-2">{colItems.length}</span>
+              <span className="text-xs text-zinc-500-2">{colItems.length}</span>
             </div>
             <div className="space-y-2">
               {colItems.length === 0 ? (
-                <div className="text-xs text-muted-2 italic py-3 text-center border border-dashed border-border rounded-lg">Empty</div>
+                <div className="text-xs text-zinc-500-2 italic py-3 text-center border border-dashed border-zinc-200 rounded-lg">Empty</div>
               ) : (
                 colItems.map((item) => (
                   <KanbanCard
@@ -1367,7 +1367,7 @@ function KanbanCard<T>({
   const currentValue = getValue(item, groupBy.key);
 
   return (
-    <div className="rounded-lg bg-surface border border-border p-3 relative">
+    <div className="rounded-lg bg-white border border-zinc-200 p-3 relative">
       <div className="flex items-start justify-between mb-1.5">
         <div
           className={"font-medium text-sm leading-tight pr-6 " + (onClick ? "cursor-pointer hover:text-violet-600" : "")}
@@ -1379,22 +1379,22 @@ function KanbanCard<T>({
           <button
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
-            className="absolute top-2 right-2 p-1 rounded hover:bg-surface-2 text-muted-2"
+            className="absolute top-2 right-2 p-1 rounded hover:bg-zinc-50 text-zinc-500-2"
             aria-label="Move"
           >
             <MoreVertical size={11} />
           </button>
         )}
         {menuOpen && onMove && (
-          <div className="absolute top-7 right-2 z-10 w-40 rounded-lg bg-surface border border-border shadow-lg py-1">
-            <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-muted-2">Move to</div>
+          <div className="absolute top-7 right-2 z-10 w-40 rounded-lg bg-white border border-zinc-200 shadow-lg py-1">
+            <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-zinc-500-2">Move to</div>
             {columns.map((c) => (
               <button
                 key={c.value}
                 type="button"
                 onClick={() => { setMenuOpen(false); onMove(c.value); }}
                 disabled={c.value === currentValue || (currentValue == null && c.value === "__none__")}
-                className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-2 disabled:opacity-40"
+                className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-50 disabled:opacity-40"
               >
                 {c.label}
               </button>
@@ -1403,13 +1403,13 @@ function KanbanCard<T>({
         )}
       </div>
       {detailFields.length > 0 && (
-        <div className="flex flex-wrap gap-2 text-[11px] text-muted-2 mt-1">
+        <div className="flex flex-wrap gap-2 text-[11px] text-zinc-500-2 mt-1">
           {detailFields.map((f) => {
             const v = getValue(item, f.key);
             if (v == null || v === "") return null;
             return (
               <span key={f.key} className="inline-flex items-center gap-1">
-                <span className="text-muted-2 opacity-60">{f.label}:</span>
+                <span className="text-zinc-500-2 opacity-60">{f.label}:</span>
                 <CellValue field={f} value={v} compact />
               </span>
             );
@@ -1460,10 +1460,10 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
   }
 
   return (
-    <div className="rounded-xl border border-border bg-surface divide-y divide-border">
+    <div className="rounded-xl border border-zinc-200 bg-white divide-y divide-border">
       {buckets.map(([label, rows]) => (
         <div key={label} className="px-4 py-3">
-          <div className="text-[11px] uppercase tracking-wider text-muted-2 font-semibold mb-2 inline-flex items-center gap-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500-2 font-semibold mb-2 inline-flex items-center gap-1.5">
             <Clock size={11} /> Week of {label}
           </div>
           <div className="space-y-1.5">
@@ -1471,10 +1471,10 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
               <div
                 key={getId(item)}
                 onClick={() => onRowClick?.(item)}
-                className={"rounded-md border border-border bg-surface-2 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
+                className={"rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
               >
                 <div className="font-medium">{getTitle(item)}</div>
-                <div className="text-[11px] text-muted-2 mt-0.5">
+                <div className="text-[11px] text-zinc-500-2 mt-0.5">
                   {(() => {
                     const v = getValue(item, dateField.key);
                     return typeof v === "string" ? new Date(v).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "—";
@@ -1487,13 +1487,13 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
       ))}
       {undated.length > 0 && (
         <div className="px-4 py-3">
-          <div className="text-[11px] uppercase tracking-wider text-muted-2 font-semibold mb-2">No date</div>
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500-2 font-semibold mb-2">No date</div>
           <div className="space-y-1.5">
             {undated.map((item) => (
               <div
                 key={getId(item)}
                 onClick={() => onRowClick?.(item)}
-                className={"rounded-md border border-border bg-surface-2 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
+                className={"rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
               >
                 <div className="font-medium">{getTitle(item)}</div>
               </div>
@@ -1530,7 +1530,7 @@ function GalleryView<T>({ items, fields, getId, getTitle, getValue, onRowClick }
           <article
             key={getId(item)}
             onClick={() => onRowClick?.(item)}
-            className={"rounded-xl border border-border bg-surface p-4 transition-colors " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
+            className={"rounded-xl border border-zinc-200 bg-white p-4 transition-colors " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
           >
             <div className="font-semibold text-sm mb-2 line-clamp-2">{getTitle(item)}</div>
             <div className="space-y-1 text-xs">
@@ -1539,8 +1539,8 @@ function GalleryView<T>({ items, fields, getId, getTitle, getValue, onRowClick }
                 if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) return null;
                 return (
                   <div key={f.key} className="flex items-center gap-2 min-w-0">
-                    <span className="text-muted-2 text-[10px] uppercase tracking-wider flex-shrink-0">{f.label}</span>
-                    <span className="text-muted truncate">
+                    <span className="text-zinc-500-2 text-[10px] uppercase tracking-wider flex-shrink-0">{f.label}</span>
+                    <span className="text-zinc-500 truncate">
                       <CellValue field={f} value={v} compact />
                     </span>
                   </div>
@@ -1559,10 +1559,10 @@ function GalleryView<T>({ items, fields, getId, getTitle, getValue, onRowClick }
 // ─────────────────────────────────────────────────────────
 
 function CellValue({ field, value, compact = false }: { field: BoardField; value: unknown; compact?: boolean }) {
-  if (value == null || value === "") return <span className="text-muted-2">—</span>;
+  if (value == null || value === "") return <span className="text-zinc-500-2">—</span>;
   switch (field.fieldType) {
     case "CHECKBOX":
-      return <span className={value ? "text-emerald-600" : "text-muted-2"}>{value ? "✓" : "—"}</span>;
+      return <span className={value ? "text-emerald-600" : "text-zinc-500-2"}>{value ? "✓" : "—"}</span>;
     case "DATE":
       return <span>{typeof value === "string" ? new Date(value).toLocaleDateString() : String(value)}</span>;
     case "MULTI_SELECT": {
@@ -1572,7 +1572,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
           {arr.slice(0, compact ? 2 : 6).map((v) => (
             <span key={v} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-950/40 text-violet-700">{v}</span>
           ))}
-          {arr.length > (compact ? 2 : 6) && <span className="text-[10px] text-muted-2">+{arr.length - (compact ? 2 : 6)}</span>}
+          {arr.length > (compact ? 2 : 6) && <span className="text-[10px] text-zinc-500-2">+{arr.length - (compact ? 2 : 6)}</span>}
         </div>
       );
     }
@@ -1585,7 +1585,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
     case "EMAIL":
       return <a href={`mailto:${String(value)}`} onClick={(e) => e.stopPropagation()} className="text-xs text-violet-600 hover:underline">{String(value)}</a>;
     case "TEXTAREA":
-      return <span className="line-clamp-2 text-xs text-muted">{String(value)}</span>;
+      return <span className="line-clamp-2 text-xs text-zinc-500">{String(value)}</span>;
     case "USER":
       // v1: just show the stored id as a chip with an avatar initial.
       // The full resolve-to-name lookup wires up when we add a shared
@@ -1613,7 +1613,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
         v.startsWith("high") || v === "urgent" ? "bg-orange-500 text-white" :
         v.startsWith("med") || v === "normal" ? "bg-amber-400 text-amber-950" :
         v.startsWith("low") ? "bg-sky-400 text-white" :
-        "bg-zinc-200 dark:bg-zinc-700 text-foreground";
+        "bg-zinc-200 dark:bg-zinc-700 text-zinc-900";
       return <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${tone}`}>{String(value)}</span>;
     }
     case "STATUS": {
@@ -1626,7 +1626,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
     }
     case "TIMELINE": {
       const tl = typeof value === "object" && value !== null ? value as { start?: string; end?: string } : null;
-      if (!tl?.start || !tl?.end) return <span className="text-muted-2">—</span>;
+      if (!tl?.start || !tl?.end) return <span className="text-zinc-500-2">—</span>;
       const start = new Date(tl.start);
       const end = new Date(tl.end);
       const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
@@ -1635,7 +1635,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
           <div className="relative w-24 h-1.5 rounded-full bg-violet-200 dark:bg-violet-900/40">
             <div className="absolute inset-0 rounded-full bg-violet-500" />
           </div>
-          <span className="text-muted tabular-nums">{days}d</span>
+          <span className="text-zinc-500 tabular-nums">{days}d</span>
         </div>
       );
     }
@@ -1656,15 +1656,15 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
           <div className="flex-1 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
             <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
           </div>
-          <span className="text-[11px] text-muted-2 tabular-nums w-8 text-right">{pct}%</span>
+          <span className="text-[11px] text-zinc-500-2 tabular-nums w-8 text-right">{pct}%</span>
         </div>
       );
     }
     case "FILES": {
       const arr = Array.isArray(value) ? (value as unknown[]) : [];
-      if (arr.length === 0) return <span className="text-muted-2">—</span>;
+      if (arr.length === 0) return <span className="text-zinc-500-2">—</span>;
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-muted">
+        <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">
           📎 <span className="tabular-nums">{arr.length}</span>
         </span>
       );
@@ -1676,7 +1676,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
         ? String((value as Record<string, unknown>).label ?? "")
         : String(value);
       return (
-        <span className="inline-flex items-center gap-1 text-xs text-muted">
+        <span className="inline-flex items-center gap-1 text-xs text-zinc-500">
           📍 <span className="truncate max-w-[160px]">{label}</span>
         </span>
       );
@@ -1687,17 +1687,17 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       const flag = code.length === 2
         ? String.fromCodePoint(...[...code].map((c) => 127397 + c.charCodeAt(0)))
         : "🌐";
-      return <span className="inline-flex items-center gap-1 text-xs">{flag} <span className="text-muted">{code}</span></span>;
+      return <span className="inline-flex items-center gap-1 text-xs">{flag} <span className="text-zinc-500">{code}</span></span>;
     }
     case "TAGS": {
       const arr = Array.isArray(value) ? (value as string[]) : [];
-      if (arr.length === 0) return <span className="text-muted-2">—</span>;
+      if (arr.length === 0) return <span className="text-zinc-500-2">—</span>;
       return (
         <div className="inline-flex flex-wrap gap-1">
           {arr.slice(0, compact ? 2 : 6).map((t) => (
             <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">#{t}</span>
           ))}
-          {arr.length > (compact ? 2 : 6) && <span className="text-[10px] text-muted-2">+{arr.length - (compact ? 2 : 6)}</span>}
+          {arr.length > (compact ? 2 : 6) && <span className="text-[10px] text-zinc-500-2">+{arr.length - (compact ? 2 : 6)}</span>}
         </div>
       );
     }
@@ -1709,11 +1709,11 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       const txt = h > 0
         ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
         : `${m}:${String(s).padStart(2, "0")}`;
-      return <span className="inline-flex items-center gap-1 text-xs font-mono text-muted">⏱ {txt}</span>;
+      return <span className="inline-flex items-center gap-1 text-xs font-mono text-zinc-500">⏱ {txt}</span>;
     }
     case "FORMULA":
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-mono text-muted-2">
+        <span className="inline-flex items-center gap-1 text-[11px] font-mono text-zinc-500-2">
           ƒ <span className="truncate max-w-[160px]">{String(value)}</span>
         </span>
       );
@@ -1721,7 +1721,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       const linked = typeof value === "object" && value !== null && "itemIds" in (value as Record<string, unknown>)
         ? ((value as Record<string, unknown>).itemIds as unknown[])
         : Array.isArray(value) ? value as unknown[] : [];
-      if (linked.length === 0) return <span className="text-muted-2">—</span>;
+      if (linked.length === 0) return <span className="text-zinc-500-2">—</span>;
       return (
         <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300">
           🔗 <span className="tabular-nums">{linked.length}</span> linked
@@ -1735,9 +1735,9 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
 
 function EmptyView({ label }: { label: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-border bg-surface text-center py-16">
-      <ChevronDown size={28} className="mx-auto mb-2 text-muted-2 rotate-180" />
-      <p className="text-sm text-muted">{label}</p>
+    <div className="rounded-xl border border-dashed border-zinc-200 bg-white text-center py-16">
+      <ChevronDown size={28} className="mx-auto mb-2 text-zinc-500-2 rotate-180" />
+      <p className="text-sm text-zinc-500">{label}</p>
     </div>
   );
 }

@@ -119,11 +119,11 @@ export function MyAlignment() {
             <Target className="w-4 h-4 text-[var(--os-brand)]" />
             Your alignment
           </h2>
-          <p className="text-xs text-muted mt-0.5">
+          <p className="text-xs text-zinc-500 mt-0.5">
             What the org expects of you — KRAs, KPIs to score, SOPs to acknowledge.
           </p>
         </div>
-        <Link href="/kra-kpi" className="text-xs text-muted hover:text-foreground inline-flex items-center gap-1">
+        <Link href="/kra-kpi" className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1">
           Open KRA &amp; KPI <ChevronRight className="w-3 h-3" />
         </Link>
       </header>
@@ -135,7 +135,7 @@ export function MyAlignment() {
           <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
           <div className="flex-1 text-sm">
             <span className="font-medium">{mandatoryPending.length} mandatory SOP{mandatoryPending.length === 1 ? "" : "s"}</span>{" "}
-            <span className="text-muted">awaiting your acknowledgement.</span>
+            <span className="text-zinc-500">awaiting your acknowledgement.</span>
           </div>
           <Link href="/sops" className="text-xs font-medium text-amber-700 hover:text-amber-800 inline-flex items-center gap-1">
             Review <ArrowRight className="w-3 h-3" />
@@ -176,18 +176,18 @@ function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
     return (
       <Link
         href="/me/weekly-review"
-        className={`rounded-md border px-4 py-3 flex items-center gap-3 hover:bg-surface-2 ${
-          isFridayOrAfter ? "border-amber-500/40 bg-amber-500/10" : "border-border bg-surface"
+        className={`rounded-md border px-4 py-3 flex items-center gap-3 hover:bg-zinc-50 ${
+          isFridayOrAfter ? "border-amber-500/40 bg-amber-500/10" : "border-zinc-200 bg-white"
         }`}
       >
-        <ClipboardCheck className={`w-4 h-4 ${isFridayOrAfter ? "text-amber-600" : "text-muted"}`} />
+        <ClipboardCheck className={`w-4 h-4 ${isFridayOrAfter ? "text-amber-600" : "text-zinc-500"}`} />
         <div className="flex-1 text-sm">
           <div className="font-medium">Weekly review — draft</div>
-          <div className="text-xs text-muted">
+          <div className="text-xs text-zinc-500">
             {isFridayOrAfter ? "Friday. Submit your week before EOD." : "Fill it in as the week unfolds; submit by Friday."}
           </div>
         </div>
-        <ArrowRight className="w-4 h-4 text-muted" />
+        <ArrowRight className="w-4 h-4 text-zinc-500" />
       </Link>
     );
   }
@@ -195,12 +195,12 @@ function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
     return (
       <Link
         href="/me/weekly-review"
-        className="rounded-md border border-border bg-surface px-4 py-3 flex items-center gap-3 hover:bg-surface-2"
+        className="rounded-md border border-zinc-200 bg-white px-4 py-3 flex items-center gap-3 hover:bg-zinc-50"
       >
-        <Clock className="w-4 h-4 text-muted" />
+        <Clock className="w-4 h-4 text-zinc-500" />
         <div className="flex-1 text-sm">
           <div className="font-medium">Weekly review — submitted</div>
-          <div className="text-xs text-muted">Awaiting manager acknowledgement.</div>
+          <div className="text-xs text-zinc-500">Awaiting manager acknowledgement.</div>
         </div>
       </Link>
     );
@@ -210,7 +210,7 @@ function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
   return (
     <Link
       href="/me/weekly-review"
-      className={`rounded-md border px-4 py-3 flex items-center gap-3 hover:bg-surface-2 ${
+      className={`rounded-md border px-4 py-3 flex items-center gap-3 hover:bg-zinc-50 ${
         approved ? "border-emerald-500/30 bg-emerald-500/5" : "border-red-500/30 bg-red-500/5"
       }`}
     >
@@ -219,7 +219,7 @@ function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
         <div className="font-medium">
           {approved ? "Weekly review — approved" : "Weekly review — changes requested"}
         </div>
-        <div className="text-xs text-muted">
+        <div className="text-xs text-zinc-500">
           {approved ? "Manager approved this week." : "Manager wants you to revise + resubmit."}
         </div>
       </div>
@@ -229,24 +229,24 @@ function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
 
 function KraColumn({ kras, loading }: { kras: KraRow[]; loading: boolean }) {
   return (
-    <div className="rounded-lg border border-border bg-surface">
+    <div className="rounded-lg border border-zinc-200 bg-white">
       <ColumnHeader Icon={Target} label="Your KRAs" count={kras.length} href="/kra-kpi" />
       {loading && kras.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-muted">Loading…</div>
+        <div className="px-4 py-3 text-xs text-zinc-500">Loading…</div>
       ) : kras.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-muted">No KRAs assigned yet.</div>
+        <div className="px-4 py-3 text-xs text-zinc-500">No KRAs assigned yet.</div>
       ) : (
         <ul className="px-2 py-1.5 max-h-[260px] overflow-y-auto">
           {kras.slice(0, 8).map((row) => (
-            <li key={row.assignmentId} className="px-2 py-1.5 rounded-md hover:bg-surface-2">
+            <li key={row.assignmentId} className="px-2 py-1.5 rounded-md hover:bg-zinc-50">
               <div className="flex items-center gap-2 text-sm">
                 <span className="truncate flex-1">{row.kra.name}</span>
                 {row.weightage > 0 ? (
-                  <span className="text-[10px] uppercase tracking-wide text-muted">{Math.round(row.weightage)}%</span>
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">{Math.round(row.weightage)}%</span>
                 ) : null}
               </div>
               {row.kra.category || row.kra.kpis.length > 0 ? (
-                <div className="text-[11px] text-muted truncate">
+                <div className="text-[11px] text-zinc-500 truncate">
                   {row.kra.category ? <span>{row.kra.category}</span> : null}
                   {row.kra.category && row.kra.kpis.length > 0 ? <span> · </span> : null}
                   {row.kra.kpis.length > 0 ? <span>{row.kra.kpis.length} KPI{row.kra.kpis.length === 1 ? "" : "s"}</span> : null}
@@ -270,12 +270,12 @@ function KpiColumn({
   onPick: (p: KpiPrompt) => void;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface">
+    <div className="rounded-lg border border-zinc-200 bg-white">
       <ColumnHeader Icon={ChartLine} label="KPIs to score" count={prompts.length} href="/kra-kpi" />
       {loading && prompts.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-muted">Loading…</div>
+        <div className="px-4 py-3 text-xs text-zinc-500">Loading…</div>
       ) : prompts.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-muted">All caught up.</div>
+        <div className="px-4 py-3 text-xs text-zinc-500">All caught up.</div>
       ) : (
         <ul className="px-2 py-1.5 max-h-[260px] overflow-y-auto">
           {prompts.slice(0, 8).map((p) => (
@@ -283,7 +283,7 @@ function KpiColumn({
               <button
                 type="button"
                 onClick={() => onPick(p)}
-                className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-2"
+                className="w-full text-left px-2 py-1.5 rounded-md hover:bg-zinc-50"
               >
                 <div className="flex items-center gap-2 text-sm">
                   <span className="truncate flex-1">{p.kpi.name}</span>
@@ -297,7 +297,7 @@ function KpiColumn({
                     {p.status === "REJECTED" ? "Rework" : "Score"}
                   </span>
                 </div>
-                <div className="text-[11px] text-muted truncate">
+                <div className="text-[11px] text-zinc-500 truncate">
                   {p.period} · target {p.targetValue ?? "—"}{p.kpi.unit ? ` ${p.kpi.unit}` : ""} · {p.kpi.frequency.toLowerCase()}
                 </div>
               </button>
@@ -319,12 +319,12 @@ function SopColumn({
   onPick: (s: SopRow) => void;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface">
+    <div className="rounded-lg border border-zinc-200 bg-white">
       <ColumnHeader Icon={BookOpenCheck} label="SOPs to acknowledge" count={sops.length} href="/sops" />
       {loading && sops.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-muted">Loading…</div>
+        <div className="px-4 py-3 text-xs text-zinc-500">Loading…</div>
       ) : sops.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-muted">All acknowledged.</div>
+        <div className="px-4 py-3 text-xs text-zinc-500">All acknowledged.</div>
       ) : (
         <ul className="px-2 py-1.5 max-h-[260px] overflow-y-auto">
           {sops.slice(0, 8).map((row) => (
@@ -332,7 +332,7 @@ function SopColumn({
               <button
                 type="button"
                 onClick={() => onPick(row)}
-                className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-2"
+                className="w-full text-left px-2 py-1.5 rounded-md hover:bg-zinc-50"
               >
                 <div className="flex items-center gap-2 text-sm">
                   <span className="truncate flex-1">{row.sop.title}</span>
@@ -342,7 +342,7 @@ function SopColumn({
                     </span>
                   ) : null}
                 </div>
-                <div className="text-[11px] text-muted truncate">{row.status.toLowerCase().replace(/_/g, " ")}</div>
+                <div className="text-[11px] text-zinc-500 truncate">{row.status.toLowerCase().replace(/_/g, " ")}</div>
               </button>
             </li>
           ))}
@@ -364,11 +364,11 @@ function ColumnHeader({
   href: string;
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-      <Icon className="w-3.5 h-3.5 text-muted" />
+    <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-200">
+      <Icon className="w-3.5 h-3.5 text-zinc-500" />
       <span className="text-xs font-medium flex-1">{label}</span>
-      <span className="text-xs text-muted">{count}</span>
-      <Link href={href} className="text-muted hover:text-foreground">
+      <span className="text-xs text-zinc-500">{count}</span>
+      <Link href={href} className="text-zinc-500 hover:text-zinc-900">
         <ChevronRight className="w-3.5 h-3.5" />
       </Link>
     </div>

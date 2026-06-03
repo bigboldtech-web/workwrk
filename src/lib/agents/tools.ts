@@ -2008,6 +2008,213 @@ const createDocWithBlocks: ToolDefinition = {
 // Registry — all tools by name
 // ─────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────
+// Brain knowledge tools — read-only org awareness so the
+// right-dock Brain panel can actually answer "who is at
+// risk on KPI compliance" / "what are my KRAs" / etc.
+// All scoped to ctx.userId or ctx.orgId; nothing crosses
+// org boundaries.
+// ─────────────────────────────────────────────────────────
+
+const listMyKras: ToolDefinition = {
+  name: "list_my_kras",
+  description:
+    "List the caller's active Key Result Area assignments (KRAs) — what the user is accountable for. Returns each KRA's name, weightage, status, and the role it's tied to.",
+  input_schema: {
+    type: "object",
+    properties: {
+      includePaused: { type: "boolean", description: "Include PAUSED assignments. Default false." },
+    },
+  },
+  handler: async (ctx, input) => {
+    const includePaused = input.includePaused === true;
+    const assignments = await prisma.kRAAssignment.findMany({
+      where: {
+        userId: ctx.userId,
+        status: includePaused ? { in: ["ACTIVE", "PAUSED"] } : "ACTIVE",
+        kra: { organizationId: ctx.orgId },
+      },
+      include: { kra: { select: { id: true, name: true, description: true, category: true } } },
+      orderBy: { weightage: "desc" },
+    });
+    return {
+      count: assignments.length,
+      kras: assignments.map((a) => ({
+        kraId: a.kraId,
+        name: a.kra.name,
+        category: a.kra.category,
+        description: a.kra.description,
+        weightage: a.weightage,
+        status: a.status,
+        period: a.period,
+      })),
+    };
+  },
+};
+
+const listMyKpiStatus: ToolDefinition = {
+  name: "list_my_kpi_status",
+  description:
+    "List the caller's KPI prompts for the current measurement period with target, actual, score, and submission status. Use this to answer 'am I on track on my KPIs', 'what KPIs do I owe', or 'what's my current performance'.",
+  input_schema: {
+    type: "object",
+    properties: {
+      period: { type: "string", description: "Optional period code (e.g. '2026-06'). Defaults to current period." },
+    },
+  },
+  handler: async (ctx, input) => {
+    const { getCurrentPeriod } = await import("@/lib/kpi-utils");
+    const period = (input.period as string) || getCurrentPeriod();
+    const records = await prisma.kPIRecord.findMany({
+      where: {
+        userId: ctx.userId,
+        period,
+        kpi: { organizationId: ctx.orgId },
+      },
+      include: {
+        kpi: {
+          select: { id: true, name: true, unit: true, frequency: true, lowerIsBetter: true, kraId: true },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    return {
+      period,
+      count: records.length,
+      records: records.map((r) => ({
+        kpiId: r.kpiId,
+        kpiName: r.kpi.name,
+        unit: r.kpi.unit,
+        frequency: r.kpi.frequency,
+        target: r.targetValue,
+        actual: r.actualValue,
+        score: r.score,
+        status: r.status,
+        lowerIsBetter: r.kpi.lowerIsBetter,
+        kraId: r.kpi.kraId,
+      })),
+    };
+  },
+};
+
+const listMySops: ToolDefinition = {
+  name: "list_my_sops",
+  description:
+    "List the SOPs assigned to the caller, with completion status, mandatory/optional, due date, and progress. Use this to answer 'what SOPs do I owe', 'have I read X', or 'what training is mandatory and overdue'.",
+  input_schema: {
+    type: "object",
+    properties: {
+      onlyOpen: { type: "boolean", description: "Only show ASSIGNED or IN_PROGRESS assignments. Default true." },
+    },
+  },
+  handler: async (ctx, input) => {
+    const onlyOpen = input.onlyOpen !== false;
+    const rows = await prisma.sOPAssignment.findMany({
+      where: {
+        userId: ctx.userId,
+        sop: { organizationId: ctx.orgId },
+        ...(onlyOpen ? { status: { in: ["ASSIGNED", "IN_PROGRESS"] } } : {}),
+      },
+      include: { sop: { select: { id: true, title: true, category: true } } },
+      orderBy: [{ mandatory: "desc" }, { dueDate: "asc" }],
+      take: 50,
+    });
+    return {
+      count: rows.length,
+      sops: rows.map((r) => ({
+        sopId: r.sopId,
+        title: r.sop.title,
+        category: r.sop.category,
+        status: r.status,
+        mandatory: r.mandatory,
+        dueDate: r.dueDate ? r.dueDate.toISOString() : null,
+        stepsTotal: r.stepsTotal,
+        stepsCompleted: r.stepsCompleted,
+        score: r.score,
+        completedAt: r.completedAt ? r.completedAt.toISOString() : null,
+      })),
+    };
+  },
+};
+
+const listMyWeeklyReviews: ToolDefinition = {
+  name: "list_my_weekly_reviews",
+  description:
+    "List the caller's recent weekly reviews (last 8 by default) — period, status, manager review state, and a short excerpt of highlights/blockers/plan. Use this to summarize what the user has been working on or whether they're behind on submission.",
+  input_schema: {
+    type: "object",
+    properties: {
+      limit: { type: "integer", description: "How many recent reviews to return. Default 8, max 26." },
+    },
+  },
+  handler: async (ctx, input) => {
+    const requested = typeof input.limit === "number" ? input.limit : 8;
+    const take = Math.max(1, Math.min(26, Math.floor(requested)));
+    const rows = await prisma.weeklyReview.findMany({
+      where: { userId: ctx.userId, organizationId: ctx.orgId },
+      orderBy: { periodStart: "desc" },
+      take,
+    });
+    const excerpt = (s: string | null, n = 240) =>
+      !s ? null : s.length > n ? s.slice(0, n - 1) + "…" : s;
+    return {
+      count: rows.length,
+      reviews: rows.map((r) => ({
+        id: r.id,
+        periodStart: r.periodStart.toISOString(),
+        status: r.status,
+        managerStatus: r.managerStatus,
+        submittedAt: r.submittedAt ? r.submittedAt.toISOString() : null,
+        reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
+        highlights: excerpt(r.highlights),
+        blockers: excerpt(r.blockers),
+        plan: excerpt(r.plan),
+      })),
+    };
+  },
+};
+
+const getTeamAlignmentRollup: ToolDefinition = {
+  name: "get_team_alignment_rollup",
+  description:
+    "Manager-only. Return the full team-alignment rollup for the caller's reports (solid + dotted): per-report KRAs, KPI compliance %, SOP read-rate %, and this week's review status. Use this to answer 'who is at risk on KPI compliance', 'who hasn't submitted their weekly review', or 'what is my team working on'.",
+  input_schema: {
+    type: "object",
+    properties: {},
+  },
+  handler: async (ctx) => {
+    const { getTeamAlignment } = await import("@/lib/team-alignment");
+    const rollup = await getTeamAlignment({ managerId: ctx.userId, organizationId: ctx.orgId });
+    if (rollup.members.length === 0) {
+      return {
+        empty: true,
+        reason: "Caller has no direct or dotted-line reports — they are an IC, not a manager.",
+      };
+    }
+    // Strip avatars / heavy fields the model doesn't need.
+    return {
+      reportCount: rollup.totals.reportCount,
+      avgKpiCompliancePct: rollup.totals.avgKpiCompliancePct,
+      avgSopReadRatePct: rollup.totals.avgSopReadRatePct,
+      activeKrasTotal: rollup.totals.activeKras,
+      members: rollup.members.map((m) => ({
+        userId: m.id,
+        name: `${m.firstName} ${m.lastName}`.trim(),
+        email: m.email,
+        via: m.via,
+        kras: m.activeKras,
+        kpiCompliancePct: m.kpis.compliancePct,
+        kpiPending: m.kpis.pending,
+        kpiSubmitted: m.kpis.submitted,
+        kpiApproved: m.kpis.approved,
+        sopReadRatePct: m.sops.readRatePct,
+        sopMandatoryPending: m.sops.mandatoryPending,
+        weeklyReview: m.weeklyReview,
+      })),
+    };
+  },
+};
+
 export const TOOLS: Record<string, ToolDefinition> = {
   // Lego primitives
   create_form: createForm,
@@ -2062,6 +2269,14 @@ export const TOOLS: Record<string, ToolDefinition> = {
   create_studio_board: createStudioBoard,
   create_workspace: createWorkspaceTool,
   invite_person_with_role: invitePersonWithRole,
+  // Brain knowledge tools — read-only org awareness for the right-dock
+  // panel. Every chat session can use these; manager-only ones bail
+  // gracefully when the caller has no reports.
+  list_my_kras: listMyKras,
+  list_my_kpi_status: listMyKpiStatus,
+  list_my_sops: listMySops,
+  list_my_weekly_reviews: listMyWeeklyReviews,
+  get_team_alignment_rollup: getTeamAlignmentRollup,
 };
 
 // Tools every session can use, regardless of agent (or no agent).
@@ -2079,6 +2294,9 @@ export const CROSS_TOOL_NAMES = [
   "create_form", "list_forms",
   "create_data_table", "list_data_tables",
   "create_doc",
+  // Brain knowledge tools (read-only org awareness)
+  "list_my_kras", "list_my_kpi_status", "list_my_sops",
+  "list_my_weekly_reviews", "get_team_alignment_rollup",
 ];
 
 // Tools per agent product. When a chat session is scoped to an agent,

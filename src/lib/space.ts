@@ -9,6 +9,7 @@
 
 import { prisma } from "@/lib/prisma";
 import type { SpaceRole, Visibility } from "@/generated/prisma";
+import { createEntityLink } from "@/lib/entity-link";
 
 const ADMIN_ACCESS_LEVELS = new Set([
   "SUPER_ADMIN",
@@ -164,6 +165,18 @@ export interface CreateSpaceInput {
   color?: string;
   visibility?: Visibility;
   parentSpaceId?: string;
+  // Override the OWNER of the Space. Defaults to userId (the creator).
+  // When different, the creator stays on as ADMIN and the chosen user
+  // becomes OWNER.
+  ownerId?: string;
+  // KRA IDs this Space is accountable for. Persisted as EntityLink
+  // rows (SPACE → KRA, relationKind=LINKED) so the goal graph can
+  // be queried in either direction.
+  linkedKraIds?: string[];
+  // Free-form wizard payload (preset, defaultPermission, defaultViews,
+  // statuses, modules, …). Stored verbatim into Space.settings. Step 2
+  // of the wizard expands this; sidebar/board renderers read it back.
+  settings?: Record<string, unknown>;
 }
 
 /**
@@ -186,6 +199,8 @@ export async function createSpace(input: CreateSpaceInput): Promise<SpaceSummary
   });
   const displayOrder = (last?.displayOrder ?? -1) + 1;
 
+  const ownerOverride = input.ownerId && input.ownerId !== input.userId ? input.ownerId : null;
+
   const created = await prisma.$transaction(async (tx) => {
     const space = await tx.space.create({
       data: {
@@ -195,10 +210,11 @@ export async function createSpace(input: CreateSpaceInput): Promise<SpaceSummary
         description: input.description ?? null,
         icon: input.icon ?? null,
         color: input.color ?? null,
-        ownerId: input.userId,
+        ownerId: ownerOverride ?? input.userId,
         visibility: input.visibility ?? "WORKSPACE",
         parentSpaceId: input.parentSpaceId ?? null,
         displayOrder,
+        ...(input.settings ? { settings: input.settings as object } : {}),
       },
       select: {
         id: true, slug: true, name: true, description: true, icon: true,
@@ -206,15 +222,46 @@ export async function createSpace(input: CreateSpaceInput): Promise<SpaceSummary
         displayOrder: true, archivedAt: true,
       },
     });
-    await tx.spaceMember.create({
-      data: { spaceId: space.id, userId: input.userId, role: "OWNER" },
-    });
+
+    if (ownerOverride) {
+      // Override case: creator stays in the Space as ADMIN; chosen user
+      // is OWNER. Two member rows.
+      await tx.spaceMember.createMany({
+        data: [
+          { spaceId: space.id, userId: ownerOverride, role: "OWNER", invitedBy: input.userId },
+          { spaceId: space.id, userId: input.userId, role: "ADMIN" },
+        ],
+        skipDuplicates: true,
+      });
+    } else {
+      await tx.spaceMember.create({
+        data: { spaceId: space.id, userId: input.userId, role: "OWNER" },
+      });
+    }
     return space;
   });
 
+  // EntityLink rows for KRAs are written outside the transaction so a
+  // missing/deleted KRA can't fail the whole Space create. Upsert keeps
+  // the call idempotent if the client retries.
+  if (input.linkedKraIds && input.linkedKraIds.length > 0) {
+    await Promise.all(
+      input.linkedKraIds.map((kraId, i) =>
+        createEntityLink({
+          organizationId: input.organizationId,
+          source: { type: "SPACE", id: created.id },
+          target: { type: "KRA", id: kraId },
+          relationKind: "LINKED",
+          position: i,
+          createdById: input.userId,
+        }).catch(() => null),
+      ),
+    );
+  }
+
   return {
     ...created,
-    memberCount: 1,
+    memberCount: ownerOverride ? 2 : 1,
     folderCount: 0,
     boardCount: 0,
   };

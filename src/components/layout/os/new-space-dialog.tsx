@@ -1,20 +1,26 @@
 "use client";
 
-// NewSpaceDialog — minimal "Create a Space" modal. Matches the
-// screenshot: icon swatch on the left, name field, description, default
-// permission (placeholder), Make Private toggle, Continue button.
+// NewSpaceDialog — two-step Space creation wizard.
 //
-// Posts to POST /api/spaces with { name, description?, visibility }.
-// On success it calls onCreated(space) so the caller can refresh the
-// sidebar tree.
+// Step 1 — Basics: icon + name + description + default permission + privacy.
+// Step 2 — Define your workflow: preset, owner, KRAs, views, statuses, modules.
+//
+// Posts to POST /api/spaces with the assembled payload. On success it
+// calls onCreated(space) so the caller can refresh the sidebar tree.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Info, Users } from "lucide-react";
+import { SpaceIconPicker } from "./space-icon-picker";
+import { SPACE_COLOR_PALETTE } from "./space-icon-catalog";
+import { SpaceWizardStep2, type Step2SubScreen, type UserOption, type KraOption } from "./space-wizard-step2";
+import { workflowFromPreset } from "./space-wizard-presets";
+import type { WorkflowConfig } from "./space-wizard-types";
 import type { Visibility } from "@/generated/prisma";
 
 interface SpaceLike {
@@ -23,6 +29,39 @@ interface SpaceLike {
   name: string;
   visibility: Visibility;
 }
+
+type Permission = "FULL_EDIT" | "EDIT" | "COMMENT" | "VIEW";
+
+const PERMISSION_LABELS: Record<Permission, string> = {
+  FULL_EDIT: "Full edit",
+  EDIT: "Edit",
+  COMMENT: "Comment",
+  VIEW: "View",
+};
+
+interface WizardState {
+  step: 1 | 2;
+  subScreen: Step2SubScreen;
+  iconName: string | null;
+  color: string;
+  name: string;
+  description: string;
+  defaultPermission: Permission;
+  isPrivate: boolean;
+  workflow: WorkflowConfig;
+}
+
+const INITIAL: WizardState = {
+  step: 1,
+  subScreen: null,
+  iconName: null,
+  color: SPACE_COLOR_PALETTE[0].hex,
+  name: "",
+  description: "",
+  defaultPermission: "FULL_EDIT",
+  isPrivate: false,
+  workflow: workflowFromPreset("starter"),
+};
 
 export function NewSpaceDialog({
   open,
@@ -33,29 +72,78 @@ export function NewSpaceDialog({
   onOpenChange: (v: boolean) => void;
   onCreated?: (s: SpaceLike) => void;
 }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [isPrivate, setIsPrivate] = useState(false);
+  const [state, setState] = useState<WizardState>(INITIAL);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [kras, setKras] = useState<KraOption[]>([]);
+  // Loading flags default to true so the very first paint of Step 2
+  // shows the loading state without a synchronous setState in the effect.
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [loadingKras, setLoadingKras] = useState(true);
+  const fetchedRef = useRef(false);
+
+  useEffect(() => {
+    if (state.step !== 2 || fetchedRef.current) return;
+    fetchedRef.current = true;
+    let active = true;
+    fetch("/api/users?scope=all&limit=200")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!active) return;
+        const rows: UserOption[] = Array.isArray(data?.data) ? data.data : [];
+        setUsers(rows);
+      })
+      .catch(() => { if (active) setUsers([]); })
+      .finally(() => { if (active) setLoadingUsers(false); });
+    fetch("/api/kras?scope=all&limit=200")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!active) return;
+        const rows: KraOption[] = Array.isArray(data?.data) ? data.data : [];
+        setKras(rows);
+      })
+      .catch(() => { if (active) setKras([]); })
+      .finally(() => { if (active) setLoadingKras(false); });
+    return () => { active = false; };
+  }, [state.step]);
+
+  const set = <K extends keyof WizardState>(key: K, value: WizardState[K]) =>
+    setState((s) => ({ ...s, [key]: value }));
 
   const reset = () => {
-    setName("");
-    setDescription("");
-    setIsPrivate(false);
+    setState(INITIAL);
     setError(null);
     setSubmitting(false);
+    setLoadingUsers(true);
+    setLoadingKras(true);
+    setUsers([]);
+    setKras([]);
+    fetchedRef.current = false;
   };
 
-  const handle = (next: boolean) => {
+  const handleOpen = (next: boolean) => {
     if (!next) reset();
     onOpenChange(next);
   };
 
+  const canAdvance = state.name.trim().length > 0;
+
+  const handleContinue = () => {
+    if (!canAdvance) {
+      setError("Space name is required");
+      return;
+    }
+    setError(null);
+    set("step", 2);
+    set("subScreen", null);
+  };
+
   const submit = async () => {
     setError(null);
-    const trimmed = name.trim();
+    const trimmed = state.name.trim();
     if (!trimmed) {
+      set("step", 1);
       setError("Space name is required");
       return;
     }
@@ -66,8 +154,16 @@ export function NewSpaceDialog({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: trimmed,
-          description: description.trim() || undefined,
-          visibility: isPrivate ? "PRIVATE" : "WORKSPACE",
+          description: state.description.trim() || undefined,
+          visibility: state.isPrivate ? "PRIVATE" : "WORKSPACE",
+          icon: state.iconName ?? undefined,
+          color: state.color,
+          ownerId: state.workflow.ownerId ?? undefined,
+          linkedKraIds: state.workflow.linkedKraIds,
+          settings: {
+            defaultPermission: state.defaultPermission,
+            workflow: state.workflow,
+          },
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -77,7 +173,7 @@ export function NewSpaceDialog({
         return;
       }
       onCreated?.(data.space as SpaceLike);
-      handle(false);
+      handleOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create Space");
       setSubmitting(false);
@@ -85,97 +181,222 @@ export function NewSpaceDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handle}>
-      <DialogContent className="max-w-[460px] p-0">
-        <div className="px-5 pt-5 pb-2">
-          <DialogTitle className="text-base font-semibold">Create a Space</DialogTitle>
-          <DialogDescription className="text-xs text-muted mt-1">
-            A Space represents teams, departments, or groups, each with its own Boards, workflows, and settings.
-          </DialogDescription>
-        </div>
+    <Dialog open={open} onOpenChange={handleOpen}>
+      <DialogContent className="max-w-[560px] p-0 gap-0">
+        {state.step === 1 ? (
+          <Step1
+            state={state}
+            error={error}
+            onChange={set}
+            onCancel={() => handleOpen(false)}
+            onContinue={handleContinue}
+          />
+        ) : (
+          <SpaceWizardStep2
+            workflow={state.workflow}
+            subScreen={state.subScreen}
+            accent={state.color}
+            error={error}
+            submitting={submitting}
+            users={users}
+            kras={kras}
+            loadingUsers={loadingUsers}
+            loadingKras={loadingKras}
+            onChange={(w) => set("workflow", w)}
+            onSubScreen={(s) => set("subScreen", s)}
+            onBack={() => set("step", 1)}
+            onCreate={submit}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-        <div className="px-5 py-3 space-y-4">
-          <div>
-            <label className="text-xs font-medium block mb-1">Icon &amp; name</label>
-            <div className="flex items-center gap-2">
-              <span className="w-9 h-9 rounded-md bg-surface-2 flex items-center justify-center text-sm font-semibold uppercase">
-                {name.trim()[0] ?? "S"}
-              </span>
+function Step1({
+  state,
+  error,
+  onChange,
+  onCancel,
+  onContinue,
+}: {
+  state: WizardState;
+  error: string | null;
+  onChange: <K extends keyof WizardState>(key: K, value: WizardState[K]) => void;
+  onCancel: () => void;
+  onContinue: () => void;
+}) {
+  const showNameError = error === "Space name is required";
+
+  return (
+    <>
+      <div className="px-6 pt-6 pb-3">
+        <DialogTitle className="text-[17px] font-semibold">Create a Space</DialogTitle>
+        <DialogDescription className="mt-1">
+          A Space represents teams, departments, or groups, each with its own Lists,
+          workflows, and settings.
+        </DialogDescription>
+      </div>
+
+      <div className="px-6 pb-2 space-y-5">
+        <div>
+          <label className="text-[12.5px] font-medium block mb-2">Icon &amp; name</label>
+          <div className="flex items-start gap-3">
+            <SpaceIconPicker
+              iconName={state.iconName}
+              color={state.color}
+              fallbackInitial={state.name.trim()[0]?.toUpperCase() ?? "S"}
+              onChange={({ iconName, color }) => {
+                onChange("iconName", iconName);
+                onChange("color", color);
+              }}
+            />
+            <div className="flex-1 min-w-0">
               <input
                 type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={state.name}
+                onChange={(e) => onChange("name", e.target.value)}
                 placeholder="e.g. Marketing, Engineering, HR"
-                className="flex-1 h-9 px-3 rounded-md border border-border bg-surface text-sm focus:outline-none focus:border-[var(--os-brand)]"
+                className={`w-full h-10 px-3 rounded-lg border bg-surface text-[13.5px] focus:outline-none transition-colors ${
+                  showNameError
+                    ? "border-red-500/70 focus:border-red-500"
+                    : "border-border focus:border-[color:var(--accent)]"
+                }`}
                 autoFocus
               />
+              {showNameError ? (
+                <div className="mt-1 text-[12px] text-red-500">Space name is required</div>
+              ) : null}
             </div>
           </div>
-
-          <div>
-            <label className="text-xs font-medium block mb-1">
-              Description <span className="text-muted">(optional)</span>
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
-              className="w-full px-3 py-2 rounded-md border border-border bg-surface text-sm resize-none focus:outline-none focus:border-[var(--os-brand)]"
-            />
-          </div>
-
-          <label className="flex items-center justify-between gap-3 cursor-pointer pt-1">
-            <div>
-              <div className="text-sm font-medium">Make Private</div>
-              <div className="text-xs text-muted">Only you and invited members have access</div>
-            </div>
-            <span
-              role="switch"
-              aria-checked={isPrivate}
-              tabIndex={0}
-              onClick={() => setIsPrivate((v) => !v)}
-              onKeyDown={(e) => {
-                if (e.key === " " || e.key === "Enter") {
-                  e.preventDefault();
-                  setIsPrivate((v) => !v);
-                }
-              }}
-              className={`relative w-9 h-5 rounded-full transition-colors ${
-                isPrivate ? "bg-[var(--os-brand)]" : "bg-surface-3"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                  isPrivate ? "translate-x-4" : "translate-x-0"
-                }`}
-              />
-            </span>
-          </label>
-
-          {error ? (
-            <div className="text-xs text-red-500 bg-red-500/10 rounded-md px-3 py-2">{error}</div>
-          ) : null}
         </div>
 
-        <div className="px-5 pb-5 pt-2 flex items-center justify-between">
+        <div>
+          <label className="text-[12.5px] font-medium block mb-2">
+            Description <span className="text-muted">(optional)</span>
+          </label>
+          <textarea
+            value={state.description}
+            onChange={(e) => onChange("description", e.target.value)}
+            rows={2}
+            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-[13.5px] resize-none focus:outline-none focus:border-[color:var(--accent)]"
+          />
+        </div>
+
+        <div className="border-t border-border pt-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-muted" />
+            <span className="text-[13.5px] font-medium">Default permission</span>
+            <Info className="h-3.5 w-3.5 text-muted-2" />
+          </div>
+          <PermissionSelect
+            value={state.defaultPermission}
+            onChange={(v) => onChange("defaultPermission", v)}
+          />
+        </div>
+
+        <div className="border-t border-border pt-4">
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <div className="text-[13.5px] font-medium">Make Private</div>
+              <div className="text-[12px] text-muted">Only you and invited members have access</div>
+            </div>
+            <Toggle
+              value={state.isPrivate}
+              onChange={(v) => onChange("isPrivate", v)}
+              accent={state.color}
+            />
+          </label>
+        </div>
+
+        {error && error !== "Space name is required" ? (
+          <div className="text-[12px] text-red-500 bg-red-500/10 rounded-md px-3 py-2">{error}</div>
+        ) : null}
+      </div>
+
+      <div className="px-6 py-4 mt-2 border-t border-border flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => {
+            /* Templates gallery — coming soon */
+          }}
+          className="text-[12.5px] text-muted hover:text-foreground transition-colors"
+        >
+          Use Templates
+        </button>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => handle(false)}
-            className="text-sm text-muted hover:text-foreground px-3 py-2"
-            disabled={submitting}
+            onClick={onCancel}
+            className="text-[13px] text-muted hover:text-foreground px-3 py-2"
           >
             Cancel
           </button>
           <button
             type="button"
-            onClick={submit}
-            disabled={submitting || !name.trim()}
-            className="px-4 py-2 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+            onClick={onContinue}
+            className="px-4 py-2 rounded-lg text-[13px] font-medium text-white shadow-sm transition hover:opacity-90"
+            style={{ backgroundColor: state.color }}
           >
-            {submitting ? "Creating…" : "Continue"}
+            Continue
           </button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </>
+  );
+}
+
+function PermissionSelect({
+  value,
+  onChange,
+}: {
+  value: Permission;
+  onChange: (v: Permission) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as Permission)}
+      className="h-8 px-2.5 pr-7 rounded-md border border-border bg-surface text-[12.5px] focus:outline-none focus:border-[color:var(--accent)]"
+    >
+      {(Object.keys(PERMISSION_LABELS) as Permission[]).map((k) => (
+        <option key={k} value={k}>
+          {PERMISSION_LABELS[k]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Toggle({
+  value,
+  onChange,
+  accent,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+  accent: string;
+}) {
+  return (
+    <span
+      role="switch"
+      aria-checked={value}
+      tabIndex={0}
+      onClick={() => onChange(!value)}
+      onKeyDown={(e) => {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          onChange(!value);
+        }
+      }}
+      className="relative w-10 h-5 rounded-full transition-colors cursor-pointer"
+      style={{ backgroundColor: value ? accent : "var(--b-line-2, #e4e4e7)" }}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+          value ? "translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </span>
   );
 }

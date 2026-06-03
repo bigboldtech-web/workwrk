@@ -14,8 +14,9 @@ import {
   Plus, X, GripVertical, ChevronDown, ChevronRight, Trash2, Copy,
   AlertCircle, Type, Minus, Image, Video, Hash, AlignLeft, AlignJustify,
   CheckSquare, Mail, Globe, Calendar, List, ListChecks, Upload,
-  Sparkles, Settings2, FileText, ArrowUp, ArrowDown,
+  Settings2, FileText, ArrowUp, ArrowDown,
 } from "lucide-react";
+import { BloomMark } from "@/components/layout/os/bloom-mark";
 
 // ============================================
 // Types (exported for other components)
@@ -238,7 +239,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
             </Button>
             {onAiGenerate && (
               <Button variant="outline" size="sm" onClick={onAiGenerate} className="gap-1.5 text-xs">
-                <Sparkles size={12} /> AI Generate
+                <BloomMark size={12} /> AI Generate
               </Button>
             )}
           </div>
@@ -253,7 +254,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
             {editing && (
               <div className="flex items-center justify-center gap-2">
                 <Button variant="outline" size="sm" onClick={addSection} className="gap-1.5"><Plus size={12} /> Add Section</Button>
-                {onAiGenerate && <Button variant="outline" size="sm" onClick={onAiGenerate} className="gap-1.5"><Sparkles size={12} /> AI Generate</Button>}
+                {onAiGenerate && <Button variant="outline" size="sm" onClick={onAiGenerate} className="gap-1.5"><BloomMark size={12} /> AI Generate</Button>}
               </div>
             )}
           </div>

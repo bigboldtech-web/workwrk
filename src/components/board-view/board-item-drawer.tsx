@@ -19,6 +19,7 @@ import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-sha
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { ItemThread } from "./item-thread";
+import { LinkedAttachments } from "./linked-attachments";
 
 interface BoardItemDrawerProps {
   itemId: string | null;
@@ -149,7 +150,7 @@ export function BoardItemDrawer({
 
       {/* Drawer */}
       <aside
-        className={`fixed top-0 right-0 bottom-0 z-50 w-[480px] max-w-full bg-surface border-l border-border shadow-2xl transition-transform duration-200 ${
+        className={`fixed top-0 right-0 bottom-0 z-50 w-[480px] max-w-full bg-white border-l border-zinc-200 shadow-2xl transition-transform duration-200 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
         aria-hidden={!open}
@@ -157,22 +158,22 @@ export function BoardItemDrawer({
         {open ? (
           <div className="flex flex-col h-full">
             {/* Header */}
-            <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+            <div className="px-5 py-3 border-b border-zinc-200 flex items-center gap-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex items-center justify-center w-7 h-7 rounded text-muted hover:bg-surface-2 hover:text-foreground"
+                className="inline-flex items-center justify-center w-7 h-7 rounded text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900"
                 aria-label="Close"
               >
                 <X className="w-4 h-4" />
               </button>
-              <span className="text-xs text-muted">Item</span>
+              <span className="text-xs text-zinc-500">Item</span>
               <div className="ml-auto flex items-center gap-1">
                 {canEdit && item ? (
                   <button
                     type="button"
                     onClick={archive}
-                    className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-red-500 px-2 py-1 rounded hover:bg-red-500/10"
+                    className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-red-500 px-2 py-1 rounded hover:bg-red-500/10"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Archive
                   </button>
@@ -183,14 +184,14 @@ export function BoardItemDrawer({
             {error ? (
               <div className="px-5 py-2 text-xs text-red-500 bg-red-500/10 flex items-center justify-between">
                 {error}
-                <button onClick={() => setError(null)} className="text-muted hover:text-foreground">
+                <button onClick={() => setError(null)} className="text-zinc-500 hover:text-zinc-900">
                   <X className="w-3 h-3" />
                 </button>
               </div>
             ) : null}
 
             {loading || !item ? (
-              <div className="flex-1 px-5 py-6 text-sm text-muted">Loading…</div>
+              <div className="flex-1 px-5 py-6 text-sm text-zinc-500">Loading…</div>
             ) : (
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
                 <TitleField item={item} canEdit={canEdit} onSave={(t) => patch({ title: t })} />
@@ -207,13 +208,13 @@ export function BoardItemDrawer({
                   <Row label="Owner">
                     {item.owner ? (
                       <span className="inline-flex items-center gap-2">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-surface-3 text-xs font-medium">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-zinc-100 text-xs font-medium">
                           {`${item.owner.firstName?.[0] ?? ""}${item.owner.lastName?.[0] ?? ""}`.toUpperCase() || "?"}
                         </span>
                         <span className="text-sm">{item.owner.firstName} {item.owner.lastName}</span>
                       </span>
                     ) : (
-                      <span className="text-xs text-muted">Unassigned</span>
+                      <span className="text-xs text-zinc-500">Unassigned</span>
                     )}
                   </Row>
                   {customFields.map((f) => (
@@ -231,7 +232,7 @@ export function BoardItemDrawer({
                     <span className="text-sm">{new Date(item.createdAt).toLocaleString()}</span>
                   </Row>
                   <Row label="Updated">
-                    <span className="text-sm text-muted">{new Date(item.updatedAt).toLocaleString()}</span>
+                    <span className="text-sm text-zinc-500">{new Date(item.updatedAt).toLocaleString()}</span>
                   </Row>
                 </div>
 
@@ -242,6 +243,13 @@ export function BoardItemDrawer({
                   onSave={(desc) =>
                     patch({ metadata: { ...item.metadata, description: desc } })
                   }
+                />
+
+                {/* Linked notes + whiteboards */}
+                <LinkedAttachments
+                  sourceType="BOARD_ITEM"
+                  sourceId={item.id}
+                  canEdit={canEdit}
                 />
 
                 {/* Comments + Activity thread */}
@@ -260,7 +268,7 @@ export function BoardItemDrawer({
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-3">
-      <span className="text-xs text-muted w-[88px] flex-shrink-0">{label}</span>
+      <span className="text-xs text-zinc-500 w-[88px] flex-shrink-0">{label}</span>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
   );
@@ -331,7 +339,7 @@ function DescriptionField({
 
   return (
     <div>
-      <h3 className="text-xs uppercase tracking-wide text-muted mb-2">Description</h3>
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Description</h3>
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -339,7 +347,7 @@ function DescriptionField({
         disabled={!canEdit}
         rows={4}
         placeholder={canEdit ? "Add a description…" : "No description"}
-        className="w-full px-3 py-2 rounded-md border border-border bg-surface text-sm resize-y focus:outline-none focus:border-[var(--os-brand)] disabled:opacity-60"
+        className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)] disabled:opacity-60"
       />
     </div>
   );
@@ -375,7 +383,7 @@ function StatusPicker({
       {current.label}
     </span>
   ) : (
-    <span className="text-xs text-muted">—</span>
+    <span className="text-xs text-zinc-500">—</span>
   );
 
   if (!canEdit) return pill;
@@ -387,10 +395,10 @@ function StatusPicker({
         className="inline-flex items-center gap-1.5"
       >
         {pill}
-        <ChevronDown className="w-3 h-3 text-muted" />
+        <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
       {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-border bg-surface shadow-lg py-1">
+        <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
           {DEFAULT_STATUS_OPTIONS.map((opt) => {
             const active = opt.value === value;
             return (
@@ -398,7 +406,7 @@ function StatusPicker({
                 key={opt.value}
                 type="button"
                 onClick={() => { onChange(opt.value); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-surface-2"
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
               >
                 <span
                   className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"

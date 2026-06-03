@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import { Sparkles, KeyRound, Loader2, Check, Trash2, Crown } from "lucide-react";
+import { KeyRound, Loader2, Check, Trash2, Crown } from "lucide-react";
+import { BloomMark } from "@/components/layout/os/bloom-mark";
 
 interface KeyState {
   enabled: boolean;
@@ -111,7 +112,7 @@ export function ByokManager() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Sparkles size={14} className="text-[#d4ff2e]" /> AI &amp; Integrations
+            <BloomMark size={14} /> AI &amp; Integrations
           </CardTitle>
           <CardDescription>
             Plug in your own Anthropic API key for AI features. AI calls stop using
@@ -139,7 +140,7 @@ export function ByokManager() {
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <Sparkles size={14} className="text-[#d4ff2e]" /> AI &amp; Integrations
+          <BloomMark size={14} /> AI &amp; Integrations
         </CardTitle>
         <CardDescription>
           AI features (organisation chat, SOP/KRA generation, profile generation)

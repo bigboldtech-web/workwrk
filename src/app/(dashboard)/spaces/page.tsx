@@ -23,14 +23,14 @@ export default async function SpacesIndexPage() {
       <header className="mb-6 flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Spaces</h1>
-          <p className="text-sm text-muted mt-1">Your team's grouping of Folders and Boards.</p>
+          <p className="text-sm text-zinc-500 mt-1">Your team's grouping of Folders and Boards.</p>
         </div>
       </header>
 
       {spaces.length === 0 ? (
-        <div className="border border-border rounded-xl px-8 py-16 text-center">
+        <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center">
           <div className="text-base font-medium mb-1">No Spaces yet</div>
-          <p className="text-sm text-muted max-w-[420px] mx-auto mb-4">
+          <p className="text-sm text-zinc-500 max-w-[420px] mx-auto mb-4">
             Spaces hold Folders and Boards for a team. Create one from the sidebar's "+" button next to Spaces.
           </p>
         </div>
@@ -40,20 +40,20 @@ export default async function SpacesIndexPage() {
             <li key={s.id}>
               <Link
                 href={`/spaces/${s.slug}`}
-                className="block px-4 py-3 rounded-lg border border-border bg-surface hover:bg-surface-2"
+                className="block px-4 py-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50"
               >
                 <div className="flex items-center gap-2 mb-1">
                   {s.visibility === "PRIVATE" ? (
-                    <Lock className="w-4 h-4 text-muted" />
+                    <Lock className="w-4 h-4 text-zinc-500" />
                   ) : (
-                    <Layers className="w-4 h-4 text-muted" />
+                    <Layers className="w-4 h-4 text-zinc-500" />
                   )}
                   <span className="font-medium text-sm">{s.name}</span>
                 </div>
                 {s.description ? (
-                  <p className="text-xs text-muted line-clamp-2">{s.description}</p>
+                  <p className="text-xs text-zinc-500 line-clamp-2">{s.description}</p>
                 ) : null}
-                <div className="mt-2 flex items-center gap-3 text-[11px] text-muted">
+                <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-500">
                   <span>{s.memberCount} member{s.memberCount === 1 ? "" : "s"}</span>
                   <span>{s.folderCount} folder{s.folderCount === 1 ? "" : "s"}</span>
                   <span>{s.boardCount} board{s.boardCount === 1 ? "" : "s"}</span>

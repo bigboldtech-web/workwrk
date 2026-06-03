@@ -43,14 +43,14 @@ export default async function TeamAlignmentPage() {
     <div className="px-8 py-6 max-w-[1280px]">
       <header className="mb-6 flex items-end justify-between gap-6">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm text-muted mb-2">
+          <div className="flex items-center gap-2 text-sm text-zinc-500 mb-2">
             <UsersIcon className="w-3.5 h-3.5" />
             <span>Team</span>
             <span>/</span>
             <span>Alignment</span>
           </div>
           <h1 className="text-2xl font-semibold">Team alignment</h1>
-          <p className="text-sm text-muted mt-1 max-w-[640px]">
+          <p className="text-sm text-zinc-500 mt-1 max-w-[640px]">
             Your direct and dotted-line reports — what they own, how they're tracking, what they owe.
           </p>
         </div>
@@ -60,14 +60,14 @@ export default async function TeamAlignmentPage() {
               non-directors back here. */}
           <Link
             href="/team/rollup"
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-border hover:bg-surface-2"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50"
           >
             <UsersIcon className="w-3.5 h-3.5" />
             Director rollup
           </Link>
           <Link
             href="/team/reviews"
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-border hover:bg-surface-2"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50"
           >
             <ClipboardCheck className="w-3.5 h-3.5" />
             Weekly reviews
@@ -77,10 +77,10 @@ export default async function TeamAlignmentPage() {
       </header>
 
       {data.members.length === 0 ? (
-        <div className="border border-border rounded-xl px-8 py-16 text-center">
-          <UsersIcon className="w-8 h-8 mx-auto text-muted mb-3" />
+        <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center">
+          <UsersIcon className="w-8 h-8 mx-auto text-zinc-500 mb-3" />
           <div className="text-base font-medium mb-1">No reports yet</div>
-          <p className="text-sm text-muted max-w-[420px] mx-auto">
+          <p className="text-sm text-zinc-500 max-w-[420px] mx-auto">
             You'll see KRAs, KPI compliance, and SOP read-rates here as soon as someone reports to you (solid or dotted).
           </p>
         </div>
@@ -104,7 +104,7 @@ export default async function TeamAlignmentPage() {
           </section>
 
           <section>
-            <h2 className="text-xs uppercase tracking-wide text-muted mb-2">Reports</h2>
+            <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Reports</h2>
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {data.members.map((m) => (
                 <li key={m.id}>
@@ -136,8 +136,8 @@ function StatCard({
     tone === "good" ? "text-emerald-600" :
     undefined;
   return (
-    <div className="rounded-lg border border-border bg-surface px-4 py-3">
-      <div className="flex items-center gap-1.5 text-xs text-muted">
+    <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
+      <div className="flex items-center gap-1.5 text-xs text-zinc-500">
         <Icon className="w-3.5 h-3.5" />
         {label}
       </div>
@@ -149,26 +149,26 @@ function StatCard({
 function MemberCard({ m }: { m: TeamMember }) {
   const initials = `${m.firstName?.[0] ?? ""}${m.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   return (
-    <article className="rounded-lg border border-border bg-surface">
-      <header className="flex items-center gap-3 px-4 py-3 border-b border-border">
-        <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-surface-3 text-sm font-medium">
+    <article className="rounded-lg border border-zinc-200 bg-white">
+      <header className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200">
+        <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-zinc-100 text-sm font-medium">
           {initials}
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">
             {m.firstName} {m.lastName}
           </div>
-          <div className="text-xs text-muted truncate">{m.email}</div>
+          <div className="text-xs text-zinc-500 truncate">{m.email}</div>
         </div>
         {m.via === "dotted" ? (
           <span
             title="Dotted-line report"
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-2 text-muted"
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500"
           >
             <GitBranchPlus className="w-3 h-3" /> Dotted
           </span>
         ) : null}
-        <Link href={`/people/${m.id}`} className="text-muted hover:text-foreground">
+        <Link href={`/people/${m.id}`} className="text-zinc-500 hover:text-zinc-900">
           <ChevronRight className="w-4 h-4" />
         </Link>
       </header>
@@ -201,7 +201,7 @@ function MemberCard({ m }: { m: TeamMember }) {
         <WeeklyReviewMetric review={m.weeklyReview} />
       </div>
       {m.sops.mandatoryPending > 0 ? (
-        <div className="px-4 py-2 border-t border-border text-xs text-red-700 bg-red-500/5 flex items-center gap-2">
+        <div className="px-4 py-2 border-t border-zinc-200 text-xs text-red-700 bg-red-500/5 flex items-center gap-2">
           <AlertCircle className="w-3 h-3" />
           {m.sops.mandatoryPending} mandatory SOP{m.sops.mandatoryPending === 1 ? "" : "s"} pending
         </div>
@@ -277,12 +277,12 @@ function Metric({
     undefined;
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-[11px] text-muted">
+      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
         <Icon className="w-3 h-3" />
         {label}
       </div>
       <div className={`text-base font-semibold ${valueColor ?? ""}`}>{value}</div>
-      <div className="text-[11px] text-muted truncate" title={sub}>{sub}</div>
+      <div className="text-[11px] text-zinc-500 truncate" title={sub}>{sub}</div>
     </div>
   );
 }

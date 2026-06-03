@@ -105,6 +105,10 @@
   border: 2px solid var(--os-canvas);
 }
 .workwrk-os ::-webkit-scrollbar-thumb:hover { background: var(--os-ink-4); }
+/* Opt-out: scrollable surfaces that should never show a scrollbar
+   (e.g. the left app rail — its column is too narrow for a 10px thumb). */
+.workwrk-os .os-no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.workwrk-os .os-no-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .workwrk-os ::selection { background: var(--os-brand-soft); color: var(--os-brand-deep); }
 
 /* ─────────── Accent overrides — keyed by ThemeApplier ────────────
@@ -113,16 +117,20 @@
    inside `.workwrk-os` so every existing rule that reads --os-brand
    re-paints. `-soft` is a 14% tint of the same hue; `-hover` is
    ~12% darker; `-deep` matches `-hover` for readable foregrounds. */
-:root[data-accent="mint"]   .workwrk-os { --os-brand: #3AB39E; --os-brand-hover: #2E9080; --os-brand-soft: #E0F2EE; --os-brand-deep: #2E9080; }
-:root[data-accent="black"]  .workwrk-os { --os-brand: #1F2024; --os-brand-hover: #111317; --os-brand-soft: #E6E7EA; --os-brand-deep: #111317; }
-:root[data-accent="purple"] .workwrk-os { --os-brand: #7C3AED; --os-brand-hover: #6328C8; --os-brand-soft: #EFE7FC; --os-brand-deep: #6328C8; }
-:root[data-accent="blue"]   .workwrk-os { --os-brand: #3B82F6; --os-brand-hover: #2563EB; --os-brand-soft: #E2EBFD; --os-brand-deep: #2563EB; }
-:root[data-accent="pink"]   .workwrk-os { --os-brand: #EC4899; --os-brand-hover: #D63584; --os-brand-soft: #FCE2EF; --os-brand-deep: #D63584; }
-:root[data-accent="violet"] .workwrk-os { --os-brand: #A855F7; --os-brand-hover: #8B3FDB; --os-brand-soft: #F1E4FD; --os-brand-deep: #8B3FDB; }
-:root[data-accent="indigo"] .workwrk-os { --os-brand: #6366F1; --os-brand-hover: #4F52D8; --os-brand-soft: #E5E6FB; --os-brand-deep: #4F52D8; }
-:root[data-accent="orange"] .workwrk-os { --os-brand: #F59E0B; --os-brand-hover: #D58503; --os-brand-soft: #FCEFCE; --os-brand-deep: #D58503; }
-:root[data-accent="teal"]   .workwrk-os { --os-brand: #14B8A6; --os-brand-hover: #0F968A; --os-brand-soft: #D6F3F0; --os-brand-deep: #0F968A; }
-:root[data-accent="bronze"] .workwrk-os { --os-brand: #A78B6C; --os-brand-hover: #8A7253; --os-brand-soft: #F1EAE0; --os-brand-deep: #8A7253; }
+/* `--os-brand-rail` is the desaturated dark form used for the left
+   app rail — ClickUp paints the rail with a much darker version of
+   the accent so it looks composed in both light and dark themes
+   without screaming the full-saturation brand at the user. */
+:root[data-accent="mint"]   .workwrk-os { --os-brand: #3AB39E; --os-brand-hover: #2E9080; --os-brand-soft: #E0F2EE; --os-brand-deep: #2E9080; --os-brand-rail: #18352F; }
+:root[data-accent="black"]  .workwrk-os { --os-brand: #1F2024; --os-brand-hover: #111317; --os-brand-soft: #E6E7EA; --os-brand-deep: #111317; --os-brand-rail: #1F2024; }
+:root[data-accent="purple"] .workwrk-os { --os-brand: #7C3AED; --os-brand-hover: #6328C8; --os-brand-soft: #EFE7FC; --os-brand-deep: #6328C8; --os-brand-rail: #2A1A47; }
+:root[data-accent="blue"]   .workwrk-os { --os-brand: #3B82F6; --os-brand-hover: #2563EB; --os-brand-soft: #E2EBFD; --os-brand-deep: #2563EB; --os-brand-rail: #1A2C4A; }
+:root[data-accent="pink"]   .workwrk-os { --os-brand: #EC4899; --os-brand-hover: #D63584; --os-brand-soft: #FCE2EF; --os-brand-deep: #D63584; --os-brand-rail: #3F1A2C; }
+:root[data-accent="violet"] .workwrk-os { --os-brand: #A855F7; --os-brand-hover: #8B3FDB; --os-brand-soft: #F1E4FD; --os-brand-deep: #8B3FDB; --os-brand-rail: #2E1A47; }
+:root[data-accent="indigo"] .workwrk-os { --os-brand: #6366F1; --os-brand-hover: #4F52D8; --os-brand-soft: #E5E6FB; --os-brand-deep: #4F52D8; --os-brand-rail: #1F1F4A; }
+:root[data-accent="orange"] .workwrk-os { --os-brand: #F59E0B; --os-brand-hover: #D58503; --os-brand-soft: #FCEFCE; --os-brand-deep: #D58503; --os-brand-rail: #3A2812; }
+:root[data-accent="teal"]   .workwrk-os { --os-brand: #14B8A6; --os-brand-hover: #0F968A; --os-brand-soft: #D6F3F0; --os-brand-deep: #0F968A; --os-brand-rail: #14302E; }
+:root[data-accent="bronze"] .workwrk-os { --os-brand: #A78B6C; --os-brand-hover: #8A7253; --os-brand-soft: #F1EAE0; --os-brand-deep: #8A7253; --os-brand-rail: #3F332A; }
 
 /* ─── Icons-only sidebar mode (toggled in CustomizePanel → Navigation) ─── */
 .os-side__scroll[data-icons-only="1"] .os-side__item-text,
@@ -1177,22 +1185,406 @@
 }
 
 /* ════════════════════════════════════════════════════════════════
- * SIDEKICK (right slide-in)
+ * BRAIN PANEL (right dock — replaces the legacy slide-over)
+ *
+ * Now a flex-column sibling of <main> inside the shell content row,
+ * not an absolute overlay. Width animates 0 ⇄ 380px so the canvas
+ * reflows around it instead of getting covered. The card styling
+ * (white bg + rounded-xl + border) matches the main canvas card so
+ * the two read as twin surfaces with a 6px gap between them.
  * ════════════════════════════════════════════════════════════════ */
 .os-sk {
-  position: absolute;
-  top: 0; right: 0; bottom: 0;
-  width: 400px;
-  background: var(--os-canvas);
-  border-left: 1px solid var(--os-line);
+  flex-shrink: 0;
+  width: 0;
+  overflow: hidden;
+  background: transparent;
+  border-radius: var(--os-r-xl);
+  border: 0;
   display: flex;
   flex-direction: column;
-  transform: translateX(100%);
-  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
-  z-index: 50;
-  box-shadow: var(--os-shadow-pop);
+  transition: width 240ms cubic-bezier(0.32, 0.72, 0, 1), margin 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  position: relative;
+  z-index: 5;
+  /* Collapse the parent flex-gap when closed so the 6px seam disappears */
+  margin-left: -6px;
 }
-.os-sk.is-open { transform: translateX(0); }
+.os-sk.is-open {
+  width: 380px;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  margin-left: 0;
+}
+/* Inner wrapper holds the real width so children don't reflow as the
+   parent animates 0 → 380. Hidden until open to avoid focus traps. */
+.os-sk__inner {
+  width: 380px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Top bar: edit (new chat) / history / centered model pill / ... / collapse */
+.os-sk__topbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--os-line);
+}
+.os-sk__iconbtn {
+  width: 28px; height: 28px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  color: var(--os-ink-2);
+}
+.os-sk__iconbtn:hover { background: var(--os-surface-1); color: var(--os-ink); }
+.os-sk__iconbtn.is-on { background: var(--os-brand-soft); color: var(--os-brand-deep); }
+.os-sk__iconbtn svg { width: 15px; height: 15px; }
+.os-sk__topbar-spacer { flex: 1; }
+.os-sk__model-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--os-ink-2);
+}
+.os-sk__model-pill svg { width: 12px; height: 12px; }
+.os-sk__model-pill:hover { background: var(--os-surface-2); }
+
+/* Suggestion sections (Suggested / Featured / Search). Greet card +
+   section-title styles live further down (after the composer block) so
+   the panel hierarchy + dark-mode rebind sit together. */
+.os-sk__sec { padding: 4px 14px 10px; }
+.os-sk__sec-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  width: 100%;
+  text-align: left;
+  color: var(--os-ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+.os-sk__sec-row:last-child { margin-bottom: 0; }
+.os-sk__sec-row:hover { background: var(--os-surface-1); }
+.os-sk__sec-icon {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  background: var(--os-brand-soft);
+  color: var(--os-brand-deep);
+  flex-shrink: 0;
+}
+.os-sk__sec-icon svg { width: 13px; height: 13px; }
+.os-sk__sec-row-label { flex: 1; min-width: 0; }
+
+/* History view */
+.os-sk__hist-search {
+  margin: 10px 14px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: var(--os-surface-1);
+}
+.os-sk__hist-search svg { width: 13px; height: 13px; color: var(--os-ink-3); }
+.os-sk__hist-search input {
+  flex: 1; background: transparent; font-size: 13px; color: var(--os-ink); min-width: 0;
+}
+.os-sk__hist-list { padding: 4px 8px 12px; overflow-y: auto; flex: 1; }
+.os-sk__hist-group-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--os-ink-3);
+  padding: 10px 8px 4px;
+}
+.os-sk__hist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+  color: var(--os-ink);
+}
+.os-sk__hist-item:hover { background: var(--os-surface-1); }
+.os-sk__hist-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-sk__hist-empty {
+  padding: 28px 14px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--os-ink-3);
+}
+
+/* Chat thread (replaces the legacy os-sk__msg layout when there is a thread) */
+.os-sk__thread { padding: 12px 14px 4px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 12px; }
+.os-sk__bubble {
+  font-size: 13px;
+  line-height: 1.55;
+  border-radius: 12px;
+  padding: 10px 12px;
+  max-width: 90%;
+}
+.os-sk__bubble--user {
+  align-self: flex-end;
+  background: var(--os-brand);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+.os-sk__bubble--ai {
+  align-self: flex-start;
+  background: var(--os-surface-1);
+  color: var(--os-ink);
+  border-bottom-left-radius: 4px;
+}
+.os-sk__bubble--ai p { margin: 0 0 6px; }
+.os-sk__bubble--ai p:last-child { margin-bottom: 0; }
+.os-sk__bubble--ai strong { font-weight: 700; }
+.os-sk__bubble--ai code { background: rgba(0,0,0,0.06); padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+.os-sk__tool-chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--os-ink-2);
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.os-sk__tool-chip svg { width: 11px; height: 11px; }
+.os-sk__tool-chip--err { color: #B91C1C; border-color: #FCA5A5; background: #FEF2F2; }
+.os-sk__typing {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--os-ink-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.os-sk__typing-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--os-ink-3);
+  animation: osSkTyping 1.2s infinite ease-in-out;
+}
+.os-sk__typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.os-sk__typing-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes osSkTyping { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
+
+/* Composer (bottom input) */
+.os-sk__composer {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--os-line);
+}
+.os-sk__composer-shell {
+  border-radius: 14px;
+  border: 1.5px solid var(--os-line);
+  background: var(--os-canvas);
+  padding: 10px;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.os-sk__composer-shell:focus-within {
+  border-color: var(--os-brand);
+  box-shadow: 0 0 0 4px var(--os-brand-soft);
+}
+.os-sk__composer-input {
+  width: 100%;
+  resize: none;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--os-ink);
+  background: transparent;
+  min-height: 22px;
+  max-height: 160px;
+  outline: none;
+}
+.os-sk__composer-input::placeholder { color: var(--os-ink-3); }
+.os-sk__composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.os-sk__composer-side {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  color: var(--os-ink-3);
+}
+.os-sk__composer-side:hover { background: var(--os-surface-1); color: var(--os-ink); }
+.os-sk__composer-side svg { width: 14px; height: 14px; }
+.os-sk__composer-sources {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--os-surface-1);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--os-ink-2);
+}
+.os-sk__composer-sources svg { width: 12px; height: 12px; }
+.os-sk__composer-send {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: var(--os-brand);
+  color: white;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.os-sk__composer-send:hover { background: var(--os-brand-hover); }
+.os-sk__composer-send:disabled { background: var(--os-surface-2); color: var(--os-ink-3); cursor: not-allowed; }
+.os-sk__composer-send svg { width: 14px; height: 14px; }
+
+/* Brain avatar shown inside the greet card — small gradient tile with a
+   sparkle so the empty state has a clear identity, not just text. */
+.os-sk__greet-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.os-sk__greet-avatar {
+  /* The BloomMark inside carries its own halo + gradient + nucleus, so
+     the avatar wrapper stays transparent — no competing background. */
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.os-sk__greet-avatar svg { width: 28px; height: 28px; }
+.os-sk__greet-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--os-c-purple);
+}
+/* Beefed-up greet card so it carries the panel visually. */
+.os-sk__greet {
+  margin: 12px;
+  padding: 18px 16px 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--os-c-purple) 14%, var(--os-canvas)),
+    color-mix(in srgb, var(--os-c-pink) 10%, var(--os-canvas)));
+  border: 1px solid color-mix(in srgb, var(--os-c-purple) 18%, var(--os-line));
+}
+.os-sk__greet-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--os-ink);
+  line-height: 1.2;
+  margin-bottom: 6px;
+  letter-spacing: -0.01em;
+}
+.os-sk__greet-body {
+  font-size: 12.5px;
+  color: var(--os-ink-2);
+  line-height: 1.55;
+}
+
+/* Section-title polish — caps + tracking so the panel reads as
+   organized rather than a flat row of buttons. */
+.os-sk__sec-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--os-ink-3);
+  margin: 12px 4px 4px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BloomMark — the workwrk AI signature.
+   Slow rotation animation for hero usages (Brain panel avatar).
+   40s per turn so the motion is felt but never distracts. Pinned to
+   the element's own center via transform-box. */
+.bloom-mark { display: inline-block; }
+.bloom-mark--spin {
+  animation: bloomSpin 40s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes bloomSpin { to { transform: rotate(360deg); } }
+
+/* Override the global lime focus ring (globals.css applies a 3px
+   olive-green halo to every input in light mode via
+   `:root:not(.dark) input:focus-visible` — specificity 0,3,1).
+   We must match or beat that. Selector includes `input` and the
+   attribute twice to push specificity to 0,4,1 — definitively wins
+   over the global rule regardless of load order. */
+.workwrk-os input[data-palette-search][data-palette-search],
+.workwrk-os input[data-palette-search][data-palette-search]:focus,
+.workwrk-os input[data-palette-search][data-palette-search]:focus-visible {
+  box-shadow: none !important;
+  outline: none !important;
+  border: none !important;
+}
+
+/* Dark-mode coverage gaps the existing :root.dark block missed.
+   These hit Tailwind utilities used inside the command palette body so
+   the popover doesn't show pale grey bands or near-invisible borders. */
+:root.dark .workwrk-os .text-zinc-600 { color: #C7CCD4 !important; }
+:root.dark .workwrk-os .text-zinc-300 { color: #4B5260 !important; }
+:root.dark .workwrk-os .border-zinc-100 { border-color: #1F242C !important; }
+:root.dark .workwrk-os .bg-zinc-50\/50 { background: rgba(27, 31, 38, 0.6) !important; }
+:root.dark .workwrk-os .bg-zinc-100\/50 { background: rgba(31, 35, 41, 0.6) !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Brain panel — DARK MODE
+   ───────────────────────────────────────────────────────────────
+   Strategy: re-bind --os-canvas / --os-ink / etc. *inside* .os-sk
+   only. Every os-sk__* rule above uses these tokens, so the whole
+   panel flips automatically without per-rule overrides. Scoped to
+   .os-sk so the rest of the OS keeps its existing dark plumbing.
+   ═══════════════════════════════════════════════════════════════ */
+:root.dark .workwrk-os .os-sk {
+  --os-canvas:       #14171D;
+  --os-surface-1:    #1B1F26;
+  --os-surface-2:    #232831;
+  --os-surface-3:    #2A2F38;
+  --os-line:         #2A2F38;
+  --os-line-soft:    #232831;
+  --os-line-strong:  #3A4150;
+  --os-ink:          #E5E7EB;
+  --os-ink-2:        #C7CCD4;
+  --os-ink-3:        #8E94A0;
+  --os-ink-4:        #6B7280;
+  border-color: #2A2F38;
+}
+/* The brand-soft token is tuned for light backgrounds (very pale tint).
+   In dark mode that becomes nearly invisible behind the icon, so we
+   substitute a more saturated brand tint just for these surfaces. */
+:root.dark .workwrk-os .os-sk .os-sk__iconbtn.is-on,
+:root.dark .workwrk-os .os-sk .os-sk__sec-icon {
+  background: color-mix(in srgb, var(--os-brand) 28%, #1B1F26);
+  color: #FFFFFF;
+}
+/* Greet gradient — saturate it so the card actually reads as a card on
+   the dark panel background instead of fading into it. */
+:root.dark .workwrk-os .os-sk__greet {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--os-c-purple) 30%, #14171D),
+    color-mix(in srgb, var(--os-c-pink)   18%, #14171D));
+  border-color: color-mix(in srgb, var(--os-c-purple) 30%, #2A2F38);
+}
+/* User bubble pops off the dark surface — keep brand bg + white text. */
+:root.dark .workwrk-os .os-sk__bubble--user { color: #FFFFFF; }
+/* Inline code inside AI bubbles — light backgrounds disappear in dark. */
+:root.dark .workwrk-os .os-sk__bubble--ai code {
+  background: rgba(255,255,255,0.10);
+  color: #E5E7EB;
+}
 .os-sk__head {
   padding: 14px 18px;
   border-bottom: 1px solid var(--os-line);
@@ -31051,3 +31443,168 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .frep__tile-stat { font-size: 15px; font-weight: 700; color: var(--os-ink); letter-spacing: -0.01em; line-height: 1.15; }
 .frep__tile-sub { font-size: 11.5px; color: var(--os-ink-3); }
 .frep__tile-chev { width: 14px; height: 14px; color: var(--os-ink-3); flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════
+ * Dark mode — wired to ThemeApplier, which adds `data-theme="dark"`
+ * and the `.dark` class on <html> when the user picks Dark in Themes
+ * (or when Auto resolves to dark via prefers-color-scheme).
+ *
+ * Strategy: don't repaint every component. Re-bind a handful of
+ * shell-level surfaces so the rail, sidebar, topbar, canvas and
+ * customize panel all reflect the choice. Brand-colored regions
+ * (icons-only rail, notification banner) stay branded — they already
+ * look right against either background.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+:root.dark .workwrk-os {
+  /* Shell base — the dark "page" that the floating cards sit on. */
+  background: #0F1115;
+  color: #E5E7EB;
+}
+
+/* Topbar header is now a transparent flex container; its 3 child cards
+ * (.bg-white) get repainted by the catchall .bg-white rule below. Leaving
+ * the header background alone makes the gaps between the cards show the
+ * page bg, which is the whole point of the cards layout. */
+:root.dark .workwrk-os > header { color: #E5E7EB; }
+:root.dark .workwrk-os > header .text-zinc-900,
+:root.dark .workwrk-os > header .text-zinc-700 { color: #E5E7EB !important; }
+:root.dark .workwrk-os > header .text-zinc-600 { color: #C7CCD4 !important; }
+:root.dark .workwrk-os > header .text-zinc-500 { color: #9BA1AC !important; }
+:root.dark .workwrk-os > header .text-zinc-400 { color: #6B7280 !important; }
+:root.dark .workwrk-os > header .bg-zinc-100 { background: #1B1F26 !important; }
+:root.dark .workwrk-os > header .hover\:bg-zinc-100:hover { background: #232831 !important; }
+:root.dark .workwrk-os > header .hover\:bg-zinc-200:hover { background: #2A2F38 !important; }
+:root.dark .workwrk-os > header .border-zinc-200 { border-color: #232831 !important; }
+
+/* App rail — labels mode (icons-only stays brand-colored automatically) */
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) {
+  background: #14171D !important;
+  border-color: #232831 !important;
+}
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .text-zinc-600,
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .text-zinc-500 { color: #C7CCD4 !important; }
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .hover\:bg-zinc-50:hover,
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .hover\:bg-zinc-100:hover { background: #1B1F26 !important; }
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .border-zinc-100,
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .border-zinc-200 { border-color: #232831 !important; }
+
+/* Secondary sidebar — when in labels mode (data-branded="0") */
+:root.dark .workwrk-os aside[data-branded="0"] {
+  background: #14171D !important;
+  border-color: #232831 !important;
+}
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-900 { color: #E5E7EB !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-800 { color: #DDE2E8 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-700 { color: #C7CCD4 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-500 { color: #9BA1AC !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-400 { color: #6B7280 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .bg-zinc-100 { background: #1F2329 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .hover\:bg-zinc-50:hover { background: #1B1F26 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .hover\:bg-zinc-100:hover { background: #232831 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .border-zinc-100,
+:root.dark .workwrk-os aside[data-branded="0"] .border-zinc-200 { border-color: #232831 !important; }
+
+/* Notification banner already uses brand colors; leave alone */
+
+/* Main canvas slot — slightly lighter than the page so the rounded card
+ * reads as a distinct surface against the dark page bg. */
+:root.dark .workwrk-os main {
+  background: #14171D !important;
+  border-color: #232831 !important;
+  color: #E5E7EB;
+}
+
+/* Hover preview / More popover float on a white card — match dark */
+:root.dark .workwrk-os .bg-white:not(button) { background: #14171D !important; }
+:root.dark .workwrk-os .border-zinc-200 { border-color: #232831 !important; }
+:root.dark .workwrk-os .text-zinc-900 { color: #E5E7EB !important; }
+:root.dark .workwrk-os .text-zinc-800 { color: #DDE2E8 !important; }
+:root.dark .workwrk-os .text-zinc-700 { color: #C7CCD4 !important; }
+:root.dark .workwrk-os .text-zinc-500 { color: #9BA1AC !important; }
+:root.dark .workwrk-os .text-zinc-400 { color: #6B7280 !important; }
+:root.dark .workwrk-os .bg-zinc-50 { background: #1B1F26 !important; }
+:root.dark .workwrk-os .bg-zinc-100 { background: #1F2329 !important; }
+
+/* Customize panel dialog uses Tailwind defaults; key surfaces only */
+:root.dark .workwrk-os [role="dialog"] {
+  background: #14171D !important;
+  color: #E5E7EB;
+}
+
+/* Secondary sidebar footer "Customize Sidebar" — bump contrast in dark
+ * so it's not a faint gray-on-gray. Same idea for the small icons on
+ * footer rows (Slider, etc.). */
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-700 { color: #DDE2E8 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-500 { color: #B0B6C0 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .border-t.border-zinc-100,
+:root.dark .workwrk-os aside[data-branded="0"] .border-t.border-zinc-200 { border-color: #2A2F38 !important; }
+
+/* Notification banner stays branded but the X / Remind button hover needs
+ * a touch more contrast in dark surroundings. */
+:root.dark .workwrk-os [role="region"][aria-label="System notification"] button:hover { background: rgba(255,255,255,0.18) !important; }
+
+/* Notification banner — in dark mode the cream-over-white tint becomes
+ * a subtle tint over the dark surface; keep the brand-rail accent
+ * underneath for the Enable button. */
+:root.dark .workwrk-os [role="region"][aria-label="System notification"] {
+  background: color-mix(in srgb, var(--os-brand-rail) 65%, #14171D) !important;
+  color: rgba(255,255,255,0.92) !important;
+  border-bottom-color: rgba(255,255,255,0.08) !important;
+}
+:root.dark .workwrk-os [role="region"][aria-label="System notification"] button[style*="background"] {
+  background: rgba(255,255,255,0.95) !important;
+  color: var(--os-brand-rail) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * Dialog dark-mode (portal scope).
+ *
+ * Radix Dialog renders via a portal at <body>, OUTSIDE the
+ * `.workwrk-os` container. My other dark-mode rules are scoped to
+ * `.workwrk-os` so they never reach dialog content. These rules use
+ * `:root.dark` at the document level to hit dialog/popover content
+ * wherever it portals to.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+:root.dark [role="dialog"] {
+  background: #14171D !important;
+  color: #E5E7EB !important;
+  border-color: #2A2F38 !important;
+}
+
+/* Headings + descriptions */
+:root.dark [role="dialog"] h1,
+:root.dark [role="dialog"] h2,
+:root.dark [role="dialog"] h3,
+:root.dark [role="dialog"] [data-slot="dialog-title"] { color: #E5E7EB !important; }
+:root.dark [role="dialog"] [data-slot="dialog-description"] { color: #9BA1AC !important; }
+
+/* Text + icon hierarchy inside dialog */
+:root.dark [role="dialog"] .text-zinc-900 { color: #E5E7EB !important; }
+:root.dark [role="dialog"] .text-zinc-800 { color: #DDE2E8 !important; }
+:root.dark [role="dialog"] .text-zinc-700 { color: #C7CCD4 !important; }
+:root.dark [role="dialog"] .text-zinc-600 { color: #B0B6C0 !important; }
+:root.dark [role="dialog"] .text-zinc-500 { color: #9BA1AC !important; }
+:root.dark [role="dialog"] .text-zinc-400 { color: #71757D !important; }
+
+/* Surfaces */
+:root.dark [role="dialog"] .bg-white { background: #14171D !important; }
+:root.dark [role="dialog"] .bg-zinc-50 { background: #1B1F26 !important; }
+:root.dark [role="dialog"] .bg-zinc-100 { background: #1F2329 !important; }
+:root.dark [role="dialog"] .hover\:bg-zinc-50:hover { background: #1B1F26 !important; }
+:root.dark [role="dialog"] .hover\:bg-zinc-100:hover { background: #232831 !important; }
+:root.dark [role="dialog"] .hover\:bg-zinc-200:hover { background: #2A2F38 !important; }
+
+/* Borders */
+:root.dark [role="dialog"] .border-zinc-100 { border-color: #232831 !important; }
+:root.dark [role="dialog"] .border-zinc-200 { border-color: #2A2F38 !important; }
+:root.dark [role="dialog"] .border-zinc-300 { border-color: #3A3F48 !important; }
+
+/* Tabs list — Radix data-state="active" already swaps to white; just
+ * make the inactive tab text readable on the dark tabs-list bg. */
+:root.dark [role="dialog"] [data-state="inactive"] { color: #B0B6C0 !important; }
+
+/* Checkbox squares default to white border-zinc-300; need a visible
+ * empty state on dark. */
+:root.dark [role="dialog"] .border-zinc-300 { border-color: #4A4F58 !important; }

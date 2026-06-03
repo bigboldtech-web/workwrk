@@ -158,7 +158,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
 
   if (loading) {
     return (
-      <div className="p-6 text-sm text-muted-2 inline-flex items-center gap-2">
+      <div className="p-6 text-sm text-zinc-500-2 inline-flex items-center gap-2">
         <Loader2 size={14} className="animate-spin" /> Loading board…
       </div>
     );
@@ -170,7 +170,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
           <ChevronLeft size={12} /> Back to Studio
         </Link>
         <h1 className="text-lg font-semibold mb-1">Board not found</h1>
-        <p className="text-sm text-muted-2">
+        <p className="text-sm text-zinc-500-2">
           The board &ldquo;{slug}&rdquo; doesn&rsquo;t exist or you don&rsquo;t have access.
         </p>
       </div>
@@ -195,7 +195,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
     <div className="stbd p-6 max-w-[1800px] mx-auto">
       <div className="flex items-start justify-between mb-4 gap-4">
         <div className="min-w-0 flex-1">
-          <Link href="/studio" className="text-xs text-muted-2 hover:text-foreground inline-flex items-center gap-1 mb-2">
+          <Link href="/studio" className="text-xs text-zinc-500-2 hover:text-zinc-900 inline-flex items-center gap-1 mb-2">
             <ChevronLeft size={12} /> Studio
           </Link>
           <div className="flex items-center gap-2">
@@ -205,10 +205,10 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
               <TableIcon size={18} className="text-violet-600" />
             )}
             <h1 className="text-2xl font-semibold truncate">{board.name}</h1>
-            <span className="text-xs text-muted-2 tabular-nums">{board.items.length}</span>
+            <span className="text-xs text-zinc-500-2 tabular-nums">{board.items.length}</span>
           </div>
           {board.description && (
-            <p className="text-sm text-muted mt-1">{board.description}</p>
+            <p className="text-sm text-zinc-500 mt-1">{board.description}</p>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -222,7 +222,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
           <button
             type="button"
             onClick={() => setShowEditCols(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border text-muted hover:text-foreground hover:bg-surface-2 text-xs font-medium"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 text-xs font-medium"
             title="Edit columns"
           >
             <Settings2 size={12} /> Columns
@@ -230,7 +230,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
           <button
             type="button"
             onClick={() => setShowPublish(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border text-muted hover:text-foreground hover:bg-surface-2 text-xs font-medium"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 text-xs font-medium"
             title="Publish as marketplace template"
           >
             <Store size={12} /> Publish
@@ -248,7 +248,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
             onDelete={handleDeleteBoard}
             extraMenuItems={
               deleting ? (
-                <div className="px-2 py-1 text-xs text-muted-2 inline-flex items-center gap-1">
+                <div className="px-2 py-1 text-xs text-zinc-500-2 inline-flex items-center gap-1">
                   <Loader2 size={11} className="animate-spin" /> Deleting…
                 </div>
               ) : undefined
@@ -263,8 +263,8 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
             {board.layout === "KANBAN" ? <KanbanIcon size={20} /> : <TableIcon size={20} />}
           </div>
           <h2 className="text-base font-semibold mb-1">Your board is ready</h2>
-          <p className="text-sm text-muted-2 mb-5 max-w-md mx-auto">
-            Add rows to fill <span className="font-medium text-foreground">{board.name}</span> with real work. Tweak columns anytime — column edits don&rsquo;t drop your data.
+          <p className="text-sm text-zinc-500-2 mb-5 max-w-md mx-auto">
+            Add rows to fill <span className="font-medium text-zinc-900">{board.name}</span> with real work. Tweak columns anytime — column edits don&rsquo;t drop your data.
           </p>
           <div className="inline-flex items-center gap-2">
             <button
@@ -277,16 +277,16 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
             <button
               type="button"
               onClick={() => setShowEditCols(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-muted hover:text-foreground hover:bg-surface text-xs font-medium"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:bg-white text-xs font-medium"
             >
               <Settings2 size={12} /> Tune columns
             </button>
           </div>
           {(board.fields ?? []).length > 0 && (
-            <p className="text-[11px] text-muted-2 mt-5">
+            <p className="text-[11px] text-zinc-500-2 mt-5">
               {board.fields.length} column{board.fields.length === 1 ? "" : "s"}:
               {" "}
-              <span className="font-mono text-foreground/80">
+              <span className="font-mono text-zinc-900/80">
                 {board.fields.map((f) => f.label).join(" · ")}
               </span>
             </p>
@@ -324,7 +324,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
           onClick={() => { if (!publishing) { setShowPublish(false); setPublishResult(null); } }}
         >
           <div
-            className="w-full max-w-md rounded-2xl bg-surface border border-border shadow-xl p-6 space-y-3"
+            className="w-full max-w-md rounded-2xl bg-white border border-zinc-200 shadow-xl p-6 space-y-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-2">
@@ -334,21 +334,21 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
               <button
                 type="button"
                 onClick={() => { setShowPublish(false); setPublishResult(null); }}
-                className="p-1 rounded hover:bg-surface-2 text-muted"
+                className="p-1 rounded hover:bg-zinc-50 text-zinc-500"
                 aria-label="Close"
               >
                 <X size={16} />
               </button>
             </div>
-            <p className="text-xs text-muted-2">
+            <p className="text-xs text-zinc-500-2">
               Publishing snapshots the board&rsquo;s columns + layout (not its data) so other teams can install a fresh empty copy.
             </p>
 
             <div>
-              <p className="text-xs font-medium text-muted-2 mb-1">Who can install this?</p>
+              <p className="text-xs font-medium text-zinc-500-2 mb-1">Who can install this?</p>
               <div className="space-y-1">
                 <label className={"flex items-start gap-2 p-2 rounded-md border cursor-pointer text-xs " +
-                  (publishVisibility === "ORG" ? "border-violet-500 bg-violet-50 dark:bg-violet-950/20" : "border-border")}>
+                  (publishVisibility === "ORG" ? "border-violet-500 bg-violet-50 dark:bg-violet-950/20" : "border-zinc-200")}>
                   <input
                     type="radio"
                     name="visibility"
@@ -359,11 +359,11 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
                   />
                   <span>
                     <span className="font-medium block">Your org only</span>
-                    <span className="text-muted-2">Visible across your workspaces — teams in your org can install copies.</span>
+                    <span className="text-zinc-500-2">Visible across your workspaces — teams in your org can install copies.</span>
                   </span>
                 </label>
                 <label className={"flex items-start gap-2 p-2 rounded-md border cursor-pointer text-xs " +
-                  (publishVisibility === "PUBLIC" ? "border-violet-500 bg-violet-50 dark:bg-violet-950/20" : "border-border")}>
+                  (publishVisibility === "PUBLIC" ? "border-violet-500 bg-violet-50 dark:bg-violet-950/20" : "border-zinc-200")}>
                   <input
                     type="radio"
                     name="visibility"
@@ -374,20 +374,20 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
                   />
                   <span>
                     <span className="font-medium block">Public marketplace</span>
-                    <span className="text-muted-2">Every WorkwrK org can find + install it. Useful for community templates.</span>
+                    <span className="text-zinc-500-2">Every WorkwrK org can find + install it. Useful for community templates.</span>
                   </span>
                 </label>
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-muted-2">Category (optional)</label>
+              <label className="text-xs font-medium text-zinc-500-2">Category (optional)</label>
               <input
                 type="text"
                 value={publishCategory}
                 onChange={(e) => setPublishCategory(e.target.value)}
                 placeholder="Sales, PM, HR, Onboarding…"
-                className="w-full mt-1 px-3 py-2 rounded-lg border border-border bg-surface text-sm"
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm"
               />
             </div>
 
@@ -403,7 +403,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
                 type="button"
                 onClick={() => { setShowPublish(false); setPublishResult(null); }}
                 disabled={publishing}
-                className="px-3 py-1.5 rounded-md text-sm text-muted hover:bg-surface-2"
+                className="px-3 py-1.5 rounded-md text-sm text-zinc-500 hover:bg-zinc-50"
               >
                 {publishResult ? "Done" : "Cancel"}
               </button>
@@ -429,7 +429,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
           onClick={() => { if (!creating) { setShowAdd(false); setNewTitle(""); } }}
         >
           <div
-            className="w-full max-w-md rounded-2xl bg-surface border border-border shadow-xl p-6 space-y-3"
+            className="w-full max-w-md rounded-2xl bg-white border border-zinc-200 shadow-xl p-6 space-y-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-2">
@@ -437,7 +437,7 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
               <button
                 type="button"
                 onClick={() => { setShowAdd(false); setNewTitle(""); }}
-                className="p-1 rounded hover:bg-surface-2 text-muted"
+                className="p-1 rounded hover:bg-zinc-50 text-zinc-500"
                 aria-label="Close"
               >
                 <X size={16} />
@@ -455,15 +455,15 @@ export default function StudioBoardPage({ params }: { params: Promise<{ slug: st
               }}
               placeholder="Row name"
               autoFocus
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+              className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
             />
-            <p className="text-xs text-muted-2">Tip: open the row after creating to fill in the other columns.</p>
+            <p className="text-xs text-zinc-500-2">Tip: open the row after creating to fill in the other columns.</p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => { setShowAdd(false); setNewTitle(""); }}
                 disabled={creating}
-                className="px-3 py-1.5 rounded-md text-sm text-muted hover:bg-surface-2"
+                className="px-3 py-1.5 rounded-md text-sm text-zinc-500 hover:bg-zinc-50"
               >
                 Cancel
               </button>

@@ -173,6 +173,8 @@ model Organization {
   hrSegments           HRSegment[]
   // 🆕 Phase 5 — weekly review heartbeat
   weeklyReviews        WeeklyReview[]
+  // 🆕 Phase 7 — universal polymorphic graph edges
+  entityLinks          EntityLink[]
 
   @@index([slug])
 }
@@ -6196,4 +6198,94 @@ model TimerSession {
   @@index([organizationId, entityType, entityId])
   @@index([userId, stoppedAt])
   @@index([organizationId, userId])
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Phase 7 · EntityLink — the universal connective tissue.
+// ════════════════════════════════════════════════════════════════════
+//
+// Any-to-any polymorphic links between entities in the system. A Task
+// links 3 Notes + 1 Whiteboard; an SOP embeds its source Doc; a KRA
+// references a strategy Whiteboard; a board row pulls in a Note.
+//
+// We deliberately avoid hard FK columns per relationship — every
+// "linkable" entity declares its participation by string type, and
+// EntityLink rows store the graph. This is what lets new entity kinds
+// join the graph without schema changes per pair.
+//
+// Symmetry: a link is directed (source → target) but lookups are
+// indexed in both directions so "what does X link to" and "what
+// links to X" are both fast.
+//
+// relationKind lets the same pair carry different semantics:
+//   LINKED            — generic association ("see also")
+//   EMBEDDED          — target is rendered inline inside the source
+//   REQUIRED_READING  — target must be acknowledged before completion
+//   REFERENCES        — citation/footnote-style backlink
+
+model EntityLink {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  sourceType EntityLinkType
+  sourceId   String
+  targetType EntityLinkType
+  targetId   String
+
+  relationKind EntityLinkRelation @default(LINKED)
+
+  // Optional ordering for "embedded" links (so a doc with 5 embedded
+  // whiteboards renders them in user-chosen order).
+  position Int @default(0)
+
+  // Optional context note ("Why is this linked?"). Plain text.
+  context String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sourceType, sourceId, targetType, targetId, relationKind])
+  @@index([organizationId, sourceType, sourceId])
+  @@index([organizationId, targetType, targetId])
+  @@index([organizationId, relationKind])
+}
+
+enum EntityLinkType {
+  TASK
+  BOARD
+  BOARD_ITEM
+  SPACE
+  FOLDER
+  KRA
+  KPI
+  KPI_PROMPT
+  SOP
+  REVIEW
+  REVIEW_CYCLE
+  WEEKLY_REVIEW
+  NOTE
+  DOC
+  WHITEBOARD
+  FILE
+  FORM
+  TABLE
+  USER
+  DEPARTMENT
+  ROLE
+  ANNOUNCEMENT
+  KUDOS
+  CANDOR
+  SURVEY
+  CONTRACT
+  CANDIDATE
+  JOB
+}
+
+enum EntityLinkRelation {
+  LINKED
+  EMBEDDED
+  REQUIRED_READING
+  REFERENCES
 }

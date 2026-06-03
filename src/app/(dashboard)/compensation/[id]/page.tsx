@@ -55,7 +55,7 @@ type Decision = {
 type ViewerRole = "ADMIN" | "MANAGER";
 
 const DECISION_STYLE: Record<string, string> = {
-  DRAFT: "text-muted border-white/20",
+  DRAFT: "text-zinc-500 border-white/20",
   PROPOSED: "text-blue-400 border-blue-400/30",
   APPROVED: "text-green-400 border-green-400/30",
   REJECTED: "text-red-400 border-red-400/30",
@@ -180,10 +180,10 @@ export default function CompCycleDetailPage() {
   }
 
   if (loading) {
-    return <div className="text-sm text-muted py-8 text-center">Loading…</div>;
+    return <div className="text-sm text-zinc-500 py-8 text-center">Loading…</div>;
   }
   if (!cycle) {
-    return <div className="text-sm text-muted py-8 text-center">Not found.</div>;
+    return <div className="text-sm text-zinc-500 py-8 text-center">Not found.</div>;
   }
 
   const isAdmin = viewerRole === "ADMIN";
@@ -259,7 +259,7 @@ export default function CompCycleDetailPage() {
         </CardHeader>
         <CardContent className="p-0">
           {decisions.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted">
+            <div className="p-8 text-center text-sm text-zinc-500">
               {isAdmin
                 ? "No rows yet. Use 'Seed from employees' above to populate."
                 : "No proposals to act on yet."}
@@ -331,7 +331,7 @@ function DecisionsTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-xs text-muted border-b border-white/5">
+          <tr className="text-left text-xs text-zinc-500 border-b border-white/5">
             {showCheckbox && (
               <th className="px-3 py-2.5 font-normal w-8">
                 <input
@@ -427,7 +427,7 @@ function DecisionRow({
 
   const canBulkSelect = decision.status === "PROPOSED";
   return (
-    <tr className="border-b border-white/5 hover:bg-surface-2">
+    <tr className="border-b border-white/5 hover:bg-zinc-50">
       {showCheckbox && (
         <td className="px-3 py-1.5 align-top">
           {canBulkSelect ? (
@@ -444,9 +444,9 @@ function DecisionRow({
         <div className="font-medium text-sm">
           {decision.subject.firstName} {decision.subject.lastName}
         </div>
-        <div className="text-[10px] text-muted">{decision.subject.email}</div>
+        <div className="text-[10px] text-zinc-500">{decision.subject.email}</div>
         {decision.proposedBy && (
-          <div className="text-[10px] text-muted mt-0.5">
+          <div className="text-[10px] text-zinc-500 mt-0.5">
             proposed by {decision.proposedBy.firstName} {decision.proposedBy.lastName}
           </div>
         )}
@@ -526,13 +526,13 @@ function DecisionRow({
           />
         ) : decision.reasoning ? (
           <span
-            className="text-[11.5px] text-muted line-clamp-2 max-w-[180px] inline-block"
+            className="text-[11.5px] text-zinc-500 line-clamp-2 max-w-[180px] inline-block"
             title={decision.reasoning}
           >
             {decision.reasoning}
           </span>
         ) : (
-          <span className="text-[11.5px] text-muted-2">—</span>
+          <span className="text-[11.5px] text-zinc-500-2">—</span>
         )}
       </td>
       <td className="px-3 py-1.5 align-top">
@@ -542,7 +542,7 @@ function DecisionRow({
           </Badge>
           {decision.decisionNote && (decision.status === "APPROVED" || decision.status === "REJECTED") && (
             <span
-              className="text-[10px] text-muted-2 line-clamp-1 max-w-[140px]"
+              className="text-[10px] text-zinc-500-2 line-clamp-1 max-w-[140px]"
               title={`Note: ${decision.decisionNote}`}
             >
               note: {decision.decisionNote}

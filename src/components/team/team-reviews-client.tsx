@@ -11,7 +11,14 @@ import {
   Check, X, ChevronDown, ChevronRight, MessageSquareWarning, CheckCircle2,
 } from "lucide-react";
 import type { ManagerReviewQueueItem } from "@/lib/weekly-review";
-import { formatWeekRange } from "@/lib/weekly-review";
+
+function formatWeekRange(start: Date): string {
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  const fmt = (d: Date) =>
+    d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  return `${fmt(start)} – ${fmt(end)}, ${end.getUTCFullYear()}`;
+}
 
 interface Props {
   pending: ManagerReviewQueueItem[];
@@ -71,21 +78,21 @@ export function TeamReviewsClient({ pending, acted }: Props) {
       {error ? (
         <div className="text-xs text-red-500 bg-red-500/10 rounded-md px-3 py-2 flex items-center justify-between">
           {error}
-          <button onClick={() => setError(null)} className="text-muted hover:text-foreground">
+          <button onClick={() => setError(null)} className="text-zinc-500 hover:text-zinc-900">
             <X className="w-3 h-3" />
           </button>
         </div>
       ) : null}
 
       <section>
-        <h2 className="text-xs uppercase tracking-wide text-muted mb-2">
+        <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
           Awaiting your review · {localPending.length}
         </h2>
         {localPending.length === 0 ? (
-          <div className="rounded-lg border border-border bg-surface px-6 py-8 text-center">
+          <div className="rounded-lg border border-zinc-200 bg-white px-6 py-8 text-center">
             <CheckCircle2 className="w-6 h-6 mx-auto text-emerald-600 mb-2" />
             <div className="text-sm font-medium">Inbox zero.</div>
-            <div className="text-xs text-muted mt-1">Nothing waiting for you right now.</div>
+            <div className="text-xs text-zinc-500 mt-1">Nothing waiting for you right now.</div>
           </div>
         ) : (
           <ul className="space-y-2">
@@ -107,7 +114,7 @@ export function TeamReviewsClient({ pending, acted }: Props) {
 
       {localActed.length > 0 ? (
         <section>
-          <h2 className="text-xs uppercase tracking-wide text-muted mb-2">Recently acted</h2>
+          <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Recently acted</h2>
           <ul className="space-y-1.5">
             {localActed.map((r) => (
               <li key={r.id}>
@@ -141,27 +148,27 @@ function PendingCard({
   const [notes, setNotes] = useState("");
 
   return (
-    <article className="rounded-lg border border-border bg-surface">
+    <article className="rounded-lg border border-zinc-200 bg-white">
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-2"
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50"
       >
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-surface-3 text-sm font-medium">
+        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-zinc-100 text-sm font-medium">
           {initials}
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">{subjectName}</div>
-          <div className="text-xs text-muted">
+          <div className="text-xs text-zinc-500">
             {formatWeekRange(review.periodStart)} · submitted{" "}
             {review.submittedAt ? new Date(review.submittedAt).toLocaleDateString() : "recently"}
           </div>
         </div>
-        {open ? <ChevronDown className="w-4 h-4 text-muted" /> : <ChevronRight className="w-4 h-4 text-muted" />}
+        {open ? <ChevronDown className="w-4 h-4 text-zinc-500" /> : <ChevronRight className="w-4 h-4 text-zinc-500" />}
       </button>
 
       {open ? (
-        <div className="px-4 py-3 border-t border-border space-y-4">
+        <div className="px-4 py-3 border-t border-zinc-200 space-y-4">
           <Section title="KRA progress">
             {review.kraProgress.length === 0 ? (
               <Empty />
@@ -170,10 +177,10 @@ function PendingCard({
                 {review.kraProgress.map((kp) => (
                   <li key={kp.kraId} className="text-sm">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted w-12">{kp.progressPct}%</span>
-                      <span className="flex-1 truncate font-mono text-[11px] text-muted">{kp.kraId}</span>
+                      <span className="text-xs text-zinc-500 w-12">{kp.progressPct}%</span>
+                      <span className="flex-1 truncate font-mono text-[11px] text-zinc-500">{kp.kraId}</span>
                     </div>
-                    {kp.note ? <div className="text-[11px] text-muted ml-12">{kp.note}</div> : null}
+                    {kp.note ? <div className="text-[11px] text-zinc-500 ml-12">{kp.note}</div> : null}
                   </li>
                 ))}
               </ul>
@@ -187,7 +194,7 @@ function PendingCard({
               <ul className="space-y-1">
                 {review.kpiSnapshots.map((k) => (
                   <li key={k.kpiId} className="text-sm flex items-center gap-2">
-                    <span className="font-mono text-[11px] text-muted flex-1 truncate">{k.kpiId}</span>
+                    <span className="font-mono text-[11px] text-zinc-500 flex-1 truncate">{k.kpiId}</span>
                     <span>{k.value ?? "—"}</span>
                   </li>
                 ))}
@@ -201,13 +208,13 @@ function PendingCard({
             <Narrative label="Plan" body={review.plan} />
           </div>
 
-          <div className="border-t border-border pt-3 space-y-2">
-            <label className="text-xs font-medium block">Notes to {review.subject?.firstName ?? "report"} <span className="text-muted">(optional, sent with your decision)</span></label>
+          <div className="border-t border-zinc-200 pt-3 space-y-2">
+            <label className="text-xs font-medium block">Notes to {review.subject?.firstName ?? "report"} <span className="text-zinc-500">(optional, sent with your decision)</span></label>
             <textarea
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2 rounded-md border border-border bg-surface text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
             <div className="flex items-center gap-2 pt-1">
               <button
@@ -245,7 +252,7 @@ function ActedCard({ review }: { review: ManagerReviewQueueItem }) {
     }`}>
       <div className="flex items-center gap-2 text-sm">
         <span className="font-medium flex-1 truncate">{subjectName}</span>
-        <span className="text-xs text-muted">{formatWeekRange(review.periodStart)}</span>
+        <span className="text-xs text-zinc-500">{formatWeekRange(review.periodStart)}</span>
         <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
           approved ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700"
         }`}>
@@ -253,7 +260,7 @@ function ActedCard({ review }: { review: ManagerReviewQueueItem }) {
         </span>
       </div>
       {review.managerNotes ? (
-        <div className="text-xs text-muted mt-1 whitespace-pre-wrap">{review.managerNotes}</div>
+        <div className="text-xs text-zinc-500 mt-1 whitespace-pre-wrap">{review.managerNotes}</div>
       ) : null}
     </div>
   );
@@ -262,21 +269,21 @@ function ActedCard({ review }: { review: ManagerReviewQueueItem }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-[11px] uppercase tracking-wide text-muted mb-1.5">{title}</h3>
+      <h3 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">{title}</h3>
       {children}
     </div>
   );
 }
 
 function Empty() {
-  return <div className="text-xs text-muted">—</div>;
+  return <div className="text-xs text-zinc-500">—</div>;
 }
 
 function Narrative({ label, body }: { label: string; body: string | null }) {
   return (
-    <div className="rounded-md border border-border bg-surface-2 px-3 py-2">
-      <div className="text-[11px] text-muted">{label}</div>
-      <div className="text-sm whitespace-pre-wrap break-words mt-1">{body || <span className="text-muted">—</span>}</div>
+    <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+      <div className="text-[11px] text-zinc-500">{label}</div>
+      <div className="text-sm whitespace-pre-wrap break-words mt-1">{body || <span className="text-zinc-500">—</span>}</div>
     </div>
   );
 }

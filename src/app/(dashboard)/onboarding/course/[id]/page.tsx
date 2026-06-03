@@ -87,7 +87,7 @@ export default function CourseDetailPage() {
   if (!course) {
     return (
       <div className="text-center py-20">
-        <p className="text-muted">Course not found</p>
+        <p className="text-zinc-500">Course not found</p>
         <Button variant="outline" className="mt-4" onClick={() => router.push("/onboarding")}>Back</Button>
       </div>
     );
@@ -105,7 +105,7 @@ export default function CourseDetailPage() {
           </Button>
           <div>
             <h1 className="text-xl font-bold">{course.title}</h1>
-            <div className="flex items-center gap-3 text-xs text-muted mt-1">
+            <div className="flex items-center gap-3 text-xs text-zinc-500 mt-1">
               {course.category && <Badge variant="outline" className="text-[10px]">{course.category}</Badge>}
               {course.duration && <span className="flex items-center gap-1"><Clock size={12} /> {course.duration} min</span>}
               {course.mandatory && <Badge variant="warning" className="text-[10px]">Mandatory</Badge>}
@@ -130,7 +130,7 @@ export default function CourseDetailPage() {
 
       {/* Description */}
       {course.description && (
-        <p className="text-sm text-muted">{course.description}</p>
+        <p className="text-sm text-zinc-500">{course.description}</p>
       )}
 
       {/* Video Embed */}
@@ -146,21 +146,21 @@ export default function CourseDetailPage() {
                 <Input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=..." />
               </div>
               {embedUrl && (
-                <div className="aspect-video rounded-lg overflow-hidden border border-border">
+                <div className="aspect-video rounded-lg overflow-hidden border border-zinc-200">
                   <iframe src={embedUrl} className="w-full h-full" allowFullScreen allow="autoplay; encrypted-media" />
                 </div>
               )}
             </div>
           ) : embedUrl ? (
-            <div className="aspect-video rounded-lg overflow-hidden border border-border">
+            <div className="aspect-video rounded-lg overflow-hidden border border-zinc-200">
               <iframe src={embedUrl} className="w-full h-full" allowFullScreen allow="autoplay; encrypted-media" />
             </div>
           ) : (
-            <div className="aspect-video rounded-lg border border-dashed border-border flex items-center justify-center bg-surface-3">
+            <div className="aspect-video rounded-lg border border-dashed border-zinc-200 flex items-center justify-center bg-zinc-100">
               <div className="text-center">
-                <Play size={32} className="mx-auto text-muted mb-2" />
-                <p className="text-sm text-muted">No video added yet</p>
-                <p className="text-xs text-muted-2">Click "Edit Course" to add a video URL</p>
+                <Play size={32} className="mx-auto text-zinc-500 mb-2" />
+                <p className="text-sm text-zinc-500">No video added yet</p>
+                <p className="text-xs text-zinc-500-2">Click "Edit Course" to add a video URL</p>
               </div>
             </div>
           )}
@@ -180,7 +180,7 @@ export default function CourseDetailPage() {
               <div className="whitespace-pre-wrap text-sm">{content}</div>
             </div>
           ) : (
-            <p className="text-sm text-muted">No content added yet.</p>
+            <p className="text-sm text-zinc-500">No content added yet.</p>
           )}
         </CardContent>
       </Card>
@@ -194,10 +194,10 @@ export default function CourseDetailPage() {
           {course.enrollments && course.enrollments.length > 0 ? (
             <div className="space-y-2">
               {course.enrollments.map((e: any) => (
-                <div key={e.id} className="flex items-center justify-between p-2 rounded border border-border">
+                <div key={e.id} className="flex items-center justify-between p-2 rounded border border-zinc-200">
                   <div>
                     <p className="text-sm font-medium">{e.user?.firstName} {e.user?.lastName}</p>
-                    <p className="text-xs text-muted">Started {new Date(e.startedAt).toLocaleDateString()}</p>
+                    <p className="text-xs text-zinc-500">Started {new Date(e.startedAt).toLocaleDateString()}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Progress value={e.progress} className="w-20 h-1.5" />
@@ -208,7 +208,7 @@ export default function CourseDetailPage() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted text-center py-4">No enrollments yet.</p>
+            <p className="text-sm text-zinc-500 text-center py-4">No enrollments yet.</p>
           )}
         </CardContent>
       </Card>

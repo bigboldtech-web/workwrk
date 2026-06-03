@@ -47,32 +47,32 @@ export default async function TeamRollupPage() {
     <div className="px-8 py-6 max-w-[1280px]">
       <header className="mb-6 flex items-end justify-between gap-6">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm text-muted mb-2">
+          <div className="flex items-center gap-2 text-sm text-zinc-500 mb-2">
             <UsersIcon className="w-3.5 h-3.5" />
             <span>Team</span>
             <span>/</span>
             <span>Director rollup</span>
           </div>
           <h1 className="text-2xl font-semibold">Director rollup</h1>
-          <p className="text-sm text-muted mt-1 max-w-[640px]">
+          <p className="text-sm text-zinc-500 mt-1 max-w-[640px]">
             Two levels of the tree below you — every sub-team's health, plus the ICs reporting to you directly.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/team/alignment" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-border hover:bg-surface-2">
+          <Link href="/team/alignment" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50">
             <UsersIcon className="w-3.5 h-3.5" /> Alignment
           </Link>
-          <Link href="/team/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-border hover:bg-surface-2">
+          <Link href="/team/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50">
             <ClipboardCheck className="w-3.5 h-3.5" /> Reviews
           </Link>
         </div>
       </header>
 
       {data.totals.aggregateReportCount === 0 ? (
-        <div className="border border-border rounded-xl px-8 py-16 text-center">
-          <UsersIcon className="w-8 h-8 mx-auto text-muted mb-3" />
+        <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center">
+          <UsersIcon className="w-8 h-8 mx-auto text-zinc-500 mb-3" />
           <div className="text-base font-medium mb-1">No reports yet</div>
-          <p className="text-sm text-muted max-w-[420px] mx-auto">
+          <p className="text-sm text-zinc-500 max-w-[420px] mx-auto">
             The director rollup wakes up as soon as you have direct reports — managers or ICs.
           </p>
         </div>
@@ -105,7 +105,7 @@ export default async function TeamRollupPage() {
 
           {data.subTeams.length > 0 ? (
             <section className="mb-8">
-              <h2 className="text-xs uppercase tracking-wide text-muted mb-2">Sub-teams</h2>
+              <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Sub-teams</h2>
               <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {data.subTeams.map((t) => (
                   <li key={t.manager.id}><SubTeamCard t={t} /></li>
@@ -116,7 +116,7 @@ export default async function TeamRollupPage() {
 
           {data.directIcs.length > 0 ? (
             <section>
-              <h2 className="text-xs uppercase tracking-wide text-muted mb-2">Direct ICs</h2>
+              <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Direct ICs</h2>
               <ul className="space-y-1.5">
                 {data.directIcs.map((ic) => (
                   <li key={ic.id}><DirectIcRow ic={ic} /></li>
@@ -145,13 +145,13 @@ function Stat({
     tone === "good" ? "text-emerald-600" :
     undefined;
   return (
-    <div className="rounded-lg border border-border bg-surface px-4 py-3">
-      <div className="flex items-center gap-1.5 text-xs text-muted">
+    <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
+      <div className="flex items-center gap-1.5 text-xs text-zinc-500">
         <Icon className="w-3.5 h-3.5" />
         {label}
       </div>
       <div className={`text-2xl font-semibold mt-1 ${valueColor ?? ""}`}>{value}</div>
-      {sub ? <div className="text-[11px] text-muted mt-0.5">{sub}</div> : null}
+      {sub ? <div className="text-[11px] text-zinc-500 mt-0.5">{sub}</div> : null}
     </div>
   );
 }
@@ -159,22 +159,22 @@ function Stat({
 function SubTeamCard({ t }: { t: SubTeam }) {
   const initials = `${t.manager.firstName?.[0] ?? ""}${t.manager.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   return (
-    <article className="rounded-lg border border-border bg-surface">
-      <header className="flex items-center gap-3 px-4 py-3 border-b border-border">
-        <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-surface-3 text-sm font-medium">
+    <article className="rounded-lg border border-zinc-200 bg-white">
+      <header className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200">
+        <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-zinc-100 text-sm font-medium">
           {initials}
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">{t.manager.firstName} {t.manager.lastName}</div>
-          <div className="text-xs text-muted truncate">{t.metrics.reportCount} report{t.metrics.reportCount === 1 ? "" : "s"}</div>
+          <div className="text-xs text-zinc-500 truncate">{t.metrics.reportCount} report{t.metrics.reportCount === 1 ? "" : "s"}</div>
         </div>
         <OwnReviewBadge own={t.manager.ownReview} />
         {t.manager.via === "dotted" ? (
-          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-2 text-muted">
+          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">
             <GitBranchPlus className="w-3 h-3" /> Dotted
           </span>
         ) : null}
-        <Link href={`/people/${t.manager.id}`} className="text-muted hover:text-foreground">
+        <Link href={`/people/${t.manager.id}`} className="text-zinc-500 hover:text-zinc-900">
           <ChevronRight className="w-4 h-4" />
         </Link>
       </header>
@@ -203,7 +203,7 @@ function SubMetric({
     undefined;
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-[11px] text-muted">
+      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
         <Icon className="w-3 h-3" />
         {label}
       </div>
@@ -215,7 +215,7 @@ function SubMetric({
 function OwnReviewBadge({ own }: { own: SubTeam["manager"]["ownReview"] }) {
   if (!own.status) return null;
   if (own.status === "DRAFT") {
-    return <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-2 text-muted">Own: Draft</span>;
+    return <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">Own: Draft</span>;
   }
   if (own.status === "SUBMITTED") {
     return <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700">Own: Submitted</span>;
@@ -233,21 +233,21 @@ function OwnReviewBadge({ own }: { own: SubTeam["manager"]["ownReview"] }) {
 function DirectIcRow({ ic }: { ic: DirectIcSummary }) {
   const initials = `${ic.firstName?.[0] ?? ""}${ic.lastName?.[0] ?? ""}`.toUpperCase() || "?";
   return (
-    <div className="flex items-center gap-3 rounded-md border border-border bg-surface px-3 py-2">
-      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-surface-3 text-xs font-medium">
+    <div className="flex items-center gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2">
+      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-zinc-100 text-xs font-medium">
         {initials}
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-sm truncate">{ic.firstName} {ic.lastName}</div>
-        <div className="text-[11px] text-muted truncate">{ic.email}</div>
+        <div className="text-[11px] text-zinc-500 truncate">{ic.email}</div>
       </div>
       {ic.via === "dotted" ? (
-        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-2 text-muted">Dotted</span>
+        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">Dotted</span>
       ) : null}
       <ReviewChip review={ic.weeklyReview} />
       <span className={`text-xs ${toneClass(tone(ic.kpiCompliancePct))}`}>KPI {ic.kpiCompliancePct}%</span>
       <span className={`text-xs ${toneClass(tone(ic.sopReadRatePct))}`}>SOP {ic.sopReadRatePct}%</span>
-      <Link href={`/people/${ic.id}`} className="text-muted hover:text-foreground">
+      <Link href={`/people/${ic.id}`} className="text-zinc-500 hover:text-zinc-900">
         <ChevronRight className="w-4 h-4" />
       </Link>
     </div>
@@ -259,7 +259,7 @@ function ReviewChip({ review }: { review: DirectIcSummary["weeklyReview"] }) {
     return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/15 text-red-700"><AlertCircle className="w-3 h-3" />No review</span>;
   }
   if (review.status === "DRAFT") {
-    return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-2 text-muted">Draft</span>;
+    return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">Draft</span>;
   }
   if (review.status === "SUBMITTED") {
     return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700"><Clock className="w-3 h-3" />Submitted</span>;

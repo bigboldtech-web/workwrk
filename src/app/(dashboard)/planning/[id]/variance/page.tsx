@@ -121,11 +121,11 @@ export default function VariancePage() {
   useEffect(() => { loadVariance(); }, [loadVariance]);
 
   if (planLoading) {
-    return <div className="text-center py-12 text-sm text-muted">Loading plan…</div>;
+    return <div className="text-center py-12 text-sm text-zinc-500">Loading plan…</div>;
   }
   if (!planResp) {
     return (
-      <div className="text-center py-12 text-sm text-muted">
+      <div className="text-center py-12 text-sm text-zinc-500">
         Plan not found.{" "}
         <Link href="/planning" className="underline">Back to plans</Link>
       </div>
@@ -156,7 +156,7 @@ export default function VariancePage() {
           <div className="flex items-center gap-2 flex-wrap">
             {plan.scenarios.length > 0 && (
               <div className="flex items-center gap-1.5">
-                <Label className="text-xs text-muted">Scenario</Label>
+                <Label className="text-xs text-zinc-500">Scenario</Label>
                 <Select value={scenarioId} onValueChange={setScenarioId}>
                   <SelectTrigger className="h-8 text-xs w-44">
                     <SelectValue placeholder="Scenario" />
@@ -172,7 +172,7 @@ export default function VariancePage() {
               </div>
             )}
             <div className="flex items-center gap-1.5">
-              <Label className="text-xs text-muted">Period</Label>
+              <Label className="text-xs text-zinc-500">Period</Label>
               <select
                 className="h-8 text-xs rounded-md border border-line bg-card-2/40 px-2"
                 value={periodId}
@@ -190,17 +190,17 @@ export default function VariancePage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-muted">Loading variance…</div>
+        <div className="text-center py-8 text-sm text-zinc-500">Loading variance…</div>
       ) : !variance ? (
         <Card>
-          <CardContent className="p-10 text-center text-sm text-muted">
+          <CardContent className="p-10 text-center text-sm text-zinc-500">
             Couldn't compute variance for this plan/scenario/period combination.
             Make sure the plan has lines for this scenario and the period has posted actuals.
           </CardContent>
         </Card>
       ) : variance.rows.length === 0 ? (
         <Card>
-          <CardContent className="p-10 text-center text-sm text-muted">
+          <CardContent className="p-10 text-center text-sm text-zinc-500">
             No accounts moved on either side. Either the plan has no lines for this period
             or no actuals were posted to GL.
           </CardContent>
@@ -211,15 +211,15 @@ export default function VariancePage() {
             <CardContent className="p-4">
               <div className="grid grid-cols-3 gap-3 text-sm">
                 <div>
-                  <div className="text-[10px] uppercase text-muted">Total Planned</div>
+                  <div className="text-[10px] uppercase text-zinc-500">Total Planned</div>
                   <div className="font-mono text-base">{fmtMoney(variance.summary.totalPlanned)}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase text-muted">Total Actual</div>
+                  <div className="text-[10px] uppercase text-zinc-500">Total Actual</div>
                   <div className="font-mono text-base">{fmtMoney(variance.summary.totalActual)}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase text-muted">Total Variance</div>
+                  <div className="text-[10px] uppercase text-zinc-500">Total Variance</div>
                   <div className={`font-mono text-base ${variance.summary.totalVariance < 0 ? "text-amber-400" : variance.summary.totalVariance > 0 ? "text-green-400" : ""}`}>
                     {fmtMoney(variance.summary.totalVariance)}
                   </div>
@@ -232,7 +232,7 @@ export default function VariancePage() {
             <CardContent className="p-0">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs text-muted border-b border-white/5">
+                  <tr className="text-left text-xs text-zinc-500 border-b border-white/5">
                     <th className="px-4 py-2.5 font-normal">Code</th>
                     <th className="px-4 py-2.5 font-normal">Account</th>
                     <th className="px-4 py-2.5 font-normal">Type</th>
@@ -248,16 +248,16 @@ export default function VariancePage() {
                     const flagClass =
                       r.favorable === true ? "text-green-400 border-green-400/30" :
                       r.favorable === false ? "text-red-400 border-red-400/30" :
-                      "text-muted border-white/20";
+                      "text-zinc-500 border-white/20";
                     const flagLabel =
                       r.favorable === true ? "Favorable" :
                       r.favorable === false ? "Unfavorable" :
                       "—";
                     return (
-                      <tr key={r.account.id} className="border-b border-white/5 hover:bg-surface-2">
+                      <tr key={r.account.id} className="border-b border-white/5 hover:bg-zinc-50">
                         <td className="px-4 py-2 font-mono text-xs">{r.account.code}</td>
                         <td className="px-4 py-2">{r.account.name}</td>
-                        <td className="px-4 py-2 text-xs text-muted">{r.account.type}</td>
+                        <td className="px-4 py-2 text-xs text-zinc-500">{r.account.type}</td>
                         <td className="px-4 py-2 text-right font-mono text-xs">{fmtMoney(r.planned)}</td>
                         <td className="px-4 py-2 text-right font-mono text-xs">{fmtMoney(r.actual)}</td>
                         <td className={`px-4 py-2 text-right font-mono text-xs ${r.favorable === false ? "text-red-400" : r.favorable === true ? "text-green-400" : ""}`}>

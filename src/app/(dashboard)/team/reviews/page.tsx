@@ -36,14 +36,14 @@ export default async function TeamReviewsPage() {
   return (
     <div className="px-8 py-6 max-w-[1100px]">
       <header className="mb-6">
-        <div className="flex items-center gap-2 text-sm text-muted mb-2">
+        <div className="flex items-center gap-2 text-sm text-zinc-500 mb-2">
           <UsersIcon className="w-3.5 h-3.5" />
           <span>Team</span>
           <span>/</span>
           <span>Weekly reviews</span>
         </div>
         <h1 className="text-2xl font-semibold">Weekly reviews</h1>
-        <p className="text-sm text-muted mt-1 max-w-[640px]">
+        <p className="text-sm text-zinc-500 mt-1 max-w-[640px]">
           Reviews submitted by your direct and dotted reports. Approve or request changes so the rollup stays current.
         </p>
       </header>

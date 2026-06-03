@@ -75,13 +75,13 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
         onClick={onClose}
         className="absolute inset-0 bg-black/30 backdrop-blur-[1px]"
       />
-      <aside className="relative h-full w-full max-w-[480px] bg-surface border-l border-border shadow-2xl flex flex-col">
-        <header className="flex items-center gap-3 px-5 py-4 border-b border-border">
+      <aside className="relative h-full w-full max-w-[480px] bg-white border-l border-zinc-200 shadow-2xl flex flex-col">
+        <header className="flex items-center gap-3 px-5 py-4 border-b border-zinc-200">
           <h2 className="flex-1 text-base font-semibold truncate" title={title}>{title || "Untitled"}</h2>
           <button
             type="button"
             onClick={() => setActivityOpen(true)}
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors"
             title="Updates &amp; activity"
           >
             <MessageCircle size={13} />
@@ -91,7 +91,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-md hover:bg-surface-2 text-muted-2 hover:text-foreground"
+            className="p-1.5 rounded-md hover:bg-zinc-50 text-zinc-500-2 hover:text-zinc-900"
             aria-label="Close"
           >
             <X size={16} />
@@ -100,7 +100,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
           <section>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-2 mb-3">Details</h3>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500-2 mb-3">Details</h3>
             <div className="space-y-3">
               {fields.map((f) => {
                 const value = getValue(item, f.key);
@@ -119,7 +119,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
           </section>
 
           <section>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-2 mb-3">Custom fields</h3>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500-2 mb-3">Custom fields</h3>
             <CustomFieldsPanel entityType={entityType} entityId={id} showEmptyState />
           </section>
 
@@ -150,7 +150,7 @@ interface FieldEditorProps {
 
 function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
   const labelEl = (
-    <label className="block text-xs font-medium text-muted-2 mb-1">{field.label}</label>
+    <label className="block text-xs font-medium text-zinc-500-2 mb-1">{field.label}</label>
   );
 
   if (!editable) {
@@ -171,7 +171,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             defaultValue={(value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
             rows={3}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-sm resize-none"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm resize-none"
           />
         </div>
       );
@@ -183,7 +183,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             type="number"
             defaultValue={value == null ? "" : Number(value)}
             onBlur={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
           />
         </div>
       );
@@ -195,7 +195,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             type="date"
             defaultValue={value ? String(value).slice(0, 10) : ""}
             onChange={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
           />
         </div>
       );
@@ -208,7 +208,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             onChange={(e) => onChange(e.target.checked)}
             id={`drawer-${field.key}`}
           />
-          <label htmlFor={`drawer-${field.key}`} className="text-xs font-medium text-muted-2">{field.label}</label>
+          <label htmlFor={`drawer-${field.key}`} className="text-xs font-medium text-zinc-500-2">{field.label}</label>
         </div>
       );
     case "SELECT": {
@@ -219,7 +219,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
           <select
             defaultValue={(value as string) ?? ""}
             onChange={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
           >
             <option value="">— None —</option>
             {choices.map((c) => (
@@ -250,7 +250,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
                     "text-xs px-2 py-1 rounded-md border transition-colors " +
                     (selected
                       ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700"
-                      : "bg-surface-2 border-border text-muted hover:border-muted-2")
+                      : "bg-zinc-50 border-zinc-200 text-zinc-500 hover:border-muted-2")
                   }
                 >
                   {c.label ?? c.value}
@@ -270,7 +270,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             defaultValue={(value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
             placeholder="https://"
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
           />
         </div>
       );
@@ -282,7 +282,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             type="email"
             defaultValue={(value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
           />
         </div>
       );
@@ -295,7 +295,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             type="text"
             defaultValue={(value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
           />
         </div>
       );
@@ -304,7 +304,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
 
 function DisplayValue({ field, value }: { field: BoardField; value: unknown }) {
   if (value == null || value === "") {
-    return <p className="text-sm text-muted-2">—</p>;
+    return <p className="text-sm text-zinc-500-2">—</p>;
   }
   if (field.fieldType === "SELECT") {
     const choice = field.options?.choices?.find((c) => c.value === value);
@@ -324,7 +324,7 @@ function DisplayValue({ field, value }: { field: BoardField; value: unknown }) {
         {arr.map((v) => {
           const choice = field.options?.choices?.find((c) => c.value === v);
           return (
-            <span key={v} className="px-1.5 py-0.5 rounded-md bg-surface-2 text-xs">{choice?.label ?? v}</span>
+            <span key={v} className="px-1.5 py-0.5 rounded-md bg-zinc-50 text-xs">{choice?.label ?? v}</span>
           );
         })}
       </div>

@@ -257,7 +257,7 @@ function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: 
   if (image) {
     return (
       <div className="relative inline-block">
-        <img src={image} alt="" className="max-h-40 rounded-md border border-border" />
+        <img src={image} alt="" className="max-h-40 rounded-md border border-zinc-200" />
         <div className="absolute top-1 right-1 flex gap-1">
           <button
             type="button"
@@ -285,14 +285,14 @@ function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: 
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="text-[11px] px-2 py-1 rounded border border-dashed border-border text-muted hover:text-[#e2ff6b] hover:border-violet-500"
+        className="text-[11px] px-2 py-1 rounded border border-dashed border-zinc-200 text-zinc-500 hover:text-[#e2ff6b] hover:border-violet-500"
       >
         + Upload image
       </button>
       <button
         type="button"
         onClick={handleUrl}
-        className="text-[11px] px-2 py-1 rounded text-muted hover:text-[#e2ff6b]"
+        className="text-[11px] px-2 py-1 rounded text-zinc-500 hover:text-[#e2ff6b]"
       >
         or paste URL
       </button>
@@ -309,12 +309,12 @@ function StepDescriptionView({ html }: { html?: string }) {
   if (looksLikeHtml) {
     return (
       <div
-        className="prose prose-sm dark:prose-invert max-w-none text-xs text-muted mt-0.5 [&_p]:my-1"
+        className="prose prose-sm dark:prose-invert max-w-none text-xs text-zinc-500 mt-0.5 [&_p]:my-1"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     );
   }
-  return <p className="text-xs text-muted mt-0.5 whitespace-pre-wrap">{html}</p>;
+  return <p className="text-xs text-zinc-500 mt-0.5 whitespace-pre-wrap">{html}</p>;
 }
 
 // Thin pass-through around the generic RichEditor — the parent holds
@@ -373,7 +373,7 @@ function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: strin
     } catch { te("Rollback failed"); } finally { setRolling(false); }
   }
 
-  if (loading) return <Card><CardContent className="p-4"><div className="h-32 bg-surface-2 rounded animate-pulse" /></CardContent></Card>;
+  if (loading) return <Card><CardContent className="p-4"><div className="h-32 bg-zinc-50 rounded animate-pulse" /></CardContent></Card>;
 
   return (
     <Card>
@@ -387,21 +387,21 @@ function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: strin
             <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)] text-xs font-bold">v{currentVersion}</div>
             <div className="flex-1">
               <p className="text-sm font-medium">Current Version</p>
-              <p className="text-xs text-muted">Live version</p>
+              <p className="text-xs text-zinc-500">Live version</p>
             </div>
             <Badge variant="outline" className="text-[10px]">Latest</Badge>
           </div>
 
           {/* Past versions */}
           {versions.length === 0 ? (
-            <p className="text-xs text-muted text-center py-4">No previous versions. Versions are saved when you publish.</p>
+            <p className="text-xs text-zinc-500 text-center py-4">No previous versions. Versions are saved when you publish.</p>
           ) : (
             versions.map((v: any) => (
-              <div key={v.id} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-surface-3">
-                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-surface-2 text-muted text-xs font-bold">v{v.version}</div>
+              <div key={v.id} className="flex items-center gap-3 p-3 rounded-lg border border-zinc-200 bg-zinc-100">
+                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-zinc-50 text-zinc-500 text-xs font-bold">v{v.version}</div>
                 <div className="flex-1">
                   <p className="text-sm font-medium">{v.title}</p>
-                  <p className="text-xs text-muted">{new Date(v.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                  <p className="text-xs text-zinc-500">{new Date(v.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
                 </div>
                 <Button variant="outline" size="sm" className="text-xs" onClick={() => handleRollback(v.id, v.version)} disabled={rolling}>
                   Rollback
@@ -945,8 +945,8 @@ export default function SOPDetailPage() {
   if (!sop) {
     return (
       <div className="flex flex-col items-center justify-center py-20 space-y-4">
-        <AlertCircle size={48} className="text-muted" />
-        <p className="text-muted">SOP not found</p>
+        <AlertCircle size={48} className="text-zinc-500" />
+        <p className="text-zinc-500">SOP not found</p>
         <Button variant="outline" onClick={() => router.push("/sops")}>
           Back to SOPs
         </Button>
@@ -968,7 +968,7 @@ export default function SOPDetailPage() {
             <AlertCircle size={18} className="text-[color:var(--accent-strong)] shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium">Unsaved changes found</p>
-              <p className="text-xs text-muted">
+              <p className="text-xs text-zinc-500">
                 Local backup from {formatSavedAgo(new Date(restorePrompt.at))} that wasn&apos;t
                 synced to the server. Restore it to keep editing, or discard to use the saved version.
               </p>
@@ -1021,7 +1021,7 @@ export default function SOPDetailPage() {
                 <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="text-lg font-bold bg-transparent border-border h-auto py-1"
+                  className="text-lg font-bold bg-transparent border-zinc-200 h-auto py-1"
                 />
               ) : (
                 <h1 className="text-xl font-bold tracking-tight truncate">
@@ -1137,10 +1137,10 @@ export default function SOPDetailPage() {
                 <DialogHeader><DialogTitle>{shareLink ? "Process Started!" : "Start Process Run"}</DialogTitle></DialogHeader>
                 {shareLink ? (
                   <div className="space-y-4 py-4">
-                    <p className="text-sm text-muted">
+                    <p className="text-sm text-zinc-500">
                       Share this link with anyone who needs to complete this process:
                     </p>
-                    <div className="flex items-center gap-2 p-3 rounded-lg bg-surface-3 border border-border">
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-zinc-100 border border-zinc-200">
                       <Link2 size={14} className="text-[color:var(--accent-strong)] shrink-0" />
                       <code className="text-xs text-[color:var(--accent-strong)] flex-1 break-all">{shareLink}</code>
                       <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copyShareLink}>
@@ -1218,11 +1218,11 @@ export default function SOPDetailPage() {
                   {/* Individual user selection */}
                   <div className="space-y-2">
                     <Label>Or Select Individuals</Label>
-                    <div className="max-h-48 overflow-y-auto border border-border rounded-md p-2 space-y-1">
+                    <div className="max-h-48 overflow-y-auto border border-zinc-200 rounded-md p-2 space-y-1">
                       {orgUsers.map((u: any) => {
                         const alreadyAssigned = assignments.some((a: any) => a.userId === u.id);
                         return (
-                          <label key={u.id} className={`flex items-center gap-2 p-1.5 rounded hover:bg-surface-2 text-sm ${alreadyAssigned ? "opacity-40" : "cursor-pointer"}`}>
+                          <label key={u.id} className={`flex items-center gap-2 p-1.5 rounded hover:bg-zinc-50 text-sm ${alreadyAssigned ? "opacity-40" : "cursor-pointer"}`}>
                             <input
                               type="checkbox"
                               disabled={alreadyAssigned}
@@ -1234,8 +1234,8 @@ export default function SOPDetailPage() {
                               className="rounded"
                             />
                             {u.firstName} {u.lastName}
-                            {u.department?.name && <span className="text-muted text-xs ml-auto">{u.department.name}</span>}
-                            {alreadyAssigned && <span className="text-[10px] text-muted ml-auto">Already assigned</span>}
+                            {u.department?.name && <span className="text-zinc-500 text-xs ml-auto">{u.department.name}</span>}
+                            {alreadyAssigned && <span className="text-[10px] text-zinc-500 ml-auto">Already assigned</span>}
                           </label>
                         );
                       })}
@@ -1275,7 +1275,7 @@ export default function SOPDetailPage() {
                 <DialogHeader>
                   <DialogTitle>Publish SOP</DialogTitle>
                 </DialogHeader>
-                <p className="text-sm text-muted py-4">
+                <p className="text-sm text-zinc-500 py-4">
                   Publishing will increment the version to v{sop.version + 1} and
                   make this SOP available to all team members. Are you sure?
                 </p>
@@ -1300,7 +1300,7 @@ export default function SOPDetailPage() {
                 <DialogHeader>
                   <DialogTitle>Archive SOP</DialogTitle>
                 </DialogHeader>
-                <p className="text-sm text-muted py-4">
+                <p className="text-sm text-zinc-500 py-4">
                   Archiving will hide this SOP from active lists. You can
                   restore it later. Are you sure?
                 </p>
@@ -1332,7 +1332,7 @@ export default function SOPDetailPage() {
         <button
           type="button"
           onClick={() => setShowInfo((v) => !v)}
-          className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground"
+          className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900"
         >
           {showInfo ? "Hide details" : "Show details"}
         </button>
@@ -1370,10 +1370,10 @@ export default function SOPDetailPage() {
                       onChange={(e) => setDescription(e.target.value)}
                       placeholder="Describe what this SOP covers..."
                       rows={3}
-                      className="bg-transparent border-border"
+                      className="bg-transparent border-zinc-200"
                     />
                   ) : (
-                    <p className="text-sm text-muted">
+                    <p className="text-sm text-zinc-500">
                       {sop.description || "No description provided."}
                     </p>
                   )}
@@ -1464,7 +1464,7 @@ export default function SOPDetailPage() {
                           setProcessFlow({ type: "process_flow", steps: flowSteps });
                           setSop({ ...(sop as SOP), content: { ...(sop.content || {}), type: "process_flow", flow: { type: "process_flow", steps: flowSteps } } });
                         }}
-                        className="gap-1.5 text-xs text-muted hover:text-[color:var(--accent-strong)]"
+                        className="gap-1.5 text-xs text-zinc-500 hover:text-[color:var(--accent-strong)]"
                       >
                         <GitBranch size={12} /> Switch to process flow
                       </Button>
@@ -1488,12 +1488,12 @@ export default function SOPDetailPage() {
                     {((sop.content.steps || []) as RecordedStep[]).map((step, index) => {
                       const totalSteps = (sop.content.steps as RecordedStep[]).length;
                       return (
-                      <div key={index} className="rounded-lg border border-border bg-surface-3 overflow-hidden group">
+                      <div key={index} className="rounded-lg border border-zinc-200 bg-zinc-100 overflow-hidden group">
                         <div className="flex items-start gap-3 p-4">
                           {/* Move up/down + step number */}
                           <div className="flex flex-col items-center gap-1 shrink-0">
                             {editing && index > 0 && (
-                              <button className="text-muted hover:text-foreground text-xs" onClick={() => {
+                              <button className="text-zinc-500 hover:text-zinc-900 text-xs" onClick={() => {
                                 const s = [...(sop.content.steps as RecordedStep[])];
                                 [s[index - 1], s[index]] = [s[index], s[index - 1]];
                                 s.forEach((st, i) => { st.order = i + 1; });
@@ -1504,7 +1504,7 @@ export default function SOPDetailPage() {
                               {index + 1}
                             </div>
                             {editing && index < totalSteps - 1 && (
-                              <button className="text-muted hover:text-foreground text-xs" onClick={() => {
+                              <button className="text-zinc-500 hover:text-zinc-900 text-xs" onClick={() => {
                                 const s = [...(sop.content.steps as RecordedStep[])];
                                 [s[index], s[index + 1]] = [s[index + 1], s[index]];
                                 s.forEach((st, i) => { st.order = i + 1; });
@@ -1517,7 +1517,7 @@ export default function SOPDetailPage() {
                               <input
                                 type="text"
                                 defaultValue={step.description || `Step ${index + 1}`}
-                                className="w-full text-sm font-medium bg-transparent border-b border-border pb-1 focus:border-violet-500 focus:outline-none"
+                                className="w-full text-sm font-medium bg-transparent border-b border-zinc-200 pb-1 focus:border-violet-500 focus:outline-none"
                                 onBlur={(e) => {
                                   const newSteps = [...(sop.content.steps as RecordedStep[])];
                                   newSteps[index] = { ...newSteps[index], description: e.target.value };
@@ -1527,7 +1527,7 @@ export default function SOPDetailPage() {
                             ) : (
                               <p className="text-sm font-medium">{step.description || `Step ${index + 1}`}</p>
                             )}
-                            {step.url && <p className="text-xs text-muted-2 mt-0.5 truncate">{step.url}</p>}
+                            {step.url && <p className="text-xs text-zinc-500-2 mt-0.5 truncate">{step.url}</p>}
                           </div>
                           {/* Delete button */}
                           {editing && (
@@ -1542,7 +1542,7 @@ export default function SOPDetailPage() {
                         </div>
                         {step.screenshot && (
                           <div className="px-4 pb-4">
-                            <img src={step.screenshot} alt={`Step ${index + 1}`} loading="lazy" decoding="async" className="w-full rounded-lg border border-border" />
+                            <img src={step.screenshot} alt={`Step ${index + 1}`} loading="lazy" decoding="async" className="w-full rounded-lg border border-zinc-200" />
                           </div>
                         )}
                       </div>
@@ -1550,7 +1550,7 @@ export default function SOPDetailPage() {
                     })}
                     {/* Add Step button for recorded SOPs */}
                     {editing && (
-                      <Button variant="ghost" size="sm" className="w-full border border-dashed border-border text-muted hover:text-[#e2ff6b] gap-1.5 mt-2" onClick={() => {
+                      <Button variant="ghost" size="sm" className="w-full border border-dashed border-zinc-200 text-zinc-500 hover:text-[#e2ff6b] gap-1.5 mt-2" onClick={() => {
                         const newSteps = [...(sop.content.steps as RecordedStep[]), {
                           order: (sop.content.steps as RecordedStep[]).length + 1,
                           action: "manual",
@@ -1570,9 +1570,9 @@ export default function SOPDetailPage() {
                     <div className="text-center py-8">
                       <FileText
                         size={32}
-                        className="mx-auto text-muted mb-2"
+                        className="mx-auto text-zinc-500 mb-2"
                       />
-                      <p className="text-sm text-muted">
+                      <p className="text-sm text-zinc-500">
                         No steps defined yet.
                       </p>
                       {editing && (
@@ -1623,14 +1623,14 @@ export default function SOPDetailPage() {
                           setDraggingStepId(null);
                           setDragOverStepId(null);
                         }}
-                        className={`flex items-start gap-3 p-3 rounded-lg border bg-surface-3 group transition-all ${
+                        className={`flex items-start gap-3 p-3 rounded-lg border bg-zinc-100 group transition-all ${
                           isDragging ? "opacity-40" : ""
                         } ${
-                          isDropTarget ? "border-violet-500 ring-1 ring-[rgba(212,255,46,0.35)]" : "border-border"
+                          isDropTarget ? "border-violet-500 ring-1 ring-[rgba(212,255,46,0.35)]" : "border-zinc-200"
                         }`}
                       >
                         <div
-                          className={`pt-0.5 text-muted transition-opacity ${editing ? "opacity-60 hover:opacity-100 cursor-grab active:cursor-grabbing" : "opacity-30"}`}
+                          className={`pt-0.5 text-zinc-500 transition-opacity ${editing ? "opacity-60 hover:opacity-100 cursor-grab active:cursor-grabbing" : "opacity-30"}`}
                           aria-label="Drag to reorder"
                           title={editing ? "Drag to reorder" : undefined}
                         >
@@ -1648,7 +1648,7 @@ export default function SOPDetailPage() {
                                   updateStep(step.id, "title", e.target.value)
                                 }
                                 placeholder="Step title..."
-                                className="bg-transparent border-border h-8 text-sm"
+                                className="bg-transparent border-zinc-200 h-8 text-sm"
                                 autoFocus
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter" && e.metaKey) setEditingStepId(null);
@@ -1682,7 +1682,7 @@ export default function SOPDetailPage() {
                             >
                               <p className="text-sm font-medium">
                                 {step.title || (
-                                  <span className="text-muted italic">Untitled step</span>
+                                  <span className="text-zinc-500 italic">Untitled step</span>
                                 )}
                               </p>
                               <StepDescriptionView html={step.description} />
@@ -1691,7 +1691,7 @@ export default function SOPDetailPage() {
                                   src={step.image}
                                   alt=""
                                   loading="lazy"
-                                  className="mt-2 rounded-md border border-border max-h-48"
+                                  className="mt-2 rounded-md border border-zinc-200 max-h-48"
                                 />
                               )}
                             </div>
@@ -1702,7 +1702,7 @@ export default function SOPDetailPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-6 w-6 text-muted hover:text-foreground disabled:opacity-30"
+                              className="h-6 w-6 text-zinc-500 hover:text-zinc-900 disabled:opacity-30"
                               onClick={() => moveStep(index, index - 1)}
                               disabled={index === 0}
                               aria-label="Move step up"
@@ -1713,7 +1713,7 @@ export default function SOPDetailPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-6 w-6 text-muted hover:text-foreground disabled:opacity-30"
+                              className="h-6 w-6 text-zinc-500 hover:text-zinc-900 disabled:opacity-30"
                               onClick={() => moveStep(index, index + 1)}
                               disabled={index === steps.length - 1}
                               aria-label="Move step down"
@@ -1763,9 +1763,9 @@ export default function SOPDetailPage() {
                     <div className="text-center py-8">
                       <Users
                         size={32}
-                        className="mx-auto text-muted mb-2"
+                        className="mx-auto text-zinc-500 mb-2"
                       />
-                      <p className="text-sm text-muted">
+                      <p className="text-sm text-zinc-500">
                         No compliance records yet.
                       </p>
                     </div>
@@ -1773,7 +1773,7 @@ export default function SOPDetailPage() {
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="border-b border-border text-muted">
+                          <tr className="border-b border-zinc-200 text-zinc-500">
                             <th className="text-left py-2 pr-4 font-medium">
                               User
                             </th>
@@ -1805,7 +1805,7 @@ export default function SOPDetailPage() {
                             return (
                               <tr
                                 key={record.id}
-                                className="border-b border-border/50"
+                                className="border-b border-zinc-200/50"
                               >
                                 <td className="py-3 pr-4">
                                   <div className="flex items-center gap-2">
@@ -1818,7 +1818,7 @@ export default function SOPDetailPage() {
                                         {record.user.firstName}{" "}
                                         {record.user.lastName}
                                       </p>
-                                      <p className="text-[10px] text-muted">
+                                      <p className="text-[10px] text-zinc-500">
                                         {record.user.email}
                                       </p>
                                     </div>
@@ -1849,7 +1849,7 @@ export default function SOPDetailPage() {
                                   </span>
                                 </td>
                                 <td className="py-3">
-                                  <span className="text-xs text-muted">
+                                  <span className="text-xs text-zinc-500">
                                     {formatDate(record.completedAt)}
                                   </span>
                                 </td>
@@ -1880,8 +1880,8 @@ export default function SOPDetailPage() {
                 <CardContent>
                   {assignments.length === 0 ? (
                     <div className="text-center py-8">
-                      <Users size={32} className="mx-auto text-muted mb-2" />
-                      <p className="text-sm text-muted">No one assigned yet.</p>
+                      <Users size={32} className="mx-auto text-zinc-500 mb-2" />
+                      <p className="text-sm text-zinc-500">No one assigned yet.</p>
                       {sop.status === "PUBLISHED" && (
                         <Button variant="outline" size="sm" className="mt-3 gap-1.5" onClick={() => setShowAssignDialog(true)}>
                           <UserPlus size={14} /> Assign People
@@ -1892,7 +1892,7 @@ export default function SOPDetailPage() {
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="border-b border-border text-muted">
+                          <tr className="border-b border-zinc-200 text-zinc-500">
                             <th className="text-left py-2 pr-4 font-medium">Person</th>
                             <th className="text-left py-2 pr-4 font-medium">Status</th>
                             <th className="text-left py-2 pr-4 font-medium">Progress</th>
@@ -1905,7 +1905,7 @@ export default function SOPDetailPage() {
                             const pct = a.stepsTotal > 0 ? Math.round((a.stepsCompleted / a.stepsTotal) * 100) : 0;
                             const isOverdue = a.status !== "COMPLETED" && a.dueDate && new Date(a.dueDate) < new Date();
                             return (
-                              <tr key={a.id} className="border-b border-border/50">
+                              <tr key={a.id} className="border-b border-zinc-200/50">
                                 <td className="py-3 pr-4">
                                   <div className="flex items-center gap-2">
                                     <div className="w-7 h-7 rounded-full bg-[rgba(212,255,46,0.08)] flex items-center justify-center text-xs font-bold text-[color:var(--accent-strong)]">
@@ -1913,7 +1913,7 @@ export default function SOPDetailPage() {
                                     </div>
                                     <div>
                                       <p className="font-medium text-xs">{a.user.firstName} {a.user.lastName}</p>
-                                      <p className="text-[10px] text-muted">{a.user.department?.name || "—"}</p>
+                                      <p className="text-[10px] text-zinc-500">{a.user.department?.name || "—"}</p>
                                     </div>
                                   </div>
                                 </td>
@@ -1932,11 +1932,11 @@ export default function SOPDetailPage() {
                                 <td className="py-3 pr-4 min-w-[120px]">
                                   <div className="flex items-center gap-2">
                                     <Progress value={pct} className="h-1.5 flex-1" />
-                                    <span className="text-xs font-mono text-muted">{pct}%</span>
+                                    <span className="text-xs font-mono text-zinc-500">{pct}%</span>
                                   </div>
                                 </td>
                                 <td className="py-3 pr-4">
-                                  <span className={`text-xs ${isOverdue ? "text-red-400 font-medium" : "text-muted"}`}>
+                                  <span className={`text-xs ${isOverdue ? "text-red-400 font-medium" : "text-zinc-500"}`}>
                                     {a.dueDate ? formatDate(a.dueDate) : "—"}
                                   </span>
                                 </td>
@@ -1972,18 +1972,18 @@ export default function SOPDetailPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-start gap-3">
-                <Tag size={14} className="text-muted shrink-0 mt-1" />
+                <Tag size={14} className="text-zinc-500 shrink-0 mt-1" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between">
-                    <Label className="text-[10px] text-muted uppercase tracking-wider">
-                      Category {savingCategory && <span className="text-muted-2 normal-case ml-1">· saving…</span>}
+                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                      Category {savingCategory && <span className="text-zinc-500-2 normal-case ml-1">· saving…</span>}
                     </Label>
                     {canManageSOPs && (
                       editingCategory ? (
                         <button
                           type="button"
                           onClick={() => setEditingCategory(false)}
-                          className="text-[10px] text-muted hover:text-foreground inline-flex items-center gap-1"
+                          className="text-[10px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
                         >
                           <CheckCircle size={11} /> Done
                         </button>
@@ -1991,7 +1991,7 @@ export default function SOPDetailPage() {
                         <button
                           type="button"
                           onClick={() => setEditingCategory(true)}
-                          className="text-[10px] text-muted hover:text-foreground inline-flex items-center gap-1"
+                          className="text-[10px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
                           aria-label="Edit category"
                         >
                           <Edit3 size={11} /> Edit
@@ -2037,17 +2037,17 @@ export default function SOPDetailPage() {
                     </div>
                   ) : (
                     <p className="text-sm mt-0.5">
-                      {sop.category || <span className="text-muted">Uncategorized</span>}
-                      {sop.subcategory && <span className="text-muted"> / {sop.subcategory}</span>}
+                      {sop.category || <span className="text-zinc-500">Uncategorized</span>}
+                      {sop.subcategory && <span className="text-zinc-500"> / {sop.subcategory}</span>}
                     </p>
                   )}
                 </div>
               </div>
 
               <div className="flex items-center gap-3">
-                <Activity size={14} className="text-muted shrink-0" />
+                <Activity size={14} className="text-zinc-500 shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-muted uppercase tracking-wider">
+                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
                     Status
                   </Label>
                   <div className="mt-0.5">{getStatusBadge(sop.status)}</div>
@@ -2055,9 +2055,9 @@ export default function SOPDetailPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <FileText size={14} className="text-muted shrink-0" />
+                <FileText size={14} className="text-zinc-500 shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-muted uppercase tracking-wider">
+                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
                     Type
                   </Label>
                   <p className="text-sm">{getSopKindLabel(sop)}</p>
@@ -2065,20 +2065,20 @@ export default function SOPDetailPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <Hash size={14} className="text-muted shrink-0" />
+                <Hash size={14} className="text-zinc-500 shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-muted uppercase tracking-wider">
+                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
                     Version
                   </Label>
                   <p className="text-sm font-mono">v{sop.version}</p>
                 </div>
               </div>
 
-              <div className="border-t border-border pt-4 space-y-3">
+              <div className="border-t border-zinc-200 pt-4 space-y-3">
                 <div className="flex items-center gap-3">
-                  <Calendar size={14} className="text-muted shrink-0" />
+                  <Calendar size={14} className="text-zinc-500 shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-muted uppercase tracking-wider">
+                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
                       Created
                     </Label>
                     <p className="text-sm">{formatDate(sop.createdAt)}</p>
@@ -2086,9 +2086,9 @@ export default function SOPDetailPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <Calendar size={14} className="text-muted shrink-0" />
+                  <Calendar size={14} className="text-zinc-500 shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-muted uppercase tracking-wider">
+                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
                       Published
                     </Label>
                     <p className="text-sm">{formatDate(sop.publishedAt)}</p>
@@ -2096,9 +2096,9 @@ export default function SOPDetailPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <Clock size={14} className="text-muted shrink-0" />
+                  <Clock size={14} className="text-zinc-500 shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-muted uppercase tracking-wider">
+                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
                       Last Updated
                     </Label>
                     <p className="text-sm">{formatDate(sop.updatedAt)}</p>
@@ -2115,13 +2115,13 @@ export default function SOPDetailPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted">Total Assigned</span>
+                <span className="text-xs text-zinc-500">Total Assigned</span>
                 <span className="text-sm font-mono font-bold">
                   {sop.compliance.length}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted flex items-center gap-1">
+                <span className="text-xs text-zinc-500 flex items-center gap-1">
                   <CheckCircle size={12} className="text-green-400" /> Completed
                 </span>
                 <span className="text-sm font-mono font-bold text-green-400">
@@ -2129,7 +2129,7 @@ export default function SOPDetailPage() {
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted flex items-center gap-1">
+                <span className="text-xs text-zinc-500 flex items-center gap-1">
                   <AlertCircle size={12} className="text-orange-400" /> Pending
                 </span>
                 <span className="text-sm font-mono font-bold text-orange-400">
@@ -2137,9 +2137,9 @@ export default function SOPDetailPage() {
                 </span>
               </div>
               {sop.compliance.length > 0 && (
-                <div className="pt-2 border-t border-border">
+                <div className="pt-2 border-t border-zinc-200">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted">
+                    <span className="text-xs text-zinc-500">
                       Completion Rate
                     </span>
                     <span className="text-sm font-mono font-bold text-[color:var(--accent-strong)]">

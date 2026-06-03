@@ -81,7 +81,7 @@ export function NewFolderDialog({
       <DialogContent className="max-w-[420px] p-0">
         <div className="px-5 pt-5 pb-2">
           <DialogTitle className="text-base font-semibold">New Folder</DialogTitle>
-          <DialogDescription className="text-xs text-muted mt-1">
+          <DialogDescription className="text-xs text-zinc-500 mt-1">
             Folders group related Boards inside a Space.
           </DialogDescription>
         </div>
@@ -94,14 +94,14 @@ export function NewFolderDialog({
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
             placeholder="e.g. Q3 launches, Engineering, Sprint #14"
-            className="w-full h-9 px-3 rounded-md border border-border bg-surface text-sm focus:outline-none focus:border-[var(--os-brand)]"
+            className="w-full h-9 px-3 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
             autoFocus
           />
           {error ? <div className="mt-2 text-xs text-red-500">{error}</div> : null}
         </div>
 
         <div className="px-5 pb-5 pt-2 flex items-center justify-between">
-          <button type="button" onClick={() => handle(false)} className="text-sm text-muted hover:text-foreground px-3 py-2" disabled={submitting}>
+          <button type="button" onClick={() => handle(false)} className="text-sm text-zinc-500 hover:text-zinc-900 px-3 py-2" disabled={submitting}>
             Cancel
           </button>
           <button

@@ -43,6 +43,9 @@ const createSchema = z.object({
   color: z.string().max(20).optional(),
   visibility: z.enum(["PRIVATE", "WORKSPACE", "ORG"]).optional(),
   parentSpaceId: z.string().min(1).optional(),
+  ownerId: z.string().min(1).optional(),
+  linkedKraIds: z.array(z.string().min(1)).max(50).optional(),
+  settings: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function POST(req: Request) {
@@ -66,6 +69,9 @@ export async function POST(req: Request) {
       color: parsed.data.color,
       visibility: parsed.data.visibility,
       parentSpaceId: parsed.data.parentSpaceId,
+      ownerId: parsed.data.ownerId,
+      linkedKraIds: parsed.data.linkedKraIds,
+      settings: parsed.data.settings,
     });
     return NextResponse.json({ space }, { status: 201 });
   } catch (err) {

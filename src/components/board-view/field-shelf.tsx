@@ -116,18 +116,18 @@ export function FieldShelf({ boardId, open, canEdit, fields, onClose, onFieldsCh
       ) : null}
 
       <aside
-        className={`fixed top-0 right-0 bottom-0 z-50 w-[400px] max-w-full bg-surface border-l border-border shadow-2xl transition-transform duration-200 ${
+        className={`fixed top-0 right-0 bottom-0 z-50 w-[400px] max-w-full bg-white border-l border-zinc-200 shadow-2xl transition-transform duration-200 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
         aria-hidden={!open}
       >
         {open ? (
           <div className="flex flex-col h-full">
-            <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+            <div className="px-5 py-3 border-b border-zinc-200 flex items-center gap-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex items-center justify-center w-7 h-7 rounded text-muted hover:bg-surface-2 hover:text-foreground"
+                className="inline-flex items-center justify-center w-7 h-7 rounded text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900"
                 aria-label="Close"
               >
                 <X className="w-4 h-4" />
@@ -135,20 +135,20 @@ export function FieldShelf({ boardId, open, canEdit, fields, onClose, onFieldsCh
               <span className="text-sm font-medium">Fields</span>
             </div>
 
-            <div className="flex items-center gap-3 px-5 mt-3 border-b border-border">
+            <div className="flex items-center gap-3 px-5 mt-3 border-b border-zinc-200">
               <TabBtn active={tab === "create"} onClick={() => setTab("create")} label="Create new" />
               <TabBtn active={tab === "existing"} onClick={() => setTab("existing")} label="Add existing" />
             </div>
 
             <div className="px-5 pt-3 pb-2">
               <div className="relative">
-                <Search className="w-3.5 h-3.5 text-muted absolute left-2.5 top-2.5" />
+                <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-2.5" />
                 <input
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search for new or existing fields"
-                  className="w-full h-8 pl-8 pr-3 rounded-md border border-border bg-surface text-sm focus:outline-none focus:border-[var(--os-brand)]"
+                  className="w-full h-8 pl-8 pr-3 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
                 />
               </div>
             </div>
@@ -156,7 +156,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, onClose, onFieldsCh
             {error ? (
               <div className="mx-5 mb-2 text-xs text-red-500 bg-red-500/10 rounded-md px-3 py-2 flex items-center justify-between">
                 {error}
-                <button onClick={() => setError(null)} className="text-muted hover:text-foreground">
+                <button onClick={() => setError(null)} className="text-zinc-500 hover:text-zinc-900">
                   <X className="w-3 h-3" />
                 </button>
               </div>
@@ -171,7 +171,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, onClose, onFieldsCh
 
               {fields.length > 0 ? (
                 <section className="mt-6 px-2">
-                  <h3 className="text-xs uppercase tracking-wide text-muted mb-2">On this board</h3>
+                  <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">On this board</h3>
                   <ul className="space-y-1">
                     {fields.map((f) => (
                       <FieldRow
@@ -200,8 +200,8 @@ function TabBtn({ active, onClick, label }: { active: boolean; onClick: () => vo
       onClick={onClick}
       className={`text-sm py-2 -mb-px border-b-2 px-1 ${
         active
-          ? "border-foreground text-foreground"
-          : "border-transparent text-muted hover:text-foreground"
+          ? "border-foreground text-zinc-900"
+          : "border-transparent text-zinc-500 hover:text-zinc-900"
       }`}
     >
       {label}
@@ -227,7 +227,7 @@ function CreateNewTab({
         if (items.length === 0) return null;
         return (
           <section key={group}>
-            <h3 className="text-xs uppercase tracking-wide text-muted px-2 mb-1">{group}</h3>
+            <h3 className="text-xs uppercase tracking-wide text-zinc-500 px-2 mb-1">{group}</h3>
             <ul className="space-y-0.5">
               {items.map((e) => (
                 <li key={e.type}>
@@ -235,14 +235,14 @@ function CreateNewTab({
                     type="button"
                     onClick={() => onPick(e.type, e.label)}
                     disabled={busy || !canEdit}
-                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-surface-2 text-left disabled:opacity-50"
+                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
                   >
-                    <e.Icon className="w-4 h-4 text-muted" />
+                    <e.Icon className="w-4 h-4 text-zinc-500" />
                     <span className="text-sm flex-1">{e.label}</span>
                     {!e.tier1 ? (
-                      <span className="text-[10px] uppercase tracking-wide text-muted">Soon</span>
+                      <span className="text-[10px] uppercase tracking-wide text-zinc-500">Soon</span>
                     ) : null}
-                    <Plus className="w-3.5 h-3.5 text-muted opacity-0 group-hover:opacity-100" />
+                    <Plus className="w-3.5 h-3.5 text-zinc-500 opacity-0 group-hover:opacity-100" />
                   </button>
                 </li>
               ))}
@@ -256,7 +256,7 @@ function CreateNewTab({
 
 function ExistingTab() {
   return (
-    <div className="px-2 py-6 text-sm text-muted text-center">
+    <div className="px-2 py-6 text-sm text-zinc-500 text-center">
       <div className="text-xs">"Add existing" lets you reuse fields from another Board.</div>
       <div className="text-xs mt-1">Wires up in Phase 3g.</div>
     </div>
@@ -284,8 +284,8 @@ function FieldRow({
   };
 
   return (
-    <li className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface-2">
-      <span className="text-xs text-muted uppercase tracking-wide w-[60px] flex-shrink-0">
+    <li className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50">
+      <span className="text-xs text-zinc-500 uppercase tracking-wide w-[60px] flex-shrink-0">
         {field.type.replace(/_/g, " ").toLowerCase()}
       </span>
       {canEdit && editing ? (
@@ -314,7 +314,7 @@ function FieldRow({
         <button
           type="button"
           onClick={onRemove}
-          className="opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-muted hover:text-red-500 hover:bg-red-500/10"
+          className="opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-red-500 hover:bg-red-500/10"
           aria-label="Remove field"
         >
           <Trash2 className="w-3.5 h-3.5" />

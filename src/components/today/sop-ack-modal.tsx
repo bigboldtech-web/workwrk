@@ -82,7 +82,7 @@ export function SopAckModal({
             <BookOpenCheck className="w-4 h-4 text-[var(--os-brand)]" />
             Acknowledge SOP
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted mt-1">
+          <DialogDescription className="text-xs text-zinc-500 mt-1">
             {sop.mandatory ? "Mandatory · audited." : "Optional acknowledgement."}
           </DialogDescription>
         </div>
@@ -91,7 +91,7 @@ export function SopAckModal({
           <div>
             <h3 className="text-sm font-medium">{sop.sop.title}</h3>
             {sop.sop.description ? (
-              <p className="text-xs text-muted mt-1 line-clamp-3">{sop.sop.description}</p>
+              <p className="text-xs text-zinc-500 mt-1 line-clamp-3">{sop.sop.description}</p>
             ) : null}
             <Link
               href={`/sops?focus=${sop.sop.id}`}
@@ -113,25 +113,25 @@ export function SopAckModal({
 
           <div>
             <label className="text-xs font-medium block mb-1">
-              Note <span className="text-muted">(optional)</span>
+              Note <span className="text-zinc-500">(optional)</span>
             </label>
             <textarea
               rows={2}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Anything you want to flag for the SOP owner…"
-              className="w-full px-3 py-2 rounded-md border border-border bg-surface text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
           </div>
 
           {error ? <div className="text-xs text-red-500">{error}</div> : null}
         </div>
 
-        <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-border">
+        <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-zinc-200">
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="text-sm text-muted hover:text-foreground px-3 py-2"
+            className="text-sm text-zinc-500 hover:text-zinc-900 px-3 py-2"
             disabled={submitting}
           >
             Cancel

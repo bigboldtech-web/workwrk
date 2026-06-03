@@ -112,7 +112,7 @@ export default function BuildAppPage() {
 
   if (loading) {
     return (
-      <div className="p-6 text-center text-sm text-muted">
+      <div className="p-6 text-center text-sm text-zinc-500">
         <Loader2 size={20} className="mx-auto mb-2 animate-spin" />
         Loading app…
       </div>
@@ -125,7 +125,7 @@ export default function BuildAppPage() {
 
   return (
     <div className="bldd p-6 max-w-[1600px] mx-auto">
-      <Link href="/build" className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground mb-3">
+      <Link href="/build" className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900 mb-3">
         <ArrowLeft size={12} /> All apps
       </Link>
 
@@ -139,8 +139,8 @@ export default function BuildAppPage() {
               <Wand2 size={10} /> Built with Vibe
             </div>
             <h1 className="text-2xl font-semibold mb-0.5">{app.name}</h1>
-            {app.description && <p className="text-sm text-muted">{app.description}</p>}
-            <p className="text-[10px] text-muted-2 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
+            {app.description && <p className="text-sm text-zinc-500">{app.description}</p>}
+            <p className="text-[10px] text-zinc-500-2 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -154,7 +154,7 @@ export default function BuildAppPage() {
           <button
             type="button"
             onClick={deleteApp}
-            className="p-2 rounded-lg text-muted-2 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+            className="p-2 rounded-lg text-zinc-500-2 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
             aria-label="Archive app"
             title="Archive app"
           >
@@ -171,10 +171,10 @@ export default function BuildAppPage() {
 
       {/* Multi-view rendering — Table / Kanban / Calendar / Gallery */}
       {rows.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface text-center py-16">
-          <Wand2 size={32} className="mx-auto mb-2 text-muted-2" />
+        <div className="rounded-xl border border-zinc-200 bg-white text-center py-16">
+          <Wand2 size={32} className="mx-auto mb-2 text-zinc-500-2" />
           <p className="font-medium text-sm mb-1">No rows yet</p>
-          <p className="text-xs text-muted mb-4">Add the first row to populate your app.</p>
+          <p className="text-xs text-zinc-500 mb-4">Add the first row to populate your app.</p>
           <button
             type="button"
             onClick={() => setShowNewRow(true)}
@@ -243,10 +243,10 @@ export default function BuildAppPage() {
 }
 
 function CellValue({ field, value }: { field: AppField; value: unknown }) {
-  if (value == null) return <span className="text-muted-2">—</span>;
+  if (value == null) return <span className="text-zinc-500-2">—</span>;
   switch (field.fieldType) {
     case "CHECKBOX":
-      return <span className={value ? "text-emerald-600" : "text-muted-2"}>{value ? "✓" : "—"}</span>;
+      return <span className={value ? "text-emerald-600" : "text-zinc-500-2"}>{value ? "✓" : "—"}</span>;
     case "DATE":
       return <span>{typeof value === "string" ? new Date(value).toLocaleDateString() : String(value)}</span>;
     case "MULTI_SELECT": {
@@ -268,7 +268,7 @@ function CellValue({ field, value }: { field: AppField; value: unknown }) {
     case "EMAIL":
       return <a href={`mailto:${String(value)}`} className="text-xs text-violet-600 hover:underline">{String(value)}</a>;
     case "TEXTAREA":
-      return <span className="line-clamp-2 text-xs text-muted">{String(value)}</span>;
+      return <span className="line-clamp-2 text-xs text-zinc-500">{String(value)}</span>;
     default:
       return <span>{String(value)}</span>;
   }
@@ -306,32 +306,32 @@ function NewRowModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl bg-surface border border-border shadow-xl p-6 space-y-3 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg rounded-2xl bg-white border border-zinc-200 shadow-xl p-6 space-y-3 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold">New row</h2>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-surface-2 text-muted"><X size={16} /></button>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-zinc-50 text-zinc-500"><X size={16} /></button>
         </div>
         {fields.map((f) => (
           <div key={f.key}>
-            <label className="block text-xs font-medium text-muted-2 mb-1">{f.label}</label>
+            <label className="block text-xs font-medium text-zinc-500-2 mb-1">{f.label}</label>
             {f.fieldType === "TEXTAREA" ? (
               <textarea
                 value={String(values[f.key] ?? "")}
                 onChange={(e) => update(f.key, e.target.value)}
                 rows={3}
-                className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm resize-none"
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm resize-none"
               />
             ) : f.fieldType === "NUMBER" ? (
-              <input type="number" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value === "" ? null : Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm" />
+              <input type="number" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value === "" ? null : Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm" />
             ) : f.fieldType === "DATE" ? (
-              <input type="date" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm" />
+              <input type="date" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm" />
             ) : f.fieldType === "CHECKBOX" ? (
               <label className="inline-flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={!!values[f.key]} onChange={(e) => update(f.key, e.target.checked)} />
                 {f.label}
               </label>
             ) : f.fieldType === "SELECT" ? (
-              <select value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm">
+              <select value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm">
                 <option value="">— None —</option>
                 {(f.options?.choices ?? []).map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
               </select>
@@ -345,7 +345,7 @@ function NewRowModal({
                       key={c.value}
                       type="button"
                       onClick={() => toggleMulti(f.key, c.value)}
-                      className={"text-xs px-2 py-1 rounded-md border transition-colors " + (sel ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700" : "bg-surface border-border text-muted hover:border-muted-2")}
+                      className={"text-xs px-2 py-1 rounded-md border transition-colors " + (sel ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700" : "bg-white border-zinc-200 text-zinc-500 hover:border-muted-2")}
                     >
                       {c.label ?? c.value}
                     </button>
@@ -357,13 +357,13 @@ function NewRowModal({
                 type={f.fieldType === "EMAIL" ? "email" : f.fieldType === "URL" ? "url" : "text"}
                 value={String(values[f.key] ?? "")}
                 onChange={(e) => update(f.key, e.target.value || null)}
-                className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm"
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm"
               />
             )}
           </div>
         ))}
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
-          <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-muted hover:bg-surface-2">Cancel</button>
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-200">
+          <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-zinc-500 hover:bg-zinc-50">Cancel</button>
           <button
             type="button"
             onClick={submit}

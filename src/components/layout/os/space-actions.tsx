@@ -22,7 +22,7 @@ export function SpaceActions({ spaceId, folderId }: { spaceId: string; folderId?
         <button
           type="button"
           onClick={() => setFolderOpen(true)}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-border hover:bg-surface-2"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50"
         >
           <FolderPlus className="w-3.5 h-3.5" />
           New Folder

@@ -104,7 +104,7 @@ export function BoardKanbanView({ boardId, initialItems, canEdit, onOpenItem }: 
       {error ? (
         <div className="px-4 py-2 text-xs text-red-500 bg-red-500/10 rounded-md flex items-center justify-between">
           {error}
-          <button onClick={() => setError(null)} className="text-muted hover:text-foreground"><X className="w-3 h-3" /></button>
+          <button onClick={() => setError(null)} className="text-zinc-500 hover:text-zinc-900"><X className="w-3 h-3" /></button>
         </div>
       ) : null}
 
@@ -144,12 +144,12 @@ export function BoardKanbanView({ boardId, initialItems, canEdit, onOpenItem }: 
                 >
                   {meta.label}
                 </span>
-                <span className="text-xs text-muted">{cards.length}</span>
+                <span className="text-xs text-zinc-500">{cards.length}</span>
                 {canEdit ? (
                   <button
                     type="button"
                     onClick={() => addCard(status)}
-                    className="ml-auto inline-flex items-center justify-center w-5 h-5 rounded text-muted hover:text-foreground hover:bg-surface-2"
+                    className="ml-auto inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50"
                     aria-label={`Add card to ${meta.label}`}
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -173,7 +173,7 @@ export function BoardKanbanView({ boardId, initialItems, canEdit, onOpenItem }: 
                   <button
                     type="button"
                     onClick={() => addCard(status)}
-                    className="w-full text-left text-xs text-muted hover:text-foreground py-1.5 px-2 rounded hover:bg-surface-2"
+                    className="w-full text-left text-xs text-zinc-500 hover:text-zinc-900 py-1.5 px-2 rounded hover:bg-zinc-50"
                   >
                     + Add card
                   </button>
@@ -208,15 +208,15 @@ function KanbanCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onOpen}
-      className={`rounded-md border border-border bg-surface px-3 py-2 text-sm ${
+      className={`rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ${
         canEdit ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
       } ${isDragging ? "opacity-40" : ""} hover:shadow-sm transition-shadow`}
     >
       <div className="break-words">{card.title}</div>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-muted">
+      <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-500">
         {card.owner ? (
           <span className="inline-flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-surface-3 text-[10px] font-medium">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-zinc-100 text-[10px] font-medium">
               {`${card.owner.firstName?.[0] ?? ""}${card.owner.lastName?.[0] ?? ""}`.toUpperCase() || "?"}
             </span>
             <span className="truncate max-w-[120px]">

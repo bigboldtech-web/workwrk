@@ -85,7 +85,7 @@ function getScoreBg(score: number) {
 
 function ScoreTrendChart({ history }: { history: Array<{ period: string; score: number }> }) {
   if (!history || history.length === 0) {
-    return <p className="text-xs text-muted text-center py-4">No score history yet</p>;
+    return <p className="text-xs text-zinc-500 text-center py-4">No score history yet</p>;
   }
 
   const maxScore = Math.max(...history.map((h) => h.score), 100);
@@ -108,7 +108,7 @@ function ScoreTrendChart({ history }: { history: Array<{ period: string; score: 
                 style={{ height: `${height}%` }}
               />
             </div>
-            <span className="text-[9px] text-muted">{label}</span>
+            <span className="text-[9px] text-zinc-500">{label}</span>
           </div>
         );
       })}
@@ -138,10 +138,10 @@ function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | nu
         if (value == null) return null;
         return (
           <div key={key} className="flex items-center gap-3">
-            <Icon size={12} className="text-muted flex-shrink-0" />
+            <Icon size={12} className="text-zinc-500 flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-muted">{label} ({weight}%)</span>
+                <span className="text-zinc-500">{label} ({weight}%)</span>
                 <span className={`font-mono font-bold ${getScoreColor(value)}`}>{value}</span>
               </div>
               <Progress value={value} className="h-1" indicatorClassName={getScoreBg(value)} />
@@ -154,7 +154,7 @@ function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | nu
           <Heart size={12} className="text-pink-400 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-muted">Kudos Bonus</span>
+              <span className="text-zinc-500">Kudos Bonus</span>
               <span className="font-mono font-bold text-pink-400">+{breakdown.kudosBonus as number}</span>
             </div>
           </div>
@@ -248,28 +248,28 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
     return (
       <div className="space-y-3">
         {[1,2,3].map((i) => (
-          <div key={i} className="h-24 bg-surface rounded-lg border border-border animate-pulse" />
+          <div key={i} className="h-24 bg-white rounded-lg border border-zinc-200 animate-pulse" />
         ))}
       </div>
     );
   }
 
   if (assignments.length === 0) {
-    return <p className="text-muted text-sm py-8 text-center">No KRA assignments yet</p>;
+    return <p className="text-zinc-500 text-sm py-8 text-center">No KRA assignments yet</p>;
   }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs text-muted">
+        <p className="text-xs text-zinc-500">
           Total weightage: <span className={totalWeightage === 100 ? "text-green-400 font-medium" : "text-orange-400 font-medium"}>{totalWeightage}%</span>
         </p>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted">Showing KPI data for:</span>
+          <span className="text-xs text-zinc-500">Showing KPI data for:</span>
           <select
             value={selectedPeriod}
             onChange={(e) => setSelectedPeriod(e.target.value)}
-            className="text-xs bg-surface border border-border rounded px-2 py-1"
+            className="text-xs bg-white border border-zinc-200 rounded px-2 py-1"
           >
             {periodOptions.map((p) => (
               <option key={p.value} value={p.value}>{p.label}</option>
@@ -304,11 +304,11 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
         const avgScore = recordedCount > 0 ? Math.round(totalPct / recordedCount) : null;
 
         return (
-          <div key={a.id} className="rounded-lg border border-border bg-surface overflow-hidden">
+          <div key={a.id} className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
             {/* KRA Header - always visible */}
             <button
               onClick={() => toggleKra(a.id)}
-              className="w-full text-left p-4 hover:bg-surface-2/50 transition-colors"
+              className="w-full text-left p-4 hover:bg-zinc-50/50 transition-colors"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -318,9 +318,9 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       {a.kra?.category && <Badge variant="outline" className="text-[9px]">{a.kra.category}</Badge>}
                       <Badge className={`text-[9px] ${a.status === "ACTIVE" ? "bg-green-500/20 text-green-400" : "bg-slate-500/20 text-slate-400"}`}>{a.status}</Badge>
-                      <span className="text-[9px] text-muted">&middot; {kpis.length} KPI{kpis.length !== 1 ? "s" : ""}</span>
+                      <span className="text-[9px] text-zinc-500">&middot; {kpis.length} KPI{kpis.length !== 1 ? "s" : ""}</span>
                       {a.period && a.period !== "ongoing" && (
-                        <span className="text-[9px] text-muted">&middot; Period: {a.period}</span>
+                        <span className="text-[9px] text-zinc-500">&middot; Period: {a.period}</span>
                       )}
                     </div>
                   </div>
@@ -329,32 +329,32 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                   {avgScore != null && (
                     <div className="text-right">
                       <p className={`text-base font-bold font-mono ${getScoreColor(avgScore)}`}>{avgScore}%</p>
-                      <p className="text-[9px] text-muted">avg score</p>
+                      <p className="text-[9px] text-zinc-500">avg score</p>
                     </div>
                   )}
                   <div className="text-right">
                     <p className="text-lg font-bold font-mono text-[color:var(--accent-strong)]">{a.weightage}%</p>
-                    <p className="text-[9px] text-muted">weight</p>
+                    <p className="text-[9px] text-zinc-500">weight</p>
                   </div>
-                  {isExpanded ? <ChevronUp size={14} className="text-muted" /> : <ChevronDown size={14} className="text-muted" />}
+                  {isExpanded ? <ChevronUp size={14} className="text-zinc-500" /> : <ChevronDown size={14} className="text-zinc-500" />}
                 </div>
               </div>
             </button>
 
             {/* Expanded Details */}
             {isExpanded && (
-              <div className="border-t border-border">
+              <div className="border-t border-zinc-200">
                 {/* KRA Description */}
                 {a.kra?.description && (
-                  <div className="px-4 py-2.5 bg-surface-2/30 border-b border-border">
-                    <p className="text-[11px] text-muted leading-relaxed">{a.kra.description}</p>
+                  <div className="px-4 py-2.5 bg-zinc-50/30 border-b border-zinc-200">
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">{a.kra.description}</p>
                   </div>
                 )}
 
                 {/* KPI Details */}
                 <div className="divide-y divide-border">
                   {kpiDetails.length === 0 ? (
-                    <p className="text-xs text-muted p-4 text-center">No KPIs defined for this KRA</p>
+                    <p className="text-xs text-zinc-500 p-4 text-center">No KPIs defined for this KRA</p>
                   ) : (
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     kpiDetails.map((kpi: any, i: number) => (
@@ -364,14 +364,14 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-medium">{kpi.name}</p>
                             {kpi.description && (
-                              <p className="text-[10px] text-muted mt-0.5 leading-snug">{kpi.description}</p>
+                              <p className="text-[10px] text-zinc-500 mt-0.5 leading-snug">{kpi.description}</p>
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             {kpi.actual != null ? (
                               <span className={`text-xs font-semibold font-mono ${getScoreColor(kpi.pct)}`}>{kpi.pct}%</span>
                             ) : (
-                              <span className="text-[10px] text-muted">Not recorded</span>
+                              <span className="text-[10px] text-zinc-500">Not recorded</span>
                             )}
                           </div>
                         </div>
@@ -384,7 +384,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                               {FREQ_LABELS[kpi.frequency] || kpi.frequency}
                             </span>
                           )}
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-500/10 text-muted border border-border">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-500/10 text-zinc-500 border border-zinc-200">
                             {kpi.type === "QUALITATIVE" ? "Qualitative" : "Quantitative"}
                           </span>
                           {kpi.lowerIsBetter && (
@@ -393,7 +393,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                             </span>
                           )}
                           {kpi.unit && (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-500/10 text-muted border border-border">
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-500/10 text-zinc-500 border border-zinc-200">
                               Unit: {kpi.unit}
                             </span>
                           )}
@@ -402,13 +402,13 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                         {/* Target & Actual Values */}
                         <div className="flex items-center gap-4 mb-1.5">
                           <div className="flex items-center gap-1.5 text-[10px]">
-                            <span className="text-muted">Target:</span>
+                            <span className="text-zinc-500">Target:</span>
                             <span className="font-medium font-mono">{kpi.target}{kpi.unit ? ` ${kpi.unit}` : ""}</span>
-                            {kpi.targetLabel && <span className="text-muted">({kpi.targetLabel})</span>}
+                            {kpi.targetLabel && <span className="text-zinc-500">({kpi.targetLabel})</span>}
                           </div>
                           {kpi.actual != null && (
                             <div className="flex items-center gap-1.5 text-[10px]">
-                              <span className="text-muted">Actual:</span>
+                              <span className="text-zinc-500">Actual:</span>
                               <span className={`font-medium font-mono ${getScoreColor(kpi.pct)}`}>{kpi.actual}{kpi.unit ? ` ${kpi.unit}` : ""}</span>
                             </div>
                           )}
@@ -425,12 +425,12 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
                         {kpi.record && (
                           <div className="flex items-center gap-3 mt-1.5">
                             {kpi.record.status && (
-                              <span className={`text-[9px] ${kpi.record.status === "APPROVED" ? "text-green-400" : kpi.record.status === "REJECTED" ? "text-red-400" : "text-muted"}`}>
+                              <span className={`text-[9px] ${kpi.record.status === "APPROVED" ? "text-green-400" : kpi.record.status === "REJECTED" ? "text-red-400" : "text-zinc-500"}`}>
                                 {kpi.record.status}
                               </span>
                             )}
                             {kpi.record.notes && (
-                              <span className="text-[9px] text-muted truncate max-w-[200px]" title={kpi.record.notes}>
+                              <span className="text-[9px] text-zinc-500 truncate max-w-[200px]" title={kpi.record.notes}>
                                 Note: {kpi.record.notes}
                               </span>
                             )}
@@ -637,7 +637,7 @@ export default function UserProfilePage() {
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <p className="text-muted">User not found</p>
+        <p className="text-zinc-500">User not found</p>
         <Button variant="ghost" className="mt-2" onClick={() => router.push("/people")}>Back to People</Button>
       </div>
     );
@@ -769,7 +769,7 @@ export default function UserProfilePage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Access Level {!isAdmin && <span className="text-[10px] text-muted-2">(admin only)</span>}</Label>
+                    <Label>Access Level {!isAdmin && <span className="text-[10px] text-zinc-500-2">(admin only)</span>}</Label>
                     <Select value={editAccessLevel} onValueChange={setEditAccessLevel} disabled={!isAdmin}>
                       <SelectTrigger><SelectValue placeholder="Select level" /></SelectTrigger>
                       <SelectContent>
@@ -824,7 +824,7 @@ export default function UserProfilePage() {
                       <SelectContent>
                         <SelectItem value="__none__">— No office —</SelectItem>
                         {offices.length === 0 ? (
-                          <div className="px-2 py-3 text-xs text-muted">
+                          <div className="px-2 py-3 text-xs text-zinc-500">
                             No offices yet. Add one in <span className="text-[color:var(--accent-strong)]">Organization → Offices</span>.
                           </div>
                         ) : (
@@ -865,10 +865,10 @@ export default function UserProfilePage() {
                 <p className={`text-4xl font-bold font-mono ${getScoreColor(perf.compositeScore)}`}>
                   {perf.compositeScore}
                 </p>
-                <p className="text-xs text-muted mt-1">Composite Score</p>
+                <p className="text-xs text-zinc-500 mt-1">Composite Score</p>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-muted font-medium mb-2">Score Breakdown</p>
+                <p className="text-xs text-zinc-500 font-medium mb-2">Score Breakdown</p>
                 <ScoreBreakdown breakdown={perf.scoreBreakdown} />
               </div>
             </div>
@@ -893,33 +893,33 @@ export default function UserProfilePage() {
         <Card>
           <CardContent className="p-4 text-center">
             <Target size={20} className="mx-auto text-[color:var(--accent-strong)] mb-1" />
-            <p className={`text-2xl font-bold font-mono ${perf.avgKPI ? getScoreColor(perf.avgKPI) : "text-muted"}`}>
+            <p className={`text-2xl font-bold font-mono ${perf.avgKPI ? getScoreColor(perf.avgKPI) : "text-zinc-500"}`}>
               {perf.avgKPI ?? "N/A"}
             </p>
-            <p className="text-xs text-muted">Avg KPI Score</p>
+            <p className="text-xs text-zinc-500">Avg KPI Score</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Target size={20} className="mx-auto text-blue-400 mb-1" />
             <p className="text-2xl font-bold font-mono">{perf.activeKRAs ?? 0}</p>
-            <p className="text-xs text-muted">Active KRAs</p>
+            <p className="text-xs text-zinc-500">Active KRAs</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Smile size={20} className="mx-auto text-green-400 mb-1" />
             <p className="text-2xl font-bold font-mono">{perf.avgMood ?? "N/A"}</p>
-            <p className="text-xs text-muted">Avg Mood</p>
+            <p className="text-xs text-zinc-500">Avg Mood</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Star size={20} className="mx-auto text-orange-400 mb-1" />
-            <p className={`text-2xl font-bold font-mono ${perf.latestReviewScore ? getScoreColor(perf.latestReviewScore) : "text-muted"}`}>
+            <p className={`text-2xl font-bold font-mono ${perf.latestReviewScore ? getScoreColor(perf.latestReviewScore) : "text-zinc-500"}`}>
               {perf.latestReviewScore ?? "N/A"}
             </p>
-            <p className="text-xs text-muted">Review Score</p>
+            <p className="text-xs text-zinc-500">Review Score</p>
           </CardContent>
         </Card>
       </div>
@@ -945,20 +945,20 @@ export default function UserProfilePage() {
 
         <TabsContent value="calendar" className="mt-4 space-y-2">
           {!user.tasks || user.tasks.length === 0 ? (
-            <p className="text-muted text-sm py-8 text-center">No calendar entries yet</p>
+            <p className="text-zinc-500 text-sm py-8 text-center">No calendar entries yet</p>
           ) : (
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.tasks.map((t: any) => (
-              <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3">
+              <div key={t.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3">
                 <div className={`h-2 w-2 rounded-full flex-shrink-0 ${
                   t.status === "COMPLETED" ? "bg-green-500" : t.status === "IN_PROGRESS" ? "bg-amber-500" : "bg-blue-500"
                 }`} />
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm ${t.status === "COMPLETED" ? "line-through text-muted" : ""}`}>{t.title}</p>
+                  <p className={`text-sm ${t.status === "COMPLETED" ? "line-through text-zinc-500" : ""}`}>{t.title}</p>
                   <div className="flex items-center gap-2 mt-1">
                     <Badge className="text-[10px]">{t.status.replace(/_/g, " ")}</Badge>
                     {t.date && (
-                      <span className="text-[10px] text-muted flex items-center gap-0.5">
+                      <span className="text-[10px] text-zinc-500 flex items-center gap-0.5">
                         <Clock size={8} /> {new Date(t.date).toLocaleDateString()}
                       </span>
                     )}
@@ -978,21 +978,21 @@ export default function UserProfilePage() {
 
         <TabsContent value="kpis" className="mt-4 space-y-2">
           {user.kpiRecords.length === 0 ? (
-            <p className="text-muted text-sm py-8 text-center">No KPI records yet</p>
+            <p className="text-zinc-500 text-sm py-8 text-center">No KPI records yet</p>
           ) : (
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.kpiRecords.map((r: any) => (
-              <div key={r.id} className="rounded-lg border border-border bg-surface p-3">
+              <div key={r.id} className="rounded-lg border border-zinc-200 bg-white p-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">{r.kpi.name}</p>
-                    <p className="text-xs text-muted">Period: {r.period} · {r.kpi.unit || ""}</p>
+                    <p className="text-xs text-zinc-500">Period: {r.period} · {r.kpi.unit || ""}</p>
                   </div>
                   <div className="text-right">
-                    <p className={`text-lg font-bold font-mono ${r.score != null ? getScoreColor(r.score) : "text-muted"}`}>
+                    <p className={`text-lg font-bold font-mono ${r.score != null ? getScoreColor(r.score) : "text-zinc-500"}`}>
                       {r.score ?? "Pending"}
                     </p>
-                    <p className="text-xs text-muted">
+                    <p className="text-xs text-zinc-500">
                       {r.actualValue ?? "?"}/{r.targetValue}
                     </p>
                   </div>
@@ -1007,19 +1007,19 @@ export default function UserProfilePage() {
 
         <TabsContent value="skills" className="mt-4">
           {user.skills.length === 0 ? (
-            <p className="text-muted text-sm py-8 text-center">No skills added yet</p>
+            <p className="text-zinc-500 text-sm py-8 text-center">No skills added yet</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {user.skills.map((s: any) => (
-                <div key={s.id} className="rounded-lg border border-border bg-surface p-3">
+                <div key={s.id} className="rounded-lg border border-zinc-200 bg-white p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-medium">{s.name}</p>
-                    <span className="text-xs text-muted">{s.selfRating}/10</span>
+                    <span className="text-xs text-zinc-500">{s.selfRating}/10</span>
                   </div>
                   <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-violet-600" />
                   {s.managerRating && (
-                    <p className="text-[10px] text-muted mt-1">Manager rating: {s.managerRating}/10</p>
+                    <p className="text-[10px] text-zinc-500 mt-1">Manager rating: {s.managerRating}/10</p>
                   )}
                 </div>
               ))}
@@ -1029,15 +1029,15 @@ export default function UserProfilePage() {
 
         <TabsContent value="reviews" className="mt-4 space-y-2">
           {user.reviewsAsSubject.length === 0 ? (
-            <p className="text-muted text-sm py-8 text-center">No reviews yet</p>
+            <p className="text-zinc-500 text-sm py-8 text-center">No reviews yet</p>
           ) : (
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.reviewsAsSubject.map((r: any) => (
-              <div key={r.id} className="rounded-lg border border-border bg-surface p-4">
+              <div key={r.id} className="rounded-lg border border-zinc-200 bg-white p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">{r.cycle.name}</p>
-                    <p className="text-xs text-muted">
+                    <p className="text-xs text-zinc-500">
                       Reviewed by {r.reviewer.firstName} {r.reviewer.lastName}
                     </p>
                   </div>
@@ -1060,25 +1060,25 @@ export default function UserProfilePage() {
 
         <TabsContent value="kudos" className="mt-4 space-y-2">
           {(!user.kudosReceived || user.kudosReceived.length === 0) ? (
-            <p className="text-muted text-sm py-8 text-center">No kudos received yet</p>
+            <p className="text-zinc-500 text-sm py-8 text-center">No kudos received yet</p>
           ) : (
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.kudosReceived.map((k: any) => (
-              <div key={k.id} className="rounded-lg border border-border bg-surface p-4">
+              <div key={k.id} className="rounded-lg border border-zinc-200 bg-white p-4">
                 <div className="flex items-start gap-3">
                   <Heart size={14} className="text-pink-400 mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-muted">
-                      From <span className="text-foreground font-medium">{k.giver.firstName} {k.giver.lastName}</span>
+                    <p className="text-xs text-zinc-500">
+                      From <span className="text-zinc-900 font-medium">{k.giver.firstName} {k.giver.lastName}</span>
                     </p>
                     <p className="text-sm mt-1 italic text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
                     <div className="flex items-center gap-2 mt-2">
                       {k.companyValue && (
                         <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-violet-500/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
                       )}
-                      <span className="text-[10px] text-muted">{new Date(k.createdAt).toLocaleDateString()}</span>
+                      <span className="text-[10px] text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</span>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-border/60">
+                    <div className="mt-3 pt-3 border-t border-zinc-200/60">
                       <KudosReactions
                         kudosId={k.id}
                         initialCounts={k.reactionCounts || []}
@@ -1095,14 +1095,14 @@ export default function UserProfilePage() {
 
         <TabsContent value="checkins" className="mt-4 space-y-2">
           {user.checkIns.length === 0 ? (
-            <p className="text-muted text-sm py-8 text-center">No check-ins yet</p>
+            <p className="text-zinc-500 text-sm py-8 text-center">No check-ins yet</p>
           ) : (
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             user.checkIns.map((c: any) => (
-              <div key={c.id} className="rounded-lg border border-border bg-surface p-3">
+              <div key={c.id} className="rounded-lg border border-zinc-200 bg-white p-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-2xl">{moodEmojis[c.mood] || "😐"}</span>
-                  <span className="text-xs text-muted">{new Date(c.createdAt).toLocaleDateString()}</span>
+                  <span className="text-xs text-zinc-500">{new Date(c.createdAt).toLocaleDateString()}</span>
                 </div>
                 {c.wentWell && <p className="text-xs text-green-400 mb-1">✓ {c.wentWell}</p>}
                 {c.challenges && <p className="text-xs text-orange-400 mb-1">⚠ {c.challenges}</p>}
@@ -1114,14 +1114,14 @@ export default function UserProfilePage() {
 
         <TabsContent value="reports" className="mt-4">
           {user.directReports.length === 0 ? (
-            <p className="text-muted text-sm py-8 text-center">No direct reports</p>
+            <p className="text-zinc-500 text-sm py-8 text-center">No direct reports</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {user.directReports.map((r: any) => (
                 <div
                   key={r.id}
-                  className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3 cursor-pointer hover:border-muted-2 transition-colors"
+                  className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 cursor-pointer hover:border-muted-2 transition-colors"
                   onClick={() => router.push(`/people/${r.id}`)}
                 >
                   <Avatar className="h-10 w-10">
@@ -1131,7 +1131,7 @@ export default function UserProfilePage() {
                   </Avatar>
                   <div>
                     <p className="text-sm font-medium">{r.firstName} {r.lastName}</p>
-                    <p className="text-xs text-muted">{r.role?.title || "No role"}</p>
+                    <p className="text-xs text-zinc-500">{r.role?.title || "No role"}</p>
                   </div>
                 </div>
               ))}
@@ -1160,14 +1160,14 @@ function AssetsTab({ userId }: { userId: string }) {
       .finally(() => setLoading(false));
   }, [userId]);
 
-  if (loading) return <div className="space-y-2">{[1,2].map((i) => <div key={i} className="h-16 bg-surface-2 rounded-lg animate-pulse" />)}</div>;
+  if (loading) return <div className="space-y-2">{[1,2].map((i) => <div key={i} className="h-16 bg-zinc-50 rounded-lg animate-pulse" />)}</div>;
 
   if (assets.length === 0) {
     return (
       <div className="text-center py-12">
-        <Package size={32} className="mx-auto text-muted mb-3" />
-        <p className="text-sm text-muted">No assets assigned</p>
-        <p className="text-xs text-muted mt-1">Assets can be assigned from the Assets page</p>
+        <Package size={32} className="mx-auto text-zinc-500 mb-3" />
+        <p className="text-sm text-zinc-500">No assets assigned</p>
+        <p className="text-xs text-zinc-500 mt-1">Assets can be assigned from the Assets page</p>
       </div>
     );
   }
@@ -1176,22 +1176,22 @@ function AssetsTab({ userId }: { userId: string }) {
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted mb-3">{assets.length} asset{assets.length !== 1 ? "s" : ""} assigned</p>
+      <p className="text-xs text-zinc-500 mb-3">{assets.length} asset{assets.length !== 1 ? "s" : ""} assigned</p>
       {assets.map((asset) => {
         const Icon = (asset.type && typeIcons[asset.type]) || Package;
         return (
           <Card key={asset.id}>
             <CardContent className="p-3">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center shrink-0">
-                  <Icon size={18} className="text-muted" />
+                <div className="w-9 h-9 rounded-lg bg-zinc-50 flex items-center justify-center shrink-0">
+                  <Icon size={18} className="text-zinc-500" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium truncate">{asset.name}</p>
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0">{asset.condition}</Badge>
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] text-muted mt-0.5">
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
                     {asset.brand && <span>{asset.brand}</span>}
                     {asset.model && <span>· {asset.model}</span>}
                     {asset.serialNumber && <span>· S/N: {asset.serialNumber}</span>}
@@ -1199,7 +1199,7 @@ function AssetsTab({ userId }: { userId: string }) {
                   </div>
                 </div>
                 {asset.assignedAt && (
-                  <p className="text-[10px] text-muted shrink-0">Since {new Date(asset.assignedAt).toLocaleDateString()}</p>
+                  <p className="text-[10px] text-zinc-500 shrink-0">Since {new Date(asset.assignedAt).toLocaleDateString()}</p>
                 )}
               </div>
             </CardContent>

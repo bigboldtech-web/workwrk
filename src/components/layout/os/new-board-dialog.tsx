@@ -37,7 +37,6 @@ import {
   FileText,
   LayoutGrid,
   ClipboardList,
-  Sparkles,
   BarChart3,
   Table2,
   Brush,
@@ -54,6 +53,7 @@ import {
   Send,
 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
+import { BloomMark } from "./bloom-mark";
 
 // ── Tile definitions ──────────────────────────────────────────────
 
@@ -74,7 +74,7 @@ const POPULAR_TILES: ViewTile[] = [
   { key: "doc",         label: "Doc", sublabel: "Wiki",           Icon: FileText,        viewType: "DOC",        hue: "#3b82f6" },
   { key: "board",       label: "Board", sublabel: "Kanban",       Icon: LayoutGrid,      viewType: "KANBAN",     hue: "#7c3aed" },
   { key: "form",        label: "Form", sublabel: "Survey",        Icon: ClipboardList,   viewType: "FORM",       hue: "#a855f7" },
-  { key: "ai",          label: "Create with AI",                  Icon: Sparkles,        viewType: null,         hue: "#ec4899" },
+  { key: "ai",          label: "Create with AI",                  Icon: BloomMark,       viewType: null,         hue: "#ec4899" },
   { key: "dashboard",   label: "Dashboard", sublabel: "Report",   Icon: BarChart3,       viewType: "DASHBOARD",  hue: "#6366f1" },
   { key: "table",       label: "Table",                           Icon: Table2,          viewType: "TABLE",      hue: "#14b8a6" },
   { key: "whiteboard",  label: "Whiteboard",                      Icon: Brush,           viewType: "WHITEBOARD", hue: "#22d3ee" },
@@ -211,7 +211,7 @@ export function NewBoardDialog({
             className={`flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors ${
               active
                 ? "bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
-                : "hover:bg-surface-2"
+                : "hover:bg-zinc-50"
             }`}
           >
             <span
@@ -222,8 +222,8 @@ export function NewBoardDialog({
             </span>
             <span className="text-sm flex items-baseline gap-1.5">
               {t.label}
-              {t.sublabel ? <span className="text-xs text-muted">{t.sublabel}</span> : null}
-              {disabled ? <span className="text-[10px] uppercase tracking-wide text-muted">Soon</span> : null}
+              {t.sublabel ? <span className="text-xs text-zinc-500">{t.sublabel}</span> : null}
+              {disabled ? <span className="text-[10px] uppercase tracking-wide text-zinc-500">Soon</span> : null}
             </span>
           </button>
         );
@@ -236,7 +236,7 @@ export function NewBoardDialog({
       <DialogContent className="max-w-[560px] p-0">
         <div className="px-5 pt-5 pb-2">
           <DialogTitle className="text-base font-semibold">New Board</DialogTitle>
-          <DialogDescription className="text-xs text-muted mt-1">
+          <DialogDescription className="text-xs text-zinc-500 mt-1">
             Name your Board and pick how it should open.
           </DialogDescription>
         </div>
@@ -248,7 +248,7 @@ export function NewBoardDialog({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Onboarding tasks, Sprint board, Customer feedback"
-            className="w-full h-9 px-3 rounded-md border border-border bg-surface text-sm focus:outline-none focus:border-[var(--os-brand)]"
+            className="w-full h-9 px-3 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
             autoFocus
           />
         </div>
@@ -260,11 +260,11 @@ export function NewBoardDialog({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search or describe a view to create"
-              className="w-full h-9 px-3 pr-9 rounded-md border border-border bg-surface text-sm focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full h-9 px-3 pr-9 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
             />
             <button
               type="button"
-              className="absolute right-1.5 top-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-muted hover:text-foreground"
+              className="absolute right-1.5 top-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-zinc-900"
               aria-label="Search views"
               tabIndex={-1}
             >
@@ -276,27 +276,27 @@ export function NewBoardDialog({
         <div className="px-3 pb-3 max-h-[55vh] overflow-y-auto">
           {tiles.popular.length > 0 ? (
             <>
-              <div className="text-xs text-muted px-3 pt-2 pb-1">Popular</div>
+              <div className="text-xs text-zinc-500 px-3 pt-2 pb-1">Popular</div>
               <TileGrid tiles={tiles.popular} />
             </>
           ) : null}
           {tiles.integrations.length > 0 ? (
             <>
-              <div className="text-xs text-muted px-3 pt-3 pb-1">Embed an integration</div>
+              <div className="text-xs text-zinc-500 px-3 pt-3 pb-1">Embed an integration</div>
               <TileGrid tiles={tiles.integrations} />
             </>
           ) : null}
           {tiles.popular.length + tiles.integrations.length === 0 ? (
-            <div className="px-3 py-6 text-sm text-muted text-center">No views match "{query.trim()}".</div>
+            <div className="px-3 py-6 text-sm text-zinc-500 text-center">No views match "{query.trim()}".</div>
           ) : null}
         </div>
 
-        <div className="px-5 py-2 border-t border-border flex items-center gap-4">
-          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer">
+        <div className="px-5 py-2 border-t border-zinc-200 flex items-center gap-4">
+          <label className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer">
             <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
             Private view
           </label>
-          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer">
+          <label className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer">
             <input type="checkbox" defaultChecked />
             Pin view
           </label>
@@ -304,8 +304,8 @@ export function NewBoardDialog({
 
         {error ? <div className="px-5 py-2 text-xs text-red-500 bg-red-500/10">{error}</div> : null}
 
-        <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-border">
-          <button type="button" onClick={() => handle(false)} className="text-sm text-muted hover:text-foreground px-3 py-2" disabled={submitting}>
+        <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-zinc-200">
+          <button type="button" onClick={() => handle(false)} className="text-sm text-zinc-500 hover:text-zinc-900 px-3 py-2" disabled={submitting}>
             Cancel
           </button>
           <button

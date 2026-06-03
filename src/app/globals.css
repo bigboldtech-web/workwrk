@@ -358,20 +358,19 @@ body {
   user-select: none;
 }
 
-/* Focus ring — softer in light mode so lime halos don't scream on white.
- * Applies globally so dialogs/inputs outside .app-shell also get it. */
+/* Focus ring — soft violet so it matches the brand accent instead of lime. */
 :root:not(.dark) input:focus-visible,
 :root:not(.dark) textarea:focus-visible,
 :root:not(.dark) button:focus-visible,
 :root:not(.dark) [role="combobox"]:focus,
 :root:not(.dark) select:focus {
-  box-shadow: 0 0 0 3px rgba(168, 204, 36, 0.25) !important;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.18) !important;
 }
 
 /* Drop the inline lime focus-ring classes that render radioactive on white */
 :root:not(.dark) .focus-visible\:ring-\[rgba\(212\,255\,46\,0\.15\)\]:focus-visible,
 :root:not(.dark) .focus\:ring-\[rgba\(212\,255\,46\,0\.15\)\]:focus {
-  --tw-ring-color: rgba(168, 204, 36, 0.25) !important;
+  --tw-ring-color: rgba(124, 58, 237, 0.18) !important;
 }
 
 /* ================================================================

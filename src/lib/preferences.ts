@@ -59,8 +59,8 @@ export const DEFAULT_HOME: HomePref = {
 };
 
 export const DEFAULT_THEME: ThemePref = {
-  appearance: "DARK",
-  accent: "mint",
+  appearance: "LIGHT",
+  accent: "purple",
 };
 
 export const DEFAULT_DENSITY: DensityPref = "cozy";

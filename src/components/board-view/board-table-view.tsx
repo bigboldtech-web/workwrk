@@ -110,18 +110,18 @@ export function BoardTableView({ boardId, initialItems, initialFields, canEdit, 
   }, [boardId, canEdit]);
 
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-hidden">
+    <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
       {error ? (
         <div className="px-4 py-2 text-xs text-red-500 bg-red-500/10 flex items-center justify-between">
           {error}
-          <button onClick={() => setError(null)} className="text-muted hover:text-foreground"><X className="w-3 h-3" /></button>
+          <button onClick={() => setError(null)} className="text-zinc-500 hover:text-zinc-900"><X className="w-3 h-3" /></button>
         </div>
       ) : null}
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-muted border-b border-border">
+            <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-200">
               <th className="px-4 py-2 font-medium w-[36%]">Name</th>
               <th className="px-4 py-2 font-medium w-[140px]">Status</th>
               <th className="px-4 py-2 font-medium w-[180px]">Owner</th>
@@ -145,13 +145,13 @@ export function BoardTableView({ boardId, initialItems, initialFields, canEdit, 
               />
             ))}
             {canEdit ? (
-              <tr className="hover:bg-surface-2">
+              <tr className="hover:bg-zinc-50">
                 <td colSpan={5 + customFields.length} className="px-4 py-2">
                   <button
                     type="button"
                     onClick={handleAdd}
                     disabled={adding}
-                    className="inline-flex items-center gap-2 text-sm text-muted hover:text-foreground"
+                    className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     {adding ? "Adding…" : "Add row"}
@@ -160,7 +160,7 @@ export function BoardTableView({ boardId, initialItems, initialFields, canEdit, 
               </tr>
             ) : null}
             {items.length === 0 && !canEdit ? (
-              <tr><td colSpan={5 + customFields.length} className="px-4 py-8 text-center text-sm text-muted">No items yet.</td></tr>
+              <tr><td colSpan={5 + customFields.length} className="px-4 py-8 text-center text-sm text-zinc-500">No items yet.</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -187,7 +187,7 @@ function Row({
   onOpen?: () => void;
 }) {
   return (
-    <tr className="border-b border-border last:border-b-0 hover:bg-surface-2 group">
+    <tr className="border-b border-zinc-200 last:border-b-0 hover:bg-zinc-50 group">
       <td className="px-4 py-2">
         <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} />
       </td>
@@ -202,7 +202,7 @@ function Row({
           <FieldValue field={f} value={row.metadata?.[f.key]} mode="display" />
         </td>
       ))}
-      <td className="px-4 py-2 text-xs text-muted">
+      <td className="px-4 py-2 text-xs text-zinc-500">
         {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
       </td>
       <td className="px-2 py-2 text-right">
@@ -210,7 +210,7 @@ function Row({
           <button
             type="button"
             onClick={() => onArchive(row.id)}
-            className="opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-muted hover:text-red-500 hover:bg-red-500/10"
+            className="opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-red-500 hover:bg-red-500/10"
             aria-label="Archive row"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -319,7 +319,7 @@ function StatusCell({
       {current.label}
     </span>
   ) : (
-    <span className="text-xs text-muted">—</span>
+    <span className="text-xs text-zinc-500">—</span>
   );
 
   if (!canEdit) return pill;
@@ -332,10 +332,10 @@ function StatusCell({
         className="inline-flex items-center gap-1.5"
       >
         {pill}
-        <ChevronDown className="w-3 h-3 text-muted" />
+        <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
       {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[160px] rounded-md border border-border bg-surface shadow-lg py-1">
+        <div className="absolute z-10 mt-1 left-0 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
           {DEFAULT_STATUS_OPTIONS.map((opt) => {
             const active = opt.value === row.status;
             return (
@@ -343,7 +343,7 @@ function StatusCell({
                 key={opt.value}
                 type="button"
                 onClick={() => { onUpdate(row.id, { status: opt.value }); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-surface-2"
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
               >
                 <span
                   className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium"
@@ -363,12 +363,12 @@ function StatusCell({
 
 function OwnerCell({ row }: { row: BoardItemRow }) {
   if (!row.owner) {
-    return <span className="text-xs text-muted">Unassigned</span>;
+    return <span className="text-xs text-zinc-500">Unassigned</span>;
   }
   const initials = `${row.owner.firstName?.[0] ?? ""}${row.owner.lastName?.[0] ?? ""}`.toUpperCase();
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-surface-3 text-xs font-medium">
+      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-zinc-100 text-xs font-medium">
         {initials || "?"}
       </span>
       <span className="text-sm">{row.owner.firstName} {row.owner.lastName}</span>

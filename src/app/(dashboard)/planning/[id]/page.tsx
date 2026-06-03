@@ -384,7 +384,7 @@ function PlanGrid({
                 {periods.map((p) => (
                   <th
                     key={p.id}
-                    className="text-right px-2 py-2.5 font-medium font-mono text-slate-600 dark:text-muted border-b border-slate-200 dark:border-line min-w-[88px]"
+                    className="text-right px-2 py-2.5 font-medium font-mono text-slate-600 dark:text-zinc-500 border-b border-slate-200 dark:border-line min-w-[88px]"
                     title={`${new Date(p.startDate).toLocaleDateString()} → ${new Date(p.endDate).toLocaleDateString()}`}
                   >
                     {p.label}

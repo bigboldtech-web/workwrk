@@ -104,7 +104,7 @@ export function ItemThread({ itemId, canEdit, currentUserId }: ItemThreadProps) 
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-2 border-b border-border">
+      <div className="flex items-center gap-3 mb-2 border-b border-zinc-200">
         <TabButton active={tab === "comments"} onClick={() => setTab("comments")} label="Comments" count={updates.length} />
         <TabButton active={tab === "activity"} onClick={() => setTab("activity")} label="Activity" count={activity.length} />
       </div>
@@ -147,11 +147,11 @@ function TabButton({
       onClick={onClick}
       className={`text-sm py-2 -mb-px border-b-2 px-1 ${
         active
-          ? "border-foreground text-foreground"
-          : "border-transparent text-muted hover:text-foreground"
+          ? "border-foreground text-zinc-900"
+          : "border-transparent text-zinc-500 hover:text-zinc-900"
       }`}
     >
-      {label} <span className="text-xs text-muted">{count}</span>
+      {label} <span className="text-xs text-zinc-500">{count}</span>
     </button>
   );
 }
@@ -180,9 +180,9 @@ function CommentsTab({
   return (
     <div className="space-y-3">
       {loading ? (
-        <div className="text-xs text-muted py-2">Loading…</div>
+        <div className="text-xs text-zinc-500 py-2">Loading…</div>
       ) : updates.length === 0 ? (
-        <div className="text-xs text-muted py-2">No comments yet.</div>
+        <div className="text-xs text-zinc-500 py-2">No comments yet.</div>
       ) : (
         <ul className="space-y-3">
           {updates.map((u) => {
@@ -190,7 +190,7 @@ function CommentsTab({
             const canDelete = canEdit || (currentUserId && u.authorId === currentUserId);
             return (
               <li key={u.id} className="group flex gap-3">
-                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-surface-3 text-xs font-medium flex-shrink-0">
+                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-zinc-100 text-xs font-medium flex-shrink-0">
                   {initials}
                 </span>
                 <div className="flex-1 min-w-0">
@@ -198,12 +198,12 @@ function CommentsTab({
                     <span className="font-medium">
                       {u.author ? `${u.author.firstName} ${u.author.lastName}` : "Someone"}
                     </span>
-                    <span className="text-muted">{relativeTime(new Date(u.createdAt))}</span>
+                    <span className="text-zinc-500">{relativeTime(new Date(u.createdAt))}</span>
                     {canDelete ? (
                       <button
                         type="button"
                         onClick={() => onDelete(u.id)}
-                        className="opacity-0 group-hover:opacity-100 ml-auto inline-flex items-center justify-center w-5 h-5 rounded text-muted hover:text-red-500 hover:bg-red-500/10"
+                        className="opacity-0 group-hover:opacity-100 ml-auto inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-red-500 hover:bg-red-500/10"
                         aria-label="Delete comment"
                       >
                         <Trash2 className="w-3 h-3" />
@@ -219,7 +219,7 @@ function CommentsTab({
       )}
 
       {canEdit ? (
-        <div className="pt-2 border-t border-border">
+        <div className="pt-2 border-t border-zinc-200">
           <div className="flex items-end gap-2">
             <textarea
               value={draft}
@@ -232,7 +232,7 @@ function CommentsTab({
               }}
               placeholder="Add a comment… (⌘+Enter to send)"
               rows={2}
-              className="flex-1 px-3 py-2 rounded-md border border-border bg-surface text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+              className="flex-1 px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
             <button
               type="button"
@@ -251,8 +251,8 @@ function CommentsTab({
 }
 
 function ActivityTab({ activity, loading }: { activity: ThreadActivity[]; loading: boolean }) {
-  if (loading) return <div className="text-xs text-muted py-2">Loading…</div>;
-  if (activity.length === 0) return <div className="text-xs text-muted py-2">No activity yet.</div>;
+  if (loading) return <div className="text-xs text-zinc-500 py-2">Loading…</div>;
+  if (activity.length === 0) return <div className="text-xs text-zinc-500 py-2">No activity yet.</div>;
   return (
     <ul className="space-y-2">
       {activity.map((a) => {
@@ -260,9 +260,9 @@ function ActivityTab({ activity, loading }: { activity: ThreadActivity[]; loadin
         const description = describeActivity(a);
         return (
           <li key={a.id} className="flex items-baseline gap-2 text-xs">
-            <span className="text-muted whitespace-nowrap">{relativeTime(new Date(a.createdAt))}</span>
+            <span className="text-zinc-500 whitespace-nowrap">{relativeTime(new Date(a.createdAt))}</span>
             <span className="flex-1 min-w-0">
-              <span className="font-medium">{actor}</span> <span className="text-muted">{description}</span>
+              <span className="font-medium">{actor}</span> <span className="text-zinc-500">{description}</span>
             </span>
           </li>
         );

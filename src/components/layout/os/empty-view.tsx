@@ -1,7 +1,8 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { Plus, Sparkles } from "lucide-react";
+import { Plus } from "lucide-react";
+import { BloomMark } from "./bloom-mark";
 
 export function OsEmptyView({
   Icon,
@@ -59,7 +60,7 @@ export function OsAiPreviewView({
       <h2 className="os-empty__title">{title}</h2>
       <p className="os-empty__sub">{subtitle}</p>
       <button type="button" className="os-empty__cta">
-        <Sparkles />
+        <BloomMark size={14} />
         <span>Ask Sidekick</span>
       </button>
     </div>

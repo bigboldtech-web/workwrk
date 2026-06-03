@@ -84,7 +84,7 @@ export function FieldValue(props: FieldValueProps) {
     case "KRA":
       return <KraValue value={value} readOnly={readOnly} onChange={onChange} />;
     default:
-      return <span className="text-xs text-muted">—</span>;
+      return <span className="text-xs text-zinc-500">—</span>;
   }
 }
 
@@ -105,7 +105,7 @@ function TextValue({
   const [draft, setDraft] = useState(v);
   useEffect(() => setDraft(v), [v]);
   if (readOnly) {
-    if (!v) return <span className="text-xs text-muted">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">—</span>;
     if (field.type === "URL" && /^https?:\/\//.test(v)) {
       return <a href={v} className="text-sm text-[var(--os-brand)] hover:underline truncate inline-block max-w-full" target="_blank" rel="noreferrer">{v}</a>;
     }
@@ -140,7 +140,7 @@ function LongTextValue({
   const [draft, setDraft] = useState(v);
   useEffect(() => setDraft(v), [v]);
   if (readOnly) {
-    if (!v) return <span className="text-xs text-muted">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">—</span>;
     return <span className="text-sm whitespace-pre-wrap break-words">{v}</span>;
   }
   return (
@@ -149,7 +149,7 @@ function LongTextValue({
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { if (draft !== v) onChange?.(draft); }}
-      className="w-full px-2 py-1 rounded-md border border-border bg-surface text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+      className="w-full px-2 py-1 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
       placeholder="—"
     />
   );
@@ -187,7 +187,7 @@ function NumberValue({
   };
 
   if (readOnly) {
-    if (n == null) return <span className="text-xs text-muted">—</span>;
+    if (n == null) return <span className="text-xs text-zinc-500">—</span>;
     return <span className="text-sm">{formatDisplay(n)}</span>;
   }
   return (
@@ -223,7 +223,7 @@ function DateValue({
 }) {
   const v = typeof value === "string" ? value : "";
   if (readOnly) {
-    if (!v) return <span className="text-xs text-muted">—</span>;
+    if (!v) return <span className="text-xs text-zinc-500">—</span>;
     try {
       const d = new Date(v);
       return (
@@ -278,7 +278,7 @@ function CheckboxValue({
       disabled={readOnly}
       onClick={() => onChange?.(!checked)}
       className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border ${
-        checked ? "bg-[var(--os-brand)] border-[var(--os-brand)] text-white" : "border-border text-transparent"
+        checked ? "bg-[var(--os-brand)] border-[var(--os-brand)] text-white" : "border-zinc-200 text-transparent"
       } ${readOnly ? "cursor-default opacity-70" : ""}`}
       aria-checked={checked}
     >
@@ -313,7 +313,7 @@ function DropdownValue({
       {current.label}
     </span>
   ) : (
-    <span className="text-xs text-muted">—</span>
+    <span className="text-xs text-zinc-500">—</span>
   );
 
   if (readOnly) return pill;
@@ -321,19 +321,19 @@ function DropdownValue({
     <div className="relative inline-block">
       <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
         {pill}
-        <ChevronDown className="w-3 h-3 text-muted" />
+        <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
       {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-border bg-surface shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
+        <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
           {choices.length === 0 ? (
-            <div className="px-2 py-1 text-xs text-muted">No options yet</div>
+            <div className="px-2 py-1 text-xs text-zinc-500">No options yet</div>
           ) : (
             choices.map((c) => (
               <button
                 key={c.value}
                 type="button"
                 onClick={() => { onChange?.(c.value); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-surface-2"
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
               >
                 <span
                   className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
@@ -348,7 +348,7 @@ function DropdownValue({
           <button
             type="button"
             onClick={() => { onChange?.(null); setOpen(false); }}
-            className="block w-full px-2 py-1.5 text-left text-xs text-muted hover:bg-surface-2"
+            className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50"
           >
             Clear
           </button>
@@ -376,7 +376,7 @@ function MultiSelectValue({
   const chips = values.map((v) => choices.find((c) => c.value === v)).filter((c): c is FieldChoice => !!c);
 
   if (readOnly) {
-    if (chips.length === 0) return <span className="text-xs text-muted">—</span>;
+    if (chips.length === 0) return <span className="text-xs text-zinc-500">—</span>;
     return (
       <span className="flex flex-wrap gap-1">
         {chips.map((c) => (
@@ -398,7 +398,7 @@ function MultiSelectValue({
   return (
     <div className="flex flex-wrap gap-1">
       {choices.length === 0 ? (
-        <span className="text-xs text-muted">No options yet</span>
+        <span className="text-xs text-zinc-500">No options yet</span>
       ) : (
         choices.map((c) => {
           const on = values.includes(c.value);
@@ -454,9 +454,9 @@ function KraValue({
       {current.name}
     </span>
   ) : v ? (
-    <span className="text-xs text-muted">{loading ? "Loading…" : "Unknown KRA"}</span>
+    <span className="text-xs text-zinc-500">{loading ? "Loading…" : "Unknown KRA"}</span>
   ) : (
-    <span className="text-xs text-muted">—</span>
+    <span className="text-xs text-zinc-500">—</span>
   );
 
   if (readOnly) return display;
@@ -464,29 +464,29 @@ function KraValue({
     <div className="relative inline-block">
       <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
         {display}
-        <ChevronDown className="w-3 h-3 text-muted" />
+        <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
       {open ? (
         <div
-          className="absolute z-10 mt-1 left-0 min-w-[260px] max-h-[320px] overflow-y-auto rounded-md border border-border bg-surface shadow-lg py-1"
+          className="absolute z-10 mt-1 left-0 min-w-[260px] max-h-[320px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1"
           onMouseLeave={() => setOpen(false)}
         >
           {loading ? (
-            <div className="px-2 py-2 text-xs text-muted">Loading…</div>
+            <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
           ) : kras.length === 0 ? (
-            <div className="px-2 py-2 text-xs text-muted">No KRAs in this org yet.</div>
+            <div className="px-2 py-2 text-xs text-zinc-500">No KRAs in this org yet.</div>
           ) : (
             kras.map((k) => (
               <button
                 key={k.id}
                 type="button"
                 onClick={() => { onChange?.(k.id); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-surface-2"
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
               >
-                <Target className="w-3.5 h-3.5 text-muted" />
+                <Target className="w-3.5 h-3.5 text-zinc-500" />
                 <span className="flex-1 truncate">
                   {k.name}
-                  {k.category ? <span className="ml-2 text-[10px] uppercase tracking-wide text-muted">{k.category}</span> : null}
+                  {k.category ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
                 </span>
                 {k.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
               </button>
@@ -496,7 +496,7 @@ function KraValue({
             <button
               type="button"
               onClick={() => { onChange?.(null); setOpen(false); }}
-              className="block w-full px-2 py-1.5 text-left text-xs text-muted hover:bg-surface-2 border-t border-border mt-1"
+              className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1"
             >
               Clear
             </button>
@@ -531,7 +531,7 @@ function RatingValue({
           className={readOnly ? "cursor-default" : "cursor-pointer"}
           aria-label={`Rate ${i}`}
         >
-          <Star className={`w-4 h-4 ${i <= n ? "fill-amber-400 text-amber-400" : "text-muted"}`} />
+          <Star className={`w-4 h-4 ${i <= n ? "fill-amber-400 text-amber-400" : "text-zinc-500"}`} />
         </button>
       ))}
     </div>
