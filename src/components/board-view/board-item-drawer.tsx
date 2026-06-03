@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Trash2, X } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items";
+import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { ItemThread } from "./item-thread";

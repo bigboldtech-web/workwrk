@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, X } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items";
+import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
 
 interface BoardKanbanViewProps {
   boardId: string;

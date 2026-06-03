@@ -17,7 +17,7 @@ import {
   Phone, DollarSign, Percent, Star, Tag, User as UserIcon,
   Paperclip, Sigma, ArrowRightLeft, Network, ToggleLeft, PenLine,
   MapPin, GaugeCircle, Activity, BarChart3, Languages, FileText,
-  CheckCheck, Shirt, ThumbsUp, Sparkles, ListFilter,
+  CheckCheck, Shirt, ThumbsUp, Sparkles, ListFilter, Target,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,13 +40,15 @@ export type FieldType =
   | "BUTTON" | "SIGNATURE" | "VOTING" | "ACTION_ITEMS"
   // AI-typed
   | "SUMMARY" | "SENTIMENT" | "CATEGORIZE" | "TRANSLATION"
-  | "CUSTOM_TEXT" | "CUSTOM_DROPDOWN";
+  | "CUSTOM_TEXT" | "CUSTOM_DROPDOWN"
+  // WorkwrK AI-OS gating fields (Phase 4)
+  | "KRA";
 
 export interface FieldCatalogEntry {
   type: FieldType;
   label: string;
   Icon: LucideIcon;
-  group: "Common" | "AI" | "Advanced";
+  group: "Common" | "AI" | "Advanced" | "WorkwrK";
   /** Whether this phase ships a real renderer (true) or a stub (false). */
   tier1: boolean;
   description?: string;
@@ -79,6 +81,9 @@ export const FIELD_CATALOG: FieldCatalogEntry[] = [
   { type: "TRANSLATION",   label: "Translation",   Icon: Languages,  group: "AI", tier1: false },
   { type: "CUSTOM_TEXT",   label: "Custom text",   Icon: Sparkles,   group: "AI", tier1: false, description: "Free-form AI text on the row" },
   { type: "CUSTOM_DROPDOWN", label: "Custom dropdown", Icon: Sparkles, group: "AI", tier1: false },
+
+  // ── WorkwrK AI-OS ───────────────────────────────────────────
+  { type: "KRA", label: "KRA tag", Icon: Target, group: "WorkwrK", tier1: true, description: "Tag this row with an organizational KRA" },
 
   // ── Advanced ────────────────────────────────────────────────
   { type: "FORMULA",          label: "Formula",         Icon: Sigma,         group: "Advanced", tier1: false },

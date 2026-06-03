@@ -22,6 +22,7 @@ import {
   Heart, ChartLine, Megaphone, ChevronRight, Sparkles, Coffee,
 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { MyAlignment } from "@/components/today/my-alignment";
 
 type Me = { user?: { id: string; firstName?: string | null; lastName?: string | null; email?: string } };
 type ApiTask = {
@@ -207,6 +208,10 @@ export default function TodayPage() {
           </div>
         )}
       </header>
+
+      {/* Phase 4 — KRA/KPI/SOP alignment block. Hides itself if the
+          user has no assignments + no SOPs (brand-new orgs). */}
+      <MyAlignment />
 
       {/* Stat strip */}
       <section className="today2__stats">

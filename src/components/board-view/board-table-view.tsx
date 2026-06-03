@@ -19,7 +19,7 @@ import { Check, Plus, Trash2, X, ChevronDown } from "lucide-react";
 import {
   DEFAULT_STATUS_OPTIONS,
   type BoardItemRow,
-} from "@/lib/board-items";
+} from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 

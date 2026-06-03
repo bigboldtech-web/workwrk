@@ -38,7 +38,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, onClose, onFieldsCh
   }, [query]);
 
   const grouped = useMemo(() => {
-    const out: Record<string, FieldCatalogEntry[]> = { Common: [], AI: [], Advanced: [] };
+    const out: Record<string, FieldCatalogEntry[]> = { Common: [], WorkwrK: [], AI: [], Advanced: [] };
     for (const e of filtered) out[e.group].push(e);
     return out;
   }, [filtered]);
@@ -222,7 +222,7 @@ function CreateNewTab({
 }) {
   return (
     <div className="space-y-4">
-      {(["Common", "AI", "Advanced"] as const).map((group) => {
+      {(["Common", "WorkwrK", "AI", "Advanced"] as const).map((group) => {
         const items = grouped[group] ?? [];
         if (items.length === 0) return null;
         return (

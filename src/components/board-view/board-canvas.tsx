@@ -10,7 +10,7 @@ import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
-import type { BoardItemRow } from "@/lib/board-items";
+import type { BoardItemRow } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { BoardTableView } from "./board-table-view";
 import { BoardKanbanView } from "./board-kanban-view";

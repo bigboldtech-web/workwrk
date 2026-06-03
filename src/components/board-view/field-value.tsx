@@ -10,8 +10,37 @@
 // AI types render as a muted "—" placeholder until Phase 4+.
 
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Star } from "lucide-react";
+import { Check, ChevronDown, Star, Target } from "lucide-react";
 import type { FieldChoice, FieldDef } from "@/lib/field-catalog";
+
+// Tiny module-level cache for KRA lookups — every KRA cell on the
+// page shares one fetch instead of N parallel requests.
+type KraLite = { id: string; name: string; category: string | null };
+let _krasCache: { items: KraLite[]; loadedAt: number } | null = null;
+let _krasPromise: Promise<KraLite[]> | null = null;
+
+async function loadKras(): Promise<KraLite[]> {
+  // Refresh every 60s so newly-added KRAs trickle in.
+  if (_krasCache && Date.now() - _krasCache.loadedAt < 60_000) {
+    return _krasCache.items;
+  }
+  if (_krasPromise) return _krasPromise;
+  _krasPromise = (async () => {
+    const res = await fetch("/api/kras?scope=all", { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const items: KraLite[] = (data.kras ?? []).map((k: { id: string; name: string; category: string | null }) => ({
+      id: k.id, name: k.name, category: k.category,
+    }));
+    _krasCache = { items, loadedAt: Date.now() };
+    return items;
+  })();
+  try {
+    return await _krasPromise;
+  } finally {
+    _krasPromise = null;
+  }
+}
 
 interface FieldValueProps {
   field: FieldDef;
@@ -52,6 +81,8 @@ export function FieldValue(props: FieldValueProps) {
       return <MultiSelectValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
     case "RATING":
       return <RatingValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
+    case "KRA":
+      return <KraValue value={value} readOnly={readOnly} onChange={onChange} />;
     default:
       return <span className="text-xs text-muted">—</span>;
   }
@@ -391,6 +422,90 @@ function MultiSelectValue({
 }
 
 // ── Rating (1..N stars) ───────────────────────────────────────────
+
+// ── KRA picker (WorkwrK AI-OS) ────────────────────────────────────
+
+function KraValue({
+  value,
+  readOnly,
+  onChange,
+}: {
+  value: unknown;
+  readOnly: boolean;
+  onChange?: (v: string | null) => void;
+}) {
+  const v = typeof value === "string" ? value : "";
+  const [kras, setKras] = useState<KraLite[]>(_krasCache?.items ?? []);
+  const [loading, setLoading] = useState(!_krasCache);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void loadKras().then((items) => {
+      if (active) { setKras(items); setLoading(false); }
+    });
+    return () => { active = false; };
+  }, []);
+
+  const current = v ? kras.find((k) => k.id === v) : null;
+  const display = current ? (
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-[color-mix(in_srgb,var(--os-brand)_14%,transparent)] text-[var(--os-brand)]">
+      <Target className="w-3 h-3" />
+      {current.name}
+    </span>
+  ) : v ? (
+    <span className="text-xs text-muted">{loading ? "Loading…" : "Unknown KRA"}</span>
+  ) : (
+    <span className="text-xs text-muted">—</span>
+  );
+
+  if (readOnly) return display;
+  return (
+    <div className="relative inline-block">
+      <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
+        {display}
+        <ChevronDown className="w-3 h-3 text-muted" />
+      </button>
+      {open ? (
+        <div
+          className="absolute z-10 mt-1 left-0 min-w-[260px] max-h-[320px] overflow-y-auto rounded-md border border-border bg-surface shadow-lg py-1"
+          onMouseLeave={() => setOpen(false)}
+        >
+          {loading ? (
+            <div className="px-2 py-2 text-xs text-muted">Loading…</div>
+          ) : kras.length === 0 ? (
+            <div className="px-2 py-2 text-xs text-muted">No KRAs in this org yet.</div>
+          ) : (
+            kras.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                onClick={() => { onChange?.(k.id); setOpen(false); }}
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-surface-2"
+              >
+                <Target className="w-3.5 h-3.5 text-muted" />
+                <span className="flex-1 truncate">
+                  {k.name}
+                  {k.category ? <span className="ml-2 text-[10px] uppercase tracking-wide text-muted">{k.category}</span> : null}
+                </span>
+                {k.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
+              </button>
+            ))
+          )}
+          {v ? (
+            <button
+              type="button"
+              onClick={() => { onChange?.(null); setOpen(false); }}
+              className="block w-full px-2 py-1.5 text-left text-xs text-muted hover:bg-surface-2 border-t border-border mt-1"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function RatingValue({
   field,

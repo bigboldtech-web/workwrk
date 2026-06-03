@@ -20,26 +20,13 @@
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/item-thread";
+import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
 
-export const DEFAULT_STATUS_OPTIONS = [
-  { value: "TO_DO",       label: "To Do",        color: "#94a3b8" },
-  { value: "IN_PROGRESS", label: "In Progress",  color: "#3b82f6" },
-  { value: "DONE",        label: "Done",         color: "#10b981" },
-] as const;
-
-export interface BoardItemRow {
-  id: string;
-  title: string;
-  status: string | null;
-  ownerId: string | null;
-  groupKey: string | null;
-  position: number;
-  metadata: Record<string, unknown>;
-  archivedAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-  owner?: { id: string; firstName: string; lastName: string; avatar: string | null } | null;
-}
+// Re-export the client-safe pieces so existing server code (API routes,
+// page server components) keeps working with `from "@/lib/board-items"`.
+// Client components must import from `@/lib/board-items-shared` directly
+// to avoid pulling Prisma + pg into the browser bundle.
+export { DEFAULT_STATUS_OPTIONS, type BoardItemRow };
 
 function rowFrom(it: {
   id: string;

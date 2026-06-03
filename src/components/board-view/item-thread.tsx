@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Send, Trash2 } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS } from "@/lib/board-items";
+import { DEFAULT_STATUS_OPTIONS } from "@/lib/board-items-shared";
 import type { ThreadActivity, ThreadUpdate } from "@/lib/item-thread";
 
 type Tab = "comments" | "activity";
