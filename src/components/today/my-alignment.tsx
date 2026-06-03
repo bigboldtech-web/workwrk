@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Target, ChartLine, BookOpenCheck, ArrowRight, AlertCircle, ChevronRight,
+  ClipboardCheck, CheckCircle2, Clock,
 } from "lucide-react";
 import { KpiScoreModal } from "./kpi-score-modal";
 import { SopAckModal } from "./sop-ack-modal";
@@ -52,10 +53,18 @@ interface SopRow {
   sop: { id: string; title: string; description: string | null; status: string };
 }
 
+interface WeeklyReviewLite {
+  id: string;
+  status: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED";
+  periodStart: string;
+  managerStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED" | null;
+}
+
 export function MyAlignment() {
   const [kras, setKras] = useState<KraRow[]>([]);
   const [prompts, setPrompts] = useState<KpiPrompt[]>([]);
   const [sops, setSops] = useState<SopRow[]>([]);
+  const [weekly, setWeekly] = useState<WeeklyReviewLite | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeKpi, setActiveKpi] = useState<KpiPrompt | null>(null);
   const [activeSop, setActiveSop] = useState<SopRow | null>(null);
@@ -64,15 +73,27 @@ export function MyAlignment() {
     let active = true;
     (async () => {
       try {
-        const [kRes, pRes, sRes] = await Promise.all([
-          fetch("/api/me/kras",         { cache: "no-store" }),
-          fetch("/api/me/kpi-prompts",  { cache: "no-store" }),
-          fetch("/api/me/sops",         { cache: "no-store" }),
+        const [kRes, pRes, sRes, wRes] = await Promise.all([
+          fetch("/api/me/kras",          { cache: "no-store" }),
+          fetch("/api/me/kpi-prompts",   { cache: "no-store" }),
+          fetch("/api/me/sops",          { cache: "no-store" }),
+          fetch("/api/me/weekly-review", { cache: "no-store" }),
         ]);
         if (!active) return;
         if (kRes.ok) setKras((await kRes.json()).kras ?? []);
         if (pRes.ok) setPrompts((await pRes.json()).prompts ?? []);
         if (sRes.ok) setSops((await sRes.json()).sops ?? []);
+        if (wRes.ok) {
+          const data = await wRes.json();
+          if (data.review) {
+            setWeekly({
+              id: data.review.id,
+              status: data.review.status,
+              periodStart: data.review.periodStart,
+              managerStatus: data.review.managerStatus,
+            });
+          }
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -83,9 +104,10 @@ export function MyAlignment() {
   const pendingSops = sops.filter((s) => s.pending);
   const mandatoryPending = pendingSops.filter((s) => s.mandatory);
 
-  // If totally empty (no assignments), don't show the block — keeps
-  // /today clean for new orgs that haven't seeded yet.
-  if (!loading && kras.length === 0 && prompts.length === 0 && sops.length === 0) {
+  // If totally empty (no assignments + no weekly review yet), don't
+  // show the block — keeps /today clean for new orgs that haven't
+  // seeded yet.
+  if (!loading && kras.length === 0 && prompts.length === 0 && sops.length === 0 && !weekly) {
     return null;
   }
 
@@ -105,6 +127,8 @@ export function MyAlignment() {
           Open KRA &amp; KPI <ChevronRight className="w-3 h-3" />
         </Link>
       </header>
+
+      {weekly ? <WeeklyReviewCallout w={weekly} /> : null}
 
       {mandatoryPending.length > 0 ? (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-center gap-3">
@@ -142,6 +166,64 @@ export function MyAlignment() {
         }}
       />
     </section>
+  );
+}
+
+function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
+  const day = new Date().getUTCDay(); // 0=Sun, 5=Fri
+  const isFridayOrAfter = day === 0 || day === 5 || day === 6;
+  if (w.status === "DRAFT") {
+    return (
+      <Link
+        href="/me/weekly-review"
+        className={`rounded-md border px-4 py-3 flex items-center gap-3 hover:bg-surface-2 ${
+          isFridayOrAfter ? "border-amber-500/40 bg-amber-500/10" : "border-border bg-surface"
+        }`}
+      >
+        <ClipboardCheck className={`w-4 h-4 ${isFridayOrAfter ? "text-amber-600" : "text-muted"}`} />
+        <div className="flex-1 text-sm">
+          <div className="font-medium">Weekly review — draft</div>
+          <div className="text-xs text-muted">
+            {isFridayOrAfter ? "Friday. Submit your week before EOD." : "Fill it in as the week unfolds; submit by Friday."}
+          </div>
+        </div>
+        <ArrowRight className="w-4 h-4 text-muted" />
+      </Link>
+    );
+  }
+  if (w.status === "SUBMITTED") {
+    return (
+      <Link
+        href="/me/weekly-review"
+        className="rounded-md border border-border bg-surface px-4 py-3 flex items-center gap-3 hover:bg-surface-2"
+      >
+        <Clock className="w-4 h-4 text-muted" />
+        <div className="flex-1 text-sm">
+          <div className="font-medium">Weekly review — submitted</div>
+          <div className="text-xs text-muted">Awaiting manager acknowledgement.</div>
+        </div>
+      </Link>
+    );
+  }
+  // ACKNOWLEDGED
+  const approved = w.managerStatus === "APPROVED";
+  return (
+    <Link
+      href="/me/weekly-review"
+      className={`rounded-md border px-4 py-3 flex items-center gap-3 hover:bg-surface-2 ${
+        approved ? "border-emerald-500/30 bg-emerald-500/5" : "border-red-500/30 bg-red-500/5"
+      }`}
+    >
+      {approved ? <CheckCircle2 className="w-4 h-4 text-emerald-700" /> : <AlertCircle className="w-4 h-4 text-red-700" />}
+      <div className="flex-1 text-sm">
+        <div className="font-medium">
+          {approved ? "Weekly review — approved" : "Weekly review — changes requested"}
+        </div>
+        <div className="text-xs text-muted">
+          {approved ? "Manager approved this week." : "Manager wants you to revise + resubmit."}
+        </div>
+      </div>
+    </Link>
   );
 }
 

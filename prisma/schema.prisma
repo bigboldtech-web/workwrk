@@ -171,6 +171,8 @@ model Organization {
   folders              Folder[]
   preference           OrgPreference?
   hrSegments           HRSegment[]
+  // 🆕 Phase 5 — weekly review heartbeat
+  weeklyReviews        WeeklyReview[]
 
   @@index([slug])
 }
@@ -521,10 +523,13 @@ model User {
   organizationMemberships OrganizationMembership[]     @relation("OrgMembershipUser")
 
   // 🆕 Phase 1 shell — ClickUp parity substrate
-  preference            UserPreference?
-  spaceMemberships      SpaceMember[]
-  dottedLineToManagers  UserDottedLine[] @relation("DottedLineFromUser")
-  dottedLineFromReports UserDottedLine[] @relation("DottedLineToManager")
+  preference             UserPreference?
+  spaceMemberships       SpaceMember[]
+  dottedLineToManagers   UserDottedLine[] @relation("DottedLineFromUser")
+  dottedLineFromReports  UserDottedLine[] @relation("DottedLineToManager")
+  // 🆕 Phase 5 — weekly review heartbeat
+  weeklyReviewsAsSubject WeeklyReview[]   @relation("WeeklyReviewSubject")
+  weeklyReviewsAsManager WeeklyReview[]   @relation("WeeklyReviewManager")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -1539,6 +1544,71 @@ enum ReviewStatus {
   MANAGER_REVIEW
   CALIBRATION
   COMPLETED
+}
+
+// ──────────────────────────────────────────────────────────────────
+// 🆕 PHASE 5 — Weekly review (heartbeat cadence).
+// Different from the cycle-bound Review above: this is a recurring
+// per-week submission. Every IC fills one in each Friday (kpi numbers,
+// kra progress, blockers, plan); their manager approves or requests
+// changes; rollups bubble up the reporting tree. The single load-
+// bearing stickiness mechanism of the AI-OS vision (Decision D3).
+//
+// Uniqueness on (userId, periodStart) means an IC has at most one
+// WeeklyReview per ISO-week-start (Monday 00:00 UTC). The cron that
+// auto-creates DRAFT rows for the current week reuses upsert against
+// that unique constraint.
+// ──────────────────────────────────────────────────────────────────
+
+model WeeklyReview {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("WeeklyReviewSubject", fields: [userId], references: [id], onDelete: Cascade)
+
+  // ISO week start — Monday 00:00 UTC of the week this review covers.
+  periodStart DateTime
+
+  // Subject's body — JSON blobs for forward-compat.
+  // kpiSnapshots: [{ kpiId, value: number, note?: string }]
+  // kraProgress:  [{ kraId, progressPct: 0-100, note?: string }]
+  kpiSnapshots Json    @default("[]")
+  kraProgress  Json    @default("[]")
+  highlights   String? @db.Text // wins from the week
+  blockers     String? @db.Text // what's stuck / asks
+  plan         String? @db.Text // next week's plan
+
+  status      WeeklyReviewStatus @default(DRAFT)
+  submittedAt DateTime?
+
+  // Manager loop (Phase 5b fills these in).
+  managerId     String?
+  manager       User?                @relation("WeeklyReviewManager", fields: [managerId], references: [id])
+  managerStatus ManagerReviewStatus?
+  managerNotes  String?              @db.Text
+  reviewedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, periodStart])
+  @@index([organizationId, periodStart])
+  @@index([managerId, status])
+  @@index([userId, status])
+}
+
+enum WeeklyReviewStatus {
+  DRAFT // auto-created on Monday, IC hasn't touched yet (or saved partial)
+  SUBMITTED // IC has submitted for manager review
+  ACKNOWLEDGED // manager has acted on it (approved or requested changes)
+}
+
+enum ManagerReviewStatus {
+  PENDING // submitted but not yet looked at
+  APPROVED // manager approved as-is
+  CHANGES_REQUESTED // manager wants the IC to revise + resubmit
 }
 
 model PeerFeedback {

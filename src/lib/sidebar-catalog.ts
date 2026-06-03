@@ -36,7 +36,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { key: "home",        label: "Home",        Icon: HomeIcon,        href: "/today",         alwaysOn: true },
   { key: "ai",          label: "AI",          Icon: Sparkles,        href: "/sidekick" },
-  { key: "teams",       label: "Teams",       Icon: Users,           href: "/people" },
+  { key: "teams",       label: "Teams",       Icon: Users,           href: "/team/alignment" },
   { key: "docs",        label: "Docs",        Icon: FileText,        href: "/docs" },
   { key: "dashboards",  label: "Dashboards",  Icon: BarChart3,       href: "/dashboard" },
   { key: "whiteboards", label: "Whiteboards", Icon: Brush,           href: "/whiteboards" },
