@@ -34,6 +34,7 @@ const createSchema = z.object({
   name: z.string().min(1).max(160),
   description: z.string().max(2000).optional(),
   productSlug: z.string().max(40).optional(),
+  spaceId: z.string().min(1).optional(),
 });
 
 export async function POST(req: Request) {
@@ -49,6 +50,7 @@ export async function POST(req: Request) {
       name: parsed.data.name,
       description: parsed.data.description,
       productSlug: parsed.data.productSlug,
+      spaceId: parsed.data.spaceId,
       ownerId: ctx.userId,
       lastEditedById: ctx.userId,
       lastEditedAt: new Date(),

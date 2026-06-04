@@ -13,7 +13,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UserPlus, ArrowUpCircle, LayoutGrid, ExternalLink, PinOff, Sparkles } from "lucide-react";
-import { APPS, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
+import { useSession } from "next-auth/react";
+import { APPS, canAccessApp, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
 import { useOsShell } from "./shell-context";
 
 const HOVER_OPEN_MS = 180;
@@ -34,10 +35,15 @@ export function ClickAppRail() {
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
+
   const pinnedApps = useMemo<AppEntry[]>(() => {
     const byKey = new Map(APPS.map((a) => [a.key, a] as const));
-    return pinnedAppKeys.map((k) => byKey.get(k)).filter(Boolean) as AppEntry[];
-  }, [pinnedAppKeys]);
+    return pinnedAppKeys
+      .map((k) => byKey.get(k))
+      .filter((a): a is AppEntry => Boolean(a) && canAccessApp(a!, accessLevel));
+  }, [pinnedAppKeys, accessLevel]);
 
   const routeApp = findAppForPath(pathname);
   const highlightedKey = activeAppKey ?? routeApp?.key ?? "home";

@@ -54,7 +54,7 @@ interface HydratedLink {
   position: number;
   context: string | null;
   createdAt: string;
-  target?: { title: string | null; subtitle?: string | null };
+  target?: { title: string | null; subtitle?: string | null; href?: string | null };
 }
 
 async function hydrate(rows: Awaited<ReturnType<typeof listLinksFrom>>, orgId: string): Promise<HydratedLink[]> {
@@ -65,7 +65,7 @@ async function hydrate(rows: Awaited<ReturnType<typeof listLinksFrom>>, orgId: s
     byType.set(r.targetType, list);
   }
 
-  const titleByKey = new Map<string, { title: string | null; subtitle?: string | null }>();
+  const titleByKey = new Map<string, { title: string | null; subtitle?: string | null; href?: string | null }>();
   await Promise.all(
     Array.from(byType.entries()).map(async ([type, ids]) => {
       if (type === "NOTE" || type === "DOC") {
@@ -73,19 +73,31 @@ async function hydrate(rows: Awaited<ReturnType<typeof listLinksFrom>>, orgId: s
           where: { organizationId: orgId, id: { in: ids } },
           select: { id: true, title: true, excerpt: true },
         });
-        for (const d of docs) titleByKey.set(`${type}:${d.id}`, { title: d.title, subtitle: d.excerpt });
+        for (const d of docs) titleByKey.set(`${type}:${d.id}`, { title: d.title, subtitle: d.excerpt, href: `/docs/${d.id}` });
       } else if (type === "WHITEBOARD") {
         const wbs = await prisma.whiteboard.findMany({
           where: { organizationId: orgId, id: { in: ids } },
           select: { id: true, name: true, description: true },
         });
-        for (const w of wbs) titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description });
+        for (const w of wbs) titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description, href: `/whiteboards/${w.id}` });
       } else if (type === "KRA") {
         const kras = await prisma.kRA.findMany({
           where: { organizationId: orgId, id: { in: ids } },
           select: { id: true, name: true, category: true },
         });
         for (const k of kras) titleByKey.set(`${type}:${k.id}`, { title: k.name, subtitle: k.category });
+      } else if (type === "FILE") {
+        const files = await prisma.fileEntry.findMany({
+          where: { organizationId: orgId, id: { in: ids } },
+          select: { id: true, name: true, mimeType: true, size: true, url: true },
+        });
+        for (const f of files) {
+          titleByKey.set(`${type}:${f.id}`, {
+            title: f.name,
+            subtitle: `${f.mimeType} · ${Math.max(1, Math.round(f.size / 1024))} KB`,
+            href: f.url,
+          });
+        }
       }
       // Other types pass through without hydration — the client can request more specifically if needed.
     }),

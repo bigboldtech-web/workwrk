@@ -18,11 +18,20 @@ import {
   HardDrive, Server, Receipt, Coins, Database, Code2, Settings as SettingsIcon,
   ShoppingBag, Workflow, AlertTriangle, ScrollText, Gavel, Palette, Boxes,
   TrendingDown, ClipboardList, FileBarChart, Lightbulb, ShieldCheck,
+  Library as LibraryIcon, Folder,
   type LucideIcon,
 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
 import { usePathname } from "next/navigation";
 import { NewSpaceDialog } from "./new-space-dialog";
+import { NewBoardDialog } from "./new-board-dialog";
+import { NewFolderDialog } from "./new-folder-dialog";
+import { SpaceCreateTrigger } from "./space-create-popover";
+import { SpaceMoreTrigger } from "./space-more-menu";
+import { ShareSpaceDialog } from "./share-space-dialog";
+import { useSidebarSearch } from "./sidebar-search-context";
+import { createElement } from "react";
+import { getSpaceIcon } from "./space-icon-catalog";
 
 export interface AppEntry {
   key: string;
@@ -49,6 +58,38 @@ export interface AppEntry {
    * listens for. Absent → button hidden.
    */
   newAction?: { label: string; href?: string; event?: string };
+  /**
+   * Minimum access tier required to see this app at all. Absent =
+   * available to everyone (default).
+   *
+   *   "manager"   — TEAM_LEAD, MANAGER, DIRECTOR, VP, C_LEVEL, HR, admin
+   *   "hr-admin"  — HR + COMPANY_ADMIN + SUPER_ADMIN (people management)
+   *   "org-admin" — COMPANY_ADMIN + SUPER_ADMIN only (finance/legal)
+   *
+   * ICs get the management surface as a top-bar popover instead of a
+   * full app entry — see ClickTopbar for the read/light-action versions.
+   */
+  requiredAccess?: "manager" | "hr-admin" | "org-admin";
+}
+
+const MANAGER_LEVELS = new Set([
+  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR",
+  "MANAGER", "TEAM_LEAD", "HR",
+]);
+const HR_ADMIN_LEVELS = new Set([
+  "SUPER_ADMIN", "COMPANY_ADMIN", "HR",
+]);
+const ORG_ADMIN_LEVELS = new Set([
+  "SUPER_ADMIN", "COMPANY_ADMIN",
+]);
+
+export function canAccessApp(app: AppEntry, accessLevel: string | null | undefined): boolean {
+  if (!app.requiredAccess) return true;
+  if (!accessLevel) return false;
+  if (app.requiredAccess === "manager") return MANAGER_LEVELS.has(accessLevel);
+  if (app.requiredAccess === "hr-admin") return HR_ADMIN_LEVELS.has(accessLevel);
+  if (app.requiredAccess === "org-admin") return ORG_ADMIN_LEVELS.has(accessLevel);
+  return true;
 }
 
 /** Window event name format for per-app "new" actions. */
@@ -119,6 +160,23 @@ interface SpaceRow {
   slug: string;
   name: string;
   visibility: "PRIVATE" | "WORKSPACE" | "ORG";
+  icon: string | null;
+  color: string | null;
+}
+
+const DEFAULT_SPACE_COLOR = "#71717A";
+
+function SpaceTile({ space }: { space: SpaceRow }) {
+  const Icon = getSpaceIcon(space.icon);
+  const bg = space.color ?? DEFAULT_SPACE_COLOR;
+  return (
+    <span
+      className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
+      style={{ backgroundColor: bg }}
+    >
+      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : (space.name[0] ?? "?")}
+    </span>
+  );
 }
 
 /** Default order if /api/preferences isn't loaded yet or the user hasn't customised. */
@@ -126,10 +184,17 @@ const DEFAULT_SECTIONS_ORDER: string[] = ["favorites", "spaces"];
 
 function HomeSidebar() {
   const pathname = usePathname() || "";
+  const { query: searchQuery } = useSidebarSearch();
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [newSpaceOpen, setNewSpaceOpen] = useState(false);
   const [sectionsOrder, setSectionsOrder] = useState<string[]>(DEFAULT_SECTIONS_ORDER);
+  // Per-Space create dialogs — co-hosted at the sidebar level so we
+  // don't mount one dialog per row. The SpaceCreateTrigger popover
+  // sets the activeSpaceId and which dialog kind to show.
+  const [boardDialogSpaceId, setBoardDialogSpaceId] = useState<string | null>(null);
+  const [folderDialogSpaceId, setFolderDialogSpaceId] = useState<string | null>(null);
+  const [shareDialogSpace, setShareDialogSpace] = useState<SpaceRow | null>(null);
 
   // The sidebar header "+" dispatches `workwrk:os:new:home-new-space`
   // when Home is active — open the NewSpaceDialog in response.
@@ -139,16 +204,19 @@ function HomeSidebar() {
     return () => window.removeEventListener("workwrk:os:new:home-new-space", onNew);
   }, []);
 
-  const reload = useCallback(async () => {
-    try {
-      const res = await fetch("/api/spaces", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setSpaces(Array.isArray(data.spaces) ? data.spaces : []);
-    } catch {}
+  const reload = useCallback(() => {
+    fetch("/api/spaces", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setSpaces(Array.isArray(data.spaces) ? data.spaces : []);
+      })
+      .catch(() => {});
   }, []);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   // Subscribe to /api/preferences for sectionsOrder. Updates live when
   // CustomizePanel saves (dispatches workwrk:prefs-changed).
@@ -188,10 +256,22 @@ function HomeSidebar() {
     </div>
   );
 
-  const renderSpaces = () => (
+  const renderSpaces = () => {
+    const q = searchQuery.trim().toLowerCase();
+    const visibleSpaces = q
+      ? spaces.filter((s) => s.name.toLowerCase().includes(q))
+      : spaces;
+    return (
     <div key="spaces">
       <div className="flex items-center gap-2 px-2 py-1.5 mt-1">
-        <span className="text-[13px] font-medium flex-1 text-zinc-700">Spaces</span>
+        <span className="text-[13px] font-medium flex-1 text-zinc-700">
+          Spaces
+          {q && visibleSpaces.length !== spaces.length ? (
+            <span className="ml-1 text-[11px] text-zinc-400 font-normal">
+              {visibleSpaces.length}/{spaces.length}
+            </span>
+          ) : null}
+        </span>
         <button
           type="button"
           onClick={() => setNewSpaceOpen(true)}
@@ -202,26 +282,48 @@ function HomeSidebar() {
         </button>
       </div>
       <ul>
-        {spaces.map((s) => {
+        {visibleSpaces.map((s) => {
           const isActive = pathname === `/spaces/${s.slug}`;
           return (
-            <li key={s.id}>
+            <li
+              key={s.id}
+              className={`group/space relative flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-md ${
+                isActive ? "bg-zinc-100" : "hover:bg-zinc-50"
+              }`}
+            >
               <Link
                 href={`/spaces/${s.slug}`}
-                className={`flex items-center gap-2.5 px-2 py-1 rounded-md text-[13px] ${
-                  isActive ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                className={`flex items-center gap-2 text-[13px] flex-1 min-w-0 ${
+                  isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
                 }`}
               >
-                {s.visibility === "PRIVATE" ? (
-                  <Lock className="w-3.5 h-3.5 text-zinc-500" />
-                ) : (
-                  <Star className="w-3.5 h-3.5 text-amber-500" />
-                )}
+                <SpaceTile space={s} />
                 <span className="truncate flex-1">{s.name}</span>
+                {s.visibility === "PRIVATE" ? (
+                  <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
+                ) : null}
               </Link>
+              <span className="opacity-0 group-hover/space:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+                <SpaceMoreTrigger
+                  space={s}
+                  onUpdated={() => void reload()}
+                  onRequestShare={() => setShareDialogSpace(s)}
+                />
+                <SpaceCreateTrigger
+                  spaceId={s.id}
+                  onRequestBoard={() => setBoardDialogSpaceId(s.id)}
+                  onRequestFolder={() => setFolderDialogSpaceId(s.id)}
+                  onCreated={() => void reload()}
+                />
+              </span>
             </li>
           );
         })}
+        {q && visibleSpaces.length === 0 ? (
+          <li className="px-2 py-2 text-[11.5px] text-zinc-400">
+            No Spaces match &ldquo;{searchQuery}&rdquo;
+          </li>
+        ) : null}
         <li>
           <button
             type="button"
@@ -234,7 +336,8 @@ function HomeSidebar() {
         </li>
       </ul>
     </div>
-  );
+    );
+  };
 
   return (
     <>
@@ -243,6 +346,7 @@ function HomeSidebar() {
         <NavItem href="/inbox?assigned-comments" Icon={MessageSquare} label="Assigned Comments" />
         <NavItem href="/tasks" Icon={CheckSquare} label="My Tasks" active={pathname === "/tasks"} />
         <NavItem href="/spaces" Icon={ListChecks} label="All Tasks" active={pathname === "/spaces"} />
+        <NavItem href="/library" Icon={LibraryIcon} label="Library" active={pathname.startsWith("/library")} />
         <NavItem href="#" Icon={MoreHorizontal} label="More" />
       </ul>
 
@@ -258,40 +362,69 @@ function HomeSidebar() {
         onOpenChange={setNewSpaceOpen}
         onCreated={() => void reload()}
       />
+
+      {boardDialogSpaceId ? (
+        <NewBoardDialog
+          open
+          onOpenChange={(v) => { if (!v) setBoardDialogSpaceId(null); }}
+          spaceId={boardDialogSpaceId}
+          folderId={null}
+          onCreated={() => { setBoardDialogSpaceId(null); void reload(); }}
+        />
+      ) : null}
+
+      {folderDialogSpaceId ? (
+        <NewFolderDialog
+          open
+          onOpenChange={(v) => { if (!v) setFolderDialogSpaceId(null); }}
+          spaceId={folderDialogSpaceId}
+          parentFolderId={null}
+          onCreated={() => { setFolderDialogSpaceId(null); void reload(); }}
+        />
+      ) : null}
+
+      <ShareSpaceDialog
+        open={Boolean(shareDialogSpace)}
+        onOpenChange={(v) => { if (!v) setShareDialogSpace(null); }}
+        spaceId={shareDialogSpace?.id ?? null}
+        spaceName={shareDialogSpace?.name ?? ""}
+        initialVisibility={shareDialogSpace?.visibility ?? "WORKSPACE"}
+        onChanged={() => void reload()}
+      />
     </>
   );
 }
 
-/* ───────────────────────── Planner sidebar ───────────────────────── */
+/* ───────────────────────── Calendar sidebar ───────────────────────── */
 
-function PlannerSidebar() {
+function CalendarSidebar() {
   return (
-    <div className="px-3 pt-2">
-      <div className="flex flex-col items-center text-center py-6">
-        <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center mb-3">
-          <Calendar className="w-6 h-6 text-zinc-500" />
-        </div>
-        <div className="text-sm text-zinc-700">
-          Connect your calendar to view upcoming events and join your next call
-        </div>
+    <>
+      <ul>
+        <NavItem href="/calendar" Icon={Calendar} label="Month view" />
+        <NavItem href="/calendar?scope=mine" Icon={Calendar} label="My schedule" />
+        <NavItem href="/calendar?scope=team" Icon={Calendar} label="Team schedule" />
+      </ul>
+      <SectionLabel>Integrations</SectionLabel>
+      <div className="px-2 pt-1 pb-2 space-y-1.5">
+        <button
+          type="button"
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md border border-zinc-200 hover:bg-zinc-50 text-[12px]"
+        >
+          <span className="w-4 h-4 rounded bg-blue-500 text-white text-[9px] font-bold flex items-center justify-center">31</span>
+          <span className="flex-1 text-left">Google Calendar</span>
+          <span className="text-[10px] text-zinc-500">Connect</span>
+        </button>
+        <button
+          type="button"
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md border border-zinc-200 hover:bg-zinc-50 text-[12px]"
+        >
+          <span className="w-4 h-4 rounded bg-sky-600 text-white text-[9px] font-bold flex items-center justify-center">O</span>
+          <span className="flex-1 text-left">Outlook</span>
+          <span className="text-[10px] text-zinc-500">Connect</span>
+        </button>
       </div>
-      <button
-        type="button"
-        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 hover:bg-zinc-50 text-sm mb-2"
-      >
-        <span className="w-5 h-5 rounded bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">31</span>
-        <span className="flex-1 text-left">Google Calendar</span>
-        <span className="text-xs text-zinc-500">Connect</span>
-      </button>
-      <button
-        type="button"
-        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 hover:bg-zinc-50 text-sm"
-      >
-        <span className="w-5 h-5 rounded bg-sky-600 text-white text-[10px] font-bold flex items-center justify-center">O</span>
-        <span className="flex-1 text-left">Microsoft Outlook</span>
-        <span className="text-xs text-zinc-500">Connect</span>
-      </button>
-    </div>
+    </>
   );
 }
 
@@ -359,17 +492,19 @@ function DashboardsSidebar() {
   );
 }
 
-/* ───────────────────────── Whiteboards sidebar ───────────────────────── */
+/* ───────────────────────── Library sidebar (Notes + Whiteboards + Files) ───────────────────────── */
 
-function WhiteboardsSidebar() {
+function LibrarySidebar() {
   return (
     <>
       <ul>
-        <NavItem href="/whiteboards" Icon={Brush} label="All Whiteboards" />
-        <NavItem href="/whiteboards?mine=1" Icon={Brush} label="My Whiteboards" />
+        <NavItem href="/library" Icon={LibraryIcon} label="All" />
+        <NavItem href="/library?tab=notes" Icon={FileText} label="Notes" />
+        <NavItem href="/library?tab=whiteboards" Icon={Brush} label="Whiteboards" />
+        <NavItem href="/library?tab=files" Icon={Folder} label="Files" />
       </ul>
       <SectionLabel>Favorites</SectionLabel>
-      <EmptyState title="Star a Whiteboard to see it here" />
+      <EmptyState title="Star an item to see it here" />
     </>
   );
 }
@@ -451,8 +586,8 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files"],
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
     newAction: { label: "New Space", event: "home-new-space" } },
-  { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner",
-    matchPaths: ["/planner", "/calendar"], Sidebar: PlannerSidebar,
+  { key: "planner", label: "Calendar", Icon: Calendar, defaultHref: "/calendar",
+    matchPaths: ["/calendar", "/planner"], Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true },
   { key: "ai", label: "AI", Icon: BloomMark, defaultHref: "/sidekick",
     matchPaths: ["/sidekick", "/agents"], Sidebar: AiSidebar,
@@ -467,10 +602,10 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/dashboard"], Sidebar: DashboardsSidebar,
     category: "Core", defaultPinned: true,
     newAction: { label: "New Dashboard", href: "/dashboard?new=1" } },
-  { key: "whiteboards", label: "Whitebo..", Icon: Brush, defaultHref: "/whiteboards",
-    matchPaths: ["/whiteboards"], Sidebar: WhiteboardsSidebar,
+  { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library",
+    matchPaths: ["/library", "/whiteboards", "/docs"], Sidebar: LibrarySidebar,
     category: "Core", defaultPinned: true,
-    newAction: { label: "New Whiteboard", href: "/whiteboards?new=1" } },
+    newAction: { label: "New Note", href: "/library?tab=notes&new=1" } },
   { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms",
     matchPaths: ["/forms"], Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
     newAction: { label: "New Form", href: "/forms?new=1" } },
@@ -532,7 +667,7 @@ export const APPS: AppEntry[] = [
 
   // ── People & HR ─────────────────────────────────────────────
   { key: "recruiting", label: "Recruiting", Icon: UserCheck, defaultHref: "/recruiting",
-    matchPaths: ["/recruiting"], category: "People",
+    matchPaths: ["/recruiting"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([
       { href: "/recruiting",            label: "Recruiting",      Icon: UserCheck },
       { href: "/recruiting/jobs",       label: "Jobs",            Icon: Briefcase },
@@ -541,27 +676,27 @@ export const APPS: AppEntry[] = [
       { href: "/recruiting/interviews", label: "Interviews",      Icon: MessageSquare },
     ]) },
   { key: "onboarding", label: "Onboarding", Icon: HeartHandshake, defaultHref: "/onboarding",
-    matchPaths: ["/onboarding"], category: "People",
+    matchPaths: ["/onboarding"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([
       { href: "/onboarding", label: "Onboarding", Icon: HeartHandshake },
     ]) },
   { key: "reviews", label: "Reviews", Icon: ClipboardCheck, defaultHref: "/reviews",
-    matchPaths: ["/reviews"], category: "People",
+    matchPaths: ["/reviews"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([
       { href: "/reviews", label: "Reviews", Icon: ClipboardCheck },
       { href: "/talent",  label: "Talent (9-box)", Icon: Award },
     ]) },
   { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor",
-    matchPaths: ["/candor"], category: "People",
+    matchPaths: ["/candor"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/candor", label: "Candor", Icon: MessageSquare }]) },
   { key: "announcements", label: "Announce..", Icon: Megaphone, defaultHref: "/announcements",
-    matchPaths: ["/announcements"], category: "People",
+    matchPaths: ["/announcements"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/announcements", label: "Announcements", Icon: Megaphone }]) },
   { key: "kudos", label: "Kudos", Icon: ThumbsUp, defaultHref: "/kudos",
-    matchPaths: ["/kudos"], category: "People",
+    matchPaths: ["/kudos"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/kudos", label: "Kudos", Icon: ThumbsUp }]) },
   { key: "surveys", label: "Surveys", Icon: FileSpreadsheet, defaultHref: "/surveys",
-    matchPaths: ["/surveys"], category: "People",
+    matchPaths: ["/surveys"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: FileSpreadsheet }]) },
 
   // ── Time & Pay ──────────────────────────────────────────────
@@ -569,24 +704,24 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/time-off"], category: "Time & Pay",
     Sidebar: linksSidebar([{ href: "/time-off", label: "Time off", Icon: Calendar }]) },
   { key: "payroll", label: "Payroll", Icon: Coins, defaultHref: "/payroll",
-    matchPaths: ["/payroll"], category: "Time & Pay",
+    matchPaths: ["/payroll"], category: "Time & Pay", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([
       { href: "/payroll",      label: "Payroll",  Icon: Coins },
       { href: "/payroll/runs", label: "Pay runs", Icon: Workflow },
     ]) },
   { key: "benefits", label: "Benefits", Icon: HeartHandshake, defaultHref: "/benefits",
-    matchPaths: ["/benefits"], category: "Time & Pay",
+    matchPaths: ["/benefits"], category: "Time & Pay", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/benefits", label: "Benefits", Icon: HeartHandshake }]) },
   { key: "expenses", label: "Expenses", Icon: Receipt, defaultHref: "/expenses",
     matchPaths: ["/expenses"], category: "Time & Pay",
     Sidebar: linksSidebar([{ href: "/expenses", label: "Expenses", Icon: Receipt }]) },
   { key: "compensation", label: "Compen..", Icon: Coins, defaultHref: "/compensation",
-    matchPaths: ["/compensation"], category: "Time & Pay",
+    matchPaths: ["/compensation"], category: "Time & Pay", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/compensation", label: "Compensation", Icon: Coins }]) },
 
   // ── Finance ─────────────────────────────────────────────────
   { key: "financials", label: "Financ..", Icon: BarChart3, defaultHref: "/financials",
-    matchPaths: ["/financials"], category: "Finance",
+    matchPaths: ["/financials"], category: "Finance", requiredAccess: "org-admin",
     Sidebar: linksSidebar([
       { href: "/financials",            label: "Financials hub",  Icon: BarChart3 },
       { href: "/financials/accounts",   label: "GL accounts",     Icon: Database },
@@ -595,13 +730,13 @@ export const APPS: AppEntry[] = [
       { href: "/financials/calendar",   label: "Periods",         Icon: Calendar },
     ]) },
   { key: "planning", label: "Planning", Icon: TrendingDown, defaultHref: "/planning",
-    matchPaths: ["/planning"], category: "Finance",
+    matchPaths: ["/planning"], category: "Finance", requiredAccess: "org-admin",
     Sidebar: linksSidebar([
       { href: "/planning/plans",    label: "Budget plans", Icon: ClipboardList },
       { href: "/planning/variance", label: "Variance",     Icon: TrendingDown },
     ]) },
   { key: "procurement", label: "Procure..", Icon: ShoppingBag, defaultHref: "/procurement",
-    matchPaths: ["/procurement"], category: "Finance",
+    matchPaths: ["/procurement"], category: "Finance", requiredAccess: "org-admin",
     Sidebar: linksSidebar([
       { href: "/procurement/pos",      label: "Purchase orders", Icon: ShoppingBag },
       { href: "/procurement/invoices", label: "Invoices",        Icon: Receipt },
@@ -630,10 +765,10 @@ export const APPS: AppEntry[] = [
       { href: "/sops/compliance", label: "Compliance", Icon: ShieldCheck },
     ]) },
   { key: "policies", label: "Policies", Icon: ShieldCheck, defaultHref: "/policies",
-    matchPaths: ["/policies"], category: "Knowledge",
+    matchPaths: ["/policies"], category: "Knowledge", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/policies", label: "Policies", Icon: ShieldCheck }]) },
   { key: "legal", label: "Legal", Icon: Gavel, defaultHref: "/legal",
-    matchPaths: ["/legal"], category: "Knowledge",
+    matchPaths: ["/legal"], category: "Knowledge", requiredAccess: "org-admin",
     Sidebar: linksSidebar([
       { href: "/legal",           label: "Legal hub", Icon: Gavel },
       { href: "/legal/contracts", label: "Contracts", Icon: FileText },

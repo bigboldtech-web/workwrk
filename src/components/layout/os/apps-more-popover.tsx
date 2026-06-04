@@ -27,7 +27,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Settings, Pin, Clock as ClockIcon } from "lucide-react";
 import { useOsShell } from "./shell-context";
-import { APPS, CATALOG_APPS, CATEGORY_ORDER, isAlwaysPinned, type AppEntry } from "./apps-catalog";
+import { APPS, CATALOG_APPS, CATEGORY_ORDER, canAccessApp, isAlwaysPinned, type AppEntry } from "./apps-catalog";
+import { useSession } from "next-auth/react";
 
 export function AppsMorePopover() {
   const router = useRouter();
@@ -56,11 +57,15 @@ export function AppsMorePopover() {
     };
   }, [appsGridOpen, closeAppsGrid]);
 
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
+
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const accessible = CATALOG_APPS.filter((a) => canAccessApp(a, accessLevel));
     const filtered = q
-      ? CATALOG_APPS.filter((a) => a.label.toLowerCase().includes(q) || a.key.includes(q))
-      : CATALOG_APPS;
+      ? accessible.filter((a) => a.label.toLowerCase().includes(q) || a.key.includes(q))
+      : accessible;
     const byCat = new Map<string, AppEntry[]>();
     for (const a of filtered) {
       const c = a.category ?? "Other";
@@ -75,7 +80,7 @@ export function AppsMorePopover() {
           .filter((c) => !CATEGORY_ORDER.includes(c))
           .map((c) => ({ category: c, apps: byCat.get(c)! })),
       );
-  }, [query]);
+  }, [query, accessLevel]);
 
   const recentApps = useMemo<AppEntry[]>(() => {
     const byKey = new Map(APPS.map((a) => [a.key, a] as const));

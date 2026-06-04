@@ -20,6 +20,7 @@ import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { ItemThread } from "./item-thread";
 import { LinkedAttachments } from "./linked-attachments";
+import { TimeTracker } from "./time-tracker";
 
 interface BoardItemDrawerProps {
   itemId: string | null;
@@ -252,6 +253,13 @@ export function BoardItemDrawer({
                   canEdit={canEdit}
                 />
 
+                {/* Time tracking */}
+                <TimeTracker
+                  entityType="BOARD_ITEM"
+                  entityId={item.id}
+                  canEdit={canEdit}
+                />
+
                 {/* Comments + Activity thread */}
                 <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} />
               </div>
@@ -285,9 +293,17 @@ function TitleField({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
+  // Re-sync draft from the prop using the official derived-state-during-
+  // render pattern: setState inside render is allowed when guarded by an
+  // equality check. Avoids the cascading-renders lint flag that fires
+  // on useEffect(setDraft).
+  const [syncedTitle, setSyncedTitle] = useState(item.title);
+  if (syncedTitle !== item.title) {
+    setSyncedTitle(item.title);
+    setDraft(item.title);
+  }
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setDraft(item.title); }, [item.title]);
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
   const commit = () => {

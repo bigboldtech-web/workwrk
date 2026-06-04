@@ -23,6 +23,13 @@ import { WorkspaceMenu } from "./workspace-menu";
 import { AskAiButton } from "./ask-ai-button";
 import { ProfileMenu } from "./profile-menu";
 import { PROFILE_TOOL_MAP } from "./profile-tools";
+import { TopbarPopoverButton } from "./topbar-popover-button";
+import { OsNotificationsPopover } from "./notifications-popover";
+import { OsCandorPopover } from "./candor-popover";
+import { OsAnnouncementsPopover } from "./announcements-popover";
+import { OsKudosPopover } from "./kudos-popover";
+import { OsSurveysPopover } from "./surveys-popover";
+import { ActiveTimerPill } from "./active-timer-pill";
 
 export function ClickTopbar() {
   const { openPalette, openSidekick, profileToolPins, presenceStatus, mutedNotifications } = useOsShell();
@@ -82,6 +89,7 @@ export function ClickTopbar() {
           avatar. The pinned-tool icons are driven by profileToolPins
           (managed from the ProfileMenu dropdown). */}
       <div className="h-full flex items-center gap-0.5 bg-white rounded-lg border border-zinc-200 px-1">
+        <ActiveTimerPill />
         <div className="flex items-center gap-0.5">
           {pinnedTools.map((tool) => (
             <Link
@@ -97,21 +105,21 @@ export function ClickTopbar() {
           {pinnedTools.length > 0 ? (
             <span aria-hidden className="w-px h-3.5 bg-zinc-200 mx-0.5" />
           ) : null}
-          <Link href="/inbox" className="p-1 rounded-md hover:bg-zinc-100 text-zinc-500 hover:text-zinc-800" aria-label="Inbox" title="Inbox">
-            <Inbox className="w-[14px] h-[14px]" />
-          </Link>
-          <Link href="/candor" className="p-1 rounded-md hover:bg-zinc-100 text-zinc-500 hover:text-zinc-800" aria-label="Candor" title="Candor">
-            <MessageSquare className="w-[14px] h-[14px]" />
-          </Link>
-          <Link href="/announcements" className="p-1 rounded-md hover:bg-zinc-100 text-zinc-500 hover:text-zinc-800" aria-label="Announcements" title="Announcements">
-            <Megaphone className="w-[14px] h-[14px]" />
-          </Link>
-          <Link href="/kudos" className="p-1 rounded-md hover:bg-zinc-100 text-zinc-500 hover:text-zinc-800" aria-label="Kudos" title="Kudos">
-            <ThumbsUp className="w-[14px] h-[14px]" />
-          </Link>
-          <Link href="/surveys" className="p-1 rounded-md hover:bg-zinc-100 text-zinc-500 hover:text-zinc-800" aria-label="Surveys" title="Surveys">
-            <FileSpreadsheet className="w-[14px] h-[14px]" />
-          </Link>
+          <TopbarPopoverButton Icon={Inbox} ariaLabel="Inbox" title="Inbox · what's new for you">
+            {(close) => <OsNotificationsPopover onClose={close} />}
+          </TopbarPopoverButton>
+          <TopbarPopoverButton Icon={MessageSquare} ariaLabel="Candor" title="Candor · give private feedback">
+            {(close) => <OsCandorPopover onClose={close} />}
+          </TopbarPopoverButton>
+          <TopbarPopoverButton Icon={Megaphone} ariaLabel="Announcements" title="Announcements">
+            {(close) => <OsAnnouncementsPopover onClose={close} />}
+          </TopbarPopoverButton>
+          <TopbarPopoverButton Icon={ThumbsUp} ariaLabel="Kudos" title="Kudos · recognition for the team">
+            {(close) => <OsKudosPopover onClose={close} />}
+          </TopbarPopoverButton>
+          <TopbarPopoverButton Icon={FileSpreadsheet} ariaLabel="Surveys" title="Surveys · pulses pending for you">
+            {(close) => <OsSurveysPopover onClose={close} />}
+          </TopbarPopoverButton>
         </div>
         <div className="relative ml-1">
           <button
