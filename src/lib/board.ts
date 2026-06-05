@@ -14,7 +14,8 @@
 // the parent Space's membership + visibility decides.
 
 import { prisma } from "@/lib/prisma";
-import type { Visibility, ViewType } from "@/generated/prisma";
+import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
+import { canEditSpace, getSpaceForReader } from "@/lib/space";
 
 const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
@@ -254,20 +255,124 @@ export async function archiveBoard(boardId: string) {
 }
 
 /**
- * Access check — the Phase 6 resolver will replace this. For now:
- * org admin always reads; otherwise the user must read the parent Space.
+ * Resolve board-level read access, composing Space + Board layers.
+ *
+ *   visibility = ORG       → any org member can read (overrides Space if Space is stricter)
+ *   visibility = WORKSPACE → defer to Space access (the default; "inherit")
+ *   visibility = PRIVATE   → BoardMember + Board.ownerId + Space OWNER + org admin only
+ *
+ * Returns the board row when readable, null otherwise.
  */
-export async function canReadBoard(boardId: string, userId: string, accessLevel?: string): Promise<boolean> {
+export async function getBoardForReader(
+  boardId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+) {
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true },
+  });
+  if (!board) return null;
+
+  // Org admins always read.
+  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return board;
+
+  if (board.visibility === "ORG") return board;
+
+  if (board.visibility === "PRIVATE") {
+    // Board owner always passes.
+    if (board.ownerId === userId) return board;
+    // Space OWNERs see through PRIVATE board overrides (they manage the parent).
+    if (board.spaceId) {
+      const spaceMember = await prisma.spaceMember.findUnique({
+        where: { spaceId_userId: { spaceId: board.spaceId, userId } },
+        select: { role: true },
+      });
+      if (spaceMember?.role === "OWNER") return board;
+    }
+    // Otherwise: explicit BoardMember row required.
+    const boardMember = await prisma.boardMember.findUnique({
+      where: { boardId_userId: { boardId, userId } },
+      select: { id: true },
+    });
+    return boardMember ? board : null;
+  }
+
+  // visibility = WORKSPACE (default) → inherit Space rules.
+  if (!board.spaceId) return null;
+  const space = await getSpaceForReader(board.spaceId, userId, accessLevel ?? undefined);
+  return space ? board : null;
+}
+
+/**
+ * Edit access check. Org admins always edit. Otherwise:
+ *   PRIVATE → BoardMember OWNER/ADMIN, Board.ownerId, or Space OWNER
+ *   else    → defer to canEditSpace (Space OWNER/ADMIN)
+ */
+export async function canEditBoard(
+  boardId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<boolean> {
   if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
   const board = await prisma.board.findUnique({
     where: { id: boardId },
-    select: { spaceId: true, visibility: true },
+    select: { spaceId: true, visibility: true, ownerId: true },
   });
-  if (!board?.spaceId) return false;
-  if (board.visibility === "ORG") return true;
-  const member = await prisma.spaceMember.findUnique({
-    where: { spaceId_userId: { spaceId: board.spaceId, userId } },
-    select: { id: true },
+  if (!board) return false;
+  if (board.ownerId === userId) return true;
+
+  if (board.visibility === "PRIVATE") {
+    const boardMember = await prisma.boardMember.findUnique({
+      where: { boardId_userId: { boardId, userId } },
+      select: { role: true },
+    });
+    if (boardMember?.role === "OWNER" || boardMember?.role === "ADMIN") return true;
+    // Fall through to Space OWNER override (admins of the parent Space
+    // can manage even a PRIVATE board).
+    if (board.spaceId) {
+      const spaceMember = await prisma.spaceMember.findUnique({
+        where: { spaceId_userId: { spaceId: board.spaceId, userId } },
+        select: { role: true },
+      });
+      return spaceMember?.role === "OWNER";
+    }
+    return false;
+  }
+
+  if (!board.spaceId) return false;
+  return canEditSpace(board.spaceId, userId, accessLevel ?? undefined);
+}
+
+/**
+ * Legacy thin wrapper. Kept so older call sites compile while we
+ * migrate them to getBoardForReader. New code should use the resolver.
+ */
+export async function canReadBoard(boardId: string, userId: string, accessLevel?: string): Promise<boolean> {
+  const board = await getBoardForReader(boardId, userId, accessLevel);
+  return Boolean(board);
+}
+
+export async function listBoardMembers(boardId: string) {
+  return prisma.boardMember.findMany({
+    where: { boardId },
+    include: {
+      user: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } },
+    },
+    orderBy: { createdAt: "asc" },
   });
-  return !!member;
+}
+
+export async function addBoardMember(boardId: string, userId: string, role: SpaceRole, invitedBy?: string) {
+  return prisma.boardMember.upsert({
+    where: { boardId_userId: { boardId, userId } },
+    create: { boardId, userId, role, invitedBy: invitedBy ?? null },
+    update: { role },
+  });
+}
+
+export async function removeBoardMember(boardId: string, userId: string) {
+  return prisma.boardMember.delete({
+    where: { boardId_userId: { boardId, userId } },
+  });
 }

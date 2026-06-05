@@ -5,12 +5,22 @@
 // inside the BoardItemDrawer today; designed so the same component drops
 // into any drawer/page that has an entity context.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   FileText, Frame, Paperclip, Plus, X, ExternalLink, Loader2, Upload,
-  Image as ImageIcon, FileVideo, FileAudio, FileType,
+  Image as ImageIcon, FileVideo, FileAudio, FileType, Database, Link2,
 } from "lucide-react";
+import { LinkExistingPicker } from "./link-existing-picker";
+
+interface PickerCandidate { id: string; title: string; subtitle?: string | null }
+
+interface LinkExistingConfig {
+  kindLabel: string;
+  loadCandidates: () => Promise<PickerCandidate[]>;
+  /** Returns the target entity type (NOTE / WHITEBOARD / FILE / TABLE) for the POST */
+  targetType: "NOTE" | "WHITEBOARD" | "FILE" | "TABLE";
+}
 
 type EntityType = "BOARD_ITEM" | "TASK" | "BOARD" | "SPACE" | "KRA" | "KPI" | "SOP";
 
@@ -24,13 +34,19 @@ interface HydratedLink {
 interface Props {
   sourceType: EntityType;
   sourceId: string;
+  /** Optional Space context — when present, uploaded files are tagged
+   *  with spaceId so they're filterable under the right Space in the
+   *  Library. Surfaces that don't know their Space (e.g. org-wide
+   *  primitives) can omit this. */
+  spaceId?: string | null;
   canEdit: boolean;
 }
 
-export function LinkedAttachments({ sourceType, sourceId, canEdit }: Props) {
+export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit }: Props) {
   const [notes, setNotes] = useState<HydratedLink[] | null>(null);
   const [boards, setBoards] = useState<HydratedLink[] | null>(null);
   const [files, setFiles] = useState<HydratedLink[] | null>(null);
+  const [tables, setTables] = useState<HydratedLink[] | null>(null);
 
   const load = useCallback(() => {
     Promise.all([
@@ -38,10 +54,12 @@ export function LinkedAttachments({ sourceType, sourceId, canEdit }: Props) {
       fetch(`/api/entity-links?sourceType=${sourceType}&sourceId=${sourceId}&filterTargetType=DOC`).then((r) => r.json()).catch(() => ({ links: [] })),
       fetch(`/api/entity-links?sourceType=${sourceType}&sourceId=${sourceId}&filterTargetType=WHITEBOARD`).then((r) => r.json()).catch(() => ({ links: [] })),
       fetch(`/api/entity-links?sourceType=${sourceType}&sourceId=${sourceId}&filterTargetType=FILE`).then((r) => r.json()).catch(() => ({ links: [] })),
-    ]).then(([noteRes, docRes, wbRes, fileRes]) => {
+      fetch(`/api/entity-links?sourceType=${sourceType}&sourceId=${sourceId}&filterTargetType=TABLE`).then((r) => r.json()).catch(() => ({ links: [] })),
+    ]).then(([noteRes, docRes, wbRes, fileRes, tableRes]) => {
       setNotes([...(noteRes.links ?? []), ...(docRes.links ?? [])]);
       setBoards(wbRes.links ?? []);
       setFiles(fileRes.links ?? []);
+      setTables(tableRes.links ?? []);
     });
   }, [sourceType, sourceId]);
 
@@ -57,6 +75,19 @@ export function LinkedAttachments({ sourceType, sourceId, canEdit }: Props) {
         items={notes}
         canEdit={canEdit}
         emptyHint="Attach a doc that explains context, decisions, or references."
+        sourceType={sourceType}
+        sourceId={sourceId}
+        onReload={load}
+        linkExisting={{
+          kindLabel: "note",
+          targetType: "NOTE",
+          loadCandidates: async () => {
+            const res = await fetch("/api/docs");
+            const data = await res.json().catch(() => ({}));
+            const list: Array<{ id: string; title: string; excerpt?: string | null }> = data?.docs ?? [];
+            return list.map((d) => ({ id: d.id, title: d.title, subtitle: d.excerpt }));
+          },
+        }}
         onAdd={async (title) => {
           const docRes = await fetch("/api/docs", {
             method: "POST",
@@ -89,6 +120,19 @@ export function LinkedAttachments({ sourceType, sourceId, canEdit }: Props) {
         items={boards}
         canEdit={canEdit}
         emptyHint="Sketch a flow, diagram, or retro — drop it in for context."
+        sourceType={sourceType}
+        sourceId={sourceId}
+        onReload={load}
+        linkExisting={{
+          kindLabel: "whiteboard",
+          targetType: "WHITEBOARD",
+          loadCandidates: async () => {
+            const res = await fetch("/api/whiteboards");
+            const data = await res.json().catch(() => ({}));
+            const list: Array<{ id: string; name: string; description?: string | null }> = data?.whiteboards ?? [];
+            return list.map((w) => ({ id: w.id, title: w.name, subtitle: w.description }));
+          },
+        }}
         onAdd={async (name) => {
           const wbRes = await fetch("/api/whiteboards", {
             method: "POST",
@@ -118,9 +162,63 @@ export function LinkedAttachments({ sourceType, sourceId, canEdit }: Props) {
       <FileLinkSection
         sourceType={sourceType}
         sourceId={sourceId}
+        spaceId={spaceId ?? null}
         items={files}
         canEdit={canEdit}
         onReload={load}
+      />
+
+      <LinkSection
+        title="Tables"
+        Icon={Database}
+        items={tables}
+        canEdit={canEdit}
+        emptyHint="Attach a Stackby-style data table — vendor list, CRM, anything spreadsheet-shaped."
+        sourceType={sourceType}
+        sourceId={sourceId}
+        onReload={load}
+        linkExisting={{
+          kindLabel: "table",
+          targetType: "TABLE",
+          loadCandidates: async () => {
+            const res = await fetch("/api/tables");
+            const data = await res.json().catch(() => ({}));
+            // /api/tables returns either an array directly or {data: [...]} via jsonSuccess
+            const list: Array<{ id: string; name: string; description?: string | null; rowCount?: number }> =
+              Array.isArray(data) ? data : (data?.data ?? []);
+            return list.map((t) => ({
+              id: t.id,
+              title: t.name,
+              subtitle: t.description ?? (typeof t.rowCount === "number" ? `${t.rowCount} ${t.rowCount === 1 ? "row" : "rows"}` : null),
+            }));
+          },
+        }}
+        onAdd={async (name) => {
+          const body: Record<string, unknown> = { name };
+          if (spaceId) body.spaceId = spaceId;
+          const tblRes = await fetch("/api/tables", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await tblRes.json();
+          const tableId = data?.id ?? data?.data?.id;
+          if (!tableId) throw new Error("Could not create table");
+          await fetch("/api/entity-links", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              source: { type: sourceType, id: sourceId },
+              target: { type: "TABLE", id: tableId },
+            }),
+          });
+          await load();
+        }}
+        onRemove={async (id) => {
+          await fetch(`/api/entity-links/${id}`, { method: "DELETE" });
+          await load();
+        }}
+        defaultHref={(targetId) => `/tables/${targetId}`}
       />
     </div>
   );
@@ -135,6 +233,10 @@ function LinkSection({
   onAdd,
   onRemove,
   defaultHref,
+  sourceType,
+  sourceId,
+  linkExisting,
+  onReload,
 }: {
   title: string;
   Icon: typeof FileText;
@@ -145,11 +247,37 @@ function LinkSection({
   onRemove: (linkId: string) => Promise<void>;
   /** Fallback URL builder used when the API didn't return target.href. */
   defaultHref: (targetId: string) => string;
+  /** Source context for the link-existing path (passed straight through to EntityLink POST). */
+  sourceType?: EntityType;
+  sourceId?: string;
+  /** When present, renders a small "Link existing" button next to "+ Add". */
+  linkExisting?: LinkExistingConfig;
+  /** Called after a successful Link-existing pick so the parent can refetch. */
+  onReload?: () => void;
 }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const handlePick = async (candidate: PickerCandidate) => {
+    if (!linkExisting || !sourceType || !sourceId) return;
+    await fetch("/api/entity-links", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source: { type: sourceType, id: sourceId },
+        target: { type: linkExisting.targetType, id: candidate.id },
+      }),
+    });
+    onReload?.();
+  };
+
+  const linkedIds = useMemo(
+    () => (items ?? []).map((i) => i.targetId),
+    [items],
+  );
 
   const commit = async () => {
     const v = draft.trim();
@@ -171,21 +299,44 @@ function LinkSection({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 relative">
         <h3 className="text-xs uppercase tracking-wide text-zinc-500 flex items-center gap-1.5">
           <Icon className="h-3 w-3" />
           {title}
           {items ? <span className="text-zinc-400 normal-case font-normal">· {items.length}</span> : null}
         </h3>
         {canEdit && !adding ? (
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
-          >
-            <Plus className="h-3 w-3" />
-            Add
-          </button>
+          <div className="flex items-center gap-2 relative">
+            {linkExisting ? (
+              <button
+                type="button"
+                onClick={() => setPickerOpen((v) => !v)}
+                className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+                title={`Link an existing ${linkExisting.kindLabel}`}
+              >
+                <Link2 className="h-3 w-3" />
+                Link
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+            >
+              <Plus className="h-3 w-3" />
+              Add
+            </button>
+            {linkExisting ? (
+              <LinkExistingPicker
+                open={pickerOpen}
+                onClose={() => setPickerOpen(false)}
+                kindLabel={linkExisting.kindLabel}
+                loadCandidates={linkExisting.loadCandidates}
+                excludeIds={linkedIds}
+                onPick={handlePick}
+              />
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -288,12 +439,14 @@ function fileIconFor(subtitle: string | null | undefined): typeof FileText {
 function FileLinkSection({
   sourceType,
   sourceId,
+  spaceId,
   items,
   canEdit,
   onReload,
 }: {
   sourceType: EntityType;
   sourceId: string;
+  spaceId: string | null;
   items: HydratedLink[] | null;
   canEdit: boolean;
   onReload: () => void;
@@ -318,6 +471,7 @@ function FileLinkSection({
           mimeType: file.type || "application/octet-stream",
           size: upData.size ?? file.size,
           url: upData.url,
+          spaceId: spaceId ?? undefined,
         }),
       });
       if (!entryRes.ok) return;
@@ -356,16 +510,39 @@ function FileLinkSection({
     onReload();
   };
 
+  const linkedFileIds = (items ?? []).map((it) => it.targetId);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const linkExistingFile = async (candidate: { id: string; title: string }) => {
+    await fetch("/api/entity-links", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source: { type: sourceType, id: sourceId },
+        target: { type: "FILE", id: candidate.id },
+      }),
+    });
+    onReload();
+  };
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 relative">
         <h3 className="text-xs uppercase tracking-wide text-zinc-500 flex items-center gap-1.5">
           <Paperclip className="h-3 w-3" />
           Files
           {items ? <span className="text-zinc-400 normal-case font-normal">· {items.length}</span> : null}
         </h3>
         {canEdit ? (
-          <>
+          <div className="flex items-center gap-2 relative">
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+              title="Link an existing file"
+            >
+              <Link2 className="h-3 w-3" />
+              Link
+            </button>
             <input ref={inputRef} type="file" multiple className="hidden" onChange={onPick} />
             <button
               type="button"
@@ -376,7 +553,27 @@ function FileLinkSection({
               {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
               Upload
             </button>
-          </>
+            <LinkExistingPicker
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              kindLabel="file"
+              excludeIds={linkedFileIds}
+              loadCandidates={async () => {
+                const res = await fetch("/api/files");
+                const data = await res.json().catch(() => ({}));
+                const list: Array<{ id: string; name: string; mimeType?: string; size?: number }> =
+                  Array.isArray(data) ? data : (data?.data ?? []);
+                return list.map((f) => ({
+                  id: f.id,
+                  title: f.name,
+                  subtitle: [f.mimeType, typeof f.size === "number" ? `${Math.max(1, Math.round(f.size / 1024))} KB` : null]
+                    .filter(Boolean)
+                    .join(" · "),
+                }));
+              }}
+              onPick={linkExistingFile}
+            />
+          </div>
         ) : null}
       </div>
 

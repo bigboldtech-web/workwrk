@@ -211,6 +211,11 @@ model FileEntry {
   url            String // resolvable URL: /api/uploads/<key> or S3
   folderId       String?
   folder         FileFolder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  // 🆕 Phase 20 — Optional Space anchor so an attachment uploaded from
+  // a Board/Item inside a Space is filterable + restorable in the
+  // right context. Org-wide uploads (Library tab without a Space chip
+  // selected) leave this null.
+  spaceId        String?
   uploadedById   String
   // Light, optional metadata — text caption, color tag for sorting.
   description    String?
@@ -225,6 +230,7 @@ model FileEntry {
 
   @@index([organizationId, folderId])
   @@index([uploadedById])
+  @@index([organizationId, spaceId])
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -298,12 +304,19 @@ model DataTable {
   // mirrors how Forms expose a public responder. Org members still see
   // the full editor; outside viewers get a read-only grid.
   isPublic       Boolean        @default(false)
+  // 🆕 Phase 32 — Optional Space anchor so a table created from inside
+  // a Space (via the SpaceCreatePopover Database row, or auto-tagged
+  // from a board's drawer) shows under the right Space chip in /library.
+  // Org-wide tables (Library create with no Space chip selected) leave
+  // this null and stay visible to everyone in the org.
+  spaceId        String?
   createdById    String
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   rows           DataTableRow[]
 
   @@index([organizationId])
+  @@index([organizationId, spaceId])
   @@index([createdById])
 }
 
@@ -527,6 +540,8 @@ model User {
   // 🆕 Phase 1 shell — ClickUp parity substrate
   preference             UserPreference?
   spaceMemberships       SpaceMember[]
+  // 🆕 Phase 23 — per-board access overrides
+  boardMemberships       BoardMember[] @relation("BoardMemberUser")
   dottedLineToManagers   UserDottedLine[] @relation("DottedLineFromUser")
   dottedLineFromReports  UserDottedLine[] @relation("DottedLineToManager")
   // 🆕 Phase 5 — weekly review heartbeat
@@ -606,10 +621,18 @@ model Invitation {
   // KPIs underneath — no separate kpiIds array needed.
   kraIds         String[]     @default([])
   sopIds         String[]     @default([])
+  // 🆕 Phase 18 — Space-targeted invitation. When `spaceId` is set the
+  // accept flow ALSO creates a SpaceMember row (role = spaceRole) so
+  // the invitee lands inside the Space they were invited to. The
+  // KRA/SOP gate is bypassed for this code path — joining a Space is
+  // a lighter intent than full org-onboarding.
+  spaceId        String?
+  spaceRole      SpaceRole?
   createdAt      DateTime     @default(now())
 
   @@index([token])
   @@index([organizationId])
+  @@index([spaceId])
 }
 
 // Workspace — a named space inside a product (e.g. "Sales Team A" /
@@ -4786,8 +4809,9 @@ model Board {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  views View[]
-  items Item[]
+  views   View[]
+  items   Item[]
+  members BoardMember[]
 
   @@unique([organizationId, slug])
   @@index([organizationId, productSlug])
@@ -4795,6 +4819,33 @@ model Board {
   @@index([spaceId])
   @@index([folderId])
   @@index([itemType])
+}
+
+// 🆕 Phase 23 — Per-Board access overrides. Layered on top of Space:
+//   - When Board.visibility = WORKSPACE (default), the resolver defers
+//     to Space access entirely. No BoardMember rows needed.
+//   - When Board.visibility = PRIVATE, only listed BoardMembers + the
+//     Board's ownerId + Space OWNERs + org admins can read. Tightens
+//     a board below its Space's visibility.
+//   - When Board.visibility = ORG, anyone in the org can read regardless
+//     of Space membership. Loosens above its Space.
+//
+// Role semantics mirror SpaceRole. OWNER + ADMIN can mutate; MEMBER/GUEST
+// are read-only at the API gate (UI may grant comment access).
+model BoardMember {
+  id        String    @id @default(cuid())
+  boardId   String
+  board     Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation("BoardMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  role      SpaceRole @default(MEMBER)
+  invitedBy String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([boardId, userId])
+  @@index([userId])
+  @@index([boardId, role])
 }
 
 model View {
@@ -4845,6 +4896,14 @@ model Item {
   groupKey       String?
   position       Float        @default(0)
   archivedAt     DateTime?
+  // 🆕 Phase 58 — first-class date columns. Pre-Phase 58 dates lived
+  // in metadata under user-defined keys (per-board DATE field). The
+  // Calendar + Gantt views still project metadata as a fallback, but
+  // these columns let new items set their schedule directly without
+  // needing a board-level field shelf entry. startAt is the optional
+  // beginning of a duration; dueAt is the deadline / single-day date.
+  startAt        DateTime?
+  dueAt          DateTime?
   metadata       Json         @default("{}")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -4852,6 +4911,7 @@ model Item {
   @@unique([itemType, itemId])
   @@index([organizationId, boardId])
   @@index([boardId, position])
+  @@index([boardId, dueAt])
   @@index([itemType])
   @@index([ownerId])
 }

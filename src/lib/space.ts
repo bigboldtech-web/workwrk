@@ -126,6 +126,41 @@ export async function listSpacesForUser(
 }
 
 /**
+ * Batch visibility check. Given a set of spaceIds, returns the subset
+ * the viewer can read. Used by Library endpoints to filter out items
+ * pinned to Spaces the viewer isn't in.
+ *
+ * Org admins see all → returns the full input set.
+ * Otherwise: ORG-visibility Spaces + Spaces the viewer is a member of.
+ *
+ * One query per category instead of N — safe for big result pages.
+ */
+export async function visibleSpaceIds(
+  spaceIds: string[],
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<Set<string>> {
+  if (spaceIds.length === 0) return new Set();
+  const unique = Array.from(new Set(spaceIds));
+  if (isOrgAdminAccessLevel(accessLevel)) return new Set(unique);
+
+  const [orgVis, memberOf] = await Promise.all([
+    prisma.space.findMany({
+      where: { id: { in: unique }, visibility: "ORG" },
+      select: { id: true },
+    }),
+    prisma.spaceMember.findMany({
+      where: { userId, spaceId: { in: unique } },
+      select: { spaceId: true },
+    }),
+  ]);
+  const out = new Set<string>();
+  for (const s of orgVis) out.add(s.id);
+  for (const m of memberOf) out.add(m.spaceId);
+  return out;
+}
+
+/**
  * Read access check. Org admins always read. Otherwise:
  *   - ORG visibility → any org member reads.
  *   - WORKSPACE / PRIVATE → must have a SpaceMember row.

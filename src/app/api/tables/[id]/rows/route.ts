@@ -9,12 +9,21 @@ import type { Prisma } from "@/generated/prisma";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
+import { getSpaceForReader } from "@/lib/space";
 
-async function resolveTable(id: string, orgId: string) {
-  return prisma.dataTable.findFirst({
+// Phase 32b — gate by parent Space visibility. Returns null when the
+// table doesn't exist OR is scoped to a Space the viewer can't read.
+async function resolveTable(id: string, orgId: string, userId: string, accessLevel: string | null | undefined) {
+  const table = await prisma.dataTable.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, organizationId: true },
+    select: { id: true, organizationId: true, spaceId: true },
   });
+  if (!table) return null;
+  if (table.spaceId) {
+    const space = await getSpaceForReader(table.spaceId, userId, accessLevel ?? "EMPLOYEE");
+    if (!space) return null;
+  }
+  return table;
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,7 +32,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const orgId = getOrgId(session);
   const { id } = await params;
 
-  const table = await resolveTable(id, orgId);
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
+  const table = await resolveTable(id, orgId, getUserId(session), accessLevel);
   if (!table) return jsonError("not found", 404);
 
   const rows = await prisma.dataTableRow.findMany({
@@ -41,7 +51,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const userId = getUserId(session);
   const { id } = await params;
 
-  const table = await resolveTable(id, orgId);
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
+  const table = await resolveTable(id, orgId, getUserId(session), accessLevel);
   if (!table) return jsonError("not found", 404);
 
   const body = await req.json();
@@ -71,7 +82,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const orgId = getOrgId(session);
   const { id } = await params;
 
-  const table = await resolveTable(id, orgId);
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
+  const table = await resolveTable(id, orgId, getUserId(session), accessLevel);
   if (!table) return jsonError("not found", 404);
 
   const body = await req.json();
@@ -102,7 +114,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const orgId = getOrgId(session);
   const { id } = await params;
 
-  const table = await resolveTable(id, orgId);
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
+  const table = await resolveTable(id, orgId, getUserId(session), accessLevel);
   if (!table) return jsonError("not found", 404);
 
   const body = await req.json();

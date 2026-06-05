@@ -11,12 +11,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Library as LibraryIcon, FileText, Frame, Folder, Plus, Search, Loader2, Clock,
   Upload, Star, Trash2, Download, ImageIcon, FileVideo, FileAudio, FileType,
+  Database,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
-type Tab = "notes" | "whiteboards" | "files";
+type Tab = "notes" | "whiteboards" | "files" | "tables";
 
 interface ApiDoc {
   id: string;
@@ -53,14 +54,32 @@ function relTime(iso: string): string {
 
 export default function LibraryPage() {
   const searchParams = useSearchParams();
+  const tabParam = searchParams?.get("tab");
   const initialTab: Tab =
-    searchParams?.get("tab") === "whiteboards"
-      ? "whiteboards"
-      : searchParams?.get("tab") === "files"
-        ? "files"
-        : "notes";
+    tabParam === "whiteboards" ? "whiteboards"
+    : tabParam === "files" ? "files"
+    : tabParam === "tables" ? "tables"
+    : "notes";
   const [tab, setTab] = useState<Tab>(initialTab);
   const [query, setQuery] = useState("");
+  const [spaces, setSpaces] = useState<SpaceChip[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/spaces")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        const list: SpaceChip[] = Array.isArray(data?.spaces)
+          ? data.spaces.map((s: { id: string; name: string; color: string | null; icon: string | null }) => ({
+              id: s.id, name: s.name, color: s.color, icon: s.icon,
+            }))
+          : [];
+        setSpaces(list);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   return (
     <>
@@ -84,6 +103,9 @@ export default function LibraryPage() {
           <TabPill active={tab === "files"} onClick={() => setTab("files")} icon={<Folder className="h-3.5 w-3.5" />}>
             Files
           </TabPill>
+          <TabPill active={tab === "tables"} onClick={() => setTab("tables")} icon={<Database className="h-3.5 w-3.5" />}>
+            Tables
+          </TabPill>
 
           <div className="ml-auto relative w-64">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
@@ -99,9 +121,10 @@ export default function LibraryPage() {
       </div>
 
       <div className="p-6">
-        {tab === "notes" ? <NotesTab query={query} /> : null}
-        {tab === "whiteboards" ? <WhiteboardsTab query={query} /> : null}
-        {tab === "files" ? <FilesTab query={query} /> : null}
+        {tab === "notes" ? <NotesTab query={query} spaces={spaces} /> : null}
+        {tab === "whiteboards" ? <WhiteboardsTab query={query} spaces={spaces} /> : null}
+        {tab === "files" ? <FilesTab query={query} spaces={spaces} /> : null}
+        {tab === "tables" ? <TablesTab query={query} spaces={spaces} /> : null}
       </div>
     </>
   );
@@ -138,30 +161,41 @@ function TabPill({
 // Notes tab
 // ────────────────────────────────────────────────────────────────────
 
-function NotesTab({ query }: { query: string }) {
+function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
   const router = useRouter();
   const { toast } = useOsToast();
   const [rows, setRows] = useState<ApiDoc[] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [activeSpaceId, setActiveSpaceId] = useState<string | "all" | "unscoped">("all");
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/docs");
-      const data = await res.json();
-      setRows(data.docs ?? []);
-    } catch {
-      setRows([]);
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  const load = useCallback(() => {
+    let url = "/api/docs";
+    if (activeSpaceId === "unscoped") url += "?standaloneOnly=1";
+    else if (activeSpaceId !== "all") url += `?entityType=SPACE&entityId=${activeSpaceId}`;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setRows(data.docs ?? []);
+      })
+      .catch(() => setRows([]));
+  }, [activeSpaceId]);
+  useEffect(() => { load(); }, [load]);
 
   const newNote = async () => {
     setCreating(true);
     try {
+      const body: Record<string, unknown> = { title: "Untitled note" };
+      // Notes created from a specific Space chip get tagged to that
+      // Space so the chip count stays consistent on next refresh.
+      if (activeSpaceId !== "all" && activeSpaceId !== "unscoped") {
+        body.entityType = "SPACE";
+        body.entityId = activeSpaceId;
+      }
       const res = await fetch("/api/docs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "Untitled note" }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       const id = data?.doc?.id;
@@ -185,6 +219,16 @@ function NotesTab({ query }: { query: string }) {
 
   return (
     <div>
+      {spaces.length > 0 ? (
+        <div className="mb-3 flex items-center gap-1.5 flex-wrap">
+          <FileSpaceChip label="All" active={activeSpaceId === "all"} onClick={() => setActiveSpaceId("all")} />
+          <FileSpaceChip label="Unscoped" active={activeSpaceId === "unscoped"} onClick={() => setActiveSpaceId("unscoped")} />
+          {spaces.map((s) => (
+            <FileSpaceChip key={s.id} label={s.name} color={s.color} active={activeSpaceId === s.id} onClick={() => setActiveSpaceId(s.id)} />
+          ))}
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between mb-4">
         <div className="text-[12.5px] text-zinc-500">
           {rows === null ? "Loading…" : `${filtered.length} note${filtered.length === 1 ? "" : "s"}`}
@@ -247,32 +291,42 @@ function NotesTab({ query }: { query: string }) {
 // Whiteboards tab
 // ────────────────────────────────────────────────────────────────────
 
-function WhiteboardsTab({ query }: { query: string }) {
+function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
   const router = useRouter();
   const { toast } = useOsToast();
   const [rows, setRows] = useState<ApiWhiteboard[] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [activeSpaceId, setActiveSpaceId] = useState<string | "all" | "unscoped">("all");
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/whiteboards");
-      const data = await res.json();
-      setRows(data.whiteboards ?? []);
-    } catch {
-      setRows([]);
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  const load = useCallback(() => {
+    let url = "/api/whiteboards";
+    if (activeSpaceId === "unscoped") url += "?spaceId=unscoped";
+    else if (activeSpaceId !== "all") url += `?spaceId=${activeSpaceId}`;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setRows(data.whiteboards ?? []);
+      })
+      .catch(() => setRows([]));
+  }, [activeSpaceId]);
+  useEffect(() => { load(); }, [load]);
 
   const newBoard = async () => {
     const name = window.prompt("Whiteboard name?", "Untitled whiteboard")?.trim();
     if (!name) return;
     setCreating(true);
     try {
+      const body: Record<string, unknown> = { name };
+      // Whiteboards created from a specific Space chip get tagged so
+      // the chip count stays consistent on next refresh.
+      if (activeSpaceId !== "all" && activeSpaceId !== "unscoped") {
+        body.spaceId = activeSpaceId;
+      }
       const res = await fetch("/api/whiteboards", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       const id = data?.whiteboard?.id;
@@ -296,6 +350,16 @@ function WhiteboardsTab({ query }: { query: string }) {
 
   return (
     <div>
+      {spaces.length > 0 ? (
+        <div className="mb-3 flex items-center gap-1.5 flex-wrap">
+          <FileSpaceChip label="All" active={activeSpaceId === "all"} onClick={() => setActiveSpaceId("all")} />
+          <FileSpaceChip label="Unscoped" active={activeSpaceId === "unscoped"} onClick={() => setActiveSpaceId("unscoped")} />
+          {spaces.map((s) => (
+            <FileSpaceChip key={s.id} label={s.name} color={s.color} active={activeSpaceId === s.id} onClick={() => setActiveSpaceId(s.id)} />
+          ))}
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between mb-4">
         <div className="text-[12.5px] text-zinc-500">
           {rows === null ? "Loading…" : `${filtered.length} whiteboard${filtered.length === 1 ? "" : "s"}`}
@@ -369,8 +433,16 @@ interface ApiFile {
   starred: boolean;
   description?: string | null;
   uploadedById: string;
+  spaceId?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+interface SpaceChip {
+  id: string;
+  name: string;
+  color: string | null;
+  icon: string | null;
 }
 
 function formatBytes(n: number): string {
@@ -387,22 +459,27 @@ function MimeIcon({ mimeType, className }: { mimeType: string; className?: strin
   return <FileText className={className} />;
 }
 
-function FilesTab({ query }: { query: string }) {
+function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
   const { toast } = useOsToast();
   const [rows, setRows] = useState<ApiFile[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [activeSpaceId, setActiveSpaceId] = useState<string | "all" | "unscoped">("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
-    fetch("/api/files")
+    const url =
+      activeSpaceId === "all" || activeSpaceId === "unscoped"
+        ? "/api/files"
+        : `/api/files?spaceId=${activeSpaceId}`;
+    fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const list: ApiFile[] = Array.isArray(data) ? data : (data?.data ?? []);
         setRows(list);
       })
       .catch(() => setRows([]));
-  }, []);
+  }, [activeSpaceId]);
 
   useEffect(() => {
     load();
@@ -480,12 +557,16 @@ function FilesTab({ query }: { query: string }) {
 
   const filtered = useMemo(() => {
     if (!rows) return [];
+    let base = rows;
+    if (activeSpaceId === "unscoped") {
+      base = base.filter((f) => !f.spaceId);
+    }
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((f) =>
+    if (!q) return base;
+    return base.filter((f) =>
       f.name.toLowerCase().includes(q) || (f.description ?? "").toLowerCase().includes(q),
     );
-  }, [rows, query]);
+  }, [rows, query, activeSpaceId]);
 
   return (
     <div
@@ -494,6 +575,30 @@ function FilesTab({ query }: { query: string }) {
       onDrop={onDrop}
       className={dragOver ? "ring-2 ring-zinc-900 ring-offset-2 ring-offset-zinc-50 rounded-xl" : ""}
     >
+      {spaces.length > 0 ? (
+        <div className="mb-3 flex items-center gap-1.5 flex-wrap">
+          <FileSpaceChip
+            label="All"
+            active={activeSpaceId === "all"}
+            onClick={() => setActiveSpaceId("all")}
+          />
+          <FileSpaceChip
+            label="Unscoped"
+            active={activeSpaceId === "unscoped"}
+            onClick={() => setActiveSpaceId("unscoped")}
+          />
+          {spaces.map((s) => (
+            <FileSpaceChip
+              key={s.id}
+              label={s.name}
+              color={s.color}
+              active={activeSpaceId === s.id}
+              onClick={() => setActiveSpaceId(s.id)}
+            />
+          ))}
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between mb-4">
         <div className="text-[12.5px] text-zinc-500">
           {rows === null ? "Loading…" : `${filtered.length} file${filtered.length === 1 ? "" : "s"}`}
@@ -606,6 +711,142 @@ function FilesTab({ query }: { query: string }) {
   );
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Tables tab — Stackby/Airtable-style data tables. Lego primitive
+// (Phase 32). Each row is a DataTable with column count + row count.
+// ────────────────────────────────────────────────────────────────────
+
+interface ApiTable {
+  id: string;
+  name: string;
+  description?: string | null;
+  columns: { id: string; type: string; label: string }[];
+  rowCount: number;
+  spaceId?: string | null;
+  updatedAt: string;
+}
+
+function TablesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
+  const router = useRouter();
+  const { toast } = useOsToast();
+  const [rows, setRows] = useState<ApiTable[] | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [activeSpaceId, setActiveSpaceId] = useState<string | "all" | "unscoped">("all");
+
+  const load = useCallback(() => {
+    let url = "/api/tables";
+    if (activeSpaceId === "unscoped") url += "?spaceId=unscoped";
+    else if (activeSpaceId !== "all") url += `?spaceId=${activeSpaceId}`;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const list: ApiTable[] = Array.isArray(data) ? data : (data?.data ?? []);
+        setRows(list);
+      })
+      .catch(() => setRows([]));
+  }, [activeSpaceId]);
+  useEffect(() => { load(); }, [load]);
+
+  const newTable = async () => {
+    setCreating(true);
+    try {
+      const body: Record<string, unknown> = { name: "Untitled table" };
+      if (activeSpaceId !== "all" && activeSpaceId !== "unscoped") {
+        body.spaceId = activeSpaceId;
+      }
+      const res = await fetch("/api/tables", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      const id = data?.id ?? data?.data?.id;
+      if (id) router.push(`/tables/${id}`);
+      else throw new Error();
+    } catch {
+      toast("Couldn't create table");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    if (!rows) return [];
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((t) =>
+      t.name.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, query]);
+
+  return (
+    <div>
+      {spaces.length > 0 ? (
+        <div className="mb-3 flex items-center gap-1.5 flex-wrap">
+          <FileSpaceChip label="All" active={activeSpaceId === "all"} onClick={() => setActiveSpaceId("all")} />
+          <FileSpaceChip label="Unscoped" active={activeSpaceId === "unscoped"} onClick={() => setActiveSpaceId("unscoped")} />
+          {spaces.map((s) => (
+            <FileSpaceChip key={s.id} label={s.name} color={s.color} active={activeSpaceId === s.id} onClick={() => setActiveSpaceId(s.id)} />
+          ))}
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-[12.5px] text-zinc-500">
+          {rows === null ? "Loading…" : `${filtered.length} table${filtered.length === 1 ? "" : "s"}`}
+        </div>
+        <button
+          type="button"
+          onClick={newTable}
+          disabled={creating}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
+        >
+          {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          New table
+        </button>
+      </div>
+
+      {rows === null ? (
+        <div className="text-zinc-400 text-[13px]">Loading tables…</div>
+      ) : filtered.length === 0 ? (
+        <EmptyTab
+          icon={<Database className="h-8 w-8 text-zinc-300" />}
+          title={query ? `No tables match "${query}"` : "No tables yet"}
+          subtitle="Stackby-style flexible data tables. Build a CRM, a vendor list, or any spreadsheet — drop them into tasks and Spaces."
+        />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {filtered.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => router.push(`/tables/${t.id}`)}
+              className="text-left rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Database className="h-3.5 w-3.5 text-zinc-400" />
+                <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+                  {t.columns.length} column{t.columns.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="text-[13px] font-medium text-zinc-900 line-clamp-1">{t.name}</div>
+              {t.description ? (
+                <div className="mt-1 text-[12px] text-zinc-500 line-clamp-2">{t.description}</div>
+              ) : null}
+              <div className="mt-2 flex items-center gap-1 text-[11px] text-zinc-400">
+                <Clock className="h-3 w-3" />
+                {relTime(t.updatedAt)}
+                <span className="text-zinc-300">·</span>
+                {t.rowCount} {t.rowCount === 1 ? "row" : "rows"}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EmptyTab({
   icon,
   title,
@@ -621,5 +862,38 @@ function EmptyTab({
       <div className="text-[14px] font-medium text-zinc-900 mb-1">{title}</div>
       <div className="text-[12.5px] text-zinc-500 max-w-sm mx-auto">{subtitle}</div>
     </div>
+  );
+}
+
+function FileSpaceChip({
+  label,
+  color,
+  active,
+  onClick,
+}: {
+  label: string;
+  color?: string | null;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-[11.5px] px-2 py-1 rounded-full border transition inline-flex items-center gap-1.5"
+      style={{
+        backgroundColor: active ? (color ?? "#18181b") : "white",
+        borderColor: active ? (color ?? "#18181b") : "rgb(228 228 231)",
+        color: active ? "white" : "rgb(82 82 91)",
+      }}
+    >
+      {color ? (
+        <span
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ backgroundColor: active ? "white" : color }}
+        />
+      ) : null}
+      {label}
+    </button>
   );
 }

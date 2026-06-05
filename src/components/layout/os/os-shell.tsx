@@ -46,14 +46,14 @@ export function OsShell({ children }: { children: React.ReactNode }) {
     <OsShellProvider>
       <OsToastProvider>
         <ThemeApplier />
-        <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5">
+        <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5 overflow-hidden">
           <ClickTopbar />
           <NotificationBanner />
-          <div className="flex-1 flex min-h-0 relative gap-1.5">
+          <div className="flex-1 flex min-h-0 relative gap-1.5 overflow-hidden">
             <ClickAppRail />
             <ClickSidebar />
             <AppsMorePopover />
-            <main className="flex-1 min-w-0 overflow-y-auto bg-white rounded-xl border border-zinc-200">
+            <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-white rounded-xl border border-zinc-200">
               {children}
             </main>
             <OsSidekickPanel />

@@ -10,7 +10,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, ListChecks, FolderPlus, FileText, BarChart3, Brush, ClipboardCheck,
-  Download, LayoutTemplate, ChevronRight, Loader2,
+  Download, LayoutTemplate, ChevronRight, Loader2, Database,
 } from "lucide-react";
 import { useOsToast } from "./toast";
 
@@ -157,6 +157,26 @@ function SpaceCreateMenu({
     }
   };
 
+  const createDatabase = async () => {
+    setBusyKind("database");
+    try {
+      const res = await fetch("/api/tables", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Untitled table", spaceId }),
+      });
+      const data = await res.json();
+      const id = data?.id ?? data?.data?.id;
+      if (!id) throw new Error();
+      onCreated?.();
+      router.push(`/tables/${id}`);
+    } catch {
+      toast("Couldn't create database");
+    } finally {
+      setBusyKind(null);
+    }
+  };
+
   return (
     <div
       role="menu"
@@ -191,6 +211,13 @@ function SpaceCreateMenu({
         label="Whiteboard"
         busy={busyKind === "whiteboard"}
         onClick={createWhiteboard}
+      />
+      <MenuItem
+        Icon={Database}
+        label="Database"
+        subtitle="Flexible spreadsheet · CRM, lists, anything"
+        busy={busyKind === "database"}
+        onClick={createDatabase}
       />
       <MenuItem
         Icon={ClipboardCheck}

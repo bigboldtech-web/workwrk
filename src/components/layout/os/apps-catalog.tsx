@@ -10,14 +10,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
-  Video, Trophy, Clock, LayoutGrid,
+  Video, Trophy, Clock,
   Inbox, MessageSquare, CheckSquare, ListChecks, MoreHorizontal,
-  Plus, ChevronDown, ChevronRight, Star, Lock,
-  TrendingUp, Megaphone, Briefcase, Layers, BookOpen, Wrench, Building2,
-  LifeBuoy, HeartHandshake, GraduationCap, UserCheck, Award, ThumbsUp, FileSpreadsheet,
-  HardDrive, Server, Receipt, Coins, Database, Code2, Settings as SettingsIcon,
-  ShoppingBag, Workflow, AlertTriangle, ScrollText, Gavel, Palette, Boxes,
-  TrendingDown, ClipboardList, FileBarChart, Lightbulb, ShieldCheck,
+  Plus, ChevronDown, ChevronRight, Star,
+  Megaphone, Briefcase, BookOpen, Wrench, Building2,
+  HeartHandshake, GraduationCap, UserCheck, Award, ThumbsUp, FileSpreadsheet,
+  HardDrive, Boxes,
+  Settings as SettingsIcon,
+  ShoppingBag, Workflow, ScrollText, Palette,
+  ShieldCheck,
   Library as LibraryIcon, Folder,
   type LucideIcon,
 } from "lucide-react";
@@ -26,12 +27,9 @@ import { usePathname } from "next/navigation";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
-import { SpaceCreateTrigger } from "./space-create-popover";
-import { SpaceMoreTrigger } from "./space-more-menu";
 import { ShareSpaceDialog } from "./share-space-dialog";
+import { SpaceTreeRow } from "./space-tree-row";
 import { useSidebarSearch } from "./sidebar-search-context";
-import { createElement } from "react";
-import { getSpaceIcon } from "./space-icon-catalog";
 
 export interface AppEntry {
   key: string;
@@ -164,21 +162,6 @@ interface SpaceRow {
   color: string | null;
 }
 
-const DEFAULT_SPACE_COLOR = "#71717A";
-
-function SpaceTile({ space }: { space: SpaceRow }) {
-  const Icon = getSpaceIcon(space.icon);
-  const bg = space.color ?? DEFAULT_SPACE_COLOR;
-  return (
-    <span
-      className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
-      style={{ backgroundColor: bg }}
-    >
-      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : (space.name[0] ?? "?")}
-    </span>
-  );
-}
-
 /** Default order if /api/preferences isn't loaded yet or the user hasn't customised. */
 const DEFAULT_SECTIONS_ORDER: string[] = ["favorites", "spaces"];
 
@@ -285,38 +268,15 @@ function HomeSidebar() {
         {visibleSpaces.map((s) => {
           const isActive = pathname === `/spaces/${s.slug}`;
           return (
-            <li
+            <SpaceTreeRow
               key={s.id}
-              className={`group/space relative flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-md ${
-                isActive ? "bg-zinc-100" : "hover:bg-zinc-50"
-              }`}
-            >
-              <Link
-                href={`/spaces/${s.slug}`}
-                className={`flex items-center gap-2 text-[13px] flex-1 min-w-0 ${
-                  isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
-                }`}
-              >
-                <SpaceTile space={s} />
-                <span className="truncate flex-1">{s.name}</span>
-                {s.visibility === "PRIVATE" ? (
-                  <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
-                ) : null}
-              </Link>
-              <span className="opacity-0 group-hover/space:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
-                <SpaceMoreTrigger
-                  space={s}
-                  onUpdated={() => void reload()}
-                  onRequestShare={() => setShareDialogSpace(s)}
-                />
-                <SpaceCreateTrigger
-                  spaceId={s.id}
-                  onRequestBoard={() => setBoardDialogSpaceId(s.id)}
-                  onRequestFolder={() => setFolderDialogSpaceId(s.id)}
-                  onCreated={() => void reload()}
-                />
-              </span>
-            </li>
+              space={s}
+              isActive={isActive}
+              onReloadSpaces={() => void reload()}
+              onRequestShareSpace={() => setShareDialogSpace(s)}
+              onRequestNewBoard={() => setBoardDialogSpaceId(s.id)}
+              onRequestNewFolder={() => setFolderDialogSpaceId(s.id)}
+            />
           );
         })}
         {q && visibleSpaces.length === 0 ? (
@@ -622,48 +582,12 @@ export const APPS: AppEntry[] = [
     category: "Core", defaultPinned: true,
     newAction: { label: "Log time", href: "/timesheets?new=1" } },
 
-  // ── Sales (off by default) ──────────────────────────────────
-  { key: "crm", label: "CRM", Icon: TrendingUp, defaultHref: "/crm",
-    matchPaths: ["/crm"], category: "Sales",
-    Sidebar: linksSidebar([
-      { href: "/crm",            label: "CRM hub",    Icon: TrendingUp },
-      { href: "/crm/leads",      label: "Leads",      Icon: UserCheck },
-      { href: "/crm/accounts",   label: "Accounts",   Icon: Building2 },
-      { href: "/crm/pipeline",   label: "Pipeline",   Icon: Workflow },
-      { href: "/crm/activities", label: "Activities", Icon: MessageSquare },
-      { href: "/crm/reports",    label: "Reports",    Icon: FileBarChart },
-    ]) },
-
-  // ── Marketing ───────────────────────────────────────────────
-  { key: "marketing", label: "Marketing", Icon: Megaphone, defaultHref: "/marketing",
-    matchPaths: ["/marketing"], category: "Marketing",
-    Sidebar: linksSidebar([
-      { href: "/marketing",           label: "Marketing hub", Icon: Megaphone },
-      { href: "/marketing/campaigns", label: "Campaigns",     Icon: TrendingUp },
-      { href: "/marketing/content",   label: "Content",       Icon: FileText },
-      { href: "/marketing/events",    label: "Events",        Icon: Calendar },
-    ]) },
-
-  // ── Service ─────────────────────────────────────────────────
-  { key: "helpdesk", label: "Helpdesk", Icon: LifeBuoy, defaultHref: "/helpdesk",
-    matchPaths: ["/helpdesk"], category: "Service",
-    Sidebar: linksSidebar([
-      { href: "/helpdesk",           label: "Helpdesk",         Icon: LifeBuoy },
-      { href: "/helpdesk/tickets",   label: "Helpdesk tickets", Icon: ClipboardList },
-      { href: "/helpdesk/customers", label: "Customers",        Icon: Users },
-    ]) },
-  { key: "itsm", label: "ITSM", Icon: Server, defaultHref: "/itsm",
-    matchPaths: ["/itsm", "/process-runs"], category: "Service",
-    Sidebar: linksSidebar([
-      { href: "/itsm",           label: "ITSM hub",        Icon: Server },
-      { href: "/itsm/incidents", label: "Incidents",       Icon: AlertTriangle },
-      { href: "/itsm/tickets",   label: "Service tickets", Icon: ClipboardList },
-      { href: "/itsm/problems",  label: "Problems",        Icon: AlertTriangle },
-      { href: "/itsm/changes",   label: "Changes",         Icon: Workflow },
-      { href: "/itsm/cmdb",      label: "CMDB",            Icon: Database },
-      { href: "/itsm/kb",        label: "Knowledge base",  Icon: BookOpen },
-      { href: "/process-runs",   label: "Process runs",    Icon: Workflow },
-    ]) },
+  // ── PPMS scope (2026-06-03): CRM / Marketing / Helpdesk / ITSM
+  // intentionally not pinned. WorkwrK is a People + Project Management
+  // System; sales/external-support/IT are not core. Their /api routes
+  // and pages still exist for direct linking if needed.
+  // Tools + Assets ARE PPMS-core (per-employee provisioning) — see
+  // the People section below.
 
   // ── People & HR ─────────────────────────────────────────────
   { key: "recruiting", label: "Recruiting", Icon: UserCheck, defaultHref: "/recruiting",
@@ -699,62 +623,26 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/surveys"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: FileSpreadsheet }]) },
 
-  // ── Time & Pay ──────────────────────────────────────────────
+  // ── Time off ────────────────────────────────────────────────
+  // PPMS scope: Payroll / Benefits / Expenses / Compensation are
+  // partner-integration targets (Phase 2 strategy), not in-house.
+  // Financials / Planning / Procurement / Dev sit outside PPMS —
+  // pages remain on disk; just not pinned to the rail.
   { key: "time-off", label: "Time off", Icon: Calendar, defaultHref: "/time-off",
     matchPaths: ["/time-off"], category: "Time & Pay",
     Sidebar: linksSidebar([{ href: "/time-off", label: "Time off", Icon: Calendar }]) },
-  { key: "payroll", label: "Payroll", Icon: Coins, defaultHref: "/payroll",
-    matchPaths: ["/payroll"], category: "Time & Pay", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([
-      { href: "/payroll",      label: "Payroll",  Icon: Coins },
-      { href: "/payroll/runs", label: "Pay runs", Icon: Workflow },
-    ]) },
-  { key: "benefits", label: "Benefits", Icon: HeartHandshake, defaultHref: "/benefits",
-    matchPaths: ["/benefits"], category: "Time & Pay", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([{ href: "/benefits", label: "Benefits", Icon: HeartHandshake }]) },
-  { key: "expenses", label: "Expenses", Icon: Receipt, defaultHref: "/expenses",
-    matchPaths: ["/expenses"], category: "Time & Pay",
-    Sidebar: linksSidebar([{ href: "/expenses", label: "Expenses", Icon: Receipt }]) },
-  { key: "compensation", label: "Compen..", Icon: Coins, defaultHref: "/compensation",
-    matchPaths: ["/compensation"], category: "Time & Pay", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([{ href: "/compensation", label: "Compensation", Icon: Coins }]) },
 
-  // ── Finance ─────────────────────────────────────────────────
-  { key: "financials", label: "Financ..", Icon: BarChart3, defaultHref: "/financials",
-    matchPaths: ["/financials"], category: "Finance", requiredAccess: "org-admin",
-    Sidebar: linksSidebar([
-      { href: "/financials",            label: "Financials hub",  Icon: BarChart3 },
-      { href: "/financials/accounts",   label: "GL accounts",     Icon: Database },
-      { href: "/financials/entries",    label: "Journal entries", Icon: FileText },
-      { href: "/financials/statements", label: "Statements",      Icon: FileBarChart },
-      { href: "/financials/calendar",   label: "Periods",         Icon: Calendar },
-    ]) },
-  { key: "planning", label: "Planning", Icon: TrendingDown, defaultHref: "/planning",
-    matchPaths: ["/planning"], category: "Finance", requiredAccess: "org-admin",
-    Sidebar: linksSidebar([
-      { href: "/planning/plans",    label: "Budget plans", Icon: ClipboardList },
-      { href: "/planning/variance", label: "Variance",     Icon: TrendingDown },
-    ]) },
-  { key: "procurement", label: "Procure..", Icon: ShoppingBag, defaultHref: "/procurement",
-    matchPaths: ["/procurement"], category: "Finance", requiredAccess: "org-admin",
-    Sidebar: linksSidebar([
-      { href: "/procurement/pos",      label: "Purchase orders", Icon: ShoppingBag },
-      { href: "/procurement/invoices", label: "Invoices",        Icon: Receipt },
-      { href: "/procurement/vendors",  label: "Vendors",         Icon: Building2 },
-    ]) },
+  // ── People resourcing — provisioning what employees need to do work.
+  // Tools = SaaS subscriptions + access grants (Slack, GitHub, Figma…).
+  // Assets = physical equipment (laptops, monitors, keys, badges).
+  // Both are per-employee provisioning surfaces — natural fit under
+  // People. Tied to onboarding (grant) and offboarding (revoke) flows.
+  { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools",
+    matchPaths: ["/tools"], category: "People", requiredAccess: "hr-admin",
+    Sidebar: linksSidebar([{ href: "/tools", label: "Tools & subscriptions", Icon: HardDrive }]) },
   { key: "assets", label: "Assets", Icon: Boxes, defaultHref: "/assets",
-    matchPaths: ["/assets"], category: "Finance",
-    Sidebar: linksSidebar([{ href: "/assets", label: "Assets", Icon: Boxes }]) },
-
-  // ── Dev ─────────────────────────────────────────────────────
-  { key: "dev", label: "Dev", Icon: Code2, defaultHref: "/dev",
-    matchPaths: ["/dev"], category: "Dev",
-    Sidebar: linksSidebar([
-      { href: "/dev",          label: "Dev hub",  Icon: Code2 },
-      { href: "/dev/sprints",  label: "Sprints",  Icon: Workflow },
-      { href: "/dev/releases", label: "Releases", Icon: Boxes },
-      { href: "/dev/roadmap",  label: "Roadmap",  Icon: TrendingUp },
-    ]) },
+    matchPaths: ["/assets"], category: "People", requiredAccess: "hr-admin",
+    Sidebar: linksSidebar([{ href: "/assets", label: "Assets & equipment", Icon: Boxes }]) },
 
   // ── Knowledge ───────────────────────────────────────────────
   { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops",
@@ -767,14 +655,6 @@ export const APPS: AppEntry[] = [
   { key: "policies", label: "Policies", Icon: ShieldCheck, defaultHref: "/policies",
     matchPaths: ["/policies"], category: "Knowledge", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/policies", label: "Policies", Icon: ShieldCheck }]) },
-  { key: "legal", label: "Legal", Icon: Gavel, defaultHref: "/legal",
-    matchPaths: ["/legal"], category: "Knowledge", requiredAccess: "org-admin",
-    Sidebar: linksSidebar([
-      { href: "/legal",           label: "Legal hub", Icon: Gavel },
-      { href: "/legal/contracts", label: "Contracts", Icon: FileText },
-      { href: "/legal/ip",        label: "IP",        Icon: Lightbulb },
-      { href: "/legal/privacy",   label: "Privacy",   Icon: ShieldCheck },
-    ]) },
   { key: "learning", label: "Learning", Icon: GraduationCap, defaultHref: "/learning",
     matchPaths: ["/learning"], category: "Knowledge",
     Sidebar: linksSidebar([
@@ -782,9 +662,6 @@ export const APPS: AppEntry[] = [
       { href: "/learning/mine",    label: "My courses", Icon: GraduationCap },
       { href: "/learning/manage",  label: "Manage",     Icon: SettingsIcon },
     ]) },
-  { key: "brand", label: "Brand", Icon: Palette, defaultHref: "/brand-guide",
-    matchPaths: ["/brand-guide"], category: "Knowledge",
-    Sidebar: linksSidebar([{ href: "/brand-guide", label: "Brand guide", Icon: Palette }]) },
 
   // ── Build & Extend ──────────────────────────────────────────
   { key: "build", label: "Build", Icon: Wrench, defaultHref: "/build",
@@ -793,9 +670,6 @@ export const APPS: AppEntry[] = [
   { key: "studio", label: "Studio", Icon: Palette, defaultHref: "/studio",
     matchPaths: ["/studio"], category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/studio", label: "Studio", Icon: Palette }]) },
-  { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools",
-    matchPaths: ["/tools"], category: "Build & Extend",
-    Sidebar: linksSidebar([{ href: "/tools", label: "Tools", Icon: HardDrive }]) },
   { key: "store", label: "Marketp..", Icon: ShoppingBag, defaultHref: "/store",
     matchPaths: ["/store"], category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/store", label: "Marketplace", Icon: ShoppingBag }]) },

@@ -6,7 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { archiveBoardItem, deleteBoardItem, updateBoardItem } from "@/lib/board-items";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { prisma } from "@/lib/prisma";
 
 async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
@@ -14,11 +14,12 @@ async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel:
     where: { id: itemId },
     include: { board: { select: { id: true, spaceId: true, organizationId: true } } },
   });
-  if (!item || item.organizationId !== c.organizationId || !item.board.spaceId) {
+  if (!item || item.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  const space = await getSpaceForReader(item.board.spaceId, c.userId, c.accessLevel);
-  if (!space) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  // Phase 23b — gate via parent Board (which composes Space + Board.visibility).
+  const board = await getBoardForReader(item.boardId, c.userId, c.accessLevel);
+  if (!board) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   return { item };
 }
 
@@ -38,6 +39,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     item: {
       id: gate.item.id,
       boardId: gate.item.boardId,
+      spaceId: gate.item.board.spaceId,
       title: gate.item.title,
       status: gate.item.status,
       ownerId: gate.item.ownerId,
@@ -69,12 +71,12 @@ async function loadAndGate(itemId: string, c: { userId: string; accessLevel: str
     where: { id: itemId },
     include: { board: { select: { id: true, spaceId: true, organizationId: true } } },
   });
-  if (!item || item.organizationId !== c.organizationId || !item.board.spaceId) {
+  if (!item || item.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  const space = await getSpaceForReader(item.board.spaceId, c.userId, c.accessLevel);
-  if (!space) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  const canEdit = await canEditSpace(item.board.spaceId, c.userId, c.accessLevel);
+  const board = await getBoardForReader(item.boardId, c.userId, c.accessLevel);
+  if (!board) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  const canEdit = await canEditBoard(item.boardId, c.userId, c.accessLevel);
   if (!canEdit) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   return { item };
 }
@@ -86,6 +88,9 @@ const patchSchema = z.object({
   groupKey: z.string().max(80).nullable().optional(),
   position: z.number().finite().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  // Phase 58 — first-class date columns; ISO strings or null.
+  startAt: z.string().datetime().nullable().optional(),
+  dueAt: z.string().datetime().nullable().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

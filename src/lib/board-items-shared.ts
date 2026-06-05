@@ -22,8 +22,15 @@ export interface BoardItemRow {
   groupKey: string | null;
   position: number;
   metadata: Record<string, unknown>;
+  /** Phase 58 — first-class date columns. Either may be null. */
+  startAt?: Date | string | null;
+  dueAt?: Date | string | null;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  /** Surfaced by GET /api/items/[id] so the drawer can tag attachments
+   *  to the right Space (Phase 20). Optional because other surfaces
+   *  may pass through a BoardItemRow without including it. */
+  spaceId?: string | null;
   owner?: { id: string; firstName: string; lastName: string; avatar: string | null } | null;
 }

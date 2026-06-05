@@ -1,0 +1,266 @@
+"use client";
+
+// ViewTabMenu — the "..." popover that lives on each view tab in the
+// Board detail page. Actions:
+//   Rename       — inline editor in the popover, PATCH name
+//   Set default  — PATCH isDefault=true (server demotes the previous default in the same tx)
+//   Duplicate    — POST a new view with the source's type + config + " (copy)" suffix
+//   Delete       — DELETE; blocked server-side if it's the last view on the board
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  MoreHorizontal, Edit2, Copy, Trash2, Star, Loader2,
+} from "lucide-react";
+import type { ViewType } from "@/generated/prisma";
+import { useOsToast } from "@/components/layout/os/toast";
+
+interface ViewLike {
+  id: string;
+  name: string;
+  type: ViewType;
+  isDefault: boolean;
+  config: unknown;
+}
+
+interface Props {
+  boardId: string;
+  view: ViewLike;
+}
+
+export function ViewTabMenu({ boardId, view }: Props) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("mousedown", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <span className="relative inline-flex">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className={`p-0.5 rounded transition-colors ${
+          open ? "text-zinc-900 bg-zinc-200" : "text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+        }`}
+        aria-label="View actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="View actions"
+      >
+        <MoreHorizontal className="w-3 h-3" />
+      </button>
+      {open ? (
+        <div ref={panelRef} className="absolute left-0 top-6 z-[80] w-[200px]">
+          <ViewMenuPanel boardId={boardId} view={view} onClose={() => setOpen(false)} />
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+type Mode = "menu" | "rename";
+
+function ViewMenuPanel({
+  boardId,
+  view,
+  onClose,
+}: {
+  boardId: string;
+  view: ViewLike;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const { toast } = useOsToast();
+  const [mode, setMode] = useState<Mode>("menu");
+  const [draft, setDraft] = useState(view.name);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const patch = async (body: Record<string, unknown>, kind: string): Promise<boolean> => {
+    setBusy(kind);
+    try {
+      const res = await fetch(`/api/boards/${boardId}/views/${view.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast(data?.error ?? "Update failed");
+        return false;
+      }
+      router.refresh();
+      return true;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const duplicate = async () => {
+    setBusy("dup");
+    try {
+      const res = await fetch(`/api/boards/${boardId}/views`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: `${view.name} (copy)`,
+          type: view.type,
+          config: view.config ?? undefined,
+          isShared: true,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast(data?.error ?? "Duplicate failed");
+        return;
+      }
+      toast("View duplicated");
+      onClose();
+      router.refresh();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm(`Delete the "${view.name}" view?`)) return;
+    setBusy("del");
+    try {
+      const res = await fetch(`/api/boards/${boardId}/views/${view.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast(data?.error ?? "Delete failed");
+        return;
+      }
+      toast("View deleted");
+      onClose();
+      router.refresh();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (mode === "rename") {
+    return (
+      <div className="bg-white rounded-xl border border-zinc-200 shadow-2xl p-2.5">
+        <div className="text-[10.5px] uppercase tracking-wide text-zinc-400 font-semibold mb-2">
+          Rename view
+        </div>
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const v = draft.trim();
+              if (v && v !== view.name) {
+                patch({ name: v }, "rename").then((ok) => { if (ok) onClose(); });
+              } else {
+                onClose();
+              }
+            }
+            if (e.key === "Escape") onClose();
+          }}
+          className="w-full h-8 px-2 rounded-md border border-zinc-200 bg-white text-[12.5px] focus:outline-none focus:border-zinc-400"
+          autoFocus
+        />
+        <div className="flex justify-end gap-1.5 mt-2">
+          <button
+            type="button"
+            onClick={() => setMode("menu")}
+            disabled={Boolean(busy)}
+            className="h-6 px-2 rounded-md text-[11.5px] text-zinc-600 hover:bg-zinc-100"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const v = draft.trim();
+              if (!v || v === view.name) { onClose(); return; }
+              const ok = await patch({ name: v }, "rename");
+              if (ok) onClose();
+            }}
+            disabled={Boolean(busy) || !draft.trim()}
+            className="h-6 px-2 rounded-md text-[11.5px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {busy === "rename" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            Save
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div role="menu" className="bg-white rounded-xl border border-zinc-200 shadow-2xl py-1.5">
+      <Item Icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
+      {!view.isDefault ? (
+        <Item
+          Icon={Star}
+          label="Set as default"
+          busy={busy === "default"}
+          onClick={async () => {
+            const ok = await patch({ isDefault: true }, "default");
+            if (ok) onClose();
+          }}
+        />
+      ) : null}
+      <Item Icon={Copy} label="Duplicate" busy={busy === "dup"} onClick={duplicate} />
+      <div className="h-px bg-zinc-100 my-1" />
+      <Item Icon={Trash2} label="Delete" destructive busy={busy === "del"} onClick={remove} />
+    </div>
+  );
+}
+
+function Item({
+  Icon,
+  label,
+  busy,
+  destructive,
+  onClick,
+}: {
+  Icon: typeof Edit2;
+  label: string;
+  busy?: boolean;
+  destructive?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      disabled={busy}
+      className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] disabled:opacity-50 ${
+        destructive ? "text-red-600 hover:bg-red-50" : "text-zinc-800 hover:bg-zinc-50"
+      }`}
+    >
+      <Icon className={`h-3.5 w-3.5 shrink-0 ${destructive ? "text-red-500" : "text-zinc-500"}`} />
+      <span className="flex-1">{label}</span>
+      {busy ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400" /> : null}
+    </button>
+  );
+}
+
+export type { ViewLike };

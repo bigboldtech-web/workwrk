@@ -5,8 +5,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canReadBoard } from "@/lib/board";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { canEditBoard, canReadBoard, getBoardForReader } from "@/lib/board";
 import { prisma } from "@/lib/prisma";
 
 const VIEW_TYPES = [
@@ -50,16 +49,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const c = await ctx();
   if ("error" in c) return c.error;
   const { id } = await params;
-  const board = await prisma.board.findUnique({
-    where: { id },
-    select: { spaceId: true, organizationId: true },
-  });
-  if (!board || board.organizationId !== c.organizationId || !board.spaceId) {
+  const board = await getBoardForReader(id, c.userId, c.accessLevel);
+  if (!board || board.organizationId !== c.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  const space = await getSpaceForReader(board.spaceId, c.userId, c.accessLevel);
-  if (!space) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const canEdit = await canEditSpace(board.spaceId, c.userId, c.accessLevel);
+  const canEdit = await canEditBoard(id, c.userId, c.accessLevel);
   if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json().catch(() => null);

@@ -3,7 +3,10 @@ export type PresetId =
   | "people-hr"
   | "engineering"
   | "marketing"
-  | "operations";
+  | "operations"
+  | "sales"
+  | "support"
+  | "customer-success";
 
 export type ViewKey =
   | "LIST"

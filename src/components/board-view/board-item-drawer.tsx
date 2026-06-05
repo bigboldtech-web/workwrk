@@ -246,10 +246,11 @@ export function BoardItemDrawer({
                   }
                 />
 
-                {/* Linked notes + whiteboards */}
+                {/* Linked notes + whiteboards + files */}
                 <LinkedAttachments
                   sourceType="BOARD_ITEM"
                   sourceId={item.id}
+                  spaceId={item.spaceId ?? null}
                   canEdit={canEdit}
                 />
 

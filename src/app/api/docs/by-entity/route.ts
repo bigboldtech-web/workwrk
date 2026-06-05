@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
+import { docAccessible } from "@/lib/doc-access";
 
 const bodySchema = z.object({
   entityType: z.string().min(1).max(40),
@@ -24,6 +25,13 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+
+  // Phase 37 — gate the parent entity. Without this, find-or-create
+  // would let a probe with a guessed parent ID either surface an
+  // existing doc on a private parent or mint a new one. 404-not-403
+  // so the gate doesn't leak existence.
+  const ok = await docAccessible(parsed.data, ctx.userId, ctx.accessLevel);
+  if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Look for an existing, non-archived doc on this entity.
   const existing = await prisma.doc.findFirst({

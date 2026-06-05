@@ -78,9 +78,10 @@ export async function POST(req: Request) {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Create user + materialize their KRA/SOP assignments + mark
-    // invitation accepted, all in one transaction so a partial signup
-    // can never leave a user without their role definition.
+    // Create user + materialize their KRA/SOP assignments + (if the
+    // invite carried a spaceId) drop them straight into that Space, all
+    // in one transaction so a partial signup can never leave a user
+    // without their role definition.
     await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -130,6 +131,20 @@ export async function POST(req: Request) {
         });
       }
 
+      // 🆕 Phase 18 — Space-targeted invite. Drop the new user into
+      // the Space they were invited to with the role the admin chose.
+      if (invitation.spaceId) {
+        await tx.spaceMember.upsert({
+          where: { spaceId_userId: { spaceId: invitation.spaceId, userId: user.id } },
+          create: {
+            spaceId: invitation.spaceId,
+            userId: user.id,
+            role: invitation.spaceRole ?? "MEMBER",
+          },
+          update: {},
+        });
+      }
+
       await tx.invitation.update({
         where: { id: invitation.id },
         data: { accepted: true },
@@ -162,7 +177,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ message: "Account created successfully" }, { status: 201 });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Accept invite error:", error);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }

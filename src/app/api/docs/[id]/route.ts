@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
+import { docAccessible } from "@/lib/doc-access";
 
 const putSchema = z.object({
   title: z.string().min(1).max(300).optional(),
@@ -34,6 +35,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     },
   });
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await docAccessible(doc, ctx.userId, ctx.accessLevel))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   return NextResponse.json({ doc });
 }
@@ -49,9 +53,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
   const existing = await prisma.doc.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, title: true, content: true, archivedAt: true },
+    select: { id: true, title: true, content: true, archivedAt: true, entityType: true, entityId: true },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await docAccessible(existing, ctx.userId, ctx.accessLevel))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
   if (existing.archivedAt) return NextResponse.json({ error: "archived" }, { status: 410 });
 
   // Compute the next version number for this Doc. Versions are
@@ -99,9 +106,12 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const existing = await prisma.doc.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, archivedAt: true },
+    select: { id: true, archivedAt: true, entityType: true, entityId: true },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await docAccessible(existing, ctx.userId, ctx.accessLevel))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
   if (existing.archivedAt) return NextResponse.json({ ok: true, alreadyArchived: true });
 
   // Soft-archive only — the row stays, versions stay.

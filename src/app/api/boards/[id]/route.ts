@@ -5,9 +5,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveBoard, updateBoard } from "@/lib/board";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
-import { prisma } from "@/lib/prisma";
+import { archiveBoard, canEditBoard, getBoardForReader, updateBoard } from "@/lib/board";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -22,16 +20,14 @@ async function ctx() {
 }
 
 async function loadAndGate(boardId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
-  const board = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { id: true, spaceId: true, organizationId: true },
-  });
-  if (!board || board.organizationId !== c.organizationId || !board.spaceId) {
+  // Cross-tenant safety + read gate (composes Space + Board.visibility +
+  // BoardMember per Phase 23). Returns null when the viewer can't see
+  // the board OR when it's in a different org.
+  const board = await getBoardForReader(boardId, c.userId, c.accessLevel);
+  if (!board || board.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  const space = await getSpaceForReader(board.spaceId, c.userId, c.accessLevel);
-  if (!space) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  const canEdit = await canEditSpace(board.spaceId, c.userId, c.accessLevel);
+  const canEdit = await canEditBoard(boardId, c.userId, c.accessLevel);
   if (!canEdit) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   return { board };
 }

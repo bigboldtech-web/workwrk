@@ -6,8 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { addBoardField, getBoardFields } from "@/lib/board-fields";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
-import { prisma } from "@/lib/prisma";
+import { canEditBoard, getBoardForReader } from "@/lib/board";
 
 const FIELD_TYPES = [
   "TEXT", "LONG_TEXT", "NUMBER", "DATE", "DATETIME",
@@ -33,16 +32,12 @@ async function ctx() {
 }
 
 async function loadBoard(boardId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
-  const board = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { spaceId: true, organizationId: true },
-  });
-  if (!board || board.organizationId !== c.organizationId || !board.spaceId) {
+  // Phase 23b — compose Space + Board gates. Cross-org check folded in.
+  const board = await getBoardForReader(boardId, c.userId, c.accessLevel);
+  if (!board || board.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  const space = await getSpaceForReader(board.spaceId, c.userId, c.accessLevel);
-  if (!space) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  return { spaceId: board.spaceId };
+  return { board };
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -67,7 +62,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const gate = await loadBoard(id, c);
   if ("error" in gate) return gate.error;
-  const canEdit = await canEditSpace(gate.spaceId, c.userId, c.accessLevel);
+  const canEdit = await canEditBoard(id, c.userId, c.accessLevel);
   if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

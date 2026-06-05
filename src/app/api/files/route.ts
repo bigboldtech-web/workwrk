@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
+import { visibleSpaceIds } from "@/lib/space";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -19,11 +20,13 @@ export async function GET(req: NextRequest) {
   const folderId = folderIdRaw === "root" || folderIdRaw === null ? null : folderIdRaw;
   const starred = sp.get("starred") === "true";
   const search = sp.get("q")?.trim().toLowerCase() ?? "";
+  const spaceIdFilter = sp.get("spaceId"); // "" or null = all; specific id = scoped
 
   const where: Record<string, unknown> = { organizationId: orgId };
   if (search) where.name = { contains: search, mode: "insensitive" };
   else if (starred) where.starred = true;
   else where.folderId = folderId;
+  if (spaceIdFilter) where.spaceId = spaceIdFilter;
 
   const files = await prisma.fileEntry.findMany({
     where,
@@ -31,7 +34,18 @@ export async function GET(req: NextRequest) {
     take: 500,
   });
 
-  return jsonSuccess(files);
+  // Phase 22 — gate by Space visibility. Files with spaceId=null stay
+  // visible to everyone in the org (unscoped). Files tagged to a Space
+  // are returned only if the viewer can read that Space.
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+  const userId = getUserId(session);
+  const scopedIds = files.map((f) => f.spaceId).filter((s): s is string => Boolean(s));
+  const visible = scopedIds.length > 0
+    ? await visibleSpaceIds(scopedIds, userId, accessLevel)
+    : new Set<string>();
+  const gated = files.filter((f) => !f.spaceId || visible.has(f.spaceId));
+
+  return jsonSuccess(gated);
 }
 
 export async function POST(req: NextRequest) {
@@ -46,6 +60,7 @@ export async function POST(req: NextRequest) {
   const size = Number(body.size) || 0;
   const url = typeof body.url === "string" ? body.url : "";
   const folderId = typeof body.folderId === "string" && body.folderId ? body.folderId : null;
+  const spaceId = typeof body.spaceId === "string" && body.spaceId ? body.spaceId : null;
   const description = typeof body.description === "string" ? body.description.slice(0, 500) : null;
 
   if (!name || !url) return jsonError("name + url required");
@@ -55,8 +70,17 @@ export async function POST(req: NextRequest) {
     if (!folder) return jsonError("folder not found", 404);
   }
 
+  // Cross-tenant safety: the spaceId must belong to the caller's org.
+  // No membership check here — uploading from a board the caller can
+  // see is already permission-gated by the surface that hosts the upload
+  // (e.g. BoardItemDrawer enforces canEdit before exposing the form).
+  if (spaceId) {
+    const space = await prisma.space.findFirst({ where: { id: spaceId, organizationId: orgId }, select: { id: true } });
+    if (!space) return jsonError("space not found", 404);
+  }
+
   const entry = await prisma.fileEntry.create({
-    data: { organizationId: orgId, name, mimeType, size, url, folderId, uploadedById: userId, description },
+    data: { organizationId: orgId, name, mimeType, size, url, folderId, spaceId, uploadedById: userId, description },
   });
 
   return jsonSuccess(entry, 201);

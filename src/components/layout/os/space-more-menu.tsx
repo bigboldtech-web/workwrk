@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
+import { MorePortal } from "./more-portal";
 
 interface SpaceRowLike {
   id: string;
@@ -81,19 +82,14 @@ export function SpaceMoreTrigger({ space, onUpdated, onRequestShare }: Props) {
         <MoreHorizontal className="w-3 h-3" />
       </button>
 
-      {open ? (
-        <div
-          ref={panelRef}
-          className="absolute left-full top-0 ml-1 z-[70] w-[260px]"
-        >
-          <SpaceMoreMenu
-            space={space}
-            onClose={() => setOpen(false)}
-            onUpdated={onUpdated}
-            onRequestShare={onRequestShare}
-          />
-        </div>
-      ) : null}
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={260} open={open} placement="right">
+        <SpaceMoreMenu
+          space={space}
+          onClose={() => setOpen(false)}
+          onUpdated={onUpdated}
+          onRequestShare={onRequestShare}
+        />
+      </MorePortal>
     </span>
   );
 }

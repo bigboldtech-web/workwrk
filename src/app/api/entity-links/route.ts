@@ -21,6 +21,7 @@ import {
   listLinksFrom,
   listLinksTo,
 } from "@/lib/entity-link";
+import { visibleSpaceIds } from "@/lib/space";
 import type { EntityLinkType, EntityLinkRelation } from "@/generated/prisma";
 
 const ENTITY_TYPES = [
@@ -37,11 +38,11 @@ async function ctx() {
   if (!session?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const u = session.user as { id?: string; organizationId?: string };
+  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
   if (!u.id || !u.organizationId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  return { userId: u.id, organizationId: u.organizationId };
+  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
 }
 
 interface HydratedLink {
@@ -57,7 +58,12 @@ interface HydratedLink {
   target?: { title: string | null; subtitle?: string | null; href?: string | null };
 }
 
-async function hydrate(rows: Awaited<ReturnType<typeof listLinksFrom>>, orgId: string): Promise<HydratedLink[]> {
+async function hydrate(
+  rows: Awaited<ReturnType<typeof listLinksFrom>>,
+  orgId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<HydratedLink[]> {
   const byType = new Map<string, string[]>();
   for (const r of rows) {
     const list = byType.get(r.targetType) ?? [];
@@ -66,20 +72,30 @@ async function hydrate(rows: Awaited<ReturnType<typeof listLinksFrom>>, orgId: s
   }
 
   const titleByKey = new Map<string, { title: string | null; subtitle?: string | null; href?: string | null }>();
+  // Track which target → which Space it lives in. Used after hydration
+  // to drop rows whose Space the viewer can't read (Phase 22b).
+  const targetSpaceId = new Map<string, string>();
+
   await Promise.all(
     Array.from(byType.entries()).map(async ([type, ids]) => {
       if (type === "NOTE" || type === "DOC") {
         const docs = await prisma.doc.findMany({
           where: { organizationId: orgId, id: { in: ids } },
-          select: { id: true, title: true, excerpt: true },
+          select: { id: true, title: true, excerpt: true, entityType: true, entityId: true },
         });
-        for (const d of docs) titleByKey.set(`${type}:${d.id}`, { title: d.title, subtitle: d.excerpt, href: `/docs/${d.id}` });
+        for (const d of docs) {
+          titleByKey.set(`${type}:${d.id}`, { title: d.title, subtitle: d.excerpt, href: `/docs/${d.id}` });
+          if (d.entityType === "SPACE" && d.entityId) targetSpaceId.set(`${type}:${d.id}`, d.entityId);
+        }
       } else if (type === "WHITEBOARD") {
         const wbs = await prisma.whiteboard.findMany({
           where: { organizationId: orgId, id: { in: ids } },
-          select: { id: true, name: true, description: true },
+          select: { id: true, name: true, description: true, spaceId: true },
         });
-        for (const w of wbs) titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description, href: `/whiteboards/${w.id}` });
+        for (const w of wbs) {
+          titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description, href: `/whiteboards/${w.id}` });
+          if (w.spaceId) targetSpaceId.set(`${type}:${w.id}`, w.spaceId);
+        }
       } else if (type === "KRA") {
         const kras = await prisma.kRA.findMany({
           where: { organizationId: orgId, id: { in: ids } },
@@ -89,7 +105,7 @@ async function hydrate(rows: Awaited<ReturnType<typeof listLinksFrom>>, orgId: s
       } else if (type === "FILE") {
         const files = await prisma.fileEntry.findMany({
           where: { organizationId: orgId, id: { in: ids } },
-          select: { id: true, name: true, mimeType: true, size: true, url: true },
+          select: { id: true, name: true, mimeType: true, size: true, url: true, spaceId: true },
         });
         for (const f of files) {
           titleByKey.set(`${type}:${f.id}`, {
@@ -97,24 +113,55 @@ async function hydrate(rows: Awaited<ReturnType<typeof listLinksFrom>>, orgId: s
             subtitle: `${f.mimeType} · ${Math.max(1, Math.round(f.size / 1024))} KB`,
             href: f.url,
           });
+          if (f.spaceId) targetSpaceId.set(`${type}:${f.id}`, f.spaceId);
+        }
+      } else if (type === "TABLE") {
+        const tables = await prisma.dataTable.findMany({
+          where: { organizationId: orgId, id: { in: ids } },
+          select: {
+            id: true, name: true, description: true, spaceId: true,
+            _count: { select: { rows: true } },
+          },
+        });
+        for (const t of tables) {
+          const rowCount = t._count.rows;
+          titleByKey.set(`${type}:${t.id}`, {
+            title: t.name,
+            subtitle: t.description ?? `${rowCount} ${rowCount === 1 ? "row" : "rows"}`,
+            href: `/tables/${t.id}`,
+          });
+          if (t.spaceId) targetSpaceId.set(`${type}:${t.id}`, t.spaceId);
         }
       }
       // Other types pass through without hydration — the client can request more specifically if needed.
     }),
   );
 
-  return rows.map((r) => ({
-    id: r.id,
-    sourceType: r.sourceType,
-    sourceId: r.sourceId,
-    targetType: r.targetType,
-    targetId: r.targetId,
-    relationKind: r.relationKind,
-    position: r.position,
-    context: r.context,
-    createdAt: r.createdAt.toISOString(),
-    target: titleByKey.get(`${r.targetType}:${r.targetId}`),
-  }));
+  // Drop links whose target lives in a Space the viewer can't read.
+  const uniqueSpaceIds = Array.from(new Set(targetSpaceId.values()));
+  const visible = uniqueSpaceIds.length > 0
+    ? await visibleSpaceIds(uniqueSpaceIds, userId, accessLevel)
+    : new Set<string>();
+
+  return rows
+    .filter((r) => {
+      const key = `${r.targetType}:${r.targetId}`;
+      const spaceId = targetSpaceId.get(key);
+      if (!spaceId) return true; // unscoped target = no gate
+      return visible.has(spaceId);
+    })
+    .map((r) => ({
+      id: r.id,
+      sourceType: r.sourceType,
+      sourceId: r.sourceId,
+      targetType: r.targetType,
+      targetId: r.targetId,
+      relationKind: r.relationKind,
+      position: r.position,
+      context: r.context,
+      createdAt: r.createdAt.toISOString(),
+      target: titleByKey.get(`${r.targetType}:${r.targetId}`),
+    }));
 }
 
 export async function GET(req: Request) {
@@ -139,7 +186,7 @@ export async function GET(req: Request) {
       relationKind,
       targetType: filterTargetType && ENTITY_TYPES.includes(filterTargetType) ? filterTargetType : undefined,
     });
-    const hydrated = await hydrate(links, c.organizationId);
+    const hydrated = await hydrate(links, c.organizationId, c.userId, c.accessLevel);
     return NextResponse.json({ links: hydrated });
   }
 
@@ -150,7 +197,7 @@ export async function GET(req: Request) {
       relationKind,
       sourceType: filterSourceType && ENTITY_TYPES.includes(filterSourceType) ? filterSourceType : undefined,
     });
-    const hydrated = await hydrate(links, c.organizationId);
+    const hydrated = await hydrate(links, c.organizationId, c.userId, c.accessLevel);
     return NextResponse.json({ links: hydrated });
   }
 

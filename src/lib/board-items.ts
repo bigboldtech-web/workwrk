@@ -36,6 +36,8 @@ function rowFrom(it: {
   groupKey: string | null;
   position: number;
   metadata: unknown;
+  startAt?: Date | null;
+  dueAt?: Date | null;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -48,6 +50,8 @@ function rowFrom(it: {
     groupKey: it.groupKey,
     position: it.position,
     metadata: (it.metadata as Record<string, unknown>) ?? {},
+    startAt: it.startAt ?? null,
+    dueAt: it.dueAt ?? null,
     archivedAt: it.archivedAt,
     createdAt: it.createdAt,
     updatedAt: it.updatedAt,
@@ -150,6 +154,10 @@ export interface UpdateBoardItemInput {
   groupKey?: string | null;
   position?: number;
   metadata?: Record<string, unknown>;
+  // Phase 58 — ISO strings accepted from the API layer; coerced to Date
+  // before reaching Prisma so the schema's DateTime type is happy.
+  startAt?: string | Date | null;
+  dueAt?: string | Date | null;
 }
 
 export async function updateBoardItem(
@@ -174,6 +182,8 @@ export async function updateBoardItem(
   if (patch.groupKey !== undefined) data.groupKey = patch.groupKey;
   if (patch.position !== undefined) data.position = patch.position;
   if (patch.metadata !== undefined) data.metadata = patch.metadata as object;
+  if (patch.startAt !== undefined) data.startAt = patch.startAt === null ? null : new Date(patch.startAt);
+  if (patch.dueAt !== undefined) data.dueAt = patch.dueAt === null ? null : new Date(patch.dueAt);
 
   const updated = await prisma.item.update({ where: { id: itemId }, data });
   const owner = updated.ownerId

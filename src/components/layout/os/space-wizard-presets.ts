@@ -18,6 +18,9 @@ export const PRESETS: PresetDef[] = [
   { id: "engineering", title: "Engineering", blurb: "Sprints, dependencies, code" },
   { id: "marketing", title: "Marketing", blurb: "Campaigns and calendars" },
   { id: "operations", title: "Operations", blurb: "Projects and Gantt timelines" },
+  { id: "sales", title: "Sales", blurb: "Deal pipeline · Kanban + KPI tracking" },
+  { id: "support", title: "Support", blurb: "Ticket queue · SOP-driven responses" },
+  { id: "customer-success", title: "Customer Success", blurb: "Renewals, upsells, health scoring" },
 ];
 
 export interface ViewCatalogEntry {
@@ -135,6 +138,42 @@ const OPS_STATUSES: StatusDef[] = [
   { key: "CANCELLED", label: "CANCELLED", group: "CLOSED", color: STATUS_COLORS.cancelled },
 ];
 
+// Sales pipeline — Kanban-native by default. Closed-lost is intentionally
+// in the CLOSED group (analytics treats lost separately from won).
+const SALES_STATUSES: StatusDef[] = [
+  { key: "PROSPECT", label: "PROSPECT", group: "ACTIVE", color: STATUS_COLORS.draft },
+  { key: "QUALIFIED", label: "QUALIFIED", group: "ACTIVE", color: STATUS_COLORS.active },
+  { key: "PROPOSAL", label: "PROPOSAL", group: "ACTIVE", color: STATUS_COLORS.inProgress },
+  { key: "NEGOTIATION", label: "NEGOTIATION", group: "ACTIVE", color: STATUS_COLORS.atRisk },
+  { key: "CLOSED_WON", label: "CLOSED WON", group: "DONE", color: STATUS_COLORS.complete },
+  { key: "CLOSED_LOST", label: "CLOSED LOST", group: "CLOSED", color: STATUS_COLORS.cancelled },
+];
+
+// Customer support — short ticket lifecycle. Awaiting-customer is the
+// "blocked on user" pause; resolution-time KPIs typically clock from
+// OPEN→RESOLVED minus the awaiting-customer span.
+const SUPPORT_STATUSES: StatusDef[] = [
+  { key: "OPEN", label: "OPEN", group: "ACTIVE", color: STATUS_COLORS.todo },
+  { key: "IN_PROGRESS", label: "IN PROGRESS", group: "ACTIVE", color: STATUS_COLORS.inProgress },
+  { key: "AWAITING_CUSTOMER", label: "AWAITING CUSTOMER", group: "ACTIVE", color: STATUS_COLORS.updateRequired },
+  { key: "RESOLVED", label: "RESOLVED", group: "DONE", color: STATUS_COLORS.complete },
+  { key: "CLOSED", label: "CLOSED", group: "CLOSED", color: STATUS_COLORS.cancelled },
+];
+
+// Customer success — account lifecycle, not deal lifecycle. ONBOARDING
+// kicks in post-close, ADOPTION measures engagement, AT_RISK is the
+// churn signal, RENEWED and EXPANSION are the two healthy exits, and
+// CHURNED is the closed-lost analogue.
+const CS_STATUSES: StatusDef[] = [
+  { key: "ONBOARDING", label: "ONBOARDING", group: "ACTIVE", color: STATUS_COLORS.draft },
+  { key: "ADOPTION", label: "ADOPTION", group: "ACTIVE", color: STATUS_COLORS.active },
+  { key: "HEALTHY", label: "HEALTHY", group: "ACTIVE", color: STATUS_COLORS.inProgress },
+  { key: "AT_RISK", label: "AT RISK", group: "ACTIVE", color: STATUS_COLORS.atRisk },
+  { key: "RENEWED", label: "RENEWED", group: "DONE", color: STATUS_COLORS.complete },
+  { key: "EXPANSION", label: "EXPANSION", group: "DONE", color: STATUS_COLORS.published },
+  { key: "CHURNED", label: "CHURNED", group: "CLOSED", color: STATUS_COLORS.cancelled },
+];
+
 interface PresetWorkflow {
   views: ViewKey[];
   defaultView: ViewKey;
@@ -172,6 +211,44 @@ const PRESET_WORKFLOWS: Record<PresetId, PresetWorkflow> = {
     defaultView: "LIST",
     statuses: OPS_STATUSES,
     modules: ["KRA", "KPI", "SOP", "PRIORITY", "DEPENDENCIES", "TIME_TRACKING", "NOTES", "WHITEBOARDS"],
+  },
+  // The user's "Lego" framing in action: Sales gets a board-by-default
+  // Space with a pipeline status set + the modules a sales team actually
+  // touches (custom fields for deal value, time tracking per deal).
+  // Not a CRM app — it's the same primitives, pre-arranged for a real
+  // use case. Customer renames/restructures freely.
+  sales: {
+    views: ["BOARD", "LIST", "CALENDAR"],
+    defaultView: "BOARD",
+    statuses: SALES_STATUSES,
+    modules: [
+      "KRA", "KPI", "NOTES", "WHITEBOARDS",
+      "PRIORITY", "TAGS", "CUSTOM_FIELDS",
+      "TIME_TRACKING", "MULTIPLE_ASSIGNEES",
+    ],
+  },
+  support: {
+    views: ["BOARD", "LIST"],
+    defaultView: "BOARD",
+    statuses: SUPPORT_STATUSES,
+    modules: [
+      "KRA", "KPI", "SOP", "NOTES",
+      "PRIORITY", "TAGS", "TIME_TRACKING", "TIME_ESTIMATES",
+    ],
+  },
+  // Customer Success — account book is fundamentally a list with a
+  // calendar overlay (renewal dates) and a Kanban for at-a-glance
+  // health stage. Custom fields land ARR/contract-end-date/CSM owner;
+  // SOPs script handoff + escalation playbooks.
+  "customer-success": {
+    views: ["LIST", "BOARD", "CALENDAR"],
+    defaultView: "LIST",
+    statuses: CS_STATUSES,
+    modules: [
+      "KRA", "KPI", "SOP", "NOTES",
+      "PRIORITY", "TAGS", "CUSTOM_FIELDS",
+      "MULTIPLE_ASSIGNEES", "CALENDAR_VIEW",
+    ],
   },
 };
 

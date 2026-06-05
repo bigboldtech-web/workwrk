@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
+import { docAccessible } from "@/lib/doc-access";
 
 const createSchema = z.object({
   title: z.string().min(1).max(300),
@@ -41,7 +42,17 @@ export async function GET(req: Request) {
     take: 100,
   });
 
-  return NextResponse.json({ docs });
+  // Phase 37 — gate per row via docAccessible, which handles SPACE +
+  // BOARD + BOARD_ITEM anchors. Standalone docs (entityType=null) and
+  // suite-specific anchors fall through. Per-row resolution is fine
+  // at the 100-doc cap; library views typically pre-filter by
+  // entity anyway.
+  const flags = await Promise.all(
+    docs.map((d) => docAccessible(d, ctx.userId, ctx.accessLevel)),
+  );
+  const gated = docs.filter((_, i) => flags[i]);
+
+  return NextResponse.json({ docs: gated });
 }
 
 export async function POST(req: Request) {
@@ -53,6 +64,16 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   const content = (parsed.data.content as object) ?? {};
+
+  // Phase 37 — block pinning to an entity the viewer can't see.
+  // Without this, a probe with a guessed boardId could mint a doc on
+  // a board the viewer can't read.
+  const ok = await docAccessible(
+    { entityType: parsed.data.entityType ?? null, entityId: parsed.data.entityId ?? null },
+    ctx.userId,
+    ctx.accessLevel,
+  );
+  if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const doc = await prisma.doc.create({
     data: {

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "prisma generate",
     "dev": "next dev",
     "build": "node scripts/deploy-migrations.mjs && prisma generate && NODE_OPTIONS=--max-old-space-size=4096 next build",
     "db:unstick": "node scripts/unstick-migrate-lock.mjs",

@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Search, X, Lock, Globe, Users as UsersIcon, Loader2, Plus, Building2, MapPin, UserPlus } from "lucide-react";
+import { Search, X, Lock, Globe, Users as UsersIcon, Loader2, Plus, Building2, MapPin, UserPlus, Mail, Copy, Check, Send, Trash2 } from "lucide-react";
 import { useOsToast } from "./toast";
 
 type Visibility = "PRIVATE" | "WORKSPACE" | "ORG";
@@ -39,7 +39,7 @@ interface GroupRow {
   memberCount: number;
 }
 
-type PickerTab = "people" | "departments" | "offices";
+type PickerTab = "people" | "departments" | "offices" | "email";
 
 interface Member {
   id: string;
@@ -409,6 +409,9 @@ export function ShareSpaceDialog({
               <PickerTabBtn active={tab === "offices"} onClick={() => setTab("offices")}>
                 <MapPin className="h-3 w-3" /> Offices
               </PickerTabBtn>
+              <PickerTabBtn active={tab === "email"} onClick={() => setTab("email")}>
+                <Mail className="h-3 w-3" /> Invite
+              </PickerTabBtn>
             </div>
           </div>
 
@@ -478,6 +481,10 @@ export function ShareSpaceDialog({
             />
           ) : null}
 
+          {tab === "email" ? (
+            <EmailInvitePanel spaceId={spaceId} />
+          ) : null}
+
           {bulkResult ? (
             <div className="mt-2 text-[11.5px] text-zinc-500">
               Added {bulkResult.added} · skipped {bulkResult.skipped} already in this Space
@@ -544,6 +551,255 @@ function Avatar({ user }: { user: UserOption }) {
     <span className="h-6 w-6 rounded-full bg-zinc-100 border border-zinc-200 inline-flex items-center justify-center text-[10px] font-semibold text-zinc-600 shrink-0">
       {avatarInitials(user)}
     </span>
+  );
+}
+
+interface PendingInvite {
+  id: string;
+  email: string;
+  spaceRole: SpaceRole | null;
+  createdAt: string;
+  expiresAt: string;
+  inviteUrl: string;
+}
+
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
+  const { toast } = useOsToast();
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<SpaceRole>("MEMBER");
+  const [busy, setBusy] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [reused, setReused] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingInvite[] | null>(null);
+  const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
+
+  const loadPending = useCallback(() => {
+    if (!spaceId) return;
+    fetch(`/api/spaces/${spaceId}/invitations`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setPending(Array.isArray(data.invitations) ? data.invitations : []);
+      })
+      .catch(() => setPending([]));
+  }, [spaceId]);
+
+  useEffect(() => {
+    loadPending();
+  }, [loadPending]);
+
+  const send = async () => {
+    if (!spaceId) return;
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed.includes("@")) {
+      toast("Enter a valid email address");
+      return;
+    }
+    setBusy(true);
+    setInviteUrl(null);
+    setReused(false);
+    try {
+      const res = await fetch(`/api/spaces/${spaceId}/invitations`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: trimmed, spaceRole: role }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data?.error ?? "Could not send invitation");
+        return;
+      }
+      setInviteUrl(data.inviteUrl ?? null);
+      setReused(Boolean(data.reused));
+      setEmail("");
+      loadPending();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast("Couldn't copy — select and copy the link manually");
+    }
+  };
+
+  const copyInvite = async (invite: PendingInvite) => {
+    try {
+      await navigator.clipboard.writeText(invite.inviteUrl);
+      setCopiedId(invite.id);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      toast("Couldn't copy");
+    }
+  };
+
+  const resend = async (invite: PendingInvite) => {
+    if (!spaceId) return;
+    setBusyInviteId(invite.id);
+    try {
+      const res = await fetch(`/api/spaces/${spaceId}/invitations/${invite.id}/resend`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data?.error ?? "Could not resend");
+        return;
+      }
+      toast(`Resent to ${invite.email}`);
+    } finally {
+      setBusyInviteId(null);
+    }
+  };
+
+  const revoke = async (invite: PendingInvite) => {
+    if (!spaceId) return;
+    if (!window.confirm(`Revoke the invitation to ${invite.email}?`)) return;
+    setBusyInviteId(invite.id);
+    setPending((prev) => (prev ?? []).filter((p) => p.id !== invite.id));
+    try {
+      const res = await fetch(`/api/spaces/${spaceId}/invitations/${invite.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast(data?.error ?? "Could not revoke");
+        loadPending();
+      }
+    } finally {
+      setBusyInviteId(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void send(); }}
+          placeholder="name@company.com"
+          className="flex-1 h-9 px-3 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
+        />
+        <select
+          value={role}
+          onChange={(e) => setRole(e.target.value as SpaceRole)}
+          className="h-9 px-2 rounded-md border border-zinc-200 bg-white text-[12px] focus:outline-none focus:border-zinc-400"
+        >
+          <option value="GUEST">Guest</option>
+          <option value="MEMBER">Member</option>
+          <option value="ADMIN">Admin</option>
+        </select>
+        <button
+          type="button"
+          onClick={send}
+          disabled={busy || !email.trim()}
+          className="h-9 px-3 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+          Send invite
+        </button>
+      </div>
+
+      <div className="mt-2 text-[11.5px] text-zinc-500 leading-snug">
+        We&rsquo;ll email them a link. They land on Sign-up, set a password, and join this Space automatically.
+      </div>
+
+      {inviteUrl ? (
+        <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-2.5">
+          <div className="text-[11px] text-zinc-500 mb-1.5">
+            {reused ? "Reusing an active invitation" : "Invitation sent"} — share the link if email doesn&rsquo;t arrive:
+          </div>
+          <div className="flex items-center gap-1.5">
+            <code className="flex-1 min-w-0 text-[11px] text-zinc-700 truncate px-2 py-1 rounded bg-white border border-zinc-200">
+              {inviteUrl}
+            </code>
+            <button
+              type="button"
+              onClick={copy}
+              className="h-7 w-7 rounded-md hover:bg-zinc-200 inline-flex items-center justify-center text-zinc-500"
+              aria-label="Copy link"
+              title="Copy link"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {pending && pending.length > 0 ? (
+        <div className="mt-4 pt-3 border-t border-zinc-100">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+            Pending invitations · {pending.length}
+          </div>
+          <ul className="rounded-md border border-zinc-200 divide-y divide-zinc-100 max-h-[200px] overflow-y-auto">
+            {pending.map((inv) => {
+              const busy = busyInviteId === inv.id;
+              return (
+                <li key={inv.id} className="px-2.5 py-2 flex items-center gap-2">
+                  <Mail className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[12.5px] font-medium text-zinc-900 truncate">{inv.email}</span>
+                    <span className="block text-[11px] text-zinc-500">
+                      {(inv.spaceRole ?? "MEMBER").toLowerCase()} · sent {relTime(inv.createdAt)}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => copyInvite(inv)}
+                    disabled={busy}
+                    className="h-6 w-6 rounded hover:bg-zinc-100 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 disabled:opacity-50"
+                    title="Copy link"
+                    aria-label="Copy link"
+                  >
+                    {copiedId === inv.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => resend(inv)}
+                    disabled={busy}
+                    className="h-6 w-6 rounded hover:bg-zinc-100 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 disabled:opacity-50"
+                    title="Resend email"
+                    aria-label="Resend email"
+                  >
+                    {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => revoke(inv)}
+                    disabled={busy}
+                    className="h-6 w-6 rounded hover:bg-red-50 inline-flex items-center justify-center text-zinc-400 hover:text-red-500 disabled:opacity-50"
+                    title="Revoke"
+                    aria-label="Revoke"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

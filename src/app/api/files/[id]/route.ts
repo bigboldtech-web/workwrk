@@ -4,8 +4,9 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
-  getSessionOrFail, getOrgId, jsonError, jsonSuccess,
+  getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
+import { getSpaceForReader } from "@/lib/space";
 
 export async function PATCH(
   req: NextRequest,
@@ -21,6 +22,15 @@ export async function PATCH(
     where: { id, organizationId: orgId },
   });
   if (!existing) return jsonError("not found", 404);
+
+  // Phase 22b — gate by Space visibility. Hide existence (404 not 403)
+  // so a viewer can't probe for the presence of files in Spaces they
+  // shouldn't see.
+  if (existing.spaceId) {
+    const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+    const space = await getSpaceForReader(existing.spaceId, getUserId(session), accessLevel);
+    if (!space) return jsonError("not found", 404);
+  }
 
   const data: Record<string, unknown> = {};
   if (typeof body.name === "string") data.name = body.name.trim().slice(0, 200);
@@ -52,6 +62,12 @@ export async function DELETE(
     where: { id, organizationId: orgId },
   });
   if (!existing) return jsonError("not found", 404);
+
+  if (existing.spaceId) {
+    const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+    const space = await getSpaceForReader(existing.spaceId, getUserId(session), accessLevel);
+    if (!space) return jsonError("not found", 404);
+  }
 
   await prisma.fileEntry.delete({ where: { id } });
   return jsonSuccess({ deleted: true });

@@ -10,7 +10,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Lock, Share2, Sparkles, Plus, Star,
+  Lock, Share2, Sparkles, Star,
   List as ListIcon, LayoutGrid, Calendar as CalIcon, GanttChart, Table2,
   ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
   Filter, CheckCircle2, Users as UsersIcon, Search, Settings,
@@ -19,6 +19,8 @@ import type { ViewType } from "@/generated/prisma";
 import { listBoardItems } from "@/lib/board-items";
 import { canEditSpace } from "@/lib/space";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
+import { NewViewTrigger } from "@/components/board-view/view-create-popover";
+import { ViewTabMenu } from "@/components/board-view/view-tab-menu";
 import { parseBoardSchema } from "@/lib/field-catalog";
 
 export const dynamic = "force-dynamic";
@@ -138,27 +140,25 @@ export default async function BoardPage(props: { params: Promise<{ slug: string 
           const color = VIEW_COLORS[v.type] ?? "text-zinc-600";
           const active = v.id === defaultView?.id;
           return (
-            <button
+            <span
               key={v.id}
-              type="button"
-              className={`flex items-center gap-1.5 px-3 py-2.5 text-sm border-b-2 -mb-px transition-colors ${
+              className={`group/view inline-flex items-center gap-1 px-2 py-2.5 text-sm border-b-2 -mb-px transition-colors ${
                 active
                   ? "border-zinc-900 text-zinc-900 font-medium"
                   : "border-transparent text-zinc-600 hover:text-zinc-900"
               }`}
             >
-              <VIcon className={`w-3.5 h-3.5 ${active ? "text-zinc-900" : color}`} />
-              {v.name}
-            </button>
+              <button type="button" className="inline-flex items-center gap-1.5">
+                <VIcon className={`w-3.5 h-3.5 ${active ? "text-zinc-900" : color}`} />
+                {v.name}
+              </button>
+              <span className="opacity-0 group-hover/view:opacity-100 transition-opacity">
+                <ViewTabMenu boardId={board.id} view={v} />
+              </span>
+            </span>
           );
         })}
-        <button
-          type="button"
-          className="flex items-center gap-1 px-2 py-2 text-sm text-zinc-500 hover:text-zinc-900"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          View
-        </button>
+        <NewViewTrigger boardId={board.id} />
       </div>
 
       {/* Filter row */}
