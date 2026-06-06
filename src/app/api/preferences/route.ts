@@ -43,6 +43,29 @@ const patchSchema = z.object({
   home: z.object({
     cards: z.array(z.string()).optional(),
     order: z.array(z.string()).optional(),
+    // Phase 78 — favorite (starred) board IDs. Surfaced in the
+    // board page header as a filled-star toggle.
+    favoriteBoardIds: z.array(z.string()).optional(),
+    // Phase 80 — favorite (starred) Space IDs.
+    favoriteSpaceIds: z.array(z.string()).optional(),
+    // Phase 15+ — favorite (starred) Doc/note IDs.
+    favoriteDocIds: z.array(z.string()).optional(),
+    // Phase 83 — favorite (starred) Folder IDs.
+    favoriteFolderIds: z.array(z.string()).optional(),
+    // Phase 84 — favorite (starred) Table IDs.
+    favoriteTableIds: z.array(z.string()).optional(),
+    // Phase 89 — favorite (starred) Whiteboard + File IDs.
+    favoriteWhiteboardIds: z.array(z.string()).optional(),
+    favoriteFileIds: z.array(z.string()).optional(),
+    // My Tasks card layout — react-grid-layout per-breakpoint shape.
+    taskCardLayout: z.record(z.string(), z.array(z.object({
+      i: z.string(),
+      x: z.number(),
+      y: z.number(),
+      w: z.number(),
+      h: z.number(),
+    }))).optional(),
+    taskCardsHidden: z.array(z.string()).optional(),
   }).optional(),
   theme: z.object({
     appearance: z.enum(["LIGHT", "DARK", "AUTO"]).optional(),

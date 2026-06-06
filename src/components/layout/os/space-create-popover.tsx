@@ -13,6 +13,7 @@ import {
   Download, LayoutTemplate, ChevronRight, Loader2, Database,
 } from "lucide-react";
 import { useOsToast } from "./toast";
+import { MorePortal } from "./more-portal";
 
 interface Props {
   spaceId: string;
@@ -70,28 +71,23 @@ export function SpaceCreateTrigger({
         <Plus className="w-3 h-3" />
       </button>
 
-      {open ? (
-        <div
-          ref={panelRef}
-          className="absolute left-full top-0 ml-1 z-[70] w-[280px]"
-        >
-          <SpaceCreateMenu
-            spaceId={spaceId}
-            onRequestBoard={() => {
-              setOpen(false);
-              onRequestBoard();
-            }}
-            onRequestFolder={() => {
-              setOpen(false);
-              onRequestFolder();
-            }}
-            onCreated={() => {
-              setOpen(false);
-              onCreated?.();
-            }}
-          />
-        </div>
-      ) : null}
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={280} open={open} placement="right">
+        <SpaceCreateMenu
+          spaceId={spaceId}
+          onRequestBoard={() => {
+            setOpen(false);
+            onRequestBoard();
+          }}
+          onRequestFolder={() => {
+            setOpen(false);
+            onRequestFolder();
+          }}
+          onCreated={() => {
+            setOpen(false);
+            onCreated?.();
+          }}
+        />
+      </MorePortal>
     </span>
   );
 }
@@ -120,7 +116,7 @@ function SpaceCreateMenu({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "Untitled doc",
+          title: "Untitled note",
           entityType: "SPACE",
           entityId: spaceId,
         }),

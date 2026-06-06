@@ -23,6 +23,26 @@ export interface SidebarPref {
 export interface HomePref {
   cards: string[];            // card keys shown on Home (e.g. "inbox", "assigned-comments")
   order: string[];            // display order
+  // Phase 78 — favorite (starred) board ids. Surfaced in the board
+  // page header star toggle + sidebar Favorites section.
+  favoriteBoardIds?: string[];
+  // Phase 80 — favorite (starred) Space ids. Same shape.
+  favoriteSpaceIds?: string[];
+  // Phase 15+ — favorite (starred) Doc/note ids. Surfaced in the Notes
+  // sidebar Favorites section and as the filled star on /docs/[id].
+  favoriteDocIds?: string[];
+  // Phase 83 — favorite (starred) Folder ids.
+  favoriteFolderIds?: string[];
+  // Phase 84 — favorite (starred) Table ids.
+  favoriteTableIds?: string[];
+  // Phase 89 — favorite (starred) Whiteboard + File ids.
+  favoriteWhiteboardIds?: string[];
+  favoriteFileIds?: string[];
+  // My Tasks card layout — react-grid-layout per-breakpoint shape.
+  // { lg: [{ i, x, y, w, h }], md: [...], sm: [...] }
+  taskCardLayout?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
+  // Hidden card keys on My Tasks (Manage cards menu)
+  taskCardsHidden?: string[];
 }
 
 export interface ThemePref {

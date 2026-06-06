@@ -7,7 +7,7 @@
 // lives here.
 
 import { useCallback, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import type { BoardItemRow } from "@/lib/board-items-shared";
@@ -19,7 +19,11 @@ import { FieldShelf } from "./field-shelf";
 
 interface BoardCanvasProps {
   boardId: string;
+  /** Phase 74 — active view's id (for PATCH /api/boards/[id]/views/[id])
+   *  + initial config blob. Null until a view exists (first board load). */
+  viewId: string | null;
   viewType: ViewType;
+  viewConfig: Record<string, unknown>;
   initialItems: BoardItemRow[];
   initialFields: FieldDef[];
   canEdit: boolean;
@@ -28,10 +32,35 @@ interface BoardCanvasProps {
   currentUserId: string | null;
 }
 
-export function BoardCanvas({ boardId, viewType, initialItems, initialFields, canEdit, currentUserId }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, canEdit, currentUserId }: BoardCanvasProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [trackedItemParam, setTrackedItemParam] = useState<string | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
+
+  // Cross-board deep link: any Space view (List/Recent/Team/etc.) can
+  // route to /boards/[slug]?item=<id> to land here with the drawer open.
+  // Derived-state-during-render pattern (React 19 friendly): we mirror
+  // the URL param into a tracked sentinel; when it changes, we update
+  // openItemId in the same render pass. The closeDrawer handler strips
+  // the param so a refresh doesn't reopen.
+  const itemParam = searchParams?.get("item") ?? null;
+  if (itemParam !== trackedItemParam) {
+    setTrackedItemParam(itemParam);
+    if (itemParam) setOpenItemId(itemParam);
+  }
+
+  const closeDrawer = useCallback(() => {
+    setOpenItemId(null);
+    if (searchParams?.get("item")) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("item");
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    }
+  }, [router, pathname, searchParams]);
   // Local mirrors so drawer/shelf edits sync into the active renderer
   // without a full router.refresh().
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -63,6 +92,8 @@ export function BoardCanvas({ boardId, viewType, initialItems, initialFields, ca
       {viewType === "TABLE" ? (
         <BoardTableView
           boardId={boardId}
+          viewId={viewId}
+          viewConfig={viewConfig}
           initialItems={items}
           initialFields={fields}
           canEdit={canEdit}
@@ -92,7 +123,7 @@ export function BoardCanvas({ boardId, viewType, initialItems, initialFields, ca
         canEdit={canEdit}
         currentUserId={currentUserId}
         fields={fields}
-        onClose={() => setOpenItemId(null)}
+        onClose={closeDrawer}
         onItemChanged={handleItemChanged}
         onItemArchived={handleItemArchived}
       />

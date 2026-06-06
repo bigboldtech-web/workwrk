@@ -94,7 +94,7 @@ export function BoardItemDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [itemId, onClose]);
 
-  const patch = useCallback(async (body: Partial<Pick<BoardItemRow, "title" | "status"> & { metadata: Record<string, unknown> }>) => {
+  const patch = useCallback(async (body: Partial<Pick<BoardItemRow, "title" | "status"> & { metadata: Record<string, unknown>; startAt: string | null; dueAt: string | null }>) => {
     if (!item) return;
     // Optimistic
     setItem((prev) => (prev ? { ...prev, ...body } : prev));
@@ -218,6 +218,20 @@ export function BoardItemDrawer({
                       <span className="text-xs text-zinc-500">Unassigned</span>
                     )}
                   </Row>
+                  <Row label="Start date">
+                    <DateField
+                      value={item.startAt ?? null}
+                      canEdit={canEdit}
+                      onSave={(v) => patch({ startAt: v })}
+                    />
+                  </Row>
+                  <Row label="Due date">
+                    <DateField
+                      value={item.dueAt ?? null}
+                      canEdit={canEdit}
+                      onSave={(v) => patch({ dueAt: v })}
+                    />
+                  </Row>
                   {customFields.map((f) => (
                     <Row key={f.key} label={f.label}>
                       <FieldValue
@@ -273,6 +287,65 @@ export function BoardItemDrawer({
 }
 
 // ── Subcomponents ─────────────────────────────────────────────────
+
+function DateField({
+  value,
+  canEdit,
+  onSave,
+}: {
+  value: Date | string | null;
+  canEdit: boolean;
+  onSave: (iso: string | null) => void;
+}) {
+  // <input type="date"> expects YYYY-MM-DD. Convert from Date/ISO.
+  const toInputValue = (v: Date | string | null): string => {
+    if (!v) return "";
+    const d = v instanceof Date ? v : new Date(v);
+    if (Number.isNaN(d.getTime())) return "";
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  const inputValue = toInputValue(value);
+
+  if (!canEdit) {
+    return (
+      <span className="text-sm text-zinc-700">
+        {inputValue ? new Date(inputValue).toLocaleDateString() : <span className="text-xs text-zinc-400">Not set</span>}
+      </span>
+    );
+  }
+
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <input
+        type="date"
+        value={inputValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) { onSave(null); return; }
+          // Build a midnight UTC ISO so the date stored matches the
+          // calendar day the user picked regardless of their tz.
+          const iso = `${v}T00:00:00.000Z`;
+          onSave(iso);
+        }}
+        className="h-7 px-2 text-sm border border-zinc-200 rounded bg-white focus:outline-none focus:border-zinc-400"
+      />
+      {inputValue ? (
+        <button
+          type="button"
+          onClick={() => onSave(null)}
+          className="text-xs text-zinc-400 hover:text-zinc-700"
+          aria-label="Clear date"
+          title="Clear"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (

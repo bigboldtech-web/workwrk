@@ -13,22 +13,25 @@ import { prisma } from "@/lib/prisma";
 import { createElement } from "react";
 import {
   Folder as FolderIcon, Lock,
-  Sparkles, Users as UsersIcon, User as UserIconSmall, Flag,
-  FileText, Database, Activity, BarChart3,
+  Sparkles, Users as UsersIcon, User as UserIconSmall,
+  FileText, Bookmark,
   LayoutDashboard, List as ListIcon, Kanban, Calendar as CalendarIcon, GanttChart,
-  ChevronLeft, ChevronRight, X,
+  ChevronLeft, ChevronRight, ChevronDown, X,
+  ListFilter, Glasses, Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { SpaceActions } from "@/components/layout/os/space-actions";
 import { SpaceQuickStart } from "@/components/layout/os/space-quick-start";
 import { SpaceShareButton } from "@/components/layout/os/space-share-button";
-import { SpaceMembersStrip } from "@/components/layout/os/space-members-strip";
+import { SpaceFavoriteButton } from "@/components/layout/os/space-favorite-button";
+import { ListCsvExport } from "@/components/board-view/list-csv-export";
+import { getEffectivePreferences } from "@/lib/preferences";
 import { ShareBoardButton } from "@/components/layout/os/share-board-button";
 import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
 import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
 import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
-import { MODULE_CATALOG, PRESETS } from "@/components/layout/os/space-wizard-presets";
-import type { ModuleKey, WorkflowConfig } from "@/components/layout/os/space-wizard-types";
+import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
+import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
 
 export const dynamic = "force-dynamic";
 
@@ -230,34 +233,9 @@ export default async function SpacePage(props: {
         ...ownedPrivateIds,
       ];
 
-  // Resolve owner + linked KRAs + member preview + recent Docs + tables
-  // + recent items + status counts in parallel. All are read-only chrome;
-  // missing rows degrade gracefully.
-  const [owner, kraLinks, memberPreview, recentDocs, spaceTables, recentItems, statusGroups] = await Promise.all([
-    space.ownerId
-      ? prisma.user.findUnique({
-          where: { id: space.ownerId },
-          select: { id: true, firstName: true, lastName: true, email: true },
-        })
-      : null,
-    prisma.entityLink.findMany({
-      where: {
-        organizationId: u.organizationId,
-        sourceType: "SPACE",
-        sourceId: space.id,
-        targetType: "KRA",
-      },
-      orderBy: { position: "asc" },
-      select: { targetId: true },
-    }),
-    prisma.spaceMember.findMany({
-      where: { spaceId: space.id },
-      include: {
-        user: { select: { id: true, firstName: true, lastName: true, email: true } },
-      },
-      orderBy: { createdAt: "asc" },
-      take: 12,
-    }),
+  // Recent Docs + tables + recent items + status counts + prefs in
+  // parallel. All are read-only chrome; missing rows degrade gracefully.
+  const [recentDocs, spaceTables, recentItems, statusGroups, prefs] = await Promise.all([
     prisma.doc.findMany({
       where: {
         organizationId: u.organizationId,
@@ -296,14 +274,11 @@ export default async function SpacePage(props: {
           _count: { _all: true },
         })
       : Promise.resolve([] as { status: string | null; _count: { _all: number } }[]),
+    getEffectivePreferences(u.id, u.organizationId),
   ]);
-
-  const kras = kraLinks.length
-    ? await prisma.kRA.findMany({
-        where: { organizationId: u.organizationId, id: { in: kraLinks.map((l) => l.targetId) } },
-        select: { id: true, name: true, category: true },
-      })
-    : [];
+  const initiallySpaceStarred = Array.isArray(prefs?.home?.favoriteSpaceIds)
+    ? prefs.home.favoriteSpaceIds.includes(space.id)
+    : false;
 
   const hasContent =
     space.folders.length > 0 ||
@@ -457,7 +432,8 @@ export default async function SpacePage(props: {
         },
         take: 600,
         select: {
-          id: true, title: true, status: true, createdAt: true, dueAt: true, metadata: true,
+          id: true, title: true, status: true, createdAt: true,
+          startAt: true, dueAt: true, metadata: true,
           boardId: true,
           board: { select: { slug: true, name: true } },
         },
@@ -465,31 +441,38 @@ export default async function SpacePage(props: {
     : [];
   const ganttItems = ganttItemsRaw
     .map((it) => {
-      let eff: Date | null = null;
+      // Determine the effective end date (dueAt OR metadata projection)
+      let endDate: Date | null = null;
       if (it.dueAt) {
-        eff = it.dueAt;
+        endDate = it.dueAt;
       } else {
         const key = dateKeyByBoard.get(it.boardId);
-        if (!key) return null;
-        const meta = it.metadata as Record<string, unknown> | null;
-        const raw = meta?.[key];
-        if (typeof raw !== "string" && !(raw instanceof Date)) return null;
-        const parsed = raw instanceof Date ? raw : new Date(raw);
-        if (Number.isNaN(parsed.getTime())) return null;
-        eff = parsed;
+        if (key) {
+          const meta = it.metadata as Record<string, unknown> | null;
+          const raw = meta?.[key];
+          if (typeof raw === "string" || raw instanceof Date) {
+            const parsed = raw instanceof Date ? raw : new Date(raw);
+            if (!Number.isNaN(parsed.getTime())) endDate = parsed;
+          }
+        }
       }
-      if (!eff || eff < ganttStart || eff >= ganttEnd) return null;
+      if (!endDate) return null;
+      // Start date is startAt if set; else equal to end (single-day marker)
+      const startDate = it.startAt ?? endDate;
+      // Skip items whose range falls entirely outside the visible window
+      if (endDate < ganttStart || startDate >= ganttEnd) return null;
       return {
         id: it.id,
         title: it.title,
         status: it.status,
-        date: eff,
+        startDate: startDate < ganttStart ? ganttStart : startDate,
+        endDate: endDate >= ganttEnd ? new Date(ganttEnd.getTime() - 1) : endDate,
         boardId: it.boardId,
         board: it.board,
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)
-    .sort((a, b) => a.date.getTime() - b.date.getTime());
+    .sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
 
   // Project effective date: Item.dueAt wins if set (Phase 58 path),
   // else fall back to the board's DATE field metadata projection.
@@ -540,26 +523,8 @@ export default async function SpacePage(props: {
       };
     })
     .sort((a, b) => b.count - a.count);
-  const hasAbout =
-    Boolean(workflow) ||
-    Boolean(owner) ||
-    kras.length > 0;
-
-  const memberPreviewUsers = memberPreview.map((m) => ({
-    id: m.user.id,
-    name: ([m.user.firstName, m.user.lastName].filter(Boolean).join(" ").trim() || m.user.email) as string,
-    initials: ((m.user.firstName?.[0] ?? "") + (m.user.lastName?.[0] ?? "")).toUpperCase() || m.user.email[0].toUpperCase(),
-    role: m.role,
-  }));
-
   const accent = space.color ?? DEFAULT_SPACE_COLOR;
   const Icon = getSpaceIcon(space.icon);
-  const enabledModules: ModuleKey[] = workflow?.modules ?? [];
-  const moduleByKey = new Map(MODULE_CATALOG.map((m) => [m.key, m]));
-  const presetLabel = workflow ? PRESETS.find((p) => p.id === workflow.preset)?.title ?? null : null;
-  const ownerName = owner
-    ? ([owner.firstName, owner.lastName].filter(Boolean).join(" ").trim() || owner.email)
-    : null;
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -575,24 +540,52 @@ export default async function SpacePage(props: {
           >
             {Icon ? createElement(Icon, { className: "h-4 w-4" }) : (space.name[0] ?? "?")}
           </span>
-          <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-2 min-w-0">
+          <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-1.5 min-w-0">
             <span className="truncate">{space.name}</span>
+            <button
+              type="button"
+              aria-label="Space menu"
+              title="Space menu"
+              className="p-0.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
             {space.visibility === "PRIVATE" ? (
               <Lock className="w-3.5 h-3.5 text-zinc-400" />
             ) : null}
+            <SpaceFavoriteButton spaceId={space.id} initiallyStarred={initiallySpaceStarred} />
+            <button
+              type="button"
+              aria-label="Filter Space"
+              title="Filter"
+              className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+            >
+              <ListFilter className="w-3.5 h-3.5" />
+            </button>
           </h1>
-          <span className="text-xs text-zinc-500">
-            {space._count.members} member{space._count.members === 1 ? "" : "s"} ·{" "}
-            {space._count.folders} folder{space._count.folders === 1 ? "" : "s"} ·{" "}
-            {space._count.boards} board{space._count.boards === 1 ? "" : "s"}
-          </span>
           <div className="flex-1" />
+          <button
+            type="button"
+            aria-label="Reader mode"
+            title="Reader mode"
+            className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500"
+          >
+            <Glasses className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+            title="Automations"
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            Automate
+          </button>
           <button
             type="button"
             className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
           >
             <Sparkles className="w-3.5 h-3.5 text-violet-500" />
-            Ask AI
+            Ask
           </button>
           <SpaceShareButton
             spaceId={space.id}
@@ -705,362 +698,216 @@ export default async function SpacePage(props: {
             accent={accent}
           />
         ) : null}
-        {view === "overview" && hasAbout ? (
-          <section
-            className="rounded-xl border border-zinc-200 bg-white p-4"
-            style={{ borderTop: `3px solid ${accent}` }}
-          >
-            <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-3">
-              About this Space
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <AboutCell
-                label="Preset"
-                icon={<Sparkles className="h-3.5 w-3.5" />}
-                value={presetLabel ?? "—"}
-              />
-              <AboutCell
-                label="Owner"
-                icon={<UsersIcon className="h-3.5 w-3.5" />}
-                value={ownerName ?? "Unassigned"}
-              />
-              <AboutCell
-                label={`Linked KRAs · ${kras.length}`}
-                icon={<Flag className="h-3.5 w-3.5" />}
-                value={
-                  kras.length === 0 ? (
-                    "None linked"
-                  ) : (
-                    <span className="flex flex-wrap gap-1">
-                      {kras.slice(0, 4).map((k) => (
-                        <span
-                          key={k.id}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-zinc-100 text-zinc-700"
-                        >
-                          {k.name}
-                        </span>
-                      ))}
-                      {kras.length > 4 ? (
-                        <span className="text-[11px] text-zinc-500">+{kras.length - 4}</span>
-                      ) : null}
-                    </span>
-                  )
-                }
-              />
-            </div>
-            {enabledModules.length > 0 ? (
-              <div className="mt-4 pt-4 border-t border-zinc-100">
-                <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
-                  Enabled modules · {enabledModules.length}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {enabledModules.map((k) => {
-                    const m = moduleByKey.get(k);
-                    return (
-                      <span
-                        key={k}
-                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium"
-                        style={{ backgroundColor: `${accent}1a`, color: accent }}
-                      >
-                        {m?.label ?? k}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="mt-4 pt-4 border-t border-zinc-100">
-              <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
-                Members
-              </div>
-              <SpaceMembersStrip
-                spaceId={space.id}
-                spaceName={space.name}
-                visibility={space.visibility}
-                members={memberPreviewUsers}
-                totalCount={space._count.members}
-              />
-            </div>
-          </section>
-        ) : null}
-
         {view === "overview" && !hasContent ? (
           <SpaceQuickStart spaceId={space.id} accent={accent} />
         ) : view === "overview" ? (
-          <div className="space-y-6">
-            {statusTotal > 0 ? (
-              <section>
-                <h2 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-1.5">
-                  <BarChart3 className="w-3 h-3" />
-                  Workload by status · {statusTotal} item{statusTotal === 1 ? "" : "s"}
-                </h2>
-                <div className="rounded-lg border border-zinc-200 bg-white p-4">
-                  <div
-                    role="img"
-                    aria-label={`Status distribution across ${statusTotal} items`}
-                    className="flex h-2.5 w-full overflow-hidden rounded-full bg-zinc-100"
-                  >
-                    {statusSegments.map((s) => {
-                      const drillable = s.key !== "__unset__";
-                      const segStyle = { width: `${s.pct}%`, backgroundColor: s.color };
-                      const segClass = "h-full first:rounded-l-full last:rounded-r-full block transition-opacity";
-                      const tip = `${s.label} · ${s.count} (${s.pct.toFixed(0)}%)`;
-                      if (!drillable) {
-                        return <span key={s.key} title={tip} className={segClass} style={segStyle} />;
-                      }
-                      const href = buildListHref(space.slug, {
-                        sort: "updated",
-                        statuses: new Set([s.key]),
-                        owners: null,
-                        groupBy: "none",
-                        due: "any",
-                      });
-                      return (
+          <div className="space-y-4">
+            <OverviewCustomizeBanner />
+            <OverviewToolbar />
+            {/* Row 1: Recent · Docs · Bookmarks */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+              <OverviewCard title="Recent">
+                {recentItems.length === 0 ? (
+                  <p className="text-xs text-zinc-500 px-2 py-3">No recent activity yet.</p>
+                ) : (
+                  <ul className="-mx-2">
+                    {recentItems.map((it) => (
+                      <li key={it.id}>
                         <Link
-                          key={s.key}
-                          href={href}
-                          title={`${tip} — open in List`}
-                          className={`${segClass} hover:opacity-80`}
-                          style={segStyle}
+                          href={`/boards/${it.board.slug}?item=${it.id}`}
+                          className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-[12.5px]"
+                        >
+                          <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                          <span className="text-zinc-900 truncate">{it.title}</span>
+                          <span className="text-zinc-400 shrink-0">·</span>
+                          <span className="text-zinc-500 truncate">in {it.board.name}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </OverviewCard>
+
+              <OverviewCard title="Docs">
+                {recentDocs.length === 0 ? (
+                  <p className="text-xs text-zinc-500 px-2 py-3">No docs in this Space yet.</p>
+                ) : (
+                  <ul className="-mx-2">
+                    {recentDocs.map((d) => (
+                      <li key={d.id}>
+                        <Link
+                          href={`/docs/${d.id}`}
+                          className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-[12.5px]"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                          <span className="text-zinc-900 truncate">{d.title}</span>
+                          <span className="text-zinc-400 shrink-0">·</span>
+                          <span className="text-zinc-500 truncate">in {d.title}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </OverviewCard>
+
+              <OverviewCard title="Bookmarks">
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-zinc-100 mb-2">
+                    <Bookmark className="w-4 h-4 text-zinc-500" />
+                  </span>
+                  <p className="text-[11.5px] text-zinc-600 max-w-[240px] mb-3">
+                    Bookmarks make it easy to save items or any URL from around the web.
+                  </p>
+                  <button
+                    type="button"
+                    disabled
+                    title="Coming soon"
+                    className="text-[11.5px] px-3 py-1.5 rounded-md bg-zinc-100 text-zinc-500 cursor-not-allowed"
+                  >
+                    Add Bookmark
+                  </button>
+                </div>
+              </OverviewCard>
+            </div>
+
+            {/* Folders */}
+            {space.folders.length > 0 ? (
+              <section>
+                <h2 className="text-sm font-semibold text-zinc-900 mb-2">Folders</h2>
+                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {space.folders.map((f) => (
+                    <li
+                      key={f.id}
+                      className="group/folder flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 transition-colors"
+                    >
+                      <FolderIcon className="w-4 h-4 text-zinc-500 shrink-0" />
+                      <span className="text-sm text-zinc-900 truncate flex-1">{f.name}</span>
+                      <span className="opacity-0 group-hover/folder:opacity-100 transition-opacity">
+                        <FolderMoreTrigger
+                          folder={{ id: f.id, name: f.name, icon: f.icon, color: f.color }}
                         />
-                      );
-                    })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {/* Lists table — Name · Color · Progress · Owner columns */}
+            {allBoards.length > 0 ? (
+              <section>
+                <h2 className="text-sm font-semibold text-zinc-900 mb-2">Lists</h2>
+                <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
+                  <div className="grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 text-[11px] uppercase tracking-wide text-zinc-500">
+                    <span>Name</span>
+                    <span>Color</span>
+                    <span>Progress</span>
+                    <span>Owner</span>
                   </div>
-                  <ul className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-1.5">
-                    {statusSegments.map((s) => {
-                      const drillable = s.key !== "__unset__";
-                      const content = (
-                        <>
+                  <ul>
+                    {allBoards.map((b) => (
+                      <li
+                        key={b.id}
+                        className="group/board grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors"
+                      >
+                        <Link
+                          href={`/boards/${b.slug}`}
+                          className="flex items-center gap-2 min-w-0"
+                        >
+                          <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                          <span className="text-[12.5px] text-zinc-900 truncate">{b.name}</span>
+                        </Link>
+                        <span className="flex items-center gap-1.5">
                           <span
-                            className="h-2 w-2 rounded-full shrink-0"
-                            style={{ backgroundColor: s.color }}
+                            className="w-3 h-3 rounded-sm"
+                            style={{ background: b.color ?? "#A1A1AA" }}
                             aria-hidden
                           />
-                          <span className="text-zinc-700 truncate flex-1">{s.label}</span>
-                          <span className="text-zinc-500 tabular-nums">{s.count}</span>
-                        </>
-                      );
-                      if (!drillable) {
-                        return (
-                          <li key={s.key} className="flex items-center gap-2 text-[11.5px]">
-                            {content}
-                          </li>
-                        );
-                      }
-                      const href = buildListHref(space.slug, {
-                        sort: "updated",
-                        statuses: new Set([s.key]),
-                        owners: null,
-                        groupBy: "none",
-                        due: "any",
-                      });
-                      return (
-                        <li key={s.key}>
-                          <Link
-                            href={href}
-                            className="flex items-center gap-2 text-[11.5px] -mx-1 px-1 py-0.5 rounded hover:bg-zinc-50"
-                          >
-                            {content}
-                          </Link>
-                        </li>
-                      );
-                    })}
+                          <span className="text-[11px] text-zinc-500">{b.color ?? "—"}</span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="h-1.5 flex-1 rounded-full bg-zinc-100 overflow-hidden">
+                            <span className="block h-full bg-zinc-300" style={{ width: "0%" }} />
+                          </span>
+                          <span className="text-[10.5px] text-zinc-500 tabular-nums shrink-0">0/—</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2">
+                          <span className="opacity-0 group-hover/board:opacity-100 transition-opacity inline-flex items-center gap-0.5">
+                            <ShareBoardButton
+                              boardId={b.id}
+                              boardName={b.name}
+                              visibility={b.visibility}
+                              parentSpaceName={space.name}
+                            />
+                            <BoardMoreTrigger
+                              board={{ id: b.id, name: b.name, icon: b.icon, color: b.color }}
+                            />
+                          </span>
+                        </span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
               </section>
             ) : null}
 
-            {recentItems.length > 0 ? (
-              <section>
-                <h2 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-1.5">
-                  <Activity className="w-3 h-3" />
-                  Recent activity
-                </h2>
-                <ul className="rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-100">
-                  {recentItems.map((it) => (
-                    <li key={it.id}>
-                      <Link
-                        href={`/boards/${it.board.slug}`}
-                        className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-50 transition-colors"
-                      >
-                        <span
-                          className="h-1.5 w-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: accent }}
-                          aria-hidden
-                        />
-                        <span className="text-[13px] text-zinc-900 truncate flex-1">{it.title}</span>
-                        <span className="text-[11px] text-zinc-500 truncate max-w-[160px] hidden sm:inline">
-                          {it.board.name}
-                        </span>
-                        <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">
-                          {timeAgo(it.updatedAt)}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
+            {/* Row 3: Resources · Workload by Status */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+              <OverviewCard title="Resources">
+                <div className="flex flex-col items-center justify-center py-10 text-center border border-dashed border-zinc-200 rounded-md">
+                  <span className="text-[11.5px] text-zinc-500">
+                    Drop files here or <span className="text-zinc-700 underline">attach</span>
+                  </span>
+                </div>
+              </OverviewCard>
 
-            {space.folders.length > 0 ? (
-              <section>
-                <h2 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Folders</h2>
-                <ul className="space-y-3">
-                  {space.folders.map((f) => (
-                    <li
-                      key={f.id}
-                      className="group/folder border border-zinc-200 rounded-lg bg-white overflow-hidden"
+              <OverviewCard title="Workload by Status">
+                {statusTotal === 0 ? (
+                  <p className="text-xs text-zinc-500 px-2 py-3">No items yet to chart.</p>
+                ) : (
+                  <div className="flex items-center gap-6">
+                    <div
+                      className="w-32 h-32 rounded-full shrink-0"
+                      role="img"
+                      aria-label={`Status pie across ${statusTotal} items`}
+                      style={{ background: buildConicGradient(statusSegments) }}
                     >
-                      <div className="px-4 py-2.5 flex items-center gap-3 border-b border-zinc-100">
-                        <FolderIcon className="w-4 h-4 text-zinc-500" />
-                        <span className="text-sm font-medium text-zinc-900 flex-1">{f.name}</span>
-                        <span className="text-xs text-zinc-500">
-                          {f._count.boards} board{f._count.boards === 1 ? "" : "s"}
-                        </span>
-                        <span className="opacity-0 group-hover/folder:opacity-100 transition-opacity">
-                          <FolderMoreTrigger
-                            folder={{ id: f.id, name: f.name, icon: f.icon, color: f.color }}
+                      <div className="w-full h-full rounded-full" style={{
+                        background: "radial-gradient(circle, transparent 38%, transparent 38%)",
+                      }} />
+                    </div>
+                    <ul className="flex-1 grid grid-cols-1 gap-1.5 min-w-0">
+                      {statusSegments.map((s) => (
+                        <li key={s.key} className="flex items-center gap-2 text-[11.5px]">
+                          <span
+                            className="h-2 w-2 rounded-full shrink-0"
+                            style={{ backgroundColor: s.color }}
+                            aria-hidden
                           />
-                        </span>
-                      </div>
-                      {f.boards.length > 0 ? (
-                        <ul className="px-2 py-2">
-                          {f.boards.map((b) => (
-                            <li
-                              key={b.id}
-                              className="group/board flex items-center gap-2 px-3 py-2 rounded-md hover:bg-zinc-50"
-                            >
-                              <Link
-                                href={`/boards/${b.slug}`}
-                                className="flex items-center gap-3 flex-1 min-w-0"
-                              >
-                                <span className="inline-flex items-center justify-center w-6 h-6 rounded text-xs font-semibold bg-zinc-100 uppercase">
-                                  {b.icon ?? b.name.charAt(0)}
-                                </span>
-                                <span className="text-sm text-zinc-900 flex-1 truncate">{b.name}</span>
-                                <span className="text-[10px] text-zinc-500 uppercase tracking-wide shrink-0">
-                                  {b.views[0]?.type ?? "TABLE"}
-                                </span>
-                              </Link>
-                              <span className="opacity-0 group-hover/board:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
-                                <ShareBoardButton
-                                  boardId={b.id}
-                                  boardName={b.name}
-                                  visibility={b.visibility}
-                                  parentSpaceName={space.name}
-                                />
-                                <BoardMoreTrigger
-                                  board={{ id: b.id, name: b.name, icon: b.icon, color: b.color }}
-                                />
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="px-4 py-3 text-xs text-zinc-500">No boards yet</div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {recentDocs.length > 0 ? (
-              <section>
-                <h2 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-1.5">
-                  <FileText className="w-3 h-3" />
-                  Docs in this Space
-                </h2>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {recentDocs.map((d) => (
-                    <li key={d.id}>
-                      <Link
-                        href={`/docs/${d.id}`}
-                        className="block p-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 transition-colors"
-                      >
-                        <div className="text-[13px] font-medium text-zinc-900 truncate">{d.title}</div>
-                        {d.excerpt ? (
-                          <div className="text-[11.5px] text-zinc-500 line-clamp-2 mt-1">{d.excerpt}</div>
-                        ) : null}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {spaceTables.length > 0 ? (
-              <section>
-                <h2 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-1.5">
-                  <Database className="w-3 h-3" />
-                  Tables in this Space
-                </h2>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {spaceTables.map((t) => {
-                    const rowCount = t._count.rows;
-                    const subtitle = t.description ?? `${rowCount} ${rowCount === 1 ? "row" : "rows"}`;
-                    return (
-                      <li key={t.id}>
-                        <Link
-                          href={`/tables/${t.id}`}
-                          className="block p-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 transition-colors"
-                        >
-                          <div className="flex items-center gap-2 mb-1">
-                            <Database className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                            <span className="text-[13px] font-medium text-zinc-900 truncate flex-1">{t.name}</span>
-                          </div>
-                          <div className="text-[11.5px] text-zinc-500 line-clamp-1">{subtitle}</div>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            ) : null}
-
-            {space.boards.length > 0 ? (
-              <section>
-                <h2 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Boards</h2>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {space.boards.map((b) => (
-                    <li
-                      key={b.id}
-                      className="group/board flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 transition-colors"
-                    >
-                      <Link
-                        href={`/boards/${b.slug}`}
-                        className="flex items-center gap-3 flex-1 min-w-0"
-                      >
-                        <span className="inline-flex items-center justify-center w-7 h-7 rounded text-xs font-semibold bg-zinc-100 uppercase">
-                          {b.icon ?? b.name.charAt(0)}
-                        </span>
-                        <span className="text-sm text-zinc-900 flex-1 truncate">{b.name}</span>
-                        <span className="text-[10px] text-zinc-500 uppercase tracking-wide shrink-0">
-                          {b.views[0]?.type ?? "TABLE"}
-                        </span>
-                      </Link>
-                      <span className="opacity-0 group-hover/board:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
-                        <ShareBoardButton
-                          boardId={b.id}
-                          boardName={b.name}
-                          visibility={b.visibility}
-                          parentSpaceName={space.name}
-                        />
-                        <BoardMoreTrigger
-                          board={{ id: b.id, name: b.name, icon: b.icon, color: b.color }}
-                        />
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
+                          <span className="text-zinc-700 truncate flex-1 uppercase tracking-wide">{s.label}</span>
+                          <span className="text-zinc-500 tabular-nums">{s.count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </OverviewCard>
+            </div>
           </div>
         ) : null}
       </div>
     </div>
   );
+}
+
+interface GanttItem {
+  id: string;
+  title: string;
+  status: string | null;
+  startDate: Date;
+  endDate: Date;
+  boardId: string;
+  board: { slug: string; name: string };
 }
 
 function SpaceGanttSection({
@@ -1071,14 +918,7 @@ function SpaceGanttSection({
   statusPalette,
   accent,
 }: {
-  items: Array<{
-    id: string;
-    title: string;
-    status: string | null;
-    date: Date;
-    boardId: string;
-    board: { slug: string; name: string };
-  }>;
+  items: GanttItem[];
   weekStart: Date;
   weekCount: number;
   spaceSlug: string;
@@ -1097,7 +937,7 @@ function SpaceGanttSection({
     new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + weekCount * 7 - 1).toLocaleString("default", { month: "short", day: "numeric", year: "numeric" })
   }`;
 
-  // Build week columns + group items into (boardId, weekIndex) buckets.
+  // Build week columns + group items by board.
   const weeks: Date[] = Array.from({ length: weekCount }, (_, i) => {
     return new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i * 7);
   });
@@ -1111,17 +951,11 @@ function SpaceGanttSection({
     }
   }
   boardOrder.sort((a, b) => a.name.localeCompare(b.name));
-  // boardId -> weekIdx -> items
-  const grid = new Map<string, Map<number, typeof items>>();
+  const itemsByBoard = new Map<string, GanttItem[]>();
   for (const it of items) {
-    const diffDays = Math.floor((it.date.getTime() - weekStart.getTime()) / 86_400_000);
-    const wIdx = Math.floor(diffDays / 7);
-    if (wIdx < 0 || wIdx >= weekCount) continue;
-    let byWeek = grid.get(it.boardId);
-    if (!byWeek) { byWeek = new Map(); grid.set(it.boardId, byWeek); }
-    const arr = byWeek.get(wIdx) ?? [];
+    const arr = itemsByBoard.get(it.boardId) ?? [];
     arr.push(it);
-    byWeek.set(wIdx, arr);
+    itemsByBoard.set(it.boardId, arr);
   }
 
   return (
@@ -1158,7 +992,7 @@ function SpaceGanttSection({
         <h2 className="text-[13px] font-semibold text-zinc-900">{rangeLabel}</h2>
         <div className="flex-1" />
         <span className="text-[10.5px] text-zinc-400 hidden sm:inline">
-          Items with a DATE field · single-week markers (start+end durations land with Item.dueAt)
+          Items with startAt + dueAt render as duration bars · single-day items show as markers
         </span>
       </div>
 
@@ -1199,8 +1033,9 @@ function SpaceGanttSection({
               <BoardRow
                 key={b.id}
                 board={b}
-                weeks={weeks}
-                cellItems={grid.get(b.id) ?? new Map()}
+                weekStart={weekStart}
+                weekCount={weekCount}
+                items={itemsByBoard.get(b.id) ?? []}
                 statusPalette={statusPalette}
                 accent={accent}
               />
@@ -1214,44 +1049,88 @@ function SpaceGanttSection({
 
 function BoardRow({
   board,
-  weeks,
-  cellItems,
+  weekStart,
+  weekCount,
+  items,
   statusPalette,
   accent,
 }: {
   board: { id: string; slug: string; name: string };
-  weeks: Date[];
-  cellItems: Map<number, Array<{ id: string; title: string; status: string | null; date: Date; board: { slug: string; name: string } }>>;
+  weekStart: Date;
+  weekCount: number;
+  items: GanttItem[];
   statusPalette: Map<string, { label: string; color: string; group: string }>;
   accent: string;
 }) {
+  const totalDays = weekCount * 7;
+  const msPerDay = 86_400_000;
+
+  // Lane-pack: greedy first-fit. Each bar gets a lane index; bars in
+  // the same lane never overlap. Output: { item, lane } per bar.
+  type Bar = { item: GanttItem; startCol: number; spanCols: number; lane: number };
+  const sorted = [...items].sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+  const lanes: number[] = []; // index = lane, value = lastEndCol (exclusive)
+  const bars: Bar[] = sorted.map((it) => {
+    const startDay = Math.max(0, Math.floor((it.startDate.getTime() - weekStart.getTime()) / msPerDay));
+    const endDay = Math.min(totalDays - 1, Math.floor((it.endDate.getTime() - weekStart.getTime()) / msPerDay));
+    const startCol = startDay;
+    const spanCols = Math.max(1, endDay - startDay + 1);
+    // Place in first lane with capacity
+    let lane = lanes.findIndex((endIdx) => endIdx <= startCol);
+    if (lane === -1) { lane = lanes.length; lanes.push(0); }
+    lanes[lane] = startCol + spanCols;
+    return { item: it, startCol, spanCols, lane };
+  });
+  const laneCount = Math.max(1, lanes.length);
+  const rowHeight = laneCount * 22 + 12; // 22px per bar + breathing room
+
   return (
     <>
-      <div className="border-b border-zinc-100 px-3 py-2 text-[12px] font-medium text-zinc-800 truncate sticky left-0 bg-white z-10">
-        <Link href={`/boards/${board.slug}`} className="hover:text-zinc-900">{board.name}</Link>
+      <div
+        className="border-b border-zinc-100 px-3 py-2 text-[12px] font-medium text-zinc-800 truncate sticky left-0 bg-white z-10 flex items-center"
+        style={{ minHeight: rowHeight }}
+      >
+        <Link href={`/boards/${board.slug}`} className="hover:text-zinc-900 truncate">{board.name}</Link>
       </div>
-      {weeks.map((_w, i) => {
-        const arr = cellItems.get(i) ?? [];
-        return (
-          <div key={i} className="border-l border-zinc-100 border-b border-zinc-100 px-1.5 py-1.5 min-h-[56px] space-y-1">
-            {arr.map((it) => {
-              const palette = it.status ? statusPalette.get(it.status) : null;
-              const color = palette?.color ?? accent;
-              return (
-                <Link
-                  key={it.id}
-                  href={`/boards/${it.board.slug}`}
-                  title={`${it.title} — ${it.date.toLocaleDateString()}`}
-                  className="block px-2 py-1 rounded text-[10.5px] font-medium text-white truncate hover:opacity-90"
-                  style={{ backgroundColor: color }}
-                >
-                  {it.title}
-                </Link>
-              );
-            })}
-          </div>
-        );
-      })}
+      <div
+        className="border-l border-zinc-100 border-b border-zinc-100 relative"
+        style={{ gridColumn: `2 / span ${weekCount}`, minHeight: rowHeight }}
+      >
+        {/* Week column dividers as light vertical lines */}
+        {Array.from({ length: weekCount - 1 }, (_, i) => (
+          <span
+            key={i}
+            aria-hidden
+            className="absolute top-0 bottom-0 w-px bg-zinc-100"
+            style={{ left: `${((i + 1) / weekCount) * 100}%` }}
+          />
+        ))}
+        {/* Bars positioned by day percent */}
+        {bars.map(({ item, startCol, spanCols, lane }) => {
+          const leftPct = (startCol / totalDays) * 100;
+          const widthPct = (spanCols / totalDays) * 100;
+          const palette = item.status ? statusPalette.get(item.status) : null;
+          const color = palette?.color ?? accent;
+          return (
+            <Link
+              key={item.id}
+              href={`/boards/${item.board.slug}?item=${item.id}`}
+              title={`${item.title} — ${item.startDate.toLocaleDateString()}${
+                item.startDate.getTime() !== item.endDate.getTime() ? ` → ${item.endDate.toLocaleDateString()}` : ""
+              }`}
+              className="absolute px-2 py-1 rounded text-[10.5px] font-medium text-white truncate hover:opacity-90 leading-tight"
+              style={{
+                left: `calc(${leftPct}% + 2px)`,
+                width: `calc(${widthPct}% - 4px)`,
+                top: 6 + lane * 22,
+                backgroundColor: color,
+              }}
+            >
+              {item.title}
+            </Link>
+          );
+        })}
+      </div>
     </>
   );
 }
@@ -1398,7 +1277,7 @@ function SpaceCalendarSection({
                     return (
                       <li key={it.id}>
                         <Link
-                          href={`/boards/${it.board.slug}`}
+                          href={`/boards/${it.board.slug}?item=${it.id}`}
                           className="flex items-center gap-1.5 px-1 py-0.5 rounded text-[10.5px] text-zinc-700 hover:bg-zinc-50 truncate"
                         >
                           <span
@@ -1570,7 +1449,7 @@ function SpaceTeamSection({
                     return (
                       <li key={it.id}>
                         <Link
-                          href={`/boards/${it.board.slug}`}
+                          href={`/boards/${it.board.slug}?item=${it.id}`}
                           className="block rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm p-2.5 transition-colors"
                           style={{ borderLeft: `3px solid ${accent}` }}
                         >
@@ -1686,7 +1565,7 @@ function SpaceBoardSection({
                   cards.map((it) => (
                     <li key={it.id}>
                       <Link
-                        href={`/boards/${it.board.slug}`}
+                        href={`/boards/${it.board.slug}?item=${it.id}`}
                         className="block rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm p-2.5 transition-colors"
                         style={{ borderLeft: `3px solid ${accent}` }}
                       >
@@ -2174,6 +2053,16 @@ function SpaceListSection({
         <ListDueMenu opts={opts} spaceSlug={spaceSlug} />
         <ListGroupByMenu opts={opts} spaceSlug={spaceSlug} />
         <ListSortMenu opts={opts} spaceSlug={spaceSlug} />
+        <ListCsvExport
+          filename={`${spaceSlug}-items-${new Date().toISOString().slice(0, 10)}.csv`}
+          rows={items.map((it) => ({
+            title: it.title,
+            status: it.status ? statusPalette.get(it.status)?.label ?? it.status : "",
+            boardName: it.board.name,
+            ownerName: it.ownerId ? (ownerFacets.find((o) => o.id === it.ownerId)?.name ?? "") : "",
+            updatedAt: it.updatedAt instanceof Date ? it.updatedAt.toISOString() : String(it.updatedAt),
+          }))}
+        />
       </div>
       {filterActive ? (
         <FilterChipStrip
@@ -2365,14 +2254,17 @@ function ListItemsTable({
           return (
             <tr key={it.id} className="hover:bg-zinc-50">
               <td className="px-3 py-2">
-                <div className="flex items-center gap-2 min-w-0">
+                <Link
+                  href={`/boards/${it.board.slug}?item=${it.id}`}
+                  className="flex items-center gap-2 min-w-0"
+                >
                   <span
                     className="h-1.5 w-1.5 rounded-full shrink-0"
                     style={{ backgroundColor: accent }}
                     aria-hidden
                   />
-                  <span className="text-[13px] text-zinc-900 truncate">{it.title}</span>
-                </div>
+                  <span className="text-[13px] text-zinc-900 truncate hover:text-zinc-700">{it.title}</span>
+                </Link>
               </td>
               <td className="px-3 py-2">
                 <span
@@ -2401,22 +2293,32 @@ function ListItemsTable({
   );
 }
 
-function AboutCell({
-  label,
-  icon,
-  value,
+function OverviewCard({
+  title,
+  children,
 }: {
-  label: string;
-  icon: React.ReactNode;
-  value: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
 }) {
   return (
-    <div>
-      <div className="text-[11px] text-zinc-500 mb-1 inline-flex items-center gap-1.5">
-        {icon}
-        {label}
+    <section className="rounded-xl border border-zinc-200 bg-white p-4 min-h-[180px] flex flex-col">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-semibold text-zinc-900">{title}</h2>
       </div>
-      <div className="text-[13px] text-zinc-900 font-medium">{value}</div>
-    </div>
+      <div className="flex-1">{children}</div>
+    </section>
   );
+}
+
+function buildConicGradient(segs: Array<{ color: string; pct: number }>): string {
+  if (segs.length === 0) return "#e4e4e7";
+  const parts: string[] = [];
+  let acc = 0;
+  for (const s of segs) {
+    const start = acc;
+    const end = acc + s.pct;
+    parts.push(`${s.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`);
+    acc = end;
+  }
+  return `conic-gradient(${parts.join(", ")})`;
 }

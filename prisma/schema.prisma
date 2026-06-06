@@ -4905,6 +4905,12 @@ model Item {
   startAt        DateTime?
   dueAt          DateTime?
   metadata       Json         @default("{}")
+  // 🆕 Phase 72 — subtask self-relation. Top-level items have parentItemId
+  // = null; subtasks point to their parent. Cascade delete so removing
+  // the parent drops the whole tree (ClickUp + Linear pattern).
+  parentItemId   String?
+  parentItem     Item?        @relation("ItemSubtasks", fields: [parentItemId], references: [id], onDelete: Cascade)
+  childItems     Item[]       @relation("ItemSubtasks")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -4912,6 +4918,7 @@ model Item {
   @@index([organizationId, boardId])
   @@index([boardId, position])
   @@index([boardId, dueAt])
+  @@index([boardId, parentItemId])
   @@index([itemType])
   @@index([ownerId])
 }

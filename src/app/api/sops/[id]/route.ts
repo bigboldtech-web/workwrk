@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, isOrgAdmin, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { broadcastWebhook } from "@/lib/webhooks";
 import { enrichScribeScreenshots } from "@/lib/scribe-enrich";
+import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
+import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 import { canWriteToFolder } from "@/lib/sop-access";
 import { isSOPContentEmpty, isSOPTitleEmpty } from "@/lib/sop-content";
 
@@ -42,7 +44,11 @@ export async function GET(
   }
 
   const enriched = await enrichScribeScreenshots(sop as any);
-  return jsonSuccess(enriched);
+  // For blocks-format WRITTEN SOPs, also refresh image / file URLs.
+  const final = enriched && enriched.content
+    ? { ...enriched, content: await presignBlocksImagesAndFiles(enriched.content) }
+    : enriched;
+  return jsonSuccess(final);
 }
 
 export async function PATCH(
@@ -202,6 +208,21 @@ export async function PATCH(
       organizationId: getOrgId(session),
       event: "sop_published",
       payload: { sopId: id, title: updated.title, category: updated.category },
+    });
+  }
+
+  // Sync EntityLink graph for backlinks. Only blocks-format SOP
+  // content holds the references we know how to extract.
+  const updatedContent = updated.content as { type?: string } | null;
+  if (updatedContent && updatedContent.type === "blocks") {
+    void syncLinksFromBlocks({
+      organizationId: getOrgId(session),
+      sourceType: "SOP",
+      sourceId: id,
+      content: updated.content,
+      createdById: (session as { user: { id: string } }).user.id,
+    }).catch((err) => {
+      console.warn("[sops PATCH] syncLinksFromBlocks failed", err);
     });
   }
 

@@ -11,15 +11,15 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
   Video, Trophy, Clock,
-  Inbox, MessageSquare, CheckSquare, ListChecks, MoreHorizontal,
-  Plus, ChevronDown, ChevronRight, Star,
+  Inbox, MessageSquare, CheckSquare, MoreHorizontal,
+  Plus, ChevronDown, ChevronRight, Star, X,
   Megaphone, Briefcase, BookOpen, Wrench, Building2,
   HeartHandshake, GraduationCap, UserCheck, Award, ThumbsUp, FileSpreadsheet,
   HardDrive, Boxes,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText, Palette,
   ShieldCheck,
-  Library as LibraryIcon, Folder,
+  Library as LibraryIcon, Folder, Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
@@ -134,6 +134,102 @@ function NavItem({
   );
 }
 
+function MyTasksGroup({ pathname }: { pathname: string }) {
+  const isActiveTree =
+    pathname === "/tasks" ||
+    pathname.startsWith("/tasks/assigned-to-me") ||
+    pathname.startsWith("/tasks/today-overdue") ||
+    pathname.startsWith("/tasks/personal-list");
+  const [expanded, setExpanded] = useState(isActiveTree);
+
+  return (
+    <>
+      <li className="relative">
+        <Link
+          href="/tasks"
+          className={`flex items-center gap-2.5 px-2 py-1 rounded-md text-[13px] ${
+            pathname === "/tasks"
+              ? "bg-zinc-100 text-zinc-900 font-medium"
+              : "text-zinc-700 hover:bg-zinc-50"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+            aria-label={expanded ? "Collapse My Tasks" : "Expand My Tasks"}
+            className="w-3.5 h-3.5 inline-flex items-center justify-center -mr-0.5 text-zinc-500 hover:text-zinc-700"
+          >
+            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
+          <CheckSquare className="w-3.5 h-3.5 flex-shrink-0 text-zinc-500" />
+          <span className="truncate flex-1">My Tasks</span>
+        </Link>
+      </li>
+      {expanded ? (
+        <li>
+          <ul className="ml-5 border-l border-zinc-100 pl-1">
+            <SubNavItem
+              href="/tasks/assigned-to-me"
+              Icon={UserCheck}
+              label="Assigned to me"
+              active={pathname.startsWith("/tasks/assigned-to-me")}
+              iconTint="#f97316"
+            />
+            <SubNavItem
+              href="/tasks/today-overdue"
+              Icon={Calendar}
+              label="Today & Overdue"
+              active={pathname.startsWith("/tasks/today-overdue")}
+              iconTint="#3b82f6"
+            />
+            <SubNavItem
+              href="/tasks/personal-list"
+              Icon={ClipboardCheck}
+              label="Personal List"
+              active={pathname.startsWith("/tasks/personal-list")}
+            />
+          </ul>
+        </li>
+      ) : null}
+    </>
+  );
+}
+
+function SubNavItem({
+  href,
+  label,
+  Icon,
+  active,
+  iconTint,
+}: {
+  href: string;
+  label: string;
+  Icon: LucideIcon;
+  active?: boolean;
+  iconTint?: string;
+}) {
+  return (
+    <li>
+      <Link
+        href={href}
+        className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
+          active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+        }`}
+      >
+        <Icon
+          className="w-3.5 h-3.5 flex-shrink-0"
+          style={iconTint ? { color: iconTint } : { color: "var(--os-ink, #71717a)" }}
+        />
+        <span className="truncate flex-1">{label}</span>
+      </Link>
+    </li>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-2 py-1.5 mt-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
@@ -165,11 +261,65 @@ interface SpaceRow {
 /** Default order if /api/preferences isn't loaded yet or the user hasn't customised. */
 const DEFAULT_SECTIONS_ORDER: string[] = ["favorites", "spaces"];
 
+function FavSubLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <li
+      className="px-2 pt-2 pb-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-zinc-400 select-none"
+      aria-hidden
+    >
+      {children}
+    </li>
+  );
+}
+
+function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder" | "table" | "whiteboard" | "file"; id: string }) {
+  const onClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const body =
+        kind === "space" ? { spaceId: id, on: false }
+        : kind === "board" ? { boardId: id, on: false }
+        : kind === "doc" ? { docId: id, on: false }
+        : kind === "folder" ? { folderId: id, on: false }
+        : kind === "table" ? { tableId: id, on: false }
+        : kind === "whiteboard" ? { whiteboardId: id, on: false }
+        : { fileId: id, on: false };
+      const res = await fetch(`/api/me/favorites/${kind}s`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
+      }
+    } catch {}
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Remove from favorites"
+      aria-label="Remove from favorites"
+      className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/fav:opacity-100 transition-opacity inline-flex items-center justify-center w-4 h-4 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+    >
+      <X className="w-3 h-3" />
+    </button>
+  );
+}
+
 function HomeSidebar() {
   const pathname = usePathname() || "";
   const { query: searchQuery } = useSidebarSearch();
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [favoriteBoards, setFavoriteBoards] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
+  const [favoriteSpaces, setFavoriteSpaces] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
+  const [favoriteDocs, setFavoriteDocs] = useState<Array<{ id: string; title: string; excerpt: string | null }>>([]);
+  const [favoriteFolders, setFavoriteFolders] = useState<Array<{ id: string; name: string; icon: string | null; color: string | null; space: { slug: string } }>>([]);
+  const [favoriteTables, setFavoriteTables] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
+  const [favoriteWhiteboards, setFavoriteWhiteboards] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
+  const [favoriteFiles, setFavoriteFiles] = useState<Array<{ id: string; name: string; url: string; mimeType: string }>>([]);
   const [newSpaceOpen, setNewSpaceOpen] = useState(false);
   const [sectionsOrder, setSectionsOrder] = useState<string[]>(DEFAULT_SECTIONS_ORDER);
   // Per-Space create dialogs — co-hosted at the sidebar level so we
@@ -223,21 +373,263 @@ function HomeSidebar() {
     };
   }, []);
 
-  const renderFavorites = () => (
-    <div key="favorites">
-      <button
-        type="button"
-        onClick={() => setFavoritesOpen((v) => !v)}
-        className="flex items-center gap-1.5 px-2 py-1.5 mt-2 text-[13px] font-medium w-full text-zinc-700 hover:text-zinc-900"
-      >
-        {favoritesOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-        <span>Favorites</span>
-      </button>
-      {favoritesOpen ? (
-        <div className="px-2 py-1 text-[11px] text-zinc-400">No favorites yet.</div>
-      ) : null}
-    </div>
-  );
+  // Phases 79/80/82/83/84/89 — hydrate all seven favorite kinds in
+  // parallel. Refetches when any favorite button fires the event.
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const [boardsRes, spacesRes, docsRes, foldersRes, tablesRes, wbsRes, filesRes] = await Promise.all([
+          fetch("/api/me/favorites/boards", { cache: "no-store" }),
+          fetch("/api/me/favorites/spaces", { cache: "no-store" }),
+          fetch("/api/me/favorites/docs", { cache: "no-store" }),
+          fetch("/api/me/favorites/folders", { cache: "no-store" }),
+          fetch("/api/me/favorites/tables", { cache: "no-store" }),
+          fetch("/api/me/favorites/whiteboards", { cache: "no-store" }),
+          fetch("/api/me/favorites/files", { cache: "no-store" }),
+        ]);
+        if (boardsRes.ok) {
+          const data = await boardsRes.json();
+          if (alive && Array.isArray(data?.boards)) setFavoriteBoards(data.boards);
+        }
+        if (spacesRes.ok) {
+          const data = await spacesRes.json();
+          if (alive && Array.isArray(data?.spaces)) setFavoriteSpaces(data.spaces);
+        }
+        if (docsRes.ok) {
+          const data = await docsRes.json();
+          if (alive && Array.isArray(data?.docs)) setFavoriteDocs(data.docs);
+        }
+        if (foldersRes.ok) {
+          const data = await foldersRes.json();
+          if (alive && Array.isArray(data?.folders)) setFavoriteFolders(data.folders);
+        }
+        if (tablesRes.ok) {
+          const data = await tablesRes.json();
+          if (alive && Array.isArray(data?.tables)) setFavoriteTables(data.tables);
+        }
+        if (wbsRes.ok) {
+          const data = await wbsRes.json();
+          if (alive && Array.isArray(data?.whiteboards)) setFavoriteWhiteboards(data.whiteboards);
+        }
+        if (filesRes.ok) {
+          const data = await filesRes.json();
+          if (alive && Array.isArray(data?.files)) setFavoriteFiles(data.files);
+        }
+      } catch {}
+    };
+    void load();
+    const onChange = () => void load();
+    window.addEventListener("workwrk:favs-changed", onChange);
+    return () => {
+      alive = false;
+      window.removeEventListener("workwrk:favs-changed", onChange);
+    };
+  }, []);
+
+  const renderFavorites = () => {
+    const total =
+      favoriteBoards.length + favoriteSpaces.length + favoriteDocs.length
+      + favoriteFolders.length + favoriteTables.length
+      + favoriteWhiteboards.length + favoriteFiles.length;
+    return (
+      <div key="favorites">
+        <button
+          type="button"
+          onClick={() => setFavoritesOpen((v) => !v)}
+          className="flex items-center gap-1.5 px-2 py-1.5 mt-2 text-[13px] font-medium w-full text-zinc-700 hover:text-zinc-900"
+        >
+          {favoritesOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          <span>Favorites</span>
+          {total > 0 ? (
+            <span className="ml-1 text-[10.5px] text-zinc-400 font-normal tabular-nums">
+              {total}
+            </span>
+          ) : null}
+        </button>
+        {favoritesOpen ? (
+          total === 0 ? (
+            <div className="px-2 py-1 text-[11px] text-zinc-400">
+              Star a Space or Board to add it here.
+            </div>
+          ) : (
+            <ul className="space-y-0.5">
+              {/* Phase 85 — when the user has more than 6 favorites,
+                  group by kind with small uppercase sub-headers so the
+                  list doesn't become a mystery soup. */}
+              {total > 6 && favoriteSpaces.length > 0 ? (
+                <FavSubLabel>Spaces</FavSubLabel>
+              ) : null}
+              {favoriteSpaces.map((s) => {
+                const active = pathname === `/spaces/${s.slug}`;
+                const bg = s.color ?? "#71717A";
+                return (
+                  <li key={`s-${s.id}`} className="group/fav relative">
+                    <Link
+                      href={`/spaces/${s.slug}`}
+                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
+                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <span
+                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
+                        style={{ backgroundColor: bg }}
+                      >
+                        {s.icon ?? s.name[0] ?? "?"}
+                      </span>
+                      <span className="truncate flex-1">{s.name}</span>
+                    </Link>
+                    <UnstarButton kind="space" id={s.id} />
+                  </li>
+                );
+              })}
+              {total > 6 && favoriteBoards.length > 0 ? (
+                <FavSubLabel>Boards</FavSubLabel>
+              ) : null}
+              {favoriteBoards.map((b) => {
+                const active = pathname === `/boards/${b.slug}`;
+                const bg = b.color ?? "#71717A";
+                return (
+                  <li key={`b-${b.id}`} className="group/fav relative">
+                    <Link
+                      href={`/boards/${b.slug}`}
+                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
+                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <span
+                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
+                        style={{ backgroundColor: bg }}
+                      >
+                        {b.icon ?? b.name[0] ?? "?"}
+                      </span>
+                      <span className="truncate flex-1">{b.name}</span>
+                    </Link>
+                    <UnstarButton kind="board" id={b.id} />
+                  </li>
+                );
+              })}
+              {total > 6 && favoriteDocs.length > 0 ? (
+                <FavSubLabel>Docs</FavSubLabel>
+              ) : null}
+              {favoriteDocs.map((d) => {
+                const active = pathname === `/docs/${d.id}`;
+                return (
+                  <li key={`d-${d.id}`} className="group/fav relative">
+                    <Link
+                      href={`/docs/${d.id}`}
+                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
+                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
+                      <span className="truncate flex-1">{d.title}</span>
+                    </Link>
+                    <UnstarButton kind="doc" id={d.id} />
+                  </li>
+                );
+              })}
+              {total > 6 && favoriteFolders.length > 0 ? (
+                <FavSubLabel>Folders</FavSubLabel>
+              ) : null}
+              {favoriteFolders.map((f) => {
+                const bg = f.color ?? "#71717A";
+                return (
+                  <li key={`f-${f.id}`} className="group/fav relative">
+                    <Link
+                      href={`/spaces/${f.space.slug}#folder-${f.id}`}
+                      className="flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] text-zinc-700 hover:bg-zinc-50"
+                    >
+                      <span
+                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
+                        style={{ backgroundColor: bg }}
+                      >
+                        <Folder className="w-2.5 h-2.5" />
+                      </span>
+                      <span className="truncate flex-1">{f.name}</span>
+                    </Link>
+                    <UnstarButton kind="folder" id={f.id} />
+                  </li>
+                );
+              })}
+              {total > 6 && favoriteTables.length > 0 ? (
+                <FavSubLabel>Tables</FavSubLabel>
+              ) : null}
+              {favoriteTables.map((t) => {
+                const active = pathname === `/tables/${t.id}`;
+                return (
+                  <li key={`t-${t.id}`} className="group/fav relative">
+                    <Link
+                      href={`/tables/${t.id}`}
+                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
+                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <span
+                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold shrink-0"
+                        style={{ backgroundColor: "#0EA5E9" }}
+                      >
+                        <FileSpreadsheet className="w-2.5 h-2.5" />
+                      </span>
+                      <span className="truncate flex-1">{t.name}</span>
+                    </Link>
+                    <UnstarButton kind="table" id={t.id} />
+                  </li>
+                );
+              })}
+              {total > 6 && favoriteWhiteboards.length > 0 ? (
+                <FavSubLabel>Whiteboards</FavSubLabel>
+              ) : null}
+              {favoriteWhiteboards.map((w) => {
+                const active = pathname === `/whiteboards/${w.id}`;
+                return (
+                  <li key={`w-${w.id}`} className="group/fav relative">
+                    <Link
+                      href={`/whiteboards/${w.id}`}
+                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
+                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <span
+                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold shrink-0"
+                        style={{ backgroundColor: "#06B6D4" }}
+                      >
+                        <Brush className="w-2.5 h-2.5" />
+                      </span>
+                      <span className="truncate flex-1">{w.name}</span>
+                    </Link>
+                    <UnstarButton kind="whiteboard" id={w.id} />
+                  </li>
+                );
+              })}
+              {total > 6 && favoriteFiles.length > 0 ? (
+                <FavSubLabel>Files</FavSubLabel>
+              ) : null}
+              {favoriteFiles.map((f) => (
+                <li key={`fl-${f.id}`} className="group/fav relative">
+                  <a
+                    href={f.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] text-zinc-700 hover:bg-zinc-50"
+                  >
+                    <span
+                      className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold shrink-0"
+                      style={{ backgroundColor: "#A1A1AA" }}
+                    >
+                      <FileText className="w-2.5 h-2.5" />
+                    </span>
+                    <span className="truncate flex-1">{f.name}</span>
+                  </a>
+                  <UnstarButton kind="file" id={f.id} />
+                </li>
+              ))}
+            </ul>
+          )
+        ) : null}
+      </div>
+    );
+  };
 
   const renderSpaces = () => {
     const q = searchQuery.trim().toLowerCase();
@@ -303,10 +695,8 @@ function HomeSidebar() {
     <>
       <ul>
         <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={pathname.startsWith("/inbox")} />
-        <NavItem href="/inbox?assigned-comments" Icon={MessageSquare} label="Assigned Comments" />
-        <NavItem href="/tasks" Icon={CheckSquare} label="My Tasks" active={pathname === "/tasks"} />
-        <NavItem href="/spaces" Icon={ListChecks} label="All Tasks" active={pathname === "/spaces"} />
-        <NavItem href="/library" Icon={LibraryIcon} label="Library" active={pathname.startsWith("/library")} />
+        <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={pathname.startsWith("/assigned-comments")} />
+        <MyTasksGroup pathname={pathname} />
         <NavItem href="#" Icon={MoreHorizontal} label="More" />
       </ul>
 
@@ -422,17 +812,66 @@ function TeamsSidebar() {
   );
 }
 
-/* ───────────────────────── Docs sidebar ───────────────────────── */
+/* ───────────────────────── Notes sidebar ───────────────────────── */
 
 function DocsSidebar() {
+  const [favs, setFavs] = useState<Array<{ id: string; title: string; emoji?: string }>>([]);
+  const [favsLoaded, setFavsLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/preferences");
+        if (!res.ok) { setFavsLoaded(true); return; }
+        const d = await res.json();
+        const ids: string[] = d.effective?.home?.favoriteDocIds ?? [];
+        if (cancelled) return;
+        if (ids.length === 0) { setFavsLoaded(true); return; }
+        const docsRes = await fetch("/api/docs");
+        if (!docsRes.ok) { setFavsLoaded(true); return; }
+        const docsData = await docsRes.json();
+        const all = (docsData.docs ?? docsData.data ?? []) as Array<{ id: string; title: string; content?: { meta?: { icon?: string } } }>;
+        if (cancelled) return;
+        const byId = new Map(all.map((x) => [x.id, x]));
+        const list = ids
+          .map((id) => byId.get(id))
+          .filter((x): x is { id: string; title: string; content?: { meta?: { icon?: string } } } => !!x)
+          .map((x) => ({ id: x.id, title: x.title, emoji: x.content?.meta?.icon }));
+        setFavs(list);
+        setFavsLoaded(true);
+      } catch { setFavsLoaded(true); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <>
       <ul>
-        <NavItem href="/docs" Icon={FileText} label="All Docs" />
-        <NavItem href="/docs?mine=1" Icon={FileText} label="My Docs" />
+        <NavItem href="/docs" Icon={FileText} label="All notes" />
+        <NavItem href="/docs?mine=1" Icon={FileText} label="My notes" />
+        <NavItem href="/docs/trash" Icon={Trash2} label="Trash" />
       </ul>
       <SectionLabel>Favorites</SectionLabel>
-      <EmptyState title="Star a Doc to see it here" />
+      {!favsLoaded ? (
+        <div className="px-3 py-2 text-[11px] text-zinc-400">Loading…</div>
+      ) : favs.length === 0 ? (
+        <EmptyState title="Star a note to see it here" />
+      ) : (
+        <ul>
+          {favs.map((f) => (
+            <li key={f.id}>
+              <Link
+                href={`/docs/${f.id}`}
+                className="flex items-center gap-2.5 px-2 py-1 rounded-md text-[13px] text-zinc-700 hover:bg-zinc-50"
+              >
+                <span className="text-[13px] w-3.5 flex-shrink-0">{f.emoji ?? "📝"}</span>
+                <span className="truncate flex-1">{f.title || "Untitled note"}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }
@@ -555,9 +994,9 @@ export const APPS: AppEntry[] = [
   { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team/alignment",
     matchPaths: ["/team", "/people", "/organization", "/kra-kpi"],
     Sidebar: TeamsSidebar, category: "Core", defaultPinned: true },
-  { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
+  { key: "docs", label: "Notes", Icon: FileText, defaultHref: "/docs",
     matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
-    newAction: { label: "New Doc", href: "/docs?new=1" } },
+    newAction: { label: "New note", href: "/docs?new=1" } },
   { key: "dashboards", label: "Dashboa..", Icon: BarChart3, defaultHref: "/dashboard",
     matchPaths: ["/dashboard"], Sidebar: DashboardsSidebar,
     category: "Core", defaultPinned: true,

@@ -47,6 +47,16 @@ export async function docAccessible(
     return Boolean(await getBoardForReader(item.boardId, userId, level));
   }
 
+  if (anchor.entityType === "FOLDER") {
+    // Resolve the parent Space via the folder, then defer.
+    const folder = await prisma.folder.findUnique({
+      where: { id: anchor.entityId },
+      select: { spaceId: true },
+    });
+    if (!folder) return false;
+    return Boolean(await getSpaceForReader(folder.spaceId, userId, level));
+  }
+
   // Unknown anchor type (LEAD, future suite-specific types, etc.) —
   // fall through. Suite-owned types should gate inside their own GETs;
   // this helper covers only the core PPMS primitives.

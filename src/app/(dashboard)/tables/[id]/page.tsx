@@ -17,6 +17,7 @@ import {
   Globe, Lock,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
 type ColType = "short_text" | "long_text" | "number" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email";
 
@@ -257,6 +258,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         </div>
         <div className="dtbl__meta">{rows.length} row{rows.length === 1 ? "" : "s"} · {table.columns.length} column{table.columns.length === 1 ? "" : "s"} {savingCols && <em>· saving…</em>}</div>
         <div className="dtbl__head-actions">
+          {tableId ? <TableFavoriteButton tableId={tableId} /> : null}
           <button
             type="button"
             className={`dtbl__head-btn ${table.isPublic ? "is-on" : ""}`}

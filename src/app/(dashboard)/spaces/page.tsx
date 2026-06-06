@@ -5,8 +5,10 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { listSpacesForUser } from "@/lib/space";
+import { getEffectivePreferences } from "@/lib/preferences";
 import Link from "next/link";
 import { Layers, Lock, Plus } from "lucide-react";
+import { SpaceFavoriteButton } from "@/components/layout/os/space-favorite-button";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +18,11 @@ export default async function SpacesIndexPage() {
   const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
   if (!u.id || !u.organizationId) redirect("/login");
 
-  const spaces = await listSpacesForUser(u.id, u.organizationId, { accessLevel: u.accessLevel });
+  const [spaces, prefs] = await Promise.all([
+    listSpacesForUser(u.id, u.organizationId, { accessLevel: u.accessLevel }),
+    getEffectivePreferences(u.id, u.organizationId),
+  ]);
+  const starredIds = new Set(prefs?.home?.favoriteSpaceIds ?? []);
 
   return (
     <div className="px-8 py-6 max-w-[1200px]">
@@ -38,27 +44,29 @@ export default async function SpacesIndexPage() {
         <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {spaces.map((s) => (
             <li key={s.id}>
-              <Link
-                href={`/spaces/${s.slug}`}
-                className="block px-4 py-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  {s.visibility === "PRIVATE" ? (
-                    <Lock className="w-4 h-4 text-zinc-500" />
-                  ) : (
-                    <Layers className="w-4 h-4 text-zinc-500" />
-                  )}
-                  <span className="font-medium text-sm">{s.name}</span>
+              <div className="relative px-4 py-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 group/space">
+                <Link href={`/spaces/${s.slug}`} className="block">
+                  <div className="flex items-center gap-2 mb-1 pr-7">
+                    {s.visibility === "PRIVATE" ? (
+                      <Lock className="w-4 h-4 text-zinc-500" />
+                    ) : (
+                      <Layers className="w-4 h-4 text-zinc-500" />
+                    )}
+                    <span className="font-medium text-sm truncate">{s.name}</span>
+                  </div>
+                  {s.description ? (
+                    <p className="text-xs text-zinc-500 line-clamp-2">{s.description}</p>
+                  ) : null}
+                  <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-500">
+                    <span>{s.memberCount} member{s.memberCount === 1 ? "" : "s"}</span>
+                    <span>{s.folderCount} folder{s.folderCount === 1 ? "" : "s"}</span>
+                    <span>{s.boardCount} board{s.boardCount === 1 ? "" : "s"}</span>
+                  </div>
+                </Link>
+                <div className="absolute top-2 right-2 opacity-0 group-hover/space:opacity-100 transition-opacity">
+                  <SpaceFavoriteButton spaceId={s.id} initiallyStarred={starredIds.has(s.id)} />
                 </div>
-                {s.description ? (
-                  <p className="text-xs text-zinc-500 line-clamp-2">{s.description}</p>
-                ) : null}
-                <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-500">
-                  <span>{s.memberCount} member{s.memberCount === 1 ? "" : "s"}</span>
-                  <span>{s.folderCount} folder{s.folderCount === 1 ? "" : "s"}</span>
-                  <span>{s.boardCount} board{s.boardCount === 1 ? "" : "s"}</span>
-                </div>
-              </Link>
+              </div>
             </li>
           ))}
         </ul>

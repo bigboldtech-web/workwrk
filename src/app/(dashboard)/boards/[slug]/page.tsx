@@ -10,7 +10,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Lock, Share2, Sparkles, Star,
+  Lock, Share2, Sparkles,
   List as ListIcon, LayoutGrid, Calendar as CalIcon, GanttChart, Table2,
   ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
   Filter, CheckCircle2, Users as UsersIcon, Search, Settings,
@@ -21,7 +21,9 @@ import { canEditSpace } from "@/lib/space";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
 import { NewViewTrigger } from "@/components/board-view/view-create-popover";
 import { ViewTabMenu } from "@/components/board-view/view-tab-menu";
+import { BoardFavoriteButton } from "@/components/board-view/board-favorite-button";
 import { parseBoardSchema } from "@/lib/field-catalog";
+import { getEffectivePreferences } from "@/lib/preferences";
 
 export const dynamic = "force-dynamic";
 
@@ -57,8 +59,12 @@ const VIEW_COLORS: Record<ViewType, string> = {
   FILE_GALLERY: "text-zinc-500",
 };
 
-export default async function BoardPage(props: { params: Promise<{ slug: string }> }) {
+export default async function BoardPage(props: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ view?: string; item?: string }>;
+}) {
   const { slug } = await props.params;
+  const sp = await props.searchParams;
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
   const u = session.user as { id?: string; organizationId?: string; accessLevel?: string };
@@ -84,11 +90,19 @@ export default async function BoardPage(props: { params: Promise<{ slug: string 
   }
 
   const defaultView = board.views.find((v) => v.isDefault) ?? board.views[0];
+  // Active view = ?view=<id> if it matches an existing view; else default.
+  // Tab click is a Link that updates this param.
+  const activeView =
+    (sp.view ? board.views.find((v) => v.id === sp.view) : null) ?? defaultView;
 
-  const [items, canEdit] = await Promise.all([
+  const [items, canEdit, prefs] = await Promise.all([
     listBoardItems(board.id),
     canEditSpace(board.space.id, u.id, u.accessLevel),
+    getEffectivePreferences(u.id, u.organizationId),
   ]);
+  const initiallyStarred = Array.isArray(prefs?.home?.favoriteBoardIds)
+    ? prefs.home.favoriteBoardIds.includes(board.id)
+    : false;
   const initialFields = parseBoardSchema(board.schema).fields;
 
   return (
@@ -110,10 +124,9 @@ export default async function BoardPage(props: { params: Promise<{ slug: string 
           <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-2 min-w-0">
             {board.visibility === "PRIVATE" ? (
               <Lock className="w-4 h-4 text-zinc-500" />
-            ) : (
-              <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
-            )}
+            ) : null}
             <span className="truncate">{board.name}</span>
+            <BoardFavoriteButton boardId={board.id} initiallyStarred={initiallyStarred} />
           </h1>
           <div className="flex-1" />
           <button
@@ -133,12 +146,17 @@ export default async function BoardPage(props: { params: Promise<{ slug: string 
         </div>
       </div>
 
-      {/* View tabs */}
+      {/* View tabs — clicking switches the active view via ?view=<id>.
+          Phase 65: tabs were previously inert (always rendered default). */}
       <div className="px-6 border-b border-zinc-200 flex items-center gap-1">
         {board.views.map((v) => {
           const VIcon = VIEW_ICONS[v.type] ?? ListIcon;
           const color = VIEW_COLORS[v.type] ?? "text-zinc-600";
-          const active = v.id === defaultView?.id;
+          const active = v.id === activeView?.id;
+          const isDefault = v.id === defaultView?.id;
+          const href = isDefault
+            ? `/boards/${board.slug}`
+            : `/boards/${board.slug}?view=${v.id}`;
           return (
             <span
               key={v.id}
@@ -148,10 +166,10 @@ export default async function BoardPage(props: { params: Promise<{ slug: string 
                   : "border-transparent text-zinc-600 hover:text-zinc-900"
               }`}
             >
-              <button type="button" className="inline-flex items-center gap-1.5">
+              <Link href={href} className="inline-flex items-center gap-1.5">
                 <VIcon className={`w-3.5 h-3.5 ${active ? "text-zinc-900" : color}`} />
                 {v.name}
-              </button>
+              </Link>
               <span className="opacity-0 group-hover/view:opacity-100 transition-opacity">
                 <ViewTabMenu boardId={board.id} view={v} />
               </span>
@@ -196,7 +214,9 @@ export default async function BoardPage(props: { params: Promise<{ slug: string 
       <div className="flex-1 overflow-y-auto px-6 py-4">
         <BoardCanvas
           boardId={board.id}
-          viewType={defaultView?.type ?? "TABLE"}
+          viewId={activeView?.id ?? null}
+          viewType={activeView?.type ?? "TABLE"}
+          viewConfig={(activeView?.config as Record<string, unknown> | null) ?? {}}
           initialItems={items}
           initialFields={initialFields}
           canEdit={canEdit}

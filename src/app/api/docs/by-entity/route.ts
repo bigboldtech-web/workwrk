@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   });
   if (existing) return NextResponse.json({ doc: existing, created: false });
 
-  const title = parsed.data.title ?? "Untitled doc";
+  const title = parsed.data.title ?? "Untitled note";
   const content = {};
   const doc = await prisma.doc.create({
     data: {

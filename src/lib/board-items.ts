@@ -38,6 +38,7 @@ function rowFrom(it: {
   metadata: unknown;
   startAt?: Date | null;
   dueAt?: Date | null;
+  parentItemId?: string | null;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -52,6 +53,7 @@ function rowFrom(it: {
     metadata: (it.metadata as Record<string, unknown>) ?? {},
     startAt: it.startAt ?? null,
     dueAt: it.dueAt ?? null,
+    parentItemId: it.parentItemId ?? null,
     archivedAt: it.archivedAt,
     createdAt: it.createdAt,
     updatedAt: it.updatedAt,
@@ -68,17 +70,55 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
     orderBy: { position: "asc" },
   });
 
-  // Fetch owners in one batch — N+1 protection.
+  const itemIds = rows.map((r) => r.id);
   const ownerIds = Array.from(new Set(rows.map((r) => r.ownerId).filter((x): x is string => !!x)));
-  const owners = ownerIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: ownerIds } },
-        select: { id: true, firstName: true, lastName: true, avatar: true },
-      })
-    : [];
-  const ownerById = new Map(owners.map((o) => [o.id, o] as const));
 
-  return rows.map((r) => rowFrom(r, r.ownerId ? ownerById.get(r.ownerId) ?? null : null));
+  // Parallel batches — owners + comment counts + attachment counts.
+  // Comments + attachments are polymorphic (entityType + entityId /
+  // sourceType + sourceId) so we groupBy the matching column.
+  const [owners, commentGroups, attachmentGroups] = await Promise.all([
+    ownerIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: ownerIds } },
+          select: { id: true, firstName: true, lastName: true, avatar: true },
+        })
+      : Promise.resolve([] as { id: string; firstName: string; lastName: string; avatar: string | null }[]),
+    itemIds.length
+      ? prisma.itemUpdate.groupBy({
+          by: ["entityId"],
+          where: { entityType: "BOARD_ITEM", entityId: { in: itemIds } },
+          _count: { _all: true },
+        })
+      : Promise.resolve([] as { entityId: string; _count: { _all: number } }[]),
+    itemIds.length
+      ? prisma.entityLink.groupBy({
+          by: ["sourceId"],
+          where: { sourceType: "BOARD_ITEM", sourceId: { in: itemIds } },
+          _count: { _all: true },
+        })
+      : Promise.resolve([] as { sourceId: string; _count: { _all: number } }[]),
+  ]);
+
+  const ownerById = new Map(owners.map((o) => [o.id, o] as const));
+  const commentCountById = new Map(commentGroups.map((g) => [g.entityId, g._count._all] as const));
+  const attachmentCountById = new Map(attachmentGroups.map((g) => [g.sourceId, g._count._all] as const));
+
+  // Subtask counts derived from the same fetched rows — no extra query.
+  // Top-level item (parentItemId = null) gets count of its direct children.
+  const subtaskCountByParent = new Map<string, number>();
+  for (const r of rows) {
+    if (r.parentItemId) {
+      subtaskCountByParent.set(r.parentItemId, (subtaskCountByParent.get(r.parentItemId) ?? 0) + 1);
+    }
+  }
+
+  return rows.map((r) => {
+    const base = rowFrom(r, r.ownerId ? ownerById.get(r.ownerId) ?? null : null);
+    base.commentCount = commentCountById.get(r.id) ?? 0;
+    base.attachmentCount = attachmentCountById.get(r.id) ?? 0;
+    base.subtaskCount = subtaskCountByParent.get(r.id) ?? 0;
+    return base;
+  });
 }
 
 export interface CreateBoardItemInput {
@@ -89,6 +129,8 @@ export interface CreateBoardItemInput {
   ownerId?: string;
   groupKey?: string;
   metadata?: Record<string, unknown>;
+  /** Phase 72 — null = top-level item; set to a parent id to create a subtask. */
+  parentItemId?: string | null;
   /** Logged on the activity feed for this item. Pass the session
    *  user's id; null only for system-generated rows. */
   actorId?: string | null;
@@ -103,8 +145,12 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
   const trimmed = input.title.trim();
   if (!trimmed) throw new Error("Title is required");
 
+  // Position scoped to the parent: subtasks order among themselves,
+  // top-level items order among themselves. Otherwise creating the
+  // first subtask under any parent would land at the bottom of the
+  // whole board's position space.
   const last = await prisma.item.findFirst({
-    where: { boardId: input.boardId },
+    where: { boardId: input.boardId, parentItemId: input.parentItemId ?? null },
     orderBy: { position: "desc" },
     select: { position: true },
   });
@@ -127,6 +173,7 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
       groupKey: input.groupKey ?? null,
       position,
       metadata: (input.metadata ?? {}) as object,
+      parentItemId: input.parentItemId ?? null,
     },
   });
   const owner = input.ownerId

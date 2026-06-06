@@ -1,17 +1,18 @@
-// GET /api/spaces/[id]/children — folders + boards + tables directly
-// under this Space, for the HomeSidebar's expandable tree. Gated by
-// getSpaceForReader so users can't enumerate children of Spaces
-// they can't see.
+// GET /api/spaces/[id]/children — folders + boards + tables + docs +
+// whiteboards directly under this Space, for the HomeSidebar's
+// expandable tree. Gated by getSpaceForReader so users can't enumerate
+// children of Spaces they can't see.
 //
 // Returns:
-//   { folders: [...] , boards: [...], tables: [...] }
+//   { folders: [...], boards: [...], tables: [...], docs: [...], whiteboards: [...] }
 //
 // Folders only includes top-level (parentFolderId = null). Sub-folder
 // tree expansion fetches /api/folders/[id]/children when we add it.
 // Boards only includes those NOT inside a folder (folderId = null) +
 // those inside any folder are returned via the folder's payload below.
-// Tables are Space-scoped DataTable rows — org-wide tables (spaceId
-// null) live in /library and never appear in any Space tree.
+// Tables/Docs/Whiteboards = Space-scoped only; org-wide rows live in
+// /library and never appear in any Space tree.
+// Docs scope: Doc.entityType="SPACE" + entityId=spaceId.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -41,13 +42,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Single query each — all three indexed on spaceId. Wrapped in
-  // allSettled so a failure on one side (e.g. a stale Prisma client
-  // before regenerate, or a DataTable.spaceId column not yet migrated)
-  // doesn't take down the whole tree. The sidebar UX is much more
-  // forgiving when "tables missing" is silent than when the whole
-  // expansion renders "Couldn't load".
-  const [foldersR, rootBoardsR, tablesR] = await Promise.allSettled([
+  // Single query each — all indexed on spaceId. allSettled keeps the
+  // sidebar usable if one query fails (e.g. stale Prisma client).
+  const [foldersR, rootBoardsR, tablesR, docsR, whiteboardsR] = await Promise.allSettled([
     prisma.folder.findMany({
       where: { spaceId: id, archivedAt: null, parentFolderId: null },
       orderBy: { position: "asc" },
@@ -81,6 +78,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       orderBy: { name: "asc" },
       select: { id: true, name: true, description: true },
     }),
+    prisma.doc.findMany({
+      where: {
+        organizationId: c.organizationId,
+        entityType: "SPACE",
+        entityId: id,
+        archivedAt: null,
+      },
+      orderBy: { title: "asc" },
+      select: { id: true, title: true },
+    }),
+    prisma.whiteboard.findMany({
+      where: { organizationId: c.organizationId, spaceId: id, archivedAt: null },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
   ]);
 
   if (foldersR.status === "rejected") {
@@ -92,10 +104,52 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (tablesR.status === "rejected") {
     console.error("[spaces/children] tables query failed:", tablesR.reason);
   }
+  if (docsR.status === "rejected") {
+    console.error("[spaces/children] docs query failed:", docsR.reason);
+  }
+  if (whiteboardsR.status === "rejected") {
+    console.error("[spaces/children] whiteboards query failed:", whiteboardsR.reason);
+  }
+
+  const folders = foldersR.status === "fulfilled" ? foldersR.value : [];
+  const folderIds = folders.map((f) => f.id);
+
+  // Folder-anchored docs — Doc.entityType="FOLDER" + entityId IN folderIds.
+  // Single batched query; grouped in app code.
+  let folderDocs: { id: string; title: string; entityId: string | null }[] = [];
+  if (folderIds.length > 0) {
+    try {
+      folderDocs = await prisma.doc.findMany({
+        where: {
+          organizationId: c.organizationId,
+          entityType: "FOLDER",
+          entityId: { in: folderIds },
+          archivedAt: null,
+        },
+        orderBy: { title: "asc" },
+        select: { id: true, title: true, entityId: true },
+      });
+    } catch (err) {
+      console.error("[spaces/children] folder docs query failed:", err);
+    }
+  }
+  const docsByFolder = new Map<string, { id: string; title: string }[]>();
+  for (const d of folderDocs) {
+    if (!d.entityId) continue;
+    const arr = docsByFolder.get(d.entityId) ?? [];
+    arr.push({ id: d.id, title: d.title });
+    docsByFolder.set(d.entityId, arr);
+  }
+  const foldersWithDocs = folders.map((f) => ({
+    ...f,
+    docs: docsByFolder.get(f.id) ?? [],
+  }));
 
   return NextResponse.json({
-    folders: foldersR.status === "fulfilled" ? foldersR.value : [],
+    folders: foldersWithDocs,
     boards: rootBoardsR.status === "fulfilled" ? rootBoardsR.value : [],
     tables: tablesR.status === "fulfilled" ? tablesR.value : [],
+    docs: docsR.status === "fulfilled" ? docsR.value : [],
+    whiteboards: whiteboardsR.status === "fulfilled" ? whiteboardsR.value : [],
   });
 }

@@ -63,6 +63,10 @@ import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-build
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { RichEditor } from "@/components/ui/rich-editor";
+import { BlockEditor, type Block } from "@/components/docs/block-editor";
+import { BacklinksPanel } from "@/components/docs/block-doc-editor";
+import { SopWalkthrough } from "@/components/sops/sop-walkthrough";
+import Link from "next/link";
 import { useRole } from "@/hooks/use-role";
 import {
   useAutosave,
@@ -511,6 +515,10 @@ export default function SOPDetailPage() {
   // own draft in local state and the top-bar Save would overwrite it
   // with the pre-edit version, silently eating the user's changes.
   const [richtextHtml, setRichtextHtml] = useState("");
+  // type:"blocks" content — the same Notes block format. Default `null`
+  // means "no blocks variant loaded"; we never touch it for non-block SOPs.
+  const [sopBlocks, setSopBlocks] = useState<Block[] | null>(null);
+  const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   // DnD bookkeeping: which step is currently being dragged (by id), and
   // which step is being hovered as a drop target. We only track target
@@ -632,6 +640,9 @@ export default function SOPDetailPage() {
         setChecklistSections((data.content?.sections || []) as ChecklistSection[]);
       } else if (data.content?.type === "richtext") {
         setRichtextHtml((data.content as { html?: string })?.html || "");
+      } else if (data.content?.type === "blocks") {
+        const c = data.content as { blocks?: Block[] };
+        setSopBlocks(Array.isArray(c.blocks) ? c.blocks : []);
       } else if (data.content?.type === "process_flow") {
         setProcessFlow({
           type: "process_flow",
@@ -686,6 +697,8 @@ export default function SOPDetailPage() {
       setChecklistSections((c.sections || []) as ChecklistSection[]);
     } else if (c.type === "richtext") {
       setRichtextHtml(c.html || "");
+    } else if (c.type === "blocks") {
+      setSopBlocks(Array.isArray(c.blocks) ? (c.blocks as Block[]) : []);
     } else if (c.type === "process_flow") {
       setProcessFlow({
         type: "process_flow",
@@ -702,6 +715,9 @@ export default function SOPDetailPage() {
     }
     if (sop?.content && (sop.content as any).type === "richtext") {
       return { type: "richtext", html: richtextHtml };
+    }
+    if (sop?.content && (sop.content as any).type === "blocks") {
+      return { type: "blocks", blocks: sopBlocks ?? [] };
     }
     if (sop?.content && (sop.content as any).type === "process_flow") {
       return { type: "process_flow", flow: processFlow };
@@ -1112,6 +1128,9 @@ export default function SOPDetailPage() {
                       <Play size={14} className="mr-2" /> Run process
                     </DropdownMenuItem>
                   )}
+                  <DropdownMenuItem onSelect={() => setWalkthroughOpen(true)}>
+                    <Play size={14} className="mr-2" /> Walk through
+                  </DropdownMenuItem>
                   {(sop.status === "PUBLISHED" || sop.sopType === "CHECKLIST") && sop.status !== "ARCHIVED" && (
                     <DropdownMenuSeparator />
                   )}
@@ -1395,8 +1414,43 @@ export default function SOPDetailPage() {
                 </Card>
               )}
 
-              {/* Steps / Checklist Builder */}
-              {sop.sopType === "CHECKLIST" ? (
+              {/* Block editor — same engine as Notes. Used for new WRITTEN
+                  SOPs created via /sops/new/text. Read-only render here;
+                  full editing happens in the dedicated /sops/new/text
+                  editor (richer UI, single-purpose chrome). */}
+              {sop.content && (sop.content as any).type === "blocks" && (
+                <Card>
+                  <CardContent className="p-4 sm:p-6">
+                    {editing ? (
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-4 text-sm">
+                        <div>
+                          <div className="font-medium">Block editor</div>
+                          <div className="text-xs text-zinc-500">
+                            This SOP uses the Notes block editor. Open the
+                            full editor to add headings, lists, images,
+                            mentions, embedded SOPs and more.
+                          </div>
+                        </div>
+                        <Button asChild size="sm">
+                          <Link href={`/sops/new/text?id=${sop.id}`}>Open editor</Link>
+                        </Button>
+                      </div>
+                    ) : (
+                      <BlockEditor
+                        key={sop.id}
+                        initialBlocks={sopBlocks}
+                        onSave={() => { /* read-only here */ }}
+                        readonly
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Steps / Checklist Builder — suppressed for blocks-typed
+                  content because that variant owns its own layout via
+                  the Block editor above. */}
+              {(sop.content as any)?.type === "blocks" ? null : sop.sopType === "CHECKLIST" ? (
                 <div>
                   {aiGenerating && (
                     <p className="text-xs text-[color:var(--accent-strong)] animate-pulse mb-2">Generating with AI...</p>
@@ -2157,6 +2211,13 @@ export default function SOPDetailPage() {
         </div>
         )}
       </div>
+
+      {sop && <BacklinksPanel kind="sop" id={sop.id} />}
+
+      {walkthroughOpen && sop && (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        <SopWalkthrough sop={sop as any} onClose={() => setWalkthroughOpen(false)} />
+      )}
     </div>
   );
 }

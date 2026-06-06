@@ -14,7 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, Loader2,
-  Table as TableIcon,
+  Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { getSpaceIcon } from "./space-icon-catalog";
@@ -24,6 +24,7 @@ import { BoardMoreTrigger } from "./board-more-menu";
 import { FolderMoreTrigger } from "./folder-more-menu";
 import { ShareBoardButton } from "./share-board-button";
 import { TableMoreTrigger } from "./table-more-menu";
+import { SidebarQuickStar } from "./sidebar-quick-star";
 
 interface SpaceRow {
   id: string;
@@ -51,6 +52,7 @@ interface FolderChild {
   position: number;
   _count: { boards: number; childFolders: number };
   boards: BoardChild[];
+  docs: DocChild[];
 }
 
 interface TableChild {
@@ -59,10 +61,22 @@ interface TableChild {
   description: string | null;
 }
 
+interface DocChild {
+  id: string;
+  title: string;
+}
+
+interface WhiteboardChild {
+  id: string;
+  name: string;
+}
+
 interface ChildrenPayload {
   folders: FolderChild[];
   boards: BoardChild[];
   tables: TableChild[];
+  docs: DocChild[];
+  whiteboards: WhiteboardChild[];
 }
 
 const DEFAULT_COLOR = "#71717A";
@@ -94,9 +108,14 @@ export function SpaceTreeRow({
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d) setData({
-          folders: d.folders ?? [],
+          folders: (d.folders ?? []).map((f: FolderChild) => ({
+            ...f,
+            docs: f.docs ?? [],
+          })),
           boards: d.boards ?? [],
           tables: d.tables ?? [],
+          docs: d.docs ?? [],
+          whiteboards: d.whiteboards ?? [],
         });
       })
       .catch(() => {})
@@ -146,6 +165,7 @@ export function SpaceTreeRow({
           ) : null}
         </Link>
         <span className="opacity-0 group-hover/space:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+          <SidebarQuickStar kind="space" id={space.id} />
           <SpaceMoreTrigger
             space={space}
             onUpdated={onReloadSpaces}
@@ -169,7 +189,7 @@ export function SpaceTreeRow({
             </li>
           ) : data === null ? (
             <li className="px-2 py-1 text-[11.5px] text-zinc-400">Couldn&rsquo;t load</li>
-          ) : data.folders.length === 0 && data.boards.length === 0 && data.tables.length === 0 ? (
+          ) : data.folders.length === 0 && data.boards.length === 0 && data.tables.length === 0 && data.docs.length === 0 && data.whiteboards.length === 0 ? (
             <li className="px-2 py-1 text-[11.5px] text-zinc-400">Empty</li>
           ) : (
             <>
@@ -188,6 +208,12 @@ export function SpaceTreeRow({
                   spaceName={space.name}
                   onChanged={refresh}
                 />
+              ))}
+              {data.docs.map((d) => (
+                <DocTreeRow key={d.id} doc={d} />
+              ))}
+              {data.whiteboards.map((w) => (
+                <WhiteboardTreeRow key={w.id} whiteboard={w} />
               ))}
               {data.tables.map((t) => (
                 <TableTreeRow key={t.id} table={t} onChanged={refresh} />
@@ -223,7 +249,7 @@ function FolderTreeRow({
   onChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const hasChildren = folder.boards.length > 0 || folder._count.childFolders > 0;
+  const hasChildren = folder.boards.length > 0 || folder.docs.length > 0 || folder._count.childFolders > 0;
 
   return (
     <li className="group/folderrow relative">
@@ -241,17 +267,22 @@ function FolderTreeRow({
         </button>
         <ChildTile color={folder.color} icon={folder.icon} fallback={FolderIcon} name={folder.name} />
         <span className="text-[12.5px] text-zinc-700 truncate flex-1">{folder.name}</span>
-        <span className="opacity-0 group-hover/folderrow:opacity-100 transition-opacity shrink-0">
+        <span className="opacity-0 group-hover/folderrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+          <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
             folder={{ id: folder.id, name: folder.name, icon: folder.icon, color: folder.color }}
             onUpdated={onChanged}
           />
+          <FolderAddTrigger folderId={folder.id} onCreated={() => { setExpanded(true); onChanged(); }} />
         </span>
       </div>
-      {expanded && folder.boards.length > 0 ? (
+      {expanded && (folder.boards.length > 0 || folder.docs.length > 0) ? (
         <ul className="ml-5 mt-0.5 border-l border-zinc-100 pl-1.5">
           {folder.boards.map((b) => (
             <BoardTreeRow key={b.id} board={b} spaceName={spaceName} onChanged={onChanged} />
+          ))}
+          {folder.docs.map((d) => (
+            <DocTreeRow key={d.id} doc={d} />
           ))}
         </ul>
       ) : null}
@@ -284,6 +315,7 @@ function BoardTreeRow({
           ) : null}
         </button>
         <span className="opacity-0 group-hover/boardrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+          <SidebarQuickStar kind="board" id={board.id} />
           <ShareBoardButton
             boardId={board.id}
             boardName={board.name}
@@ -319,8 +351,61 @@ function TableTreeRow({
           <ChildTile color="#0EA5E9" icon={null} fallback={TableIcon} name={table.name} />
           <span className="truncate">{table.name}</span>
         </button>
-        <span className="opacity-0 group-hover/tablerow:opacity-100 transition-opacity shrink-0">
+        <span className="opacity-0 group-hover/tablerow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+          <SidebarQuickStar kind="table" id={table.id} />
           <TableMoreTrigger table={{ id: table.id, name: table.name }} onUpdated={onChanged} />
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function DocTreeRow({ doc }: { doc: DocChild }) {
+  const router = useRouter();
+  return (
+    <li className="group/docrow relative">
+      <div className="flex items-center gap-1 pl-5 pr-1.5 py-0.5 rounded-md hover:bg-zinc-50">
+        <button
+          type="button"
+          onClick={() => router.push(`/docs/${doc.id}`)}
+          className="flex items-center gap-2 text-[12.5px] text-zinc-700 flex-1 min-w-0 text-left"
+        >
+          <span
+            className="h-4 w-4 rounded flex items-center justify-center text-white shrink-0"
+            style={{ backgroundColor: "#3B82F6" }}
+          >
+            <FileText className="h-2.5 w-2.5" />
+          </span>
+          <span className="truncate">{doc.title || "Untitled"}</span>
+        </button>
+        <span className="opacity-0 group-hover/docrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+          <SidebarQuickStar kind="doc" id={doc.id} />
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
+  const router = useRouter();
+  return (
+    <li className="group/wbrow relative">
+      <div className="flex items-center gap-1 pl-5 pr-1.5 py-0.5 rounded-md hover:bg-zinc-50">
+        <button
+          type="button"
+          onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
+          className="flex items-center gap-2 text-[12.5px] text-zinc-700 flex-1 min-w-0 text-left"
+        >
+          <span
+            className="h-4 w-4 rounded flex items-center justify-center text-white shrink-0"
+            style={{ backgroundColor: "#F59E0B" }}
+          >
+            <WhiteboardIcon className="h-2.5 w-2.5" />
+          </span>
+          <span className="truncate">{whiteboard.name || "Untitled whiteboard"}</span>
+        </button>
+        <span className="opacity-0 group-hover/wbrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+          <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
         </span>
       </div>
     </li>
@@ -346,6 +431,90 @@ function ChildTile({
       style={{ backgroundColor: bg }}
     >
       {Icon ? createElement(Icon, { className: "h-2.5 w-2.5" }) : (name[0] ?? "?")}
+    </span>
+  );
+}
+
+function FolderAddTrigger({
+  folderId,
+  onCreated,
+}: {
+  folderId: string;
+  onCreated: () => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  const createDoc = async () => {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/docs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Untitled",
+          entityType: "FOLDER",
+          entityId: folderId,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const id = data?.doc?.id ?? data?.id;
+        onCreated();
+        setOpen(false);
+        if (id) router.push(`/docs/${id}`);
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <span className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-label="Create inside folder"
+        title="Create"
+        className="p-0.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 inline-flex items-center justify-center"
+      >
+        <Plus className="h-3 w-3" />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
+          <ul className="absolute right-0 top-full mt-1 z-40 w-44 bg-white border border-zinc-200 rounded-md shadow-lg py-1">
+            <li>
+              <button
+                type="button"
+                onClick={createDoc}
+                disabled={creating}
+                className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                <FileText className="w-3.5 h-3.5 text-blue-500" />
+                Doc
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                disabled
+                title="Use the Space + menu for now"
+                className="w-full text-left px-3 py-1.5 text-[12.5px] text-zinc-400 inline-flex items-center gap-2 cursor-not-allowed"
+              >
+                <FolderIcon className="w-3.5 h-3.5" />
+                List (use Space +)
+              </button>
+            </li>
+          </ul>
+        </>
+      ) : null}
     </span>
   );
 }

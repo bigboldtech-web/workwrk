@@ -25,6 +25,15 @@ export interface BoardItemRow {
   /** Phase 58 — first-class date columns. Either may be null. */
   startAt?: Date | string | null;
   dueAt?: Date | string | null;
+  /** Phase 67 — counts surfaced by listBoardItems for inline badges
+   *  on the Name cell. Optional because cheaper item-fetch paths may
+   *  skip the groupBy queries. */
+  commentCount?: number;
+  attachmentCount?: number;
+  /** Phase 72 — subtask self-relation. null = top-level item. */
+  parentItemId?: string | null;
+  /** Phase 72 — count of direct children. 0 for leaf items. */
+  subtaskCount?: number;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

@@ -1,19 +1,22 @@
 "use client";
 
-/* Docs & notes — bespoke card grid.
+/* Notes — Notion-killer notes index for WorkwrK.
  *
  *  GET  /api/docs               list
- *  POST /api/docs               { title }
+ *  POST /api/docs               { title, content }
  *  PUT  /api/docs/[id]          { title?, content? }
  *
- * Three sections:
+ * Sections:
  *   1. Pinned (entityType === null && pinned)  — future hook
  *   2. Recent (touched in last 7 days)
- *   3. By collection (attached docs grouped by entityType)
+ *   3. Attached to items (entityType !== null)
  *   4. Standalone notes
  *
- * Each card shows the doc's title + 2-line excerpt + small metadata
- * row (relative-updated time + attached-to chip). Click → open editor.
+ * Creating a note opens the Templates dialog — Blank, Meeting Notes,
+ * 1:1, Project Brief, Weekly Review, Daily Standup, SOP Draft. Each
+ * template injects an opinionated starting set of blocks + an emoji,
+ * so the team can go from /new to writing in one click — the way
+ * ClickUp Notes feels useful in day-one usage.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,13 +24,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   FileText, Plus, Sparkles, Loader2, Search, Clock, Pin, ChevronRight,
-  Type,
+  Type, X,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { NOTE_TEMPLATES, type NoteTemplate } from "@/components/docs/note-templates";
 
 type ApiDoc = {
   id: string;
@@ -56,8 +60,6 @@ function relTime(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-// Tint each doc card based on the first character of its title — gives the
-// grid visual variety without requiring stored color choices.
 function tintFor(title: string): string {
   const colors = [C.indigo, C.purple, C.blue, C.teal, C.green, C.orange, C.pink];
   let h = 0;
@@ -65,12 +67,13 @@ function tintFor(title: string): string {
   return colors[h % colors.length];
 }
 
-export default function DocsPage() {
+export default function NotesPage() {
   const router = useRouter();
   const [rows, setRows] = useState<ApiDoc[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -88,18 +91,22 @@ export default function DocsPage() {
   const v = rowVersion("docs");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  async function newDoc() {
+  async function createFromTemplate(t: NoteTemplate) {
     setCreating(true);
+    setTemplatesOpen(false);
     try {
       const res = await fetch("/api/docs", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled doc" }),
+        body: JSON.stringify({
+          title: t.title,
+          content: { blocks: t.blocks(), meta: { icon: t.emoji } },
+        }),
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
       const d: ApiDoc = data.doc ?? data.data ?? data;
       router.push(`/docs/${d.id}`);
-    } catch { toast("Couldn't create doc"); }
+    } catch { toast("Couldn't create note"); }
     finally { setCreating(false); }
   }
 
@@ -128,10 +135,10 @@ export default function DocsPage() {
   return (
     <>
       <OsTitleBar
-        title="Docs & notes"
+        title="Notes"
         Icon={FileText}
         iconGradient={GRAD.tealGreen}
-        description={rows === null ? "Loading…" : `${rows.length} doc${rows.length === 1 ? "" : "s"} · live-synced`}
+        description={rows === null ? "Loading…" : `${rows.length} note${rows.length === 1 ? "" : "s"} · live-synced · @-mention people, tasks, KRAs, SOPs`}
         people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
         morePeople={9}
       />
@@ -141,22 +148,27 @@ export default function DocsPage() {
           <Search />
           <input
             type="search"
-            placeholder="Search docs by title or excerpt…"
+            placeholder="Search notes by title or excerpt…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <button type="button" className="docs__new" onClick={newDoc} disabled={creating}>
-          {creating ? <><Loader2 className="docs__spin" /> Creating…</> : <><Plus /> New doc</>}
+        <button type="button" className="docs__new" onClick={() => setTemplatesOpen(true)} disabled={creating}>
+          {creating ? <><Loader2 className="docs__spin" /> Creating…</> : <><Plus /> New note</>}
         </button>
       </div>
 
       {loadError ? (
-        <OsEmptyView Icon={FileText} iconGradient={GRAD.redPink} title="Couldn't load docs" subtitle={`API error: ${loadError}.`} cta="Retry" />
+        <OsEmptyView Icon={FileText} iconGradient={GRAD.redPink} title="Couldn't load notes" subtitle={`API error: ${loadError}.`} cta="Retry" />
       ) : rows === null ? (
-        <div className="docs__loading">Loading docs…</div>
+        <div className="docs__loading">Loading notes…</div>
       ) : rows.length === 0 ? (
-        <OsEmptyView Icon={FileText} iconGradient={GRAD.tealGreen} title="No docs yet" subtitle="Write standalone notes or attach docs to any board row. Every save creates an automatic version." chips={["Standalone", "Attached", "Versioned"]} cta="New doc" />
+        <div className="docs__empty-wrap">
+          <OsEmptyView Icon={FileText} iconGradient={GRAD.tealGreen} title="No notes yet" subtitle="Pick a template, mention teammates with @, embed boards and tasks. Every save creates a version." chips={["Templates", "@ mentions", "AI Write", "Block editor"]} cta="New note" />
+          <button type="button" className="docs__empty-cta" onClick={() => setTemplatesOpen(true)}>
+            <Plus /> Pick a template
+          </button>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="docs__loading">Nothing matches &ldquo;{search}&rdquo;.</div>
       ) : (
@@ -177,6 +189,13 @@ export default function DocsPage() {
             </Section>
           )}
         </div>
+      )}
+
+      {templatesOpen && (
+        <TemplatesDialog
+          onPick={createFromTemplate}
+          onClose={() => setTemplatesOpen(false)}
+        />
       )}
     </>
   );
@@ -207,7 +226,7 @@ function DocCard({ doc }: { doc: ApiDoc }) {
         </span>
         {doc.entityType && <span className="doc-card__attach">{doc.entityType.toLowerCase().replace(/_/g, " ")}</span>}
       </header>
-      <h3 className="doc-card__title">{doc.title || "Untitled doc"}</h3>
+      <h3 className="doc-card__title">{doc.title || "Untitled note"}</h3>
       {preview && (
         <p className="doc-card__excerpt">
           {isAi && <Sparkles className="doc-card__ai" />}
@@ -219,5 +238,45 @@ function DocCard({ doc }: { doc: ApiDoc }) {
         <ChevronRight />
       </footer>
     </Link>
+  );
+}
+
+// ───────── Templates dialog ─────────
+function TemplatesDialog({ onPick, onClose }: { onPick: (t: NoteTemplate) => void; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="notes-tdlg" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="notes-tdlg__panel" onClick={(e) => e.stopPropagation()}>
+        <header className="notes-tdlg__head">
+          <Sparkles />
+          <div>
+            <h2>Start a new note</h2>
+            <p>Pick a template — or start blank.</p>
+          </div>
+          <button type="button" className="notes-tdlg__x" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </header>
+        <div className="notes-tdlg__grid">
+          {NOTE_TEMPLATES.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className="notes-tdlg__card"
+              onClick={() => onPick(t)}
+            >
+              <span className="notes-tdlg__card-emoji">{t.emoji}</span>
+              <span className="notes-tdlg__card-title">{t.label}</span>
+              <span className="notes-tdlg__card-hint">{t.hint}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

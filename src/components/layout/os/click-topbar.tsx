@@ -17,18 +17,12 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useOsShell } from "./shell-context";
 import {
-  ChevronDown, Search, Inbox, MessageSquare, Megaphone, ThumbsUp, FileSpreadsheet,
+  ChevronDown, Search, Inbox,
 } from "lucide-react";
 import { WorkspaceMenu } from "./workspace-menu";
 import { AskAiButton } from "./ask-ai-button";
 import { ProfileMenu } from "./profile-menu";
 import { PROFILE_TOOL_MAP } from "./profile-tools";
-import { TopbarPopoverButton } from "./topbar-popover-button";
-import { OsNotificationsPopover } from "./notifications-popover";
-import { OsCandorPopover } from "./candor-popover";
-import { OsAnnouncementsPopover } from "./announcements-popover";
-import { OsKudosPopover } from "./kudos-popover";
-import { OsSurveysPopover } from "./surveys-popover";
 import { ActiveTimerPill } from "./active-timer-pill";
 
 export function ClickTopbar() {
@@ -105,21 +99,14 @@ export function ClickTopbar() {
           {pinnedTools.length > 0 ? (
             <span aria-hidden className="w-px h-3.5 bg-zinc-200 mx-0.5" />
           ) : null}
-          <TopbarPopoverButton Icon={Inbox} ariaLabel="Inbox" title="Inbox · what's new for you">
-            {(close) => <OsNotificationsPopover onClose={close} />}
-          </TopbarPopoverButton>
-          <TopbarPopoverButton Icon={MessageSquare} ariaLabel="Candor" title="Candor · give private feedback">
-            {(close) => <OsCandorPopover onClose={close} />}
-          </TopbarPopoverButton>
-          <TopbarPopoverButton Icon={Megaphone} ariaLabel="Announcements" title="Announcements">
-            {(close) => <OsAnnouncementsPopover onClose={close} />}
-          </TopbarPopoverButton>
-          <TopbarPopoverButton Icon={ThumbsUp} ariaLabel="Kudos" title="Kudos · recognition for the team">
-            {(close) => <OsKudosPopover onClose={close} />}
-          </TopbarPopoverButton>
-          <TopbarPopoverButton Icon={FileSpreadsheet} ariaLabel="Surveys" title="Surveys · pulses pending for you">
-            {(close) => <OsSurveysPopover onClose={close} />}
-          </TopbarPopoverButton>
+          <Link
+            href="/inbox"
+            aria-label="Inbox"
+            title="Inbox"
+            className="p-1 rounded-md hover:bg-zinc-100 text-zinc-500 hover:text-zinc-800 inline-flex items-center justify-center"
+          >
+            <Inbox className="w-[14px] h-[14px]" />
+          </Link>
         </div>
         <div className="relative ml-1">
           <button

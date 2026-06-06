@@ -26,17 +26,19 @@ export async function GET(req: Request) {
   const entityType = url.searchParams.get("entityType");
   const entityId = url.searchParams.get("entityId");
   const standaloneOnly = url.searchParams.get("standaloneOnly") === "1";
+  // `archived=1` flips to the trash view — only soft-archived docs.
+  const archived = url.searchParams.get("archived") === "1";
 
   const docs = await prisma.doc.findMany({
     where: {
       organizationId: ctx.orgId,
-      archivedAt: null,
+      archivedAt: archived ? { not: null } : null,
       ...(entityType && entityId ? { entityType, entityId } : {}),
       ...(standaloneOnly ? { entityType: null, entityId: null } : {}),
     },
     select: {
       id: true, title: true, excerpt: true, entityType: true, entityId: true,
-      createdById: true, createdAt: true, updatedAt: true,
+      createdById: true, createdAt: true, updatedAt: true, archivedAt: true,
     },
     orderBy: { updatedAt: "desc" },
     take: 100,

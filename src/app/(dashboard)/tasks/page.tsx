@@ -1,363 +1,692 @@
 "use client";
 
-/* My tasks — personal focus queue.
- *
- * Not a board. Not a table. A calm vertical queue with 4 buckets:
- *   Overdue · Today · This week · Later  (+ a Done-today recap pinned bottom)
- *
- * Each task is a single line: round check · title · priority dot · due chip ·
- * (optional) assigner avatar. Click the circle to complete, double-click title
- * to rename, type at the bottom of any column to add.
- *
- * GET  /api/tasks?assigneeId=me&startDate=…&endDate=…
- * PATCH /api/tasks   { id, status?, title?, date?, priority? }
- * POST  /api/tasks   { title, date, allDay }
- */
+// My Tasks — ClickUp parity (Phase A, 2026-06-06).
+// Greeting + draggable/resizable card grid powered by react-grid-layout.
+// Layout persists per-user in UserPreference.home.taskCardLayout. Cards:
+//   recents · agenda · personal-list · assigned-to-me · reminders ·
+//   assigned-comments · ai-standup · priorities · my-work
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckSquare, AlertCircle, Sun, CalendarDays, Clock, Plus, Sparkles, ChevronRight, Flame } from "lucide-react";
-import { useOsShell } from "@/components/layout/os/shell-context";
-import { useOsToast } from "@/components/layout/os/toast";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
+import {
+  Settings, GripVertical, MoreHorizontal, Maximize2, Plus,
+  List as ListIcon, CheckSquare, MessageSquare, Bell, X,
+  Calendar as CalendarIcon, Sparkles, Filter, Users as UsersIcon,
+} from "lucide-react";
+import { Responsive, WidthProvider, type Layout } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 
-type ApiPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
-type ApiStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETED";
+const ResponsiveGridLayout = WidthProvider(Responsive);
 
-type ApiTask = {
+interface RecentItem {
   id: string;
   title: string;
-  date: string;
-  status: ApiStatus;
-  priority: ApiPrio;
-  completedAt?: string | null;
-  assignee?: { id: string; firstName?: string | null; lastName?: string | null } | null;
-  labels?: { label: { id: string; name: string; color?: string | null } }[];
-};
-
-const MS_DAY = 86_400_000;
-const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
-
-const PRIO_COLOR: Record<ApiPrio, string> = {
-  URGENT: "var(--os-c-red)", HIGH: "var(--os-c-orange)",
-  NORMAL: "var(--os-c-blue)", LOW: "var(--os-c-darkgray)",
-};
-const PRIO_LABEL: Record<ApiPrio, string> = {
-  URGENT: "Urgent", HIGH: "High", NORMAL: "Normal", LOW: "Low",
-};
-
-type Bucket = "overdue" | "today" | "week" | "later" | "done";
-const BUCKET_LABEL: Record<Bucket, string> = {
-  overdue: "Overdue", today: "Today", week: "This week", later: "Later", done: "Done today",
-};
-const BUCKET_ICON: Record<Bucket, React.ComponentType<{ className?: string }>> = {
-  overdue: AlertCircle, today: Sun, week: CalendarDays, later: Clock, done: CheckSquare,
-};
-const BUCKET_HUE: Record<Bucket, string> = {
-  overdue: "var(--os-c-red)", today: "var(--os-c-orange)", week: "var(--os-c-blue)", later: "var(--os-c-indigo)", done: "var(--os-c-green)",
-};
-
-function bucketFor(t: ApiTask): Bucket {
-  const today0 = startOfDay(new Date()).getTime();
-  const due0 = startOfDay(new Date(t.date)).getTime();
-  if (t.status === "COMPLETED") {
-    const completedAt = t.completedAt ? new Date(t.completedAt).getTime() : due0;
-    return completedAt >= today0 ? "done" : "later"; // older completes drop out via filter
-  }
-  if (due0 < today0) return "overdue";
-  if (due0 === today0) return "today";
-  if (due0 <= today0 + 6 * MS_DAY) return "week";
-  return "later";
+  type: "list" | "doc" | "item";
+  parent: string;
+  href: string;
 }
 
-function dueChip(t: ApiTask): { label: string; tone: "danger" | "today" | "muted" | "good" } {
-  const today0 = startOfDay(new Date()).getTime();
-  const due0 = startOfDay(new Date(t.date)).getTime();
-  if (t.status === "COMPLETED") return { label: "Done", tone: "good" };
-  const days = Math.round((due0 - today0) / MS_DAY);
-  if (days < 0) return { label: `${-days}d late`, tone: "danger" };
-  if (days === 0) return { label: "Today", tone: "today" };
-  if (days === 1) return { label: "Tomorrow", tone: "muted" };
-  if (days <= 6) return { label: new Date(due0).toLocaleDateString("en-US", { weekday: "short" }), tone: "muted" };
-  return { label: new Date(due0).toLocaleDateString("en-US", { month: "short", day: "numeric" }), tone: "muted" };
+interface MyItemRow {
+  id: string;
+  title: string;
+  status: string | null;
+  dueAt: string | null;
+  board: { slug: string; name: string } | null;
 }
 
-const greeting = () => {
+type LayoutShape = Record<string, Layout[]>;
+
+const DEFAULT_LAYOUTS: LayoutShape = {
+  lg: [
+    { i: "recents",           x: 0, y: 0,  w: 6, h: 6 },
+    { i: "agenda",            x: 6, y: 0,  w: 6, h: 6 },
+    { i: "personal-list",     x: 0, y: 6,  w: 6, h: 5 },
+    { i: "assigned-to-me",    x: 6, y: 6,  w: 6, h: 5 },
+    { i: "reminders",         x: 0, y: 11, w: 6, h: 5 },
+    { i: "assigned-comments", x: 6, y: 11, w: 6, h: 4 },
+    { i: "ai-standup",        x: 0, y: 16, w: 6, h: 5 },
+    { i: "priorities",        x: 6, y: 15, w: 6, h: 5 },
+    { i: "my-work",           x: 0, y: 21, w: 12, h: 5 },
+  ],
+  md: [
+    { i: "recents",           x: 0, y: 0,  w: 6, h: 6 },
+    { i: "agenda",            x: 6, y: 0,  w: 6, h: 6 },
+    { i: "personal-list",     x: 0, y: 6,  w: 6, h: 5 },
+    { i: "assigned-to-me",    x: 6, y: 6,  w: 6, h: 5 },
+    { i: "reminders",         x: 0, y: 11, w: 6, h: 5 },
+    { i: "assigned-comments", x: 6, y: 11, w: 6, h: 4 },
+    { i: "ai-standup",        x: 0, y: 16, w: 6, h: 5 },
+    { i: "priorities",        x: 6, y: 15, w: 6, h: 5 },
+    { i: "my-work",           x: 0, y: 21, w: 12, h: 5 },
+  ],
+  sm: [
+    { i: "recents",           x: 0, y: 0,  w: 12, h: 5 },
+    { i: "agenda",            x: 0, y: 5,  w: 12, h: 5 },
+    { i: "personal-list",     x: 0, y: 10, w: 12, h: 5 },
+    { i: "assigned-to-me",    x: 0, y: 15, w: 12, h: 5 },
+    { i: "reminders",         x: 0, y: 20, w: 12, h: 5 },
+    { i: "assigned-comments", x: 0, y: 25, w: 12, h: 4 },
+    { i: "ai-standup",        x: 0, y: 29, w: 12, h: 5 },
+    { i: "priorities",        x: 0, y: 34, w: 12, h: 5 },
+    { i: "my-work",           x: 0, y: 39, w: 12, h: 5 },
+  ],
+};
+
+function timeGreeting(): string {
   const h = new Date().getHours();
-  if (h < 5)  return "Late night";
+  if (h < 5)  return "Good night";
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
-  if (h < 21) return "Good evening";
-  return "Wrapping up";
-};
+  if (h < 22) return "Good evening";
+  return "Good night";
+}
 
 export default function MyTasksPage() {
-  const [tasks, setTasks] = useState<ApiTask[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<Bucket, string>>({ overdue: "", today: "", week: "", later: "", done: "" });
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
+  const { data: session } = useSession();
+  const u = session?.user as { firstName?: string; name?: string } | undefined;
+  const firstName = u?.firstName || (u?.name ? u.name.split(" ")[0] : "there");
 
-  const load = useCallback(async () => {
+  const [recents, setRecents] = useState<RecentItem[] | null>(null);
+  const [assigned, setAssigned] = useState<MyItemRow[] | null>(null);
+  const [reminderNoteDismissed, setReminderNoteDismissed] = useState(false);
+  const [layouts, setLayouts] = useState<LayoutShape>(DEFAULT_LAYOUTS);
+  const [layoutsHydrated, setLayoutsHydrated] = useState(false);
+  const [hiddenCards, setHiddenCards] = useState<Set<string>>(new Set());
+  const [manageOpen, setManageOpen] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadRecents = useCallback(async () => {
     try {
-      const from = new Date(Date.now() - 14 * MS_DAY).toISOString().slice(0, 10);
-      const to   = new Date(Date.now() + 60 * MS_DAY).toISOString().slice(0, 10);
-      const res = await fetch(`/api/tasks?startDate=${from}&endDate=${to}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch("/api/spaces", { cache: "no-store" });
+      if (!res.ok) { setRecents([]); return; }
       const data = await res.json();
-      const list: ApiTask[] = Array.isArray(data) ? data : (data.data ?? []);
-      setTasks(list);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
+      const list: RecentItem[] = (data.spaces ?? []).slice(0, 8).map((s: { id: string; slug: string; name: string }) => ({
+        id: s.id,
+        title: s.name,
+        type: "list" as const,
+        parent: "Spaces",
+        href: `/spaces/${s.slug}`,
+      }));
+      setRecents(list);
+    } catch { setRecents([]); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("tasks");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const grouped = useMemo(() => {
-    const buckets: Record<Bucket, ApiTask[]> = { overdue: [], today: [], week: [], later: [], done: [] };
-    for (const t of tasks ?? []) {
-      const b = bucketFor(t);
-      // hide completed tasks unless they were completed today
-      if (t.status === "COMPLETED" && b !== "done") continue;
-      buckets[b].push(t);
-    }
-    // sort each bucket: priority desc, then due asc
-    const prioRank: Record<ApiPrio, number> = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
-    for (const k of Object.keys(buckets) as Bucket[]) {
-      buckets[k].sort((a, b) => {
-        const p = prioRank[a.priority] - prioRank[b.priority];
-        if (p !== 0) return p;
-        return new Date(a.date).getTime() - new Date(b.date).getTime();
-      });
-    }
-    return buckets;
-  }, [tasks]);
-
-  async function patch(id: string, body: Record<string, unknown>) {
-    // optimistic
-    setTasks((prev) => prev?.map((t) => t.id === id ? { ...t, ...body, status: (body.status as ApiStatus) ?? t.status, completedAt: body.status === "COMPLETED" ? new Date().toISOString() : t.completedAt } as ApiTask : t) ?? prev);
+  const loadAssigned = useCallback(async () => {
     try {
-      const res = await fetch("/api/tasks", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, ...body }),
-      });
-      if (!res.ok) throw new Error(`PATCH ${res.status}`);
-    } catch (e) {
-      toast("Couldn't save — refreshing");
-      void load();
-    }
-  }
+      const res = await fetch("/api/me/items?status=open", { cache: "no-store" });
+      if (!res.ok) { setAssigned([]); return; }
+      const data = await res.json();
+      setAssigned(Array.isArray(data.items) ? data.items : []);
+    } catch { setAssigned([]); }
+  }, []);
 
-  async function completeTask(t: ApiTask) {
-    if (t.status === "COMPLETED") {
-      await patch(t.id, { status: "IN_PROGRESS" });
-    } else {
-      await patch(t.id, { status: "COMPLETED" });
-    }
-  }
-
-  async function addTask(bucket: Bucket, title: string) {
-    if (!title.trim()) return;
-    const today = startOfDay(new Date()).getTime();
-    let date = today;
-    if (bucket === "week") date = today + 3 * MS_DAY;
-    else if (bucket === "later") date = today + 14 * MS_DAY;
+  const loadLayout = useCallback(async () => {
     try {
-      const res = await fetch("/api/tasks", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), date: new Date(date).toISOString(), allDay: true }),
+      const res = await fetch("/api/preferences", { cache: "no-store" });
+      if (!res.ok) { setLayoutsHydrated(true); return; }
+      const data = await res.json();
+      const stored = data?.effective?.home?.taskCardLayout;
+      if (stored && typeof stored === "object" && Object.keys(stored).length > 0) {
+        setLayouts({ ...DEFAULT_LAYOUTS, ...stored });
+      }
+      const hiddenArr = data?.effective?.home?.taskCardsHidden;
+      if (Array.isArray(hiddenArr)) {
+        setHiddenCards(new Set(hiddenArr));
+      }
+    } catch {}
+    setLayoutsHydrated(true);
+  }, []);
+
+  const saveHidden = useCallback((next: Set<string>) => {
+    void fetch("/api/preferences", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ home: { taskCardsHidden: Array.from(next) } }),
+    });
+  }, []);
+
+  const toggleCard = useCallback((key: string) => {
+    setHiddenCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      saveHidden(next);
+      return next;
+    });
+  }, [saveHidden]);
+
+  useEffect(() => { void loadRecents(); }, [loadRecents]);
+  useEffect(() => { void loadAssigned(); }, [loadAssigned]);
+  useEffect(() => { void loadLayout(); }, [loadLayout]);
+
+  const saveLayout = useCallback((next: LayoutShape) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void fetch("/api/preferences", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ home: { taskCardLayout: next } }),
       });
-      if (!res.ok) throw new Error(`POST ${res.status}`);
-      setDrafts((d) => ({ ...d, [bucket]: "" }));
-      void load();
-    } catch {
-      toast("Couldn't add task");
-    }
-  }
+    }, 600);
+  }, []);
 
-  async function rename(id: string, title: string) {
-    if (!title.trim()) return setRenamingId(null);
-    setRenamingId(null);
-    await patch(id, { title: title.trim() });
-  }
+  const onLayoutChange = useCallback((_current: Layout[], all: LayoutShape) => {
+    if (!layoutsHydrated) return;
+    setLayouts(all);
+    saveLayout(all);
+  }, [layoutsHydrated, saveLayout]);
 
-  async function snoozeToTomorrow(t: ApiTask) {
-    const tomorrow = startOfDay(new Date(Date.now() + MS_DAY)).toISOString();
-    await patch(t.id, { date: tomorrow });
-    void load();
-  }
-
-  const overdueCount = grouped.overdue.length;
-  const todayCount = grouped.today.length;
-  const doneToday = grouped.done.length;
-
-  // Workload: count tasks by bucket for the right-rail summary
-  const upcomingThisWeek = grouped.today.length + grouped.week.length;
-  const focusScore = todayCount === 0 ? 100 : Math.round((doneToday / (todayCount + doneToday)) * 100);
-
-  if (loadError) {
-    return (
-      <div className="my-tasks">
-        <div className="my-tasks__error">
-          <AlertCircle />
-          <div>
-            <strong>Couldn&apos;t load your tasks</strong>
-            <p>{loadError}</p>
-            <button type="button" onClick={() => { setLoadError(null); void load(); }} className="my-tasks__retry">Retry</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Cards keyed by `i` for the grid. Memoised so identity stays stable
+  // across renders (react-grid-layout uses key identity for animation).
+  const cards = useMemo(() => ({
+    "recents":           <RecentsCard recents={recents} />,
+    "agenda":            <AgendaCard />,
+    "personal-list":     <PersonalListCard />,
+    "assigned-to-me":    <AssignedToMeCard assigned={assigned} />,
+    "reminders":         <RemindersCard dismissed={reminderNoteDismissed} onDismiss={() => setReminderNoteDismissed(true)} />,
+    "assigned-comments": <AssignedCommentsCard />,
+    "ai-standup":        <AiStandUpCard firstName={firstName} />,
+    "priorities":        <PrioritiesCard />,
+    "my-work":           <MyWorkCard />,
+  }), [recents, assigned, reminderNoteDismissed, firstName]);
 
   return (
-    <div className="my-tasks">
-      <header className="my-tasks__head">
-        <div className="my-tasks__hello">
-          <div className="my-tasks__hello-greet">{greeting()}.</div>
-          <h1 className="my-tasks__hello-title">
-            {tasks === null ? "Loading your day…" :
-              todayCount === 0 && overdueCount === 0
-                ? "Nothing on your plate today."
-                : overdueCount > 0
-                  ? <>You have <strong>{overdueCount} overdue</strong> and <strong>{todayCount} due today</strong>.</>
-                  : <>You have <strong>{todayCount}</strong> task{todayCount === 1 ? "" : "s"} for today.</>}
-          </h1>
+    <div className="flex flex-col h-full bg-white">
+      {/* Top header row */}
+      <div className="px-6 pt-4 pb-2 flex items-center justify-between">
+        <h1 className="text-base font-semibold text-zinc-900">My Tasks</h1>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setManageOpen(true)}
+            className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+          >
+            Manage cards
+          </button>
+          <button
+            type="button"
+            aria-label="Settings"
+            className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
         </div>
-        <div className="my-tasks__stats">
-          <div className="my-tasks__stat">
-            <span className="my-tasks__stat-label">Overdue</span>
-            <span className="my-tasks__stat-val" style={{ color: overdueCount > 0 ? "var(--os-c-red)" : "var(--os-ink-3)" }}>{overdueCount}</span>
-          </div>
-          <div className="my-tasks__stat">
-            <span className="my-tasks__stat-label">Today</span>
-            <span className="my-tasks__stat-val">{todayCount}</span>
-          </div>
-          <div className="my-tasks__stat">
-            <span className="my-tasks__stat-label">This week</span>
-            <span className="my-tasks__stat-val">{upcomingThisWeek}</span>
-          </div>
-          <div className="my-tasks__stat">
-            <span className="my-tasks__stat-label">Focus</span>
-            <span className="my-tasks__stat-val" style={{ color: focusScore >= 70 ? "var(--os-c-green)" : focusScore >= 40 ? "var(--os-c-orange)" : "var(--os-c-red)" }}>{focusScore}%</span>
-          </div>
-        </div>
-      </header>
-
-      <div className="my-tasks__cols">
-        {(["overdue", "today", "week", "later", "done"] as Bucket[]).map((bucket) => {
-          const items = grouped[bucket];
-          if (bucket === "overdue" && items.length === 0) return null;
-          if (bucket === "done" && items.length === 0) return null;
-          const Icon = BUCKET_ICON[bucket];
-          const hue = BUCKET_HUE[bucket];
-          return (
-            <section key={bucket} className={`my-tasks__col my-tasks__col--${bucket}`}>
-              <header className="my-tasks__col-head" style={{ borderTop: `3px solid ${hue}` }}>
-                <div className="my-tasks__col-head-l">
-                  <Icon />
-                  <span>{BUCKET_LABEL[bucket]}</span>
-                  <span className="my-tasks__col-count">{items.length}</span>
-                </div>
-              </header>
-
-              <div className="my-tasks__col-body">
-                {items.length === 0 ? (
-                  <div className="my-tasks__col-empty">{bucket === "today" ? "Clear inbox. Nice." : "Nothing here."}</div>
-                ) : (
-                  items.map((t) => {
-                    const chip = dueChip(t);
-                    const isRenaming = renamingId === t.id;
-                    return (
-                      <article key={t.id} className={`task ${t.status === "COMPLETED" ? "task--done" : ""}`}>
-                        <button
-                          type="button"
-                          aria-label={t.status === "COMPLETED" ? "Mark incomplete" : "Mark complete"}
-                          className="task__check"
-                          onClick={() => completeTask(t)}
-                        >
-                          <span className="task__check-dot" style={{ borderColor: PRIO_COLOR[t.priority] }}>
-                            {t.status === "COMPLETED" && <span className="task__check-tick">✓</span>}
-                          </span>
-                        </button>
-
-                        <div className="task__main">
-                          {isRenaming ? (
-                            <input
-                              defaultValue={t.title}
-                              autoFocus
-                              onBlur={(e) => void rename(t.id, e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") void rename(t.id, e.currentTarget.value);
-                                if (e.key === "Escape") setRenamingId(null);
-                              }}
-                              className="task__title-input"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="task__title"
-                              onDoubleClick={() => setRenamingId(t.id)}
-                              title="Double-click to rename"
-                            >
-                              {t.title || <em style={{ color: "var(--os-ink-3)" }}>Untitled</em>}
-                            </button>
-                          )}
-
-                          <div className="task__meta">
-                            {t.priority === "URGENT" || t.priority === "HIGH" ? (
-                              <span className="task__prio" style={{ color: PRIO_COLOR[t.priority] }}>
-                                <Flame /> {PRIO_LABEL[t.priority]}
-                              </span>
-                            ) : null}
-                            <span className={`task__chip task__chip--${chip.tone}`}>{chip.label}</span>
-                            {(t.labels ?? []).slice(0, 2).map((l) => (
-                              <span key={l.label.id} className="task__tag">{l.label.name}</span>
-                            ))}
-                            {(t.labels?.length ?? 0) > 2 ? <span className="task__tag">+{(t.labels?.length ?? 0) - 2}</span> : null}
-                          </div>
-                        </div>
-
-                        {bucket === "overdue" || bucket === "today" ? (
-                          <button
-                            type="button"
-                            className="task__snooze"
-                            onClick={() => snoozeToTomorrow(t)}
-                            title="Snooze to tomorrow"
-                          >
-                            <ChevronRight />
-                          </button>
-                        ) : null}
-                      </article>
-                    );
-                  })
-                )}
-              </div>
-
-              {bucket !== "done" && bucket !== "overdue" ? (
-                <div className="my-tasks__add">
-                  <Plus />
-                  <input
-                    type="text"
-                    value={drafts[bucket]}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [bucket]: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === "Enter") void addTask(bucket, drafts[bucket]); }}
-                    placeholder={`Add to ${BUCKET_LABEL[bucket].toLowerCase()}…`}
-                  />
-                </div>
-              ) : null}
-            </section>
-          );
-        })}
       </div>
 
-      <footer className="my-tasks__foot">
-        <div className="my-tasks__hint">
-          <Sparkles />
-          <span>Double-click a title to rename · Click the circle to complete · Type below any column to add</span>
+      <ManageCardsModal
+        open={manageOpen}
+        onClose={() => setManageOpen(false)}
+        hidden={hiddenCards}
+        onToggle={toggleCard}
+      />
+
+      {/* Greeting */}
+      <div className="px-6 pb-4">
+        <p className="text-[22px] font-semibold text-zinc-900">
+          {timeGreeting()}, {firstName}
+        </p>
+      </div>
+
+      {/* Card grid (draggable + resizable) */}
+      <div className="flex-1 overflow-y-auto px-4 pb-6">
+        <ResponsiveGridLayout
+          className="layout"
+          layouts={filterLayouts(layouts, hiddenCards)}
+          breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+          cols={{ lg: 12, md: 12, sm: 12, xs: 6, xxs: 4 }}
+          rowHeight={56}
+          margin={[16, 16]}
+          draggableHandle=".dash-card-handle"
+          isDraggable
+          isResizable
+          onLayoutChange={onLayoutChange}
+        >
+          {Object.entries(cards)
+            .filter(([key]) => !hiddenCards.has(key))
+            .map(([key, node]) => (
+              <div key={key}>
+                {node}
+              </div>
+            ))}
+        </ResponsiveGridLayout>
+      </div>
+    </div>
+  );
+}
+
+// ─── Card components ────────────────────────────────────────────────
+
+function RecentsCard({ recents }: { recents: RecentItem[] | null }) {
+  return (
+    <DashCard title="Recents" actions={<CardEyebrow />}>
+      {recents === null ? <CardLoading /> :
+        recents.length === 0 ? <CardEmpty>Nothing recent yet.</CardEmpty> : (
+          <ul className="-mx-2">
+            {recents.map((r) => (
+              <li key={r.id}>
+                <Link
+                  href={r.href}
+                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded text-[12.5px]"
+                >
+                  <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                  <span className="text-zinc-900 truncate">{r.title}</span>
+                  <span className="text-zinc-400 shrink-0">·</span>
+                  <span className="text-zinc-500 truncate">in {r.parent}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+    </DashCard>
+  );
+}
+
+function AgendaCard() {
+  return (
+    <DashCard title="Agenda" actions={<CardEyebrow />}>
+      <div className="flex flex-col items-center justify-center text-center py-2">
+        <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-zinc-100 mb-2">
+          <CalendarIcon className="w-5 h-5 text-zinc-500" />
+        </span>
+        <p className="text-[11.5px] text-zinc-600 mb-4 max-w-[260px]">
+          Connect your calendar to view upcoming events and join your next call
+        </p>
+        <div className="w-full space-y-2 max-w-[340px]">
+          <CalendarConnect provider="Google Calendar" tone="multicolor" />
+          <CalendarConnect provider="Microsoft Outlook" tone="blue" />
         </div>
-      </footer>
+      </div>
+    </DashCard>
+  );
+}
+
+function PersonalListCard() {
+  return (
+    <DashCard title="Personal List" titleHint>
+      <div className="flex flex-col items-center justify-center text-center py-6">
+        <span className="inline-flex items-center justify-center w-11 h-11 rounded-lg border border-zinc-200 mb-2">
+          <CheckSquare className="w-5 h-5 text-zinc-400" />
+        </span>
+        <p className="text-[12px] text-zinc-600 mb-3 max-w-[260px]">
+          Personal List is a home for your tasks. <Link href="#" className="underline">Learn more</Link>
+        </p>
+        <button
+          type="button"
+          className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Create a task
+        </button>
+      </div>
+    </DashCard>
+  );
+}
+
+function AssignedToMeCard({ assigned }: { assigned: MyItemRow[] | null }) {
+  return (
+    <DashCard
+      title="Assigned to me"
+      actions={
+        <>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-zinc-700 hover:bg-zinc-100"
+            title="Due date"
+          >
+            <CalendarIcon className="w-3 h-3" />
+            Due date
+          </button>
+          <CardEyebrow />
+          <button
+            type="button"
+            aria-label="Add"
+            className="p-1 rounded hover:bg-zinc-100 text-zinc-500"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </>
+      }
+    >
+      {assigned === null ? <CardLoading /> :
+        assigned.length === 0 ? (
+          <div className="flex flex-col items-center justify-center text-center py-4">
+            <CheckSquare className="w-6 h-6 text-zinc-300 mb-2" />
+            <p className="text-[12px] text-zinc-500">
+              Tasks assigned to you will appear here.
+            </p>
+          </div>
+        ) : (
+          <ul className="-mx-2">
+            {assigned.slice(0, 8).map((it) => (
+              <li key={it.id}>
+                <Link
+                  href={it.board ? `/boards/${it.board.slug}?item=${it.id}` : "#"}
+                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded text-[12.5px]"
+                >
+                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                  <span className="text-zinc-900 truncate flex-1">{it.title}</span>
+                  {it.board ? (
+                    <span className="text-[11px] text-zinc-500 truncate max-w-[140px]">{it.board.name}</span>
+                  ) : null}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+    </DashCard>
+  );
+}
+
+function RemindersCard({ dismissed, onDismiss }: { dismissed: boolean; onDismiss: () => void }) {
+  return (
+    <DashCard title="Reminders">
+      {!dismissed ? (
+        <div className="text-[11.5px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-md px-3 py-2 mb-3 flex items-start gap-2">
+          <span className="flex-1">
+            Note: You can still create legacy Reminders here, but Reminders created elsewhere will now go to Inbox.{" "}
+            <Link href="#" className="underline">Learn more</Link>
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={onDismiss}
+            className="p-0.5 rounded hover:bg-zinc-200 text-zinc-500 shrink-0"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      ) : null}
+      <div className="flex flex-col items-center justify-center text-center py-4">
+        <Bell className="w-6 h-6 text-zinc-300 mb-2" />
+        <p className="text-[12px] text-zinc-500 mb-3">
+          Added Reminders will show here. <Link href="#" className="underline">Learn more</Link>
+        </p>
+        <button
+          type="button"
+          className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add reminder
+        </button>
+      </div>
+    </DashCard>
+  );
+}
+
+function AssignedCommentsCard() {
+  return (
+    <DashCard title="Assigned comments">
+      <div className="flex flex-col items-center justify-center text-center py-4">
+        <MessageSquare className="w-6 h-6 text-zinc-300 mb-2" />
+        <p className="text-[12px] text-zinc-500">
+          You don&apos;t have any assigned comments.{" "}
+          <Link href="/assigned-comments" className="underline">Learn more</Link>
+        </p>
+      </div>
+    </DashCard>
+  );
+}
+
+function AiStandUpCard({ firstName }: { firstName: string }) {
+  return (
+    <DashCard
+      title="AI StandUp"
+      subtitle="Last 7 days"
+      titleIcon={<Sparkles className="w-3.5 h-3.5 text-violet-500" />}
+      actions={
+        <>
+          <button type="button" aria-label="Refresh" className="p-1 rounded hover:bg-zinc-100 text-zinc-500" title="Refresh">
+            <Filter className="w-3.5 h-3.5" />
+          </button>
+          <CardEyebrow />
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-[11px]">
+          <Sparkles className="w-3 h-3" />
+          Brain
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Overview</p>
+          <p className="text-[12.5px] text-zinc-700">
+            There is no recorded activity for {firstName} in the last 7 days.
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Key Highlights</p>
+          <ul className="text-[12.5px] text-zinc-700 list-disc pl-4 space-y-0.5">
+            <li>No tasks or updates to report for this period.</li>
+          </ul>
+        </div>
+      </div>
+    </DashCard>
+  );
+}
+
+function PrioritiesCard() {
+  return (
+    <DashCard title="Priorities" titleHint>
+      <div className="flex flex-col items-center justify-center text-center py-6">
+        <span className="inline-flex items-center justify-center w-11 h-11 rounded-lg border border-zinc-200 mb-2">
+          <CheckSquare className="w-5 h-5 text-zinc-400" />
+        </span>
+        <p className="text-[12px] text-zinc-600 mb-3 max-w-[280px]">
+          Priorities keep your most important tasks in one list.{" "}
+          <Link href="#" className="underline">Learn more</Link>
+        </p>
+        <button
+          type="button"
+          className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Create a task
+        </button>
+      </div>
+    </DashCard>
+  );
+}
+
+function MyWorkCard() {
+  return (
+    <DashCard title="My Work">
+      <div className="flex flex-col items-center justify-center text-center py-8">
+        <span className="inline-flex items-center justify-center w-12 h-12 rounded-lg border border-zinc-200 mb-2">
+          <UsersIcon className="w-5 h-5 text-zinc-400" />
+        </span>
+        <p className="text-[12px] text-zinc-600 mb-3 max-w-[320px]">
+          Tasks and Reminders assigned to you will appear here.{" "}
+          <Link href="#" className="underline">Learn more</Link>
+        </p>
+        <button
+          type="button"
+          className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add task or reminder
+        </button>
+      </div>
+    </DashCard>
+  );
+}
+
+// ─── Shared chrome ──────────────────────────────────────────────────
+
+function DashCard({
+  title,
+  subtitle,
+  titleIcon,
+  titleHint,
+  actions,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  titleIcon?: React.ReactNode;
+  titleHint?: boolean;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="h-full w-full rounded-xl border border-zinc-200 bg-white p-4 flex flex-col overflow-hidden">
+      <div className="dash-card-handle flex items-center justify-between mb-3 cursor-grab active:cursor-grabbing select-none">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <GripVertical className="w-3 h-3 text-zinc-300 shrink-0" />
+          {titleIcon}
+          <h2 className="text-sm font-semibold text-zinc-900 truncate">{title}</h2>
+          {subtitle ? (
+            <span className="text-[11.5px] text-zinc-500 truncate">({subtitle})</span>
+          ) : null}
+          {titleHint ? (
+            <span
+              className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-zinc-300 text-[9px] text-zinc-400 shrink-0"
+              title="Card info"
+              aria-hidden
+            >
+              i
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-0.5">
+          {actions ?? <CardEyebrow />}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto">{children}</div>
+    </section>
+  );
+}
+
+function CardEyebrow() {
+  return (
+    <>
+      <button type="button" aria-label="Expand" className="p-1 rounded hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700">
+        <Maximize2 className="w-3.5 h-3.5" />
+      </button>
+      <button type="button" aria-label="More" className="p-1 rounded hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700">
+        <MoreHorizontal className="w-3.5 h-3.5" />
+      </button>
+    </>
+  );
+}
+
+function CardLoading() {
+  return <div className="text-[12px] text-zinc-400 py-3 text-center">Loading…</div>;
+}
+
+function CardEmpty({ children }: { children: React.ReactNode }) {
+  return <p className="text-[12px] text-zinc-500 px-2 py-3">{children}</p>;
+}
+
+const CARD_CATALOG: Array<{ key: string; label: string; description: string }> = [
+  { key: "recents",           label: "Recents",           description: "Items you opened recently" },
+  { key: "agenda",            label: "Agenda",            description: "Connect a calendar to see today's meetings" },
+  { key: "personal-list",     label: "Personal List",     description: "A home for your personal tasks" },
+  { key: "assigned-to-me",    label: "Assigned to me",    description: "Tasks across every visible board" },
+  { key: "reminders",         label: "Reminders",         description: "Add reminders that sit alongside tasks" },
+  { key: "assigned-comments", label: "Assigned comments", description: "Comments other people assigned to you" },
+  { key: "ai-standup",        label: "AI StandUp",        description: "What you've done in the last 7 days" },
+  { key: "priorities",        label: "Priorities",        description: "Your top-priority tasks in one list" },
+  { key: "my-work",           label: "My Work",           description: "All tasks + reminders owned by you" },
+];
+
+function filterLayouts(layouts: LayoutShape, hidden: Set<string>): LayoutShape {
+  const out: LayoutShape = {};
+  for (const [bp, items] of Object.entries(layouts)) {
+    out[bp] = items.filter((it) => !hidden.has(it.i));
+  }
+  return out;
+}
+
+function ManageCardsModal({
+  open,
+  onClose,
+  hidden,
+  onToggle,
+}: {
+  open: boolean;
+  onClose: () => void;
+  hidden: Set<string>;
+  onToggle: (key: string) => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+      <div
+        className="absolute inset-0 bg-black/30"
+        onClick={onClose}
+        aria-hidden
+      />
+      <div className="relative z-10 bg-white rounded-xl shadow-lg w-[480px] max-w-[90vw] max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-100">
+          <h2 className="text-sm font-semibold text-zinc-900">Manage cards</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1 rounded hover:bg-zinc-100 text-zinc-500"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <p className="px-5 pt-3 text-[12px] text-zinc-500">
+          Toggle which cards appear on My Tasks. Hidden cards keep their saved layout — re-enable any time.
+        </p>
+        <ul className="flex-1 overflow-y-auto p-3 space-y-1">
+          {CARD_CATALOG.map((c) => {
+            const isHidden = hidden.has(c.key);
+            return (
+              <li key={c.key}>
+                <label className="flex items-start gap-3 px-3 py-2 rounded-md hover:bg-zinc-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!isHidden}
+                    onChange={() => onToggle(c.key)}
+                    className="mt-1 w-4 h-4 accent-zinc-900 cursor-pointer"
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[13px] font-medium text-zinc-900">{c.label}</span>
+                    <span className="block text-[12px] text-zinc-500">{c.description}</span>
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="px-5 py-3 border-t border-zinc-100 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[12.5px] px-3 py-1.5 rounded-md bg-zinc-900 text-white hover:bg-zinc-700"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarConnect({ provider, tone }: { provider: string; tone: "multicolor" | "blue" }) {
+  const dot =
+    tone === "multicolor"
+      ? "bg-gradient-to-br from-red-400 via-yellow-400 to-green-500"
+      : "bg-blue-600";
+  return (
+    <div className="flex items-center justify-between px-3 py-2 rounded-md border border-zinc-200">
+      <span className="flex items-center gap-2 min-w-0">
+        <span className={`w-4 h-4 rounded-sm ${dot} shrink-0`} aria-hidden />
+        <span className="text-[12.5px] text-zinc-800 truncate">{provider}</span>
+      </span>
+      <button
+        type="button"
+        disabled
+        title="Coming soon"
+        className="text-[11.5px] px-2.5 py-1 rounded bg-zinc-100 text-zinc-500 cursor-not-allowed"
+      >
+        Connect
+      </button>
     </div>
   );
 }

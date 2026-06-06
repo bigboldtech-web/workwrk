@@ -16,6 +16,10 @@ import {
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { DocFavoriteButton } from "@/components/docs/doc-favorite-button";
+import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
+import { WhiteboardFavoriteButton } from "@/components/board-view/whiteboard-favorite-button";
+import { FileFavoriteButton } from "@/components/board-view/file-favorite-button";
 
 type Tab = "notes" | "whiteboards" | "files" | "tables";
 
@@ -255,31 +259,35 @@ function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filtered.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => router.push(`/docs/${d.id}`)}
-              className="text-left rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <FileText className="h-3.5 w-3.5 text-zinc-400" />
-                {d.entityType ? (
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100">
-                    {d.entityType.toLowerCase()}
-                  </span>
-                ) : (
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-400">Standalone</span>
-                )}
+            <div key={d.id} className="relative group/note">
+              <button
+                type="button"
+                onClick={() => router.push(`/docs/${d.id}`)}
+                className="w-full text-left rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition"
+              >
+                <div className="flex items-center gap-2 mb-2 pr-7">
+                  <FileText className="h-3.5 w-3.5 text-zinc-400" />
+                  {d.entityType ? (
+                    <span className="text-[10px] uppercase tracking-wide text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100">
+                      {d.entityType.toLowerCase()}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] uppercase tracking-wide text-zinc-400">Standalone</span>
+                  )}
+                </div>
+                <div className="text-[13px] font-medium text-zinc-900 line-clamp-1">{d.title || "Untitled"}</div>
+                {d.excerpt ? (
+                  <div className="mt-1 text-[12px] text-zinc-500 line-clamp-2">{d.excerpt}</div>
+                ) : null}
+                <div className="mt-2 flex items-center gap-1 text-[11px] text-zinc-400">
+                  <Clock className="h-3 w-3" />
+                  {relTime(d.updatedAt)}
+                </div>
+              </button>
+              <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/note:opacity-100 transition-opacity">
+                <DocFavoriteButton docId={d.id} initiallyStarred={false} />
               </div>
-              <div className="text-[13px] font-medium text-zinc-900 line-clamp-1">{d.title || "Untitled"}</div>
-              {d.excerpt ? (
-                <div className="mt-1 text-[12px] text-zinc-500 line-clamp-2">{d.excerpt}</div>
-              ) : null}
-              <div className="mt-2 flex items-center gap-1 text-[11px] text-zinc-400">
-                <Clock className="h-3 w-3" />
-                {relTime(d.updatedAt)}
-              </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
@@ -386,11 +394,11 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filtered.map((b) => (
+            <div key={b.id} className="relative group/wb">
             <button
-              key={b.id}
               type="button"
               onClick={() => router.push(`/whiteboards/${b.id}`)}
-              className="text-left rounded-lg border border-zinc-200 bg-white overflow-hidden hover:border-zinc-300 hover:shadow-sm transition"
+              className="w-full text-left rounded-lg border border-zinc-200 bg-white overflow-hidden hover:border-zinc-300 hover:shadow-sm transition"
             >
               <div className="aspect-video bg-zinc-50 border-b border-zinc-100 relative overflow-hidden">
                 {b.thumbnail ? (
@@ -413,6 +421,10 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
                 </div>
               </div>
             </button>
+            <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/wb:opacity-100 transition-opacity">
+              <WhiteboardFavoriteButton whiteboardId={b.id} />
+            </div>
+            </div>
           ))}
         </div>
       )}
@@ -817,29 +829,33 @@ function TablesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filtered.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => router.push(`/tables/${t.id}`)}
-              className="text-left rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Database className="h-3.5 w-3.5 text-zinc-400" />
-                <span className="text-[10px] uppercase tracking-wide text-zinc-400">
-                  {t.columns.length} column{t.columns.length === 1 ? "" : "s"}
-                </span>
+            <div key={t.id} className="relative group/table">
+              <button
+                type="button"
+                onClick={() => router.push(`/tables/${t.id}`)}
+                className="w-full text-left rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition"
+              >
+                <div className="flex items-center gap-2 mb-2 pr-7">
+                  <Database className="h-3.5 w-3.5 text-zinc-400" />
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+                    {t.columns.length} column{t.columns.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="text-[13px] font-medium text-zinc-900 line-clamp-1">{t.name}</div>
+                {t.description ? (
+                  <div className="mt-1 text-[12px] text-zinc-500 line-clamp-2">{t.description}</div>
+                ) : null}
+                <div className="mt-2 flex items-center gap-1 text-[11px] text-zinc-400">
+                  <Clock className="h-3 w-3" />
+                  {relTime(t.updatedAt)}
+                  <span className="text-zinc-300">·</span>
+                  {t.rowCount} {t.rowCount === 1 ? "row" : "rows"}
+                </div>
+              </button>
+              <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/table:opacity-100 transition-opacity">
+                <TableFavoriteButton tableId={t.id} />
               </div>
-              <div className="text-[13px] font-medium text-zinc-900 line-clamp-1">{t.name}</div>
-              {t.description ? (
-                <div className="mt-1 text-[12px] text-zinc-500 line-clamp-2">{t.description}</div>
-              ) : null}
-              <div className="mt-2 flex items-center gap-1 text-[11px] text-zinc-400">
-                <Clock className="h-3 w-3" />
-                {relTime(t.updatedAt)}
-                <span className="text-zinc-300">·</span>
-                {t.rowCount} {t.rowCount === 1 ? "row" : "rows"}
-              </div>
-            </button>
+            </div>
           ))}
         </div>
       )}

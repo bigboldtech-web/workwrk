@@ -39,7 +39,7 @@ export function SpaceQuickStart({ spaceId, accent }: Props) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "Untitled doc",
+          title: "Untitled note",
           entityType: "SPACE",
           entityId: spaceId,
         }),

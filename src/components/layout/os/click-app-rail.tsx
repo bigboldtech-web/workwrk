@@ -40,9 +40,20 @@ export function ClickAppRail() {
 
   const pinnedApps = useMemo<AppEntry[]>(() => {
     const byKey = new Map(APPS.map((a) => [a.key, a] as const));
+    // Phase A (ClickUp parity 2026-06-05): rail only renders the
+    // ClickUp-equivalent set. WorkwrK extras (AI/Teams/Docs/Dashboards/
+    // Forms/Clips/Recruiting/Reviews/Candor/Kudos/Surveys/SOPs/Policies/
+    // Learning/Build/Studio/Store/Settings/etc.) stay reachable via the
+    // Apps grid but don't pollute the rail. Phase B unhides them as
+    // first-class WorkwrK differentiators.
+    const PHASE_A_RAIL = new Set(["home", "library", "planner", "goals", "timesheets"]);
     return pinnedAppKeys
       .map((k) => byKey.get(k))
-      .filter((a): a is AppEntry => Boolean(a) && canAccessApp(a!, accessLevel));
+      .filter((a): a is AppEntry =>
+        Boolean(a) &&
+        PHASE_A_RAIL.has(a!.key) &&
+        canAccessApp(a!, accessLevel),
+      );
   }, [pinnedAppKeys, accessLevel]);
 
   const routeApp = findAppForPath(pathname);
@@ -51,7 +62,10 @@ export function ClickAppRail() {
   // Ghost icon: the user is on a route that maps to an app they
   // haven't pinned. Surface it temporarily so the rail still reflects
   // where they are, with a "Pin to keep" affordance.
-  const ghostApp = routeApp && !pinnedAppKeys.includes(routeApp.key) ? routeApp : null;
+  // Phase A: ghost app suppressed for hidden categories — keeps the rail
+  // visually quiet even when the viewer is deep inside a non-parity app.
+  const PHASE_A_GHOSTABLE = new Set(["home", "library", "planner", "goals", "timesheets"]);
+  const ghostApp = routeApp && !pinnedAppKeys.includes(routeApp.key) && PHASE_A_GHOSTABLE.has(routeApp.key) ? routeApp : null;
 
   useEffect(() => () => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);

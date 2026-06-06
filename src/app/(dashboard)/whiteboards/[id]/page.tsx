@@ -14,6 +14,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, CheckCircle2, Cloud } from "lucide-react";
+import { WhiteboardFavoriteButton } from "@/components/board-view/whiteboard-favorite-button";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = dynamic(
@@ -156,6 +157,8 @@ export default function WhiteboardCanvasPage() {
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
           placeholder="Untitled whiteboard"
         />
+
+        <WhiteboardFavoriteButton whiteboardId={board.id} />
 
         <div className="wbc__status">
           {saving ? (

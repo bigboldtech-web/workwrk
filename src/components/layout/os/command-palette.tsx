@@ -342,6 +342,46 @@ export function OsCommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [mounted, setMounted] = useState(false);
 
+  // Live results from /api/search — debounced fetch on query change.
+  // Items are mapped into Item shapes so they slot into the existing
+  // flatItems / keyboard-nav / sectioned-render machinery unchanged.
+  const [live, setLive] = useState<Item[]>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setLive([]); return; }
+    const ctrl = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal });
+        if (!res.ok) return;
+        const d = await res.json();
+        const hits = (d?.data ?? []) as Array<{
+          type: string; id: string; title: string; subtitle?: string; href?: string;
+        }>;
+        setLive(hits.map((h): Item | null => {
+          if (h.type === "note") {
+            return { kind: "doc", id: `live-note-${h.id}`, label: h.title, href: h.href, type: "doc", editedAt: "" } as DocItem;
+          }
+          if (h.type === "sop") {
+            return { kind: "doc", id: `live-sop-${h.id}`, label: h.title, href: h.href, type: "doc", editedAt: h.subtitle ?? "SOP" } as DocItem;
+          }
+          if (h.type === "task") {
+            return { kind: "task", id: `live-task-${h.id}`, label: h.title, href: h.href, status: "todo", due: h.subtitle, assignee: { name: "", color: "var(--os-c-blue)" } } as TaskItem;
+          }
+          if (h.type === "person") {
+            const initials = h.title.split(" ").map((s) => s[0] ?? "").join("").slice(0, 2).toUpperCase() || "?";
+            return { kind: "person", id: `live-person-${h.id}`, label: h.title, href: h.href, role: h.subtitle ?? "", initials, color: "var(--os-c-indigo)" } as PersonItem;
+          }
+          // Fall through: any other server type renders as a generic navigation row.
+          return h.href
+            ? { kind: "navigate", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, Icon: Search, color: "var(--os-ink-2)" } as NavItem
+            : null;
+        }).filter((x): x is Item => !!x));
+      } catch { /* abort or transient — ignore */ }
+    }, 180);
+    return () => { ctrl.abort(); clearTimeout(t); };
+  }, [query]);
+
   useEffect(() => setMounted(true), []);
 
   const toggleType = (key: string) => {
@@ -372,7 +412,18 @@ export function OsCommandPalette() {
       if (it.kind === "command" && (it as CommandItem).alias?.toLowerCase().includes(q)) return true;
       return false;
     };
-    const filtered = ALL_ITEMS.filter((it) => {
+    // When the writer is searching, prefer live API results for the
+    // entity items (tasks/docs/people). The mock arrays still feed the
+    // empty-query "today" suggestions and the actions/navigate/commands
+    // discovery rows, but they get dropped from the search result list
+    // so we don't double-show fake + real hits side-by-side.
+    const baseItems: Item[] = q
+      ? [
+          ...live,
+          ...ALL_ITEMS.filter((it) => it.kind === "action" || it.kind === "navigate" || it.kind === "command" || it.kind === "space"),
+        ]
+      : ALL_ITEMS;
+    const filtered = baseItems.filter((it) => {
       if (!matchQuery(it)) return false;
       if (activeTypes.length > 0 && !activeTypes.some((t) => t.predicate(it))) return false;
       if (filterDef?.predicate && !filterDef.predicate(it)) return false;
@@ -380,7 +431,7 @@ export function OsCommandPalette() {
     });
     if (sortDef?.sorter) filtered.sort(sortDef.sorter);
     return filtered;
-  }, [query, typeFilters, filterKey, sortKey]);
+  }, [query, typeFilters, filterKey, sortKey, live]);
 
   useEffect(() => {
     if (paletteOpen) {

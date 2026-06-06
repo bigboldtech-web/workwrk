@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
+import { docAccessible } from "@/lib/doc-access";
 
 /**
  * Unified entity search across the product. Powers the Cmd-K palette's
@@ -33,10 +34,15 @@ export async function GET(req: NextRequest) {
   const ci = { contains: needle, mode: "insensitive" as const };
   const take = 5;
 
+  const session2 = session as { user: { id: string; accessLevel: string } };
+  const me = session2.user.id;
+  const myAccess = session2.user.accessLevel;
+
   const [
     users,
     tasks,
     sops,
+    docs,
     departments,
     meetings,
     okrs,
@@ -75,6 +81,21 @@ export async function GET(req: NextRequest) {
       select: { id: true, title: true, status: true, category: true },
       orderBy: { updatedAt: "desc" },
       take,
+    }),
+    // Notes (Doc model). Over-fetch then access-gate so private notes
+    // never bleed into another viewer's palette.
+    prisma.doc.findMany({
+      where: {
+        organizationId: orgId,
+        archivedAt: null,
+        OR: [{ title: ci }, { excerpt: ci }],
+      },
+      select: {
+        id: true, title: true, excerpt: true, content: true,
+        entityType: true, entityId: true, updatedAt: true,
+      },
+      orderBy: { updatedAt: "desc" },
+      take: take * 3,
     }),
     prisma.department.findMany({
       where: { organizationId: orgId, name: ci },
@@ -177,7 +198,21 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
+  // Drop notes the viewer can't read, then slice down to the per-kind cap.
+  const docFlags = await Promise.all(docs.map((d) => docAccessible(d, me, myAccess)));
+  const visibleDocs = docs.filter((_, i) => docFlags[i]).slice(0, take);
+
   const results = [
+    ...visibleDocs.map((d) => {
+      const meta = (d.content as { meta?: { icon?: string } } | null)?.meta;
+      return {
+        type: "note" as const,
+        id: d.id,
+        title: d.title || "Untitled note",
+        subtitle: d.excerpt ? d.excerpt.slice(0, 80) : (meta?.icon ? `${meta.icon} note` : "note"),
+        href: `/docs/${d.id}`,
+      };
+    }),
     ...users.map((u) => ({
       type: "person" as const,
       id: u.id,

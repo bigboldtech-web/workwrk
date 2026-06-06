@@ -38,6 +38,8 @@ const createSchema = z.object({
   ownerId: z.string().min(1).nullable().optional(),
   groupKey: z.string().max(80).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  // Phase 72 — pass to create a subtask under the given parent.
+  parentItemId: z.string().min(1).nullable().optional(),
 });
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -67,6 +69,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       ownerId: parsed.data.ownerId ?? undefined,
       groupKey: parsed.data.groupKey,
       metadata: parsed.data.metadata,
+      parentItemId: parsed.data.parentItemId ?? null,
       actorId: c.userId,
     });
     return NextResponse.json({ item }, { status: 201 });

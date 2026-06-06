@@ -101,7 +101,7 @@ export function FullScreenDocEditor({ docId, onClose, breadcrumbs }: Props) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: liveRef.current.title || "Untitled doc",
+          title: liveRef.current.title || "Untitled note",
           content: { html: liveRef.current.html },
           excerpt: plain || null,
         }),
@@ -193,7 +193,7 @@ export function FullScreenDocEditor({ docId, onClose, breadcrumbs }: Props) {
               liveRef.current.title = e.target.value;
               scheduleSave();
             }}
-            placeholder="Untitled doc"
+            placeholder="Untitled note"
             className="w-full bg-transparent border-0 outline-none text-2xl font-semibold text-foreground placeholder-muted-2"
           />
         </div>
