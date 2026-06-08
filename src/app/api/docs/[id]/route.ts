@@ -23,6 +23,11 @@ const putSchema = z.object({
   // observed. When provided and stale, we return 409 instead of
   // silently overwriting a peer's edits.
   knownUpdatedAt: z.string().datetime().optional(),
+  // Page-tree placement (Notion-style). These can be patched on their
+  // own (a move/reorder) without snapshotting a new version.
+  parentId: z.string().nullable().optional(),
+  position: z.number().optional(),
+  isFolder: z.boolean().optional(),
 });
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -71,6 +76,31 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   if (existing.archivedAt) return NextResponse.json({ error: "archived" }, { status: 410 });
+
+  // Fast-path: a pure tree update (move / reorder / mark-folder) carries no
+  // title/content/excerpt — apply it directly without snapshotting a version
+  // (reordering shouldn't bloat history). Guard against a doc being its own
+  // parent.
+  const isTreeOnly =
+    parsed.data.title === undefined &&
+    parsed.data.content === undefined &&
+    parsed.data.excerpt === undefined &&
+    (parsed.data.parentId !== undefined || parsed.data.position !== undefined || parsed.data.isFolder !== undefined);
+  if (isTreeOnly) {
+    if (parsed.data.parentId === id) {
+      return NextResponse.json({ error: "cannot nest a note under itself" }, { status: 400 });
+    }
+    const doc = await prisma.doc.update({
+      where: { id },
+      data: {
+        ...(parsed.data.parentId !== undefined ? { parentId: parsed.data.parentId } : {}),
+        ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
+        ...(parsed.data.isFolder !== undefined ? { isFolder: parsed.data.isFolder } : {}),
+      },
+      select: { id: true, parentId: true, position: true, isFolder: true },
+    });
+    return NextResponse.json({ doc });
+  }
 
   // Optimistic-concurrency precondition. The client sends the updatedAt
   // it last observed; if the row has moved on, we 409 and let the UI

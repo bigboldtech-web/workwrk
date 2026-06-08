@@ -31,6 +31,7 @@ import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
 import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
 import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
+import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
 
 export const dynamic = "force-dynamic";
@@ -704,195 +705,196 @@ export default async function SpacePage(props: {
           <div className="space-y-4">
             <OverviewCustomizeBanner />
             <OverviewToolbar />
-            {/* Row 1: Recent · Docs · Bookmarks */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
-              <OverviewCard title="Recent">
-                {recentItems.length === 0 ? (
-                  <p className="text-xs text-zinc-500 px-2 py-3">No recent activity yet.</p>
-                ) : (
-                  <ul className="-mx-2">
-                    {recentItems.map((it) => (
-                      <li key={it.id}>
-                        <Link
-                          href={`/boards/${it.board.slug}?item=${it.id}`}
-                          className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-[12.5px]"
-                        >
-                          <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                          <span className="text-zinc-900 truncate">{it.title}</span>
-                          <span className="text-zinc-400 shrink-0">·</span>
-                          <span className="text-zinc-500 truncate">in {it.board.name}</span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </OverviewCard>
-
-              <OverviewCard title="Docs">
-                {recentDocs.length === 0 ? (
-                  <p className="text-xs text-zinc-500 px-2 py-3">No docs in this Space yet.</p>
-                ) : (
-                  <ul className="-mx-2">
-                    {recentDocs.map((d) => (
-                      <li key={d.id}>
-                        <Link
-                          href={`/docs/${d.id}`}
-                          className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-[12.5px]"
-                        >
-                          <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                          <span className="text-zinc-900 truncate">{d.title}</span>
-                          <span className="text-zinc-400 shrink-0">·</span>
-                          <span className="text-zinc-500 truncate">in {d.title}</span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </OverviewCard>
-
-              <OverviewCard title="Bookmarks">
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-zinc-100 mb-2">
-                    <Bookmark className="w-4 h-4 text-zinc-500" />
-                  </span>
-                  <p className="text-[11.5px] text-zinc-600 max-w-[240px] mb-3">
-                    Bookmarks make it easy to save items or any URL from around the web.
-                  </p>
-                  <button
-                    type="button"
-                    disabled
-                    title="Coming soon"
-                    className="text-[11.5px] px-3 py-1.5 rounded-md bg-zinc-100 text-zinc-500 cursor-not-allowed"
-                  >
-                    Add Bookmark
-                  </button>
-                </div>
-              </OverviewCard>
-            </div>
-
-            {/* Folders */}
-            {space.folders.length > 0 ? (
-              <section>
-                <h2 className="text-sm font-semibold text-zinc-900 mb-2">Folders</h2>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {space.folders.map((f) => (
-                    <li
-                      key={f.id}
-                      className="group/folder flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 transition-colors"
-                    >
-                      <FolderIcon className="w-4 h-4 text-zinc-500 shrink-0" />
-                      <span className="text-sm text-zinc-900 truncate flex-1">{f.name}</span>
-                      <span className="opacity-0 group-hover/folder:opacity-100 transition-opacity">
-                        <FolderMoreTrigger
-                          folder={{ id: f.id, name: f.name, icon: f.icon, color: f.color }}
-                        />
+            <SpaceOverviewGrid
+              initialLayouts={(prefs?.home?.overviewCardLayout ?? null) as Parameters<typeof SpaceOverviewGrid>[0]["initialLayouts"]}
+              initialHidden={prefs?.home?.overviewCardsHidden ?? null}
+              cards={{
+                recent: (
+                  <OverviewCard title="Recent">
+                    {recentItems.length === 0 ? (
+                      <p className="text-xs text-zinc-500 px-2 py-3">No recent activity yet.</p>
+                    ) : (
+                      <ul className="-mx-2">
+                        {recentItems.map((it) => (
+                          <li key={it.id}>
+                            <Link
+                              href={`/boards/${it.board.slug}?item=${it.id}`}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-[12.5px]"
+                            >
+                              <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                              <span className="text-zinc-900 truncate">{it.title}</span>
+                              <span className="text-zinc-400 shrink-0">·</span>
+                              <span className="text-zinc-500 truncate">in {it.board.name}</span>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </OverviewCard>
+                ),
+                docs: (
+                  <OverviewCard title="Docs">
+                    {recentDocs.length === 0 ? (
+                      <p className="text-xs text-zinc-500 px-2 py-3">No docs in this Space yet.</p>
+                    ) : (
+                      <ul className="-mx-2">
+                        {recentDocs.map((d) => (
+                          <li key={d.id}>
+                            <Link
+                              href={`/docs/${d.id}`}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-[12.5px]"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                              <span className="text-zinc-900 truncate">{d.title}</span>
+                              <span className="text-zinc-400 shrink-0">·</span>
+                              <span className="text-zinc-500 truncate">in {d.title}</span>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </OverviewCard>
+                ),
+                bookmarks: (
+                  <OverviewCard title="Bookmarks">
+                    <div className="flex flex-col items-center justify-center py-6 text-center">
+                      <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-zinc-100 mb-2">
+                        <Bookmark className="w-4 h-4 text-zinc-500" />
                       </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {/* Lists table — Name · Color · Progress · Owner columns */}
-            {allBoards.length > 0 ? (
-              <section>
-                <h2 className="text-sm font-semibold text-zinc-900 mb-2">Lists</h2>
-                <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
-                  <div className="grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 text-[11px] uppercase tracking-wide text-zinc-500">
-                    <span>Name</span>
-                    <span>Color</span>
-                    <span>Progress</span>
-                    <span>Owner</span>
-                  </div>
-                  <ul>
-                    {allBoards.map((b) => (
-                      <li
-                        key={b.id}
-                        className="group/board grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors"
+                      <p className="text-[11.5px] text-zinc-600 max-w-[240px] mb-3">
+                        Bookmarks make it easy to save items or any URL from around the web.
+                      </p>
+                      <button
+                        type="button"
+                        disabled
+                        title="Coming soon"
+                        className="text-[11.5px] px-3 py-1.5 rounded-md bg-zinc-100 text-zinc-500 cursor-not-allowed"
                       >
-                        <Link
-                          href={`/boards/${b.slug}`}
-                          className="flex items-center gap-2 min-w-0"
-                        >
-                          <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                          <span className="text-[12.5px] text-zinc-900 truncate">{b.name}</span>
-                        </Link>
-                        <span className="flex items-center gap-1.5">
-                          <span
-                            className="w-3 h-3 rounded-sm"
-                            style={{ background: b.color ?? "#A1A1AA" }}
-                            aria-hidden
-                          />
-                          <span className="text-[11px] text-zinc-500">{b.color ?? "—"}</span>
-                        </span>
-                        <span className="flex items-center gap-2">
-                          <span className="h-1.5 flex-1 rounded-full bg-zinc-100 overflow-hidden">
-                            <span className="block h-full bg-zinc-300" style={{ width: "0%" }} />
-                          </span>
-                          <span className="text-[10.5px] text-zinc-500 tabular-nums shrink-0">0/—</span>
-                        </span>
-                        <span className="inline-flex items-center gap-2">
-                          <span className="opacity-0 group-hover/board:opacity-100 transition-opacity inline-flex items-center gap-0.5">
-                            <ShareBoardButton
-                              boardId={b.id}
-                              boardName={b.name}
-                              visibility={b.visibility}
-                              parentSpaceName={space.name}
-                            />
-                            <BoardMoreTrigger
-                              board={{ id: b.id, name: b.name, icon: b.icon, color: b.color }}
-                            />
-                          </span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </section>
-            ) : null}
-
-            {/* Row 3: Resources · Workload by Status */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-              <OverviewCard title="Resources">
-                <div className="flex flex-col items-center justify-center py-10 text-center border border-dashed border-zinc-200 rounded-md">
-                  <span className="text-[11.5px] text-zinc-500">
-                    Drop files here or <span className="text-zinc-700 underline">attach</span>
-                  </span>
-                </div>
-              </OverviewCard>
-
-              <OverviewCard title="Workload by Status">
-                {statusTotal === 0 ? (
-                  <p className="text-xs text-zinc-500 px-2 py-3">No items yet to chart.</p>
-                ) : (
-                  <div className="flex items-center gap-6">
-                    <div
-                      className="w-32 h-32 rounded-full shrink-0"
-                      role="img"
-                      aria-label={`Status pie across ${statusTotal} items`}
-                      style={{ background: buildConicGradient(statusSegments) }}
-                    >
-                      <div className="w-full h-full rounded-full" style={{
-                        background: "radial-gradient(circle, transparent 38%, transparent 38%)",
-                      }} />
+                        Add Bookmark
+                      </button>
                     </div>
-                    <ul className="flex-1 grid grid-cols-1 gap-1.5 min-w-0">
-                      {statusSegments.map((s) => (
-                        <li key={s.key} className="flex items-center gap-2 text-[11.5px]">
-                          <span
-                            className="h-2 w-2 rounded-full shrink-0"
-                            style={{ backgroundColor: s.color }}
-                            aria-hidden
-                          />
-                          <span className="text-zinc-700 truncate flex-1 uppercase tracking-wide">{s.label}</span>
-                          <span className="text-zinc-500 tabular-nums">{s.count}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </OverviewCard>
-            </div>
+                  </OverviewCard>
+                ),
+                folders: (
+                  <OverviewCard title="Folders">
+                    {space.folders.length === 0 ? (
+                      <p className="text-xs text-zinc-500 px-2 py-3">No folders yet.</p>
+                    ) : (
+                      <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {space.folders.map((f) => (
+                          <li
+                            key={f.id}
+                            className="group/folder flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 transition-colors"
+                          >
+                            <FolderIcon className="w-4 h-4 text-zinc-500 shrink-0" />
+                            <span className="text-sm text-zinc-900 truncate flex-1">{f.name}</span>
+                            <span className="opacity-0 group-hover/folder:opacity-100 transition-opacity">
+                              <FolderMoreTrigger
+                                folder={{ id: f.id, name: f.name, icon: f.icon, color: f.color }}
+                              />
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </OverviewCard>
+                ),
+                lists: (
+                  <OverviewCard title="Lists">
+                    {allBoards.length === 0 ? (
+                      <p className="text-xs text-zinc-500 px-2 py-3">No lists yet.</p>
+                    ) : (
+                      <div className="rounded-lg border border-zinc-200 overflow-hidden">
+                        <div className="grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 text-[11px] uppercase tracking-wide text-zinc-500">
+                          <span>Name</span>
+                          <span>Color</span>
+                          <span>Progress</span>
+                          <span>Owner</span>
+                        </div>
+                        <ul>
+                          {allBoards.map((b) => (
+                            <li
+                              key={b.id}
+                              className="group/board grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors"
+                            >
+                              <Link href={`/boards/${b.slug}`} className="flex items-center gap-2 min-w-0">
+                                <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                                <span className="text-[12.5px] text-zinc-900 truncate">{b.name}</span>
+                              </Link>
+                              <span className="flex items-center gap-1.5">
+                                <span
+                                  className="w-3 h-3 rounded-sm"
+                                  style={{ background: b.color ?? "#A1A1AA" }}
+                                  aria-hidden
+                                />
+                                <span className="text-[11px] text-zinc-500">{b.color ?? "—"}</span>
+                              </span>
+                              <span className="flex items-center gap-2">
+                                <span className="h-1.5 flex-1 rounded-full bg-zinc-100 overflow-hidden">
+                                  <span className="block h-full bg-zinc-300" style={{ width: "0%" }} />
+                                </span>
+                                <span className="text-[10.5px] text-zinc-500 tabular-nums shrink-0">0/—</span>
+                              </span>
+                              <span className="inline-flex items-center gap-2">
+                                <span className="opacity-0 group-hover/board:opacity-100 transition-opacity inline-flex items-center gap-0.5">
+                                  <ShareBoardButton
+                                    boardId={b.id}
+                                    boardName={b.name}
+                                    visibility={b.visibility}
+                                    parentSpaceName={space.name}
+                                  />
+                                  <BoardMoreTrigger
+                                    board={{ id: b.id, name: b.name, icon: b.icon, color: b.color }}
+                                  />
+                                </span>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </OverviewCard>
+                ),
+                resources: (
+                  <OverviewCard title="Resources">
+                    <div className="flex flex-col items-center justify-center py-10 text-center border border-dashed border-zinc-200 rounded-md">
+                      <span className="text-[11.5px] text-zinc-500">
+                        Drop files here or <span className="text-zinc-700 underline">attach</span>
+                      </span>
+                    </div>
+                  </OverviewCard>
+                ),
+                workload: (
+                  <OverviewCard title="Workload by Status">
+                    {statusTotal === 0 ? (
+                      <p className="text-xs text-zinc-500 px-2 py-3">No items yet to chart.</p>
+                    ) : (
+                      <div className="flex items-center gap-6">
+                        <div
+                          className="w-32 h-32 rounded-full shrink-0"
+                          role="img"
+                          aria-label={`Status pie across ${statusTotal} items`}
+                          style={{ background: buildConicGradient(statusSegments) }}
+                        />
+                        <ul className="flex-1 grid grid-cols-1 gap-1.5 min-w-0">
+                          {statusSegments.map((s) => (
+                            <li key={s.key} className="flex items-center gap-2 text-[11.5px]">
+                              <span
+                                className="h-2 w-2 rounded-full shrink-0"
+                                style={{ backgroundColor: s.color }}
+                                aria-hidden
+                              />
+                              <span className="text-zinc-700 truncate flex-1 uppercase tracking-wide">{s.label}</span>
+                              <span className="text-zinc-500 tabular-nums">{s.count}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </OverviewCard>
+                ),
+              }}
+            />
           </div>
         ) : null}
       </div>
@@ -2301,11 +2303,11 @@ function OverviewCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-4 min-h-[180px] flex flex-col">
-      <div className="flex items-center justify-between mb-2">
+    <section className="h-full w-full rounded-xl border border-zinc-200 bg-white p-4 flex flex-col overflow-hidden">
+      <div className="dash-card-handle flex items-center justify-between mb-2 cursor-grab active:cursor-grabbing select-none">
         <h2 className="text-sm font-semibold text-zinc-900">{title}</h2>
       </div>
-      <div className="flex-1">{children}</div>
+      <div className="flex-1 overflow-y-auto">{children}</div>
     </section>
   );
 }

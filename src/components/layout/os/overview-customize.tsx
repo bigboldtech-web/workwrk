@@ -105,6 +105,11 @@ export function OverviewToolbar() {
       </button>
       <button
         type="button"
+        onClick={() => {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("workwrk:overview-add-card"));
+          }
+        }}
         className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[12px] text-white"
         style={{ background: "var(--os-brand)" }}
         title="Add a card"

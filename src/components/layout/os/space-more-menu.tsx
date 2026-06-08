@@ -14,11 +14,12 @@
 // Settings / Share / Permissions / Hide are intentional stubs until
 // the corresponding flows land.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Lock, Globe, Archive, Settings,
-  Share2, EyeOff, Loader2, ChevronRight,
+  Share2, EyeOff, Loader2, ChevronRight, Star, Link as LinkIcon,
+  Plus, Zap, Tag, CircleDot, Download, Files, ArrowRightLeft, Copy, Trash2,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
@@ -26,6 +27,7 @@ import { MorePortal } from "./more-portal";
 
 interface SpaceRowLike {
   id: string;
+  slug?: string;
   name: string;
   icon: string | null;
   color: string | null;
@@ -114,6 +116,48 @@ function SpaceMoreMenu({
   const [busy, setBusy] = useState<string | null>(null);
   const [iconName, setIconName] = useState(space.icon);
   const [color, setColor] = useState(space.color ?? "#71717A");
+  const [starred, setStarred] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/preferences", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive) return;
+        const ids: string[] = d?.effective?.home?.favoriteSpaceIds ?? [];
+        setStarred(ids.includes(space.id));
+      })
+      .catch(() => { if (alive) setStarred(false); });
+    return () => { alive = false; };
+  }, [space.id]);
+
+  const toggleFavorite = useCallback(async () => {
+    if (starred === null) return;
+    const next = !starred;
+    setStarred(next);
+    try {
+      await fetch("/api/me/favorites/spaces", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ spaceId: space.id, on: next }),
+      });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
+      }
+    } catch {
+      setStarred(starred);
+    }
+  }, [space.id, starred]);
+
+  const copyLink = useCallback(async () => {
+    try {
+      const url = `${window.location.origin}/spaces/${space.slug ?? space.id}`;
+      await navigator.clipboard.writeText(url);
+      toast("Link copied");
+    } catch {
+      toast("Couldn't copy");
+    }
+  }, [space, toast]);
 
   const patch = async (body: Record<string, unknown>, kind: string) => {
     setBusy(kind);
@@ -262,29 +306,48 @@ function SpaceMoreMenu({
   return (
     <div role="menu" className="bg-white rounded-xl border border-zinc-200 shadow-2xl py-1.5">
       <MenuItem
-        Icon={Edit2}
-        label="Rename"
-        onClick={() => setMode("rename")}
+        Icon={Star}
+        label={starred ? "Unfavorite" : "Favorite"}
+        onClick={toggleFavorite}
+        iconFilled={!!starred}
       />
-      <MenuItem
-        Icon={Palette}
-        label="Change icon &amp; color"
-        onClick={() => setMode("icon")}
-      />
+      <MenuItem Icon={Edit2}    label="Rename"      onClick={() => setMode("rename")} />
+      <MenuItem Icon={LinkIcon} label="Copy link"   onClick={copyLink} />
+
+      <MenuItem Icon={Plus}    label="Create new"  submenu disabled />
+      <MenuItem Icon={Palette} label="Space color" onClick={() => setMode("icon")} submenu />
+
       <MenuItem
         Icon={isPrivate ? Globe : Lock}
         label={isPrivate ? "Make workspace-visible" : "Make Private"}
         busy={busy === "visibility"}
-        onClick={() =>
-          patch({ visibility: isPrivate ? "WORKSPACE" : "PRIVATE" }, "visibility")
-        }
+        onClick={() => patch({ visibility: isPrivate ? "WORKSPACE" : "PRIVATE" }, "visibility")}
       />
+
+      <div className="h-px bg-zinc-100 my-1" />
+
+      <MenuItem Icon={Zap}       label="Automations"   disabled />
+      <MenuItem Icon={Tag}       label="Custom Fields" disabled />
+      <MenuItem Icon={CircleDot} label="Task statuses" disabled />
+
+      <MenuItem Icon={MoreHorizontal} label="More" submenu disabled />
+
+      <div className="h-px bg-zinc-100 my-1" />
+
+      <MenuItem Icon={Download}       label="Imports"   submenu disabled />
+      <MenuItem Icon={Files}          label="Templates" submenu disabled />
+      <MenuItem Icon={ArrowRightLeft} label="Move"      submenu disabled />
+      <MenuItem Icon={Copy}           label="Duplicate" disabled />
+      <MenuItem Icon={Settings}       label="Space settings" submenu disabled />
+      <MenuItem Icon={EyeOff}         label="Hide from sidebar" onClick={() => toast("Hide coming soon")} />
+      <MenuItem Icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
+      <MenuItem Icon={Trash2}         label="Delete"    destructive disabled />
 
       <div className="h-px bg-zinc-100 my-1" />
 
       <MenuItem
         Icon={Share2}
-        label="Share"
+        label="Sharing & Permissions"
         onClick={() => {
           if (onRequestShare) {
             onClose();
@@ -293,27 +356,6 @@ function SpaceMoreMenu({
             toast("Share coming soon");
           }
         }}
-      />
-      <MenuItem
-        Icon={Settings}
-        label="Space settings"
-        trailing={<ChevronRight className="h-3.5 w-3.5 text-zinc-400" />}
-        onClick={() => toast("Settings coming soon")}
-      />
-      <MenuItem
-        Icon={EyeOff}
-        label="Hide from sidebar"
-        onClick={() => toast("Hide coming soon")}
-      />
-
-      <div className="h-px bg-zinc-100 my-1" />
-
-      <MenuItem
-        Icon={Archive}
-        label="Archive Space"
-        busy={busy === "archive"}
-        destructive
-        onClick={archive}
       />
     </div>
   );
@@ -326,27 +368,55 @@ function MenuItem({
   busy,
   destructive,
   onClick,
+  submenu,
+  disabled,
+  iconFilled,
 }: {
   Icon: typeof Edit2;
   label: string;
   trailing?: ReactNode;
   busy?: boolean;
   destructive?: boolean;
-  onClick: () => void;
+  onClick?: () => void;
+  submenu?: boolean;
+  disabled?: boolean;
+  iconFilled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="menuitem"
       onClick={onClick}
-      disabled={busy}
-      className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] disabled:opacity-50 ${
-        destructive ? "text-red-600 hover:bg-red-50" : "text-zinc-800 hover:bg-zinc-50"
-      }`}
+      disabled={busy || disabled}
+      title={disabled && !busy ? "Coming soon" : undefined}
+      className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] ${
+        disabled
+          ? "text-zinc-400 cursor-not-allowed"
+          : destructive
+            ? "text-red-600 hover:bg-red-50"
+            : "text-zinc-800 hover:bg-zinc-50"
+      } disabled:opacity-100`}
     >
-      <Icon className={`h-3.5 w-3.5 shrink-0 ${destructive ? "text-red-500" : "text-zinc-500"}`} />
+      <Icon
+        className={`h-3.5 w-3.5 shrink-0 ${
+          disabled
+            ? "text-zinc-300"
+            : destructive
+              ? "text-red-500"
+              : iconFilled
+                ? "text-amber-400"
+                : "text-zinc-500"
+        }`}
+        style={iconFilled ? { fill: "currentColor" } : undefined}
+      />
       <span className="flex-1">{label}</span>
-      {busy ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400" /> : trailing}
+      {busy ? (
+        <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
+      ) : submenu ? (
+        <ChevronRight className="h-3 w-3 text-zinc-400 shrink-0" />
+      ) : (
+        trailing
+      )}
     </button>
   );
 }

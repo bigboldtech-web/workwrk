@@ -650,6 +650,10 @@ function InlineFormatToolbar() {
     x: number; y: number;
     bold: boolean; italic: boolean; underline: boolean; strike: boolean;
   }>(null);
+  // Which color-family popover is open ("hi", "tc", or none). Lifted to
+  // the toolbar so the two ColorMenu buttons are mutually exclusive —
+  // opening one closes the other automatically.
+  const [openMenu, setOpenMenu] = useState<"hi" | "tc" | null>(null);
 
   useEffect(() => {
     function update() {
@@ -707,14 +711,7 @@ function InlineFormatToolbar() {
   }
 
   function makeLink() {
-    const url = window.prompt("Link URL", "https://");
-    if (!url || !/^(https?:|mailto:|\/)/i.test(url)) return;
-    document.execCommand("createLink", false, url);
-    getEditableEl()?.querySelectorAll("a[href]").forEach((a) => {
-      a.setAttribute("target", "_blank");
-      a.setAttribute("rel", "noopener noreferrer");
-    });
-    fireInput();
+    openLinkPrompt();
   }
 
   function applyMark(family: "hi" | "tc", color: string | null) {
@@ -745,8 +742,20 @@ function InlineFormatToolbar() {
       <button type="button" title="Inline code (⌘E)" onClick={inlineCode}><Code /></button>
       <button type="button" title="Link (⌘K)" onClick={makeLink}><Link2 /></button>
       <span className="bfmt__sep" aria-hidden />
-      <ColorMenu family="hi" Icon={Highlighter} onPick={(c) => applyMark("hi", c)} />
-      <ColorMenu family="tc" Icon={Palette} onPick={(c) => applyMark("tc", c)} />
+      <ColorMenu
+        family="hi"
+        Icon={Highlighter}
+        isOpen={openMenu === "hi"}
+        onToggle={() => setOpenMenu((m) => m === "hi" ? null : "hi")}
+        onPick={(c) => { applyMark("hi", c); setOpenMenu(null); }}
+      />
+      <ColorMenu
+        family="tc"
+        Icon={Palette}
+        isOpen={openMenu === "tc"}
+        onToggle={() => setOpenMenu((m) => m === "tc" ? null : "tc")}
+        onPick={(c) => { applyMark("tc", c); setOpenMenu(null); }}
+      />
     </div>,
     document.body,
   );
@@ -761,14 +770,13 @@ const COLOR_SWATCHES: Array<{ key: string; label: string }> = [
   { key: "orange", label: "Orange" },
 ];
 
-function ColorMenu({ family, Icon, onPick }: { family: "hi" | "tc"; Icon: React.ComponentType<{ className?: string }>; onPick: (color: string | null) => void }) {
-  const [open, setOpen] = useState(false);
+function ColorMenu({ family, Icon, isOpen, onToggle, onPick }: { family: "hi" | "tc"; Icon: React.ComponentType<{ className?: string }>; isOpen: boolean; onToggle: () => void; onPick: (color: string | null) => void }) {
   return (
     <span className="bfmt__cmenu">
-      <button type="button" title={family === "hi" ? "Highlight" : "Text color"} onClick={() => setOpen((o) => !o)}>
+      <button type="button" className={isOpen ? "is-active" : ""} title={family === "hi" ? "Highlight" : "Text color"} onClick={onToggle}>
         <Icon />
       </button>
-      {open && (
+      {isOpen && (
         <div className="bfmt__cmenu-pop" onMouseDown={(e) => e.preventDefault()}>
           <div className="bfmt__cmenu-grid">
             {COLOR_SWATCHES.map((s) => (
@@ -777,11 +785,11 @@ function ColorMenu({ family, Icon, onPick }: { family: "hi" | "tc"; Icon: React.
                 type="button"
                 className={`bfmt__cmenu-cell bfmt__cmenu-cell--${family}-${s.key}`}
                 title={s.label}
-                onClick={() => { onPick(s.key); setOpen(false); }}
+                onClick={() => onPick(s.key)}
               />
             ))}
           </div>
-          <button type="button" className="bfmt__cmenu-clear" onClick={() => { onPick(null); setOpen(false); }}>
+          <button type="button" className="bfmt__cmenu-clear" onClick={() => onPick(null)}>
             Clear
           </button>
         </div>
@@ -1606,20 +1614,7 @@ function EditableText({
       if (k === "k") {
         e.preventDefault();
         const sel = window.getSelection();
-        if (sel && !sel.isCollapsed) {
-          const url = window.prompt("Link URL", "https://");
-          if (url && /^(https?:|mailto:|\/)/i.test(url)) {
-            document.execCommand("createLink", false, url);
-            // Set target/rel on the newly-created link
-            if (ref.current) {
-              ref.current.querySelectorAll("a[href]").forEach((a) => {
-                a.setAttribute("target", "_blank");
-                a.setAttribute("rel", "noopener noreferrer");
-              });
-            }
-            flushHtml();
-          }
-        }
+        if (sel && !sel.isCollapsed) openLinkPrompt();
         return;
       }
     }
@@ -2039,6 +2034,259 @@ function fmtSize(n: number): string {
 function safeHost(url: string): string {
   try { return new URL(url).host; } catch { return "—"; }
 }
+// ───────── Link prompt (styled replacement for window.prompt) ─────────
+// Fires via a window event so any editor on the page can request it
+// without prop drilling. Captures the current selection up front so
+// the link applies to what the user had highlighted, even though the
+// modal's input steals focus.
+
+const LINK_PROMPT_EVENT = "workwrk:notes:link-prompt";
+
+function openLinkPrompt() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(LINK_PROMPT_EVENT));
+}
+
+export function LinkPromptOverlay() {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("https://");
+  const savedRangeRef = useRef<Range | null>(null);
+  const savedTargetRef = useRef<HTMLElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    function onOpen() {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+        savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+        const anchor = sel.anchorNode;
+        const el = anchor && (anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor as Element);
+        savedTargetRef.current = (el?.closest(".brow__text") as HTMLElement) ?? null;
+      } else {
+        savedRangeRef.current = null;
+        savedTargetRef.current = null;
+      }
+      setUrl("https://");
+      setOpen(true);
+      // Focus the input on next tick so it's ready to type.
+      setTimeout(() => inputRef.current?.focus(), 30);
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
+    window.addEventListener(LINK_PROMPT_EVENT, onOpen);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener(LINK_PROMPT_EVENT, onOpen);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  if (!open || typeof document === "undefined") return null;
+
+  function apply() {
+    const value = url.trim();
+    if (!value || !/^(https?:|mailto:|\/)/i.test(value)) { setOpen(false); return; }
+    const range = savedRangeRef.current;
+    const target = savedTargetRef.current;
+    if (target && range) {
+      target.focus();
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      document.execCommand("createLink", false, value);
+      target.querySelectorAll("a[href]").forEach((a) => {
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener noreferrer");
+      });
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    setOpen(false);
+  }
+
+  return createPortal(
+    <div className="lnkpr" role="dialog" aria-modal="true" onClick={() => setOpen(false)}>
+      <div className="lnkpr__panel" onClick={(e) => e.stopPropagation()}>
+        <header className="lnkpr__head">
+          <Link2 />
+          <span>Insert link</span>
+          <button type="button" className="lnkpr__x" onClick={() => setOpen(false)} aria-label="Close"><X /></button>
+        </header>
+        <form
+          className="lnkpr__form"
+          onSubmit={(e) => { e.preventDefault(); apply(); }}
+        >
+          <input
+            ref={inputRef}
+            type="url"
+            placeholder="https://"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <button type="submit">Add</button>
+        </form>
+        <p className="lnkpr__hint">https:// · mailto: · or /relative-path</p>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ───────── Keyboard shortcuts cheat-sheet ─────────
+// Press `?` outside any input/textarea/contentEditable to open. Lives
+// here next to ImageLightbox because both are page-level overlays
+// triggered by document events, not local component state.
+
+const SHORTCUTS_EVENT = "workwrk:notes:shortcuts";
+
+function openShortcuts() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(SHORTCUTS_EVENT));
+}
+
+export function KeyboardShortcutsOverlay() {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    function onOpen() { setOpen(true); }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") { setOpen(false); return; }
+      if (e.key === "?" && !e.metaKey && !e.ctrlKey) {
+        const t = e.target as Element | null;
+        // Don't trigger inside text inputs / contentEditable — `?` is
+        // a legitimate character there.
+        if (t && (
+          t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+          (t as HTMLElement).isContentEditable
+        )) return;
+        e.preventDefault();
+        setOpen(true);
+      }
+    }
+    window.addEventListener(SHORTCUTS_EVENT, onOpen);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener(SHORTCUTS_EVENT, onOpen);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  if (!open || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="kbsc" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={() => setOpen(false)}>
+      <div className="kbsc__panel" onClick={(e) => e.stopPropagation()}>
+        <header className="kbsc__head">
+          <Sparkles />
+          <div>
+            <h2>Keyboard shortcuts</h2>
+            <p>Press <kbd>Esc</kbd> to close</p>
+          </div>
+          <button type="button" className="kbsc__x" onClick={() => setOpen(false)} aria-label="Close"><X /></button>
+        </header>
+        <div className="kbsc__grid">
+          <Group label="Writing">
+            <Row keys={["⌘", "B"]} desc="Bold" />
+            <Row keys={["⌘", "I"]} desc="Italic" />
+            <Row keys={["⌘", "U"]} desc="Underline" />
+            <Row keys={["⌘", "E"]} desc="Inline code" />
+            <Row keys={["⌘", "K"]} desc="Insert link" />
+          </Group>
+          <Group label="Blocks">
+            <Row keys={["/"]} desc="Open slash menu" />
+            <Row keys={["@"]} desc="Mention a person, task, KRA, SOP, or board" />
+            <Row keys={["# ", "Space"]} desc="Heading 1" />
+            <Row keys={["## ", "Space"]} desc="Heading 2" />
+            <Row keys={["- ", "Space"]} desc="Bullet list" />
+            <Row keys={["1. "]} desc="Numbered list" />
+            <Row keys={["[] "]} desc="To-do" />
+            <Row keys={["> "]} desc="Quote" />
+            <Row keys={["```"]} desc="Code block" />
+            <Row keys={["---"]} desc="Divider" />
+          </Group>
+          <Group label="Navigation">
+            <Row keys={["↑", "↓"]} desc="Move between blocks" />
+            <Row keys={["Enter"]} desc="New block / pick slash item" />
+            <Row keys={["Backspace"]} desc="Merge with previous block" />
+            <Row keys={["Tab"]} desc="Pick slash / mention selection" />
+            <Row keys={["Esc"]} desc="Close pickers, dialogs" />
+          </Group>
+          <Group label="Doc">
+            <Row keys={["?"]} desc="Open this shortcuts sheet" />
+            <Row keys={["⌘", "K"]} desc="Universal search palette" />
+          </Group>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section className="kbsc__group">
+      <h3>{label}</h3>
+      <ul>{children}</ul>
+    </section>
+  );
+}
+function Row({ keys, desc }: { keys: string[]; desc: string }) {
+  return (
+    <li>
+      <span className="kbsc__keys">
+        {keys.map((k, i) => (
+          <span key={i}>{i > 0 && <span className="kbsc__plus">+</span>}<kbd>{k}</kbd></span>
+        ))}
+      </span>
+      <span className="kbsc__desc">{desc}</span>
+    </li>
+  );
+}
+
+// ───────── Image lightbox ─────────
+// Fires a window event so any image block in any editor on the page
+// can request the lightbox without needing parent prop drilling. The
+// listener is mounted exactly once in <ImageLightbox/> below.
+const IMAGE_LIGHTBOX_EVENT = "workwrk:notes:image-lightbox";
+
+function openImageLightbox(url: string, alt: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(IMAGE_LIGHTBOX_EVENT, { detail: { url, alt } }));
+}
+
+export function ImageLightbox() {
+  const [open, setOpen] = useState<{ url: string; alt: string } | null>(null);
+
+  useEffect(() => {
+    function onOpen(e: Event) {
+      const detail = (e as CustomEvent).detail as { url?: string; alt?: string } | null;
+      if (!detail?.url) return;
+      setOpen({ url: detail.url, alt: detail.alt ?? "" });
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(null);
+    }
+    window.addEventListener(IMAGE_LIGHTBOX_EVENT, onOpen);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener(IMAGE_LIGHTBOX_EVENT, onOpen);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  if (!open || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="imglb" role="dialog" aria-modal="true" onClick={() => setOpen(null)}>
+      <button type="button" className="imglb__x" onClick={() => setOpen(null)} aria-label="Close"><X /></button>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={open.url} alt={open.alt} className="imglb__img" onClick={(e) => e.stopPropagation()} />
+      {open.alt && <div className="imglb__alt">{open.alt}</div>}
+    </div>,
+    document.body,
+  );
+}
+
 function escapeHTML(s: string): string {
   return (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
@@ -3295,7 +3543,15 @@ function ImageBlock({ block, readonly, onUpdate, onRemove }: {
     return (
       <figure className="brow__image" id={`b-${block.id}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={block.url} alt={block.alt ?? ""} style={block.width ? { maxWidth: block.width } : undefined} />
+        <img
+          src={block.url}
+          alt={block.alt ?? ""}
+          style={block.width ? { maxWidth: block.width } : undefined}
+          onClick={(e) => {
+            e.stopPropagation();
+            openImageLightbox(block.url, block.alt ?? block.caption ?? "");
+          }}
+        />
         {!readonly && (
           <button type="button" className="brow__image-x" onClick={(e) => { e.stopPropagation(); onRemove(); }} aria-label="Remove image">
             <X />

@@ -1,18 +1,18 @@
-// GET /api/spaces/[id]/children — folders + boards + tables + docs +
-// whiteboards directly under this Space, for the HomeSidebar's
-// expandable tree. Gated by getSpaceForReader so users can't enumerate
-// children of Spaces they can't see.
+// GET /api/spaces/[id]/children — folders (with up to 2 sub-levels)
+// + boards + tables + docs + whiteboards directly under this Space, for
+// the HomeSidebar's expandable tree. Gated by getSpaceForReader so
+// users can't enumerate children of Spaces they can't see.
 //
 // Returns:
-//   { folders: [...], boards: [...], tables: [...], docs: [...], whiteboards: [...] }
+//   {
+//     folders: FolderNode[]   // parentFolderId = null
+//     boards:  []             // folderId = null
+//     tables:  []
+//     docs:    []             // entityType="SPACE"
+//     whiteboards: []
+//   }
 //
-// Folders only includes top-level (parentFolderId = null). Sub-folder
-// tree expansion fetches /api/folders/[id]/children when we add it.
-// Boards only includes those NOT inside a folder (folderId = null) +
-// those inside any folder are returned via the folder's payload below.
-// Tables/Docs/Whiteboards = Space-scoped only; org-wide rows live in
-// /library and never appear in any Space tree.
-// Docs scope: Doc.entityType="SPACE" + entityId=spaceId.
+// FolderNode = { id, name, ..., boards, docs, childFolders } recursive.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -32,6 +32,21 @@ async function ctx() {
   return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
 }
 
+const BOARD_SELECT = {
+  id: true, slug: true, name: true, icon: true, color: true,
+  visibility: true,
+} as const;
+
+const FOLDER_INNER_SELECT = {
+  id: true, name: true, icon: true, color: true, position: true,
+  _count: { select: { boards: true, childFolders: true } },
+  boards: {
+    where: { archivedAt: null },
+    orderBy: { name: "asc" as const },
+    select: BOARD_SELECT,
+  },
+} as const;
+
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await ctx();
   if ("error" in c) return c.error;
@@ -42,25 +57,23 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Single query each — all indexed on spaceId. allSettled keeps the
-  // sidebar usable if one query fails (e.g. stale Prisma client).
+  // Top-level folders with 2 nested levels of childFolders.
   const [foldersR, rootBoardsR, tablesR, docsR, whiteboardsR] = await Promise.allSettled([
     prisma.folder.findMany({
       where: { spaceId: id, archivedAt: null, parentFolderId: null },
       orderBy: { position: "asc" },
       select: {
-        id: true,
-        name: true,
-        icon: true,
-        color: true,
-        position: true,
-        _count: { select: { boards: true, childFolders: true } },
-        boards: {
+        ...FOLDER_INNER_SELECT,
+        childFolders: {
           where: { archivedAt: null },
-          orderBy: { name: "asc" },
+          orderBy: { position: "asc" as const },
           select: {
-            id: true, slug: true, name: true, icon: true, color: true,
-            visibility: true,
+            ...FOLDER_INNER_SELECT,
+            childFolders: {
+              where: { archivedAt: null },
+              orderBy: { position: "asc" as const },
+              select: FOLDER_INNER_SELECT,
+            },
           },
         },
       },
@@ -68,10 +81,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     prisma.board.findMany({
       where: { spaceId: id, folderId: null, archivedAt: null },
       orderBy: { name: "asc" },
-      select: {
-        id: true, slug: true, name: true, icon: true, color: true,
-        visibility: true,
-      },
+      select: BOARD_SELECT,
     }),
     prisma.dataTable.findMany({
       where: { spaceId: id },
@@ -112,18 +122,36 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 
   const folders = foldersR.status === "fulfilled" ? foldersR.value : [];
-  const folderIds = folders.map((f) => f.id);
 
-  // Folder-anchored docs — Doc.entityType="FOLDER" + entityId IN folderIds.
-  // Single batched query; grouped in app code.
+  // Walk the tree to collect every folder ID for the docs batch query.
+  type FolderShape = {
+    id: string;
+    name: string;
+    icon: string | null;
+    color: string | null;
+    position: number;
+    _count: { boards: number; childFolders: number };
+    boards: Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: "PRIVATE" | "WORKSPACE" | "ORG" }>;
+    childFolders?: FolderShape[];
+  };
+
+  function collectIds(nodes: FolderShape[], acc: string[]) {
+    for (const n of nodes) {
+      acc.push(n.id);
+      if (n.childFolders?.length) collectIds(n.childFolders, acc);
+    }
+  }
+  const allFolderIds: string[] = [];
+  collectIds(folders as FolderShape[], allFolderIds);
+
   let folderDocs: { id: string; title: string; entityId: string | null }[] = [];
-  if (folderIds.length > 0) {
+  if (allFolderIds.length > 0) {
     try {
       folderDocs = await prisma.doc.findMany({
         where: {
           organizationId: c.organizationId,
           entityType: "FOLDER",
-          entityId: { in: folderIds },
+          entityId: { in: allFolderIds },
           archivedAt: null,
         },
         orderBy: { title: "asc" },
@@ -140,13 +168,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     arr.push({ id: d.id, title: d.title });
     docsByFolder.set(d.entityId, arr);
   }
-  const foldersWithDocs = folders.map((f) => ({
-    ...f,
-    docs: docsByFolder.get(f.id) ?? [],
-  }));
+
+  // Distribute docs to their folders + flatten childFolders -> childFolders shape.
+  function annotate(nodes: FolderShape[]): unknown[] {
+    return nodes.map((n) => ({
+      ...n,
+      docs: docsByFolder.get(n.id) ?? [],
+      childFolders: n.childFolders ? annotate(n.childFolders) : [],
+    }));
+  }
 
   return NextResponse.json({
-    folders: foldersWithDocs,
+    folders: annotate(folders as FolderShape[]),
     boards: rootBoardsR.status === "fulfilled" ? rootBoardsR.value : [],
     tables: tablesR.status === "fulfilled" ? tablesR.value : [],
     docs: docsR.status === "fulfilled" ? docsR.value : [],

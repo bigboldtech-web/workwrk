@@ -40,18 +40,10 @@ export function ClickAppRail() {
 
   const pinnedApps = useMemo<AppEntry[]>(() => {
     const byKey = new Map(APPS.map((a) => [a.key, a] as const));
-    // Phase A (ClickUp parity 2026-06-05): rail only renders the
-    // ClickUp-equivalent set. WorkwrK extras (AI/Teams/Docs/Dashboards/
-    // Forms/Clips/Recruiting/Reviews/Candor/Kudos/Surveys/SOPs/Policies/
-    // Learning/Build/Studio/Store/Settings/etc.) stay reachable via the
-    // Apps grid but don't pollute the rail. Phase B unhides them as
-    // first-class WorkwrK differentiators.
-    const PHASE_A_RAIL = new Set(["home", "library", "planner", "goals", "timesheets"]);
     return pinnedAppKeys
       .map((k) => byKey.get(k))
       .filter((a): a is AppEntry =>
         Boolean(a) &&
-        PHASE_A_RAIL.has(a!.key) &&
         canAccessApp(a!, accessLevel),
       );
   }, [pinnedAppKeys, accessLevel]);
@@ -62,10 +54,7 @@ export function ClickAppRail() {
   // Ghost icon: the user is on a route that maps to an app they
   // haven't pinned. Surface it temporarily so the rail still reflects
   // where they are, with a "Pin to keep" affordance.
-  // Phase A: ghost app suppressed for hidden categories — keeps the rail
-  // visually quiet even when the viewer is deep inside a non-parity app.
-  const PHASE_A_GHOSTABLE = new Set(["home", "library", "planner", "goals", "timesheets"]);
-  const ghostApp = routeApp && !pinnedAppKeys.includes(routeApp.key) && PHASE_A_GHOSTABLE.has(routeApp.key) ? routeApp : null;
+  const ghostApp = routeApp && !pinnedAppKeys.includes(routeApp.key) ? routeApp : null;
 
   useEffect(() => () => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -158,7 +147,7 @@ export function ClickAppRail() {
       // with their own inline `color: var(--os-brand-rail)` for the
       // dark-icon-on-white-pill look.
       style={{ backgroundColor: "var(--os-brand-rail)", color: "#fff" }}
-      className="w-[52px] flex-shrink-0 h-full flex flex-col relative transition-colors rounded-xl overflow-hidden"
+      className="w-[60px] flex-shrink-0 h-full flex flex-col relative transition-colors rounded-xl overflow-hidden"
       onMouseLeave={scheduleClose}
     >
       <nav className="flex-1 pt-3 pb-2 overflow-y-auto overflow-x-visible os-no-scrollbar">
@@ -303,29 +292,6 @@ export function ClickAppRail() {
         />
       ) : null}
     </aside>
-  );
-}
-
-function ActiveTabNotch() {
-  // The "tab" effect — soft brand fill behind the active rail item +
-  // a 2px brand-colored edge stripe. Both colors follow whichever
-  // accent the user has chosen in Themes.
-  return (
-    <>
-      <span
-        aria-hidden
-        className="absolute right-[-6px] top-1 bottom-1 w-3 rounded-l-md"
-        style={{
-          zIndex: -1,
-          background: "color-mix(in srgb, var(--os-brand) 14%, transparent)",
-        }}
-      />
-      <span
-        aria-hidden
-        className="absolute right-[-1px] top-2 bottom-2 w-[2px] rounded-l-sm"
-        style={{ background: "var(--os-brand)" }}
-      />
-    </>
   );
 }
 

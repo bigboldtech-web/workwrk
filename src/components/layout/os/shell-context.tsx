@@ -1,14 +1,26 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { ALWAYS_PINNED_KEYS, DEFAULT_PINNED_KEYS, isAlwaysPinned } from "./apps-catalog";
+import { ALWAYS_PINNED_KEYS, APPS, DEFAULT_PINNED_KEYS, isAlwaysPinned } from "./apps-catalog";
 
 /** Always-pinned keys come first, then the user's chosen order minus dupes. */
 function ensureAlwaysPinned(keys: string[]): string[] {
+  const appKeys = new Set(APPS.map((app) => app.key));
+  const validInput = keys.filter((key) => appKeys.has(key));
+  const hasUnknownKeys = validInput.length !== keys.length;
+  const onlyAlwaysPinned =
+    validInput.length > 0 && validInput.every((key) => ALWAYS_PINNED_KEYS.includes(key));
+  const shouldRecoverDefaultPins = hasUnknownKeys && (validInput.length === 0 || onlyAlwaysPinned);
+  const source = shouldRecoverDefaultPins ? DEFAULT_PINNED_KEYS : validInput;
   const seen = new Set<string>();
   const out: string[] = [];
   for (const k of ALWAYS_PINNED_KEYS) { out.push(k); seen.add(k); }
-  for (const k of keys) { if (!seen.has(k)) { out.push(k); seen.add(k); } }
+  for (const k of source) {
+    if (!seen.has(k)) {
+      out.push(k);
+      seen.add(k);
+    }
+  }
   return out;
 }
 
@@ -172,50 +184,52 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [mutedNotifications, setMutedNotificationsState] = useState(false);
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(LENS_KEY);
-      if (stored === "me" || stored === "we") setLensState(stored);
-      const app = window.localStorage.getItem(ACTIVE_APP_KEY);
-      if (app) setActiveAppKeyState(app);
-      const collapsed = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-      if (collapsed === "1") setSidebarCollapsedState(true);
-      const pins = window.localStorage.getItem(PINNED_APPS_KEY);
-      if (pins) {
-        const parsed = JSON.parse(pins);
-        if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
-          setPinnedAppKeysState(ensureAlwaysPinned(parsed));
+    const storageTimer = window.setTimeout(() => {
+      try {
+        const stored = window.localStorage.getItem(LENS_KEY);
+        if (stored === "me" || stored === "we") setLensState(stored);
+        const app = window.localStorage.getItem(ACTIVE_APP_KEY);
+        if (app) setActiveAppKeyState(app);
+        const collapsed = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+        if (collapsed === "1") setSidebarCollapsedState(true);
+        const pins = window.localStorage.getItem(PINNED_APPS_KEY);
+        if (pins) {
+          const parsed = JSON.parse(pins);
+          if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
+            setPinnedAppKeysState(ensureAlwaysPinned(parsed));
+          }
         }
-      }
-      const recents = window.localStorage.getItem(RECENT_APPS_KEY);
-      if (recents) {
-        const parsed = JSON.parse(recents);
-        if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
-          setRecentAppKeysState(parsed.slice(0, MAX_RECENTS));
+        const recents = window.localStorage.getItem(RECENT_APPS_KEY);
+        if (recents) {
+          const parsed = JSON.parse(recents);
+          if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
+            setRecentAppKeysState(parsed.slice(0, MAX_RECENTS));
+          }
         }
-      }
-      const io = window.localStorage.getItem(ICONS_ONLY_KEY);
-      if (io === "1") setIconsOnlyState(true);
-      const profilePins = window.localStorage.getItem(PROFILE_TOOL_PINS_KEY);
-      if (profilePins) {
-        const parsed = JSON.parse(profilePins);
-        if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
-          setProfileToolPinsState(parsed);
+        const io = window.localStorage.getItem(ICONS_ONLY_KEY);
+        if (io === "1") setIconsOnlyState(true);
+        const profilePins = window.localStorage.getItem(PROFILE_TOOL_PINS_KEY);
+        if (profilePins) {
+          const parsed = JSON.parse(profilePins);
+          if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
+            setProfileToolPinsState(parsed);
+          }
         }
-      }
-      const pres = window.localStorage.getItem(PRESENCE_KEY);
-      if (pres) {
-        const parsed = JSON.parse(pres);
-        if (parsed && typeof parsed.label === "string") {
-          setPresenceStatusState({
-            emoji: typeof parsed.emoji === "string" ? parsed.emoji : null,
-            label: parsed.label,
-            expiresAt: typeof parsed.expiresAt === "string" ? parsed.expiresAt : null,
-          });
+        const pres = window.localStorage.getItem(PRESENCE_KEY);
+        if (pres) {
+          const parsed = JSON.parse(pres);
+          if (parsed && typeof parsed.label === "string") {
+            setPresenceStatusState({
+              emoji: typeof parsed.emoji === "string" ? parsed.emoji : null,
+              label: parsed.label,
+              expiresAt: typeof parsed.expiresAt === "string" ? parsed.expiresAt : null,
+            });
+          }
         }
-      }
-      const muted = window.localStorage.getItem(MUTED_NOTIFS_KEY);
-      if (muted === "1") setMutedNotificationsState(true);
-    } catch {}
+        const muted = window.localStorage.getItem(MUTED_NOTIFS_KEY);
+        if (muted === "1") setMutedNotificationsState(true);
+      } catch {}
+    }, 0);
 
     // Reconcile with server-stored preference (syncs across devices).
     // Server is the source of truth when present; localStorage is a
@@ -244,6 +258,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("workwrk:prefs-changed", onPrefsChanged);
     return () => {
       alive = false;
+      window.clearTimeout(storageTimer);
       window.removeEventListener("workwrk:prefs-changed", onPrefsChanged);
     };
   }, []);

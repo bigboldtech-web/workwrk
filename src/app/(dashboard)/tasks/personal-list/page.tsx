@@ -1,8 +1,5 @@
-// /tasks/personal-list — stub redirect to the My Tasks dashboard.
-// Dedicated Personal List surface lands in a follow-up.
+import { PersonalListReferencePage } from "../_components/task-reference-pages";
 
-import { redirect } from "next/navigation";
-
-export default function PersonalListPage(): never {
-  redirect("/tasks");
+export default function PersonalListPage() {
+  return <PersonalListReferencePage />;
 }

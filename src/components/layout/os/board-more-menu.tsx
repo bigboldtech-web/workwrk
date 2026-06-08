@@ -10,10 +10,12 @@
 //   Share             → opens ShareBoardDialog (hoisted callback)
 //   Archive Board     → DELETE /api/boards/[id]  (soft-archive)
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Edit2, Palette, Share2, Archive, Loader2,
+  MoreHorizontal, Edit2, Palette, Share2, Archive, Loader2, Star,
+  Link as LinkIcon, Plus, Zap, Tag, CircleDot,
+  Download, Files, ArrowRightLeft, Copy, Trash2, ChevronRight,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
@@ -105,6 +107,48 @@ function BoardMoreMenu({
   const [busy, setBusy] = useState<string | null>(null);
   const [iconName, setIconName] = useState(board.icon);
   const [color, setColor] = useState(board.color ?? "#71717A");
+  const [starred, setStarred] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/preferences", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive) return;
+        const ids: string[] = d?.effective?.home?.favoriteBoardIds ?? [];
+        setStarred(ids.includes(board.id));
+      })
+      .catch(() => { if (alive) setStarred(false); });
+    return () => { alive = false; };
+  }, [board.id]);
+
+  const toggleFavorite = useCallback(async () => {
+    if (starred === null) return;
+    const next = !starred;
+    setStarred(next);
+    try {
+      await fetch("/api/me/favorites/boards", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ boardId: board.id, on: next }),
+      });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
+      }
+    } catch {
+      setStarred(starred);
+    }
+  }, [board.id, starred]);
+
+  const copyLink = useCallback(async () => {
+    try {
+      const url = `${window.location.origin}/boards/${board.id}`;
+      await navigator.clipboard.writeText(url);
+      toast("Link copied");
+    } catch {
+      toast("Couldn't copy");
+    }
+  }, [board.id, toast]);
 
   const patch = async (body: Record<string, unknown>, kind: string): Promise<boolean> => {
     setBusy(kind);
@@ -245,11 +289,40 @@ function BoardMoreMenu({
 
   return (
     <div role="menu" className="bg-white rounded-xl border border-zinc-200 shadow-2xl py-1.5">
+      <Item
+        Icon={Star}
+        label={starred ? "Unfavorite" : "Favorite"}
+        onClick={toggleFavorite}
+        iconFilled={!!starred}
+      />
       <Item Icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
-      <Item Icon={Palette} label="Change icon &amp; color" onClick={() => setMode("icon")} />
+      <Item Icon={LinkIcon} label="Copy link" onClick={copyLink} />
+
+      <Item Icon={Plus}    label="Create new" submenu disabled />
+      <Item Icon={Palette} label="List color" onClick={() => setMode("icon")} submenu />
+
+      <div className="h-px bg-zinc-100 my-1" />
+
+      <Item Icon={Zap}       label="Automations"   disabled />
+      <Item Icon={Tag}       label="Custom Fields" disabled />
+      <Item Icon={CircleDot} label="Task statuses" disabled />
+
+      <Item Icon={MoreHorizontal} label="More" submenu disabled />
+
+      <div className="h-px bg-zinc-100 my-1" />
+
+      <Item Icon={Download}       label="Imports"   submenu disabled />
+      <Item Icon={Files}          label="Templates" submenu disabled />
+      <Item Icon={ArrowRightLeft} label="Move"      submenu disabled />
+      <Item Icon={Copy}           label="Duplicate" disabled />
+      <Item Icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
+      <Item Icon={Trash2}         label="Delete"    destructive disabled />
+
+      <div className="h-px bg-zinc-100 my-1" />
+
       <Item
         Icon={Share2}
-        label="Share &amp; permissions"
+        label="Sharing & Permissions"
         onClick={() => {
           if (onRequestShare) {
             onClose();
@@ -259,8 +332,6 @@ function BoardMoreMenu({
           }
         }}
       />
-      <div className="h-px bg-zinc-100 my-1" />
-      <Item Icon={Archive} label="Archive board" destructive busy={busy === "archive"} onClick={archive} />
     </div>
   );
 }
@@ -271,26 +342,52 @@ function Item({
   busy,
   destructive,
   onClick,
+  submenu,
+  disabled,
+  iconFilled,
 }: {
   Icon: typeof Edit2;
   label: string | ReactNode;
   busy?: boolean;
   destructive?: boolean;
-  onClick: () => void;
+  onClick?: () => void;
+  submenu?: boolean;
+  disabled?: boolean;
+  iconFilled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="menuitem"
       onClick={onClick}
-      disabled={busy}
-      className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] disabled:opacity-50 ${
-        destructive ? "text-red-600 hover:bg-red-50" : "text-zinc-800 hover:bg-zinc-50"
-      }`}
+      disabled={busy || disabled}
+      title={disabled && !busy ? "Coming soon" : undefined}
+      className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] ${
+        disabled
+          ? "text-zinc-400 cursor-not-allowed"
+          : destructive
+            ? "text-red-600 hover:bg-red-50"
+            : "text-zinc-800 hover:bg-zinc-50"
+      } disabled:opacity-100`}
     >
-      <Icon className={`h-3.5 w-3.5 shrink-0 ${destructive ? "text-red-500" : "text-zinc-500"}`} />
+      <Icon
+        className={`h-3.5 w-3.5 shrink-0 ${
+          disabled
+            ? "text-zinc-300"
+            : destructive
+              ? "text-red-500"
+              : iconFilled
+                ? "text-amber-400"
+                : "text-zinc-500"
+        }`}
+        style={iconFilled ? { fill: "currentColor" } : undefined}
+      />
       <span className="flex-1">{label}</span>
-      {busy ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400" /> : null}
+      {busy ? (
+        <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
+      ) : submenu ? (
+        <ChevronRight className="h-3 w-3 text-zinc-400 shrink-0" />
+      ) : null}
     </button>
   );
 }

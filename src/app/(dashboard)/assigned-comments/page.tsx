@@ -8,18 +8,32 @@
 // Comment-assignment schema does not exist yet — both tabs render the
 // empty state. Real data lands when ItemUpdate gains an `assigneeId`.
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { ListFilter, Check, Calendar, Search, MessageSquare } from "lucide-react";
 
 type Tab = "assigned" | "delegated";
+
+// Brand-tinted fill — soft uses the workspace brand at low alpha for a
+// cream chip; solid uses the brand at full strength for the pressed state.
+function brandTintStyle(strength: number, kind: "soft" | "solid"): CSSProperties {
+  if (kind === "solid") {
+    return { background: "var(--os-brand-rail)" };
+  }
+  const pct = Math.round(strength * 100);
+  return {
+    background: `color-mix(in srgb, var(--os-brand-rail) ${pct}%, white)`,
+    color: "var(--os-brand-rail)",
+    borderColor: `color-mix(in srgb, var(--os-brand-rail) ${Math.min(pct + 8, 100)}%, transparent)`,
+  };
+}
 
 export default function AssignedCommentsPage() {
   const [tab, setTab] = useState<Tab>("assigned");
   const [resolved, setResolved] = useState(false);
   const [dateRange, setDateRange] = useState("Last 90 Days");
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
 
-  const filtersActive = resolved || dateRange !== "Last 90 Days" || query.length > 0;
   const clearFilters = () => {
     setResolved(false);
     setDateRange("Last 90 Days");
@@ -28,10 +42,9 @@ export default function AssignedCommentsPage() {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header */}
-      <div className="px-6 pt-4">
-        <h1 className="text-base font-semibold text-zinc-900 mb-3">Assigned Comments</h1>
-        <div className="flex items-center gap-4 border-b border-zinc-100">
+      <div className="!px-4 pt-4">
+        <h1 className="mb-3 text-[15px] font-semibold text-zinc-900">Assigned Comments</h1>
+        <div className="flex items-center gap-5 border-b border-zinc-200">
           <TabButton active={tab === "assigned"} onClick={() => setTab("assigned")}>
             Assigned to me
           </TabButton>
@@ -41,63 +54,68 @@ export default function AssignedCommentsPage() {
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="px-6 py-2 flex items-center gap-2 border-b border-zinc-100">
+      <div className="flex items-center gap-1 border-b border-zinc-100 !px-4 py-2">
         <button
           type="button"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] text-zinc-700 hover:bg-zinc-50"
+          className="inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 bg-white !px-3 text-[13px] text-zinc-600 hover:bg-zinc-50"
         >
           <ListFilter className="w-3.5 h-3.5" />
           Filter
         </button>
+        <span aria-hidden className="w-px h-5 bg-zinc-200 mx-1" />
         <button
           type="button"
           onClick={() => setResolved((v) => !v)}
           aria-pressed={resolved}
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] ${
+          className={`inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 !px-3 text-[13px] transition-colors ${
             resolved
-              ? "bg-zinc-900 text-white"
-              : "text-zinc-700 hover:bg-zinc-50"
+              ? "font-medium"
+              : "text-zinc-600 hover:bg-zinc-50"
           }`}
+          style={resolved ? brandTintStyle(0.14, "soft") : undefined}
         >
           <Check className="w-3.5 h-3.5" />
           Resolved
         </button>
         <DateRangeDropdown value={dateRange} onChange={setDateRange} />
         <div className="flex-1" />
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
-            className="pl-7 pr-2 py-1 text-[12px] border border-zinc-200 rounded w-[160px] focus:outline-none focus:border-zinc-400"
-          />
-        </div>
-      </div>
-
-      {/* Body — empty state */}
-      <div className="flex-1 flex flex-col items-center justify-center text-center px-6 py-12">
-        <span className="inline-flex items-center justify-center w-12 h-12 rounded-xl border border-zinc-200 mb-3">
-          <MessageSquare className="w-5 h-5 text-zinc-400" />
-        </span>
-        <p className="text-sm font-medium text-zinc-800 mb-3">No results found</p>
-        {filtersActive ? (
+        {searchOpen ? (
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+            <input
+              autoFocus
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onBlur={() => { if (!query) setSearchOpen(false); }}
+              placeholder="Search"
+              className="h-8 w-[180px] rounded-md border border-zinc-200 bg-white pl-8 pr-3 text-[12.5px] focus:border-zinc-400 focus:outline-none"
+            />
+          </div>
+        ) : (
           <button
             type="button"
-            onClick={clearFilters}
-            className="text-[12.5px] px-3 py-1.5 rounded border border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+            onClick={() => setSearchOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md !px-2.5 text-[13px] text-zinc-500 hover:bg-zinc-100"
           >
-            Clear filters
+            <Search className="w-3.5 h-3.5" />
+            Search
           </button>
-        ) : (
-          <p className="text-[12px] text-zinc-500 max-w-[320px]">
-            {tab === "assigned"
-              ? "Comments assigned to you will appear here."
-              : "Comments you've delegated to others will appear here."}
-          </p>
         )}
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center text-center px-6 py-12">
+        <span className="mb-5 inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50">
+          <MessageSquare className="h-8 w-8 text-zinc-400" />
+        </span>
+        <p className="mb-5 text-[20px] font-semibold text-zinc-900">No results found</p>
+        <button
+          type="button"
+          onClick={clearFilters}
+          className="rounded-md border border-zinc-200 bg-white !px-4 py-2 text-[13px] text-zinc-700 hover:bg-zinc-50"
+        >
+          Clear filters
+        </button>
       </div>
     </div>
   );
@@ -116,7 +134,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`py-2 text-[13px] border-b-2 -mb-px transition-colors ${
+      className={`border-b-2 py-2 text-[13px] transition-colors ${
         active
           ? "border-zinc-900 text-zinc-900 font-medium"
           : "border-transparent text-zinc-500 hover:text-zinc-900"
@@ -141,7 +159,8 @@ function DateRangeDropdown({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] text-zinc-700 hover:bg-zinc-50 border border-zinc-200"
+        className="inline-flex h-7 items-center gap-1.5 rounded-full border !px-3 text-[13px]"
+        style={brandTintStyle(0.12, "soft")}
       >
         <Calendar className="w-3.5 h-3.5" />
         {value}
@@ -149,7 +168,7 @@ function DateRangeDropdown({
       {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <ul className="absolute left-0 top-full mt-1 z-20 w-44 bg-white border border-zinc-200 rounded-md shadow-lg py-1">
+          <ul className="absolute left-0 top-full mt-1 z-20 w-44 rounded-md border border-zinc-200 bg-white py-1 shadow-lg">
             {options.map((opt) => (
               <li key={opt}>
                 <button
@@ -158,7 +177,7 @@ function DateRangeDropdown({
                     onChange(opt);
                     setOpen(false);
                   }}
-                  className={`w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-zinc-50 ${
+                  className={`w-full text-left !px-3 py-1.5 text-[12.5px] hover:bg-zinc-50 ${
                     value === opt ? "text-zinc-900 font-medium" : "text-zinc-700"
                   }`}
                 >

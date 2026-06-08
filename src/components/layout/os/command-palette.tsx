@@ -511,7 +511,7 @@ export function OsCommandPalette() {
       type="button"
       onClick={onClick}
       onMouseEnter={onMouseEnter}
-      className={`group w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
+	      className={`group w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
         isActive ? "bg-zinc-50" : "hover:bg-zinc-50"
       }`}
     >
@@ -709,16 +709,16 @@ export function OsCommandPalette() {
         if (e.target === e.currentTarget) closePalette();
       }}
     >
-      <div
-        className="workwrk-os w-full max-w-[760px] mx-4 bg-white rounded-2xl shadow-2xl border border-zinc-200 flex flex-col overflow-hidden"
+	      <div
+	        className="workwrk-os w-full max-w-[700px] mx-4 bg-white rounded-xl shadow-xl border border-zinc-200 flex flex-col overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label="Search"
       >
         {/* Header: search input + Ask AI pill (hands the current query off
             to the Brain panel as the initial prompt). */}
-        <div className="flex items-center gap-3 px-5 pt-4 pb-4">
-          <Search className="w-[18px] h-[18px] text-zinc-400 flex-shrink-0" />
+	        <div className="flex items-center gap-2.5 px-4 pt-3 pb-3">
+	          <Search className="w-4 h-4 text-zinc-400 flex-shrink-0" />
           <input
             ref={inputRef}
             data-palette-search
@@ -727,7 +727,7 @@ export function OsCommandPalette() {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActive(0); }}
             autoComplete="off"
-            className="flex-1 bg-transparent text-[16px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
+	            className="flex-1 bg-transparent text-[14px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
           />
           <AskAiButton onClick={() => { openSidekick(query.trim() || undefined); closePalette(); }} title="Ask the Brain" />
           <span className="text-[10.5px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 font-mono">ESC</span>
@@ -742,7 +742,7 @@ export function OsCommandPalette() {
               connecting" — softer text + slightly desaturated icon.
             ─ Connection badge sits on the icon corner, emerald gradient
               chip + canvas-color ring. */}
-        <div className="flex items-center px-5 pt-2 pb-1.5" style={{ gap: 32 }}>
+	        <div className="flex items-center px-4 pt-1.5 pb-1" style={{ gap: 24 }}>
           {SOURCES.map((s) => {
             const isUnconnected = !!s.connectable;
             return (
@@ -759,7 +759,7 @@ export function OsCommandPalette() {
                   // adapter filtering wires in later.
                   setSourceKey(s.key);
                 }}
-                className={`relative flex items-center gap-2 h-8 text-[12.5px] font-medium flex-shrink-0 transition-colors ${
+	                className={`relative flex items-center gap-1.5 h-7 text-[12px] font-medium flex-shrink-0 transition-colors ${
                   isUnconnected
                     ? "text-zinc-500 hover:text-zinc-400"
                     : sourceKey === s.key
@@ -809,7 +809,7 @@ export function OsCommandPalette() {
         {/* Filter chips (primary + "···" overflow) + Filter + Sort. The
             overflow popover hosts chips that don't fit inline; toggling
             a chip from there moves it visually to the active set. */}
-        <div className="relative flex items-center gap-2.5 px-5 py-2.5 border-b border-zinc-100">
+	        <div className="relative flex items-center gap-2 px-4 py-2 border-b border-zinc-100">
           {TYPE_FILTERS.filter((f) => f.primary).map((f) => {
             const on = typeFilters.has(f.key);
             return (
@@ -817,7 +817,7 @@ export function OsCommandPalette() {
                 key={f.key}
                 type="button"
                 onClick={() => toggleType(f.key)}
-                className={`flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium border transition-colors ${
+	                className={`flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[11.5px] font-medium border transition-colors ${
                   on
                     ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)]"
                     : "border-zinc-200 text-zinc-700 hover:bg-zinc-50"
@@ -837,7 +837,7 @@ export function OsCommandPalette() {
               key={f.key}
               type="button"
               onClick={() => toggleType(f.key)}
-              className="flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium border border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)]"
+	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[11.5px] font-medium border border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)]"
               aria-pressed
             >
               <f.Icon className="w-3.5 h-3.5" />
@@ -848,7 +848,7 @@ export function OsCommandPalette() {
             <button
               type="button"
               onClick={() => { setMoreOpen((v) => !v); setFilterOpen(false); setSortOpen(false); }}
-              className="flex items-center justify-center h-7 w-7 rounded-full border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+	              className="flex items-center justify-center h-6 w-6 rounded-full border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
               aria-label="More type filters"
               aria-expanded={moreOpen}
             >
@@ -856,7 +856,7 @@ export function OsCommandPalette() {
             </button>
             {moreOpen ? (
               <div
-                className="absolute left-0 top-9 z-10 w-56 bg-white border border-zinc-200 rounded-lg shadow-lg py-1.5"
+	                className="absolute left-0 top-8 z-10 w-52 bg-white border border-zinc-200 rounded-lg shadow-lg py-1"
                 onMouseLeave={() => setMoreOpen(false)}
               >
                 {TYPE_FILTERS.filter((f) => !f.primary).map((f) => {
@@ -866,7 +866,7 @@ export function OsCommandPalette() {
                       key={f.key}
                       type="button"
                       onClick={() => toggleType(f.key)}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12.5px] text-zinc-800 hover:bg-zinc-50"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
                     >
                       <f.Icon className="w-3.5 h-3.5 text-zinc-500" />
                       <span className="flex-1">{f.label}</span>
@@ -885,7 +885,7 @@ export function OsCommandPalette() {
             <button
               type="button"
               onClick={() => { setFilterOpen((v) => !v); setSortOpen(false); setMoreOpen(false); }}
-              className={`flex items-center gap-1.5 h-7 px-3 rounded-md text-[12px] font-medium transition-colors ${
+	              className={`flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium transition-colors ${
                 filterKey !== "any"
                   ? "text-[var(--os-brand-deep)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
                   : "text-zinc-700 hover:bg-zinc-50"
@@ -898,7 +898,7 @@ export function OsCommandPalette() {
             </button>
             {filterOpen ? (
               <div
-                className="absolute right-0 top-9 z-10 w-60 bg-white border border-zinc-200 rounded-lg shadow-lg py-1.5"
+	                className="absolute right-0 top-8 z-10 w-56 bg-white border border-zinc-200 rounded-lg shadow-lg py-1"
                 onMouseLeave={() => setFilterOpen(false)}
               >
                 {FILTERS.map((f) => {
@@ -908,7 +908,7 @@ export function OsCommandPalette() {
                       key={f.key}
                       type="button"
                       onClick={() => { setFilterKey(f.key); setFilterOpen(false); }}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12.5px] text-zinc-800 hover:bg-zinc-50"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
                     >
                       <span className="flex-1">{f.label}</span>
                       {f.hint ? <span className="text-[10.5px] text-zinc-400">{f.hint}</span> : null}
@@ -925,7 +925,7 @@ export function OsCommandPalette() {
             <button
               type="button"
               onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setMoreOpen(false); }}
-              className="flex items-center gap-1.5 h-7 px-3 rounded-md text-[12px] font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
               aria-expanded={sortOpen}
             >
               <ArrowUpDown className="w-3.5 h-3.5" />
@@ -933,7 +933,7 @@ export function OsCommandPalette() {
             </button>
             {sortOpen ? (
               <div
-                className="absolute right-0 top-9 z-10 w-56 bg-white border border-zinc-200 rounded-lg shadow-lg py-1.5"
+	                className="absolute right-0 top-8 z-10 w-52 bg-white border border-zinc-200 rounded-lg shadow-lg py-1"
                 onMouseLeave={() => setSortOpen(false)}
               >
                 {SORTS.map((s) => {
@@ -943,7 +943,7 @@ export function OsCommandPalette() {
                       key={s.key}
                       type="button"
                       onClick={() => { setSortKey(s.key); setSortOpen(false); }}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12.5px] text-zinc-800 hover:bg-zinc-50"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
                     >
                       <span className="flex-1">{s.label}</span>
                       {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
@@ -959,7 +959,7 @@ export function OsCommandPalette() {
             click "Tasks" → only tasks render here, etc. Per-row kind is
             conveyed by each row's own layout (status pill / avatar /
             file icon / etc.) so the list reads as one ranked feed. */}
-        <div className="flex-1 max-h-[440px] overflow-y-auto px-3 py-3">
+	        <div className="flex-1 max-h-[400px] overflow-y-auto px-2.5 py-2.5">
           {flatItems.length === 0 ? (
             <div className="px-4 py-14 text-center">
               <Search className="w-7 h-7 mx-auto text-zinc-300 mb-3" />
@@ -978,7 +978,7 @@ export function OsCommandPalette() {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center gap-3 px-4 py-2.5 border-t border-zinc-100 text-[11px] text-zinc-500 bg-zinc-50/50">
+	        <div className="flex items-center gap-2.5 px-3 py-2 border-t border-zinc-100 text-[11px] text-zinc-500 bg-zinc-50/50">
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-zinc-200 bg-white">
               <ChevronLeft className="w-3 h-3" />

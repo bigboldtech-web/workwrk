@@ -53,6 +53,7 @@ interface FolderChild {
   _count: { boards: number; childFolders: number };
   boards: BoardChild[];
   docs: DocChild[];
+  childFolders: FolderChild[];
 }
 
 interface TableChild {
@@ -107,16 +108,20 @@ export function SpaceTreeRow({
     fetch(`/api/spaces/${space.id}/children`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d) setData({
-          folders: (d.folders ?? []).map((f: FolderChild) => ({
+        if (d) {
+          const normalizeFolder = (f: FolderChild): FolderChild => ({
             ...f,
             docs: f.docs ?? [],
-          })),
-          boards: d.boards ?? [],
-          tables: d.tables ?? [],
-          docs: d.docs ?? [],
-          whiteboards: d.whiteboards ?? [],
-        });
+            childFolders: (f.childFolders ?? []).map(normalizeFolder),
+          });
+          setData({
+            folders: (d.folders ?? []).map(normalizeFolder),
+            boards: d.boards ?? [],
+            tables: d.tables ?? [],
+            docs: d.docs ?? [],
+            whiteboards: d.whiteboards ?? [],
+          });
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -135,26 +140,26 @@ export function SpaceTreeRow({
   return (
     <li className="group/space relative">
       <div
-        className={`flex items-center gap-1 pl-1 pr-1.5 py-1 rounded-md ${
-          isActive ? "bg-zinc-100" : "hover:bg-zinc-50"
+        className={`flex h-8 items-center gap-2 px-2.5 rounded-lg ${
+          isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
         }`}
       >
         <button
           type="button"
           onClick={toggle}
-          className="h-4 w-4 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 shrink-0"
+          className="h-4 w-4 inline-flex items-center justify-center text-zinc-500 hover:text-zinc-800 shrink-0"
           aria-label={expanded ? "Collapse Space" : "Expand Space"}
           aria-expanded={expanded}
         >
           {expanded ? (
-            <ChevronDown className="h-3 w-3" />
+            <ChevronDown className="h-4 w-4" />
           ) : (
-            <ChevronRight className="h-3 w-3" />
+            <ChevronRight className="h-4 w-4" />
           )}
         </button>
         <Link
           href={`/spaces/${space.slug}`}
-          className={`flex items-center gap-2 text-[13px] flex-1 min-w-0 ${
+          className={`flex items-center gap-2 text-[12.5px] flex-1 min-w-0 ${
             isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
           }`}
         >
@@ -181,7 +186,7 @@ export function SpaceTreeRow({
       </div>
 
       {expanded ? (
-        <ul className="ml-5 mt-0.5 mb-1 border-l border-zinc-100 pl-1.5">
+        <ul className="ml-5 mt-0.5 mb-1 border-l border-zinc-200/70 pl-2">
           {loading && data === null ? (
             <li className="px-2 py-1 inline-flex items-center gap-1.5 text-[11.5px] text-zinc-400">
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -197,6 +202,7 @@ export function SpaceTreeRow({
                 <FolderTreeRow
                   key={f.id}
                   folder={f}
+                  spaceId={space.id}
                   spaceName={space.name}
                   onChanged={refresh}
                 />
@@ -231,7 +237,7 @@ function SpaceTile({ space }: { space: SpaceRow }) {
   const bg = space.color ?? DEFAULT_COLOR;
   return (
     <span
-      className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
+      className="h-5 w-5 rounded-md flex items-center justify-center text-white text-[10.5px] font-semibold uppercase shrink-0"
       style={{ backgroundColor: bg }}
     >
       {Icon ? createElement(Icon, { className: "h-3 w-3" }) : (space.name[0] ?? "?")}
@@ -241,19 +247,25 @@ function SpaceTile({ space }: { space: SpaceRow }) {
 
 function FolderTreeRow({
   folder,
+  spaceId,
   spaceName,
   onChanged,
 }: {
   folder: FolderChild;
+  spaceId: string;
   spaceName: string;
   onChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const hasChildren = folder.boards.length > 0 || folder.docs.length > 0 || folder._count.childFolders > 0;
+  const hasChildren =
+    folder.boards.length > 0 ||
+    folder.docs.length > 0 ||
+    folder.childFolders.length > 0 ||
+    folder._count.childFolders > 0;
 
   return (
     <li className="group/folderrow relative">
-      <div className="flex items-center gap-1 pl-1 pr-1.5 py-0.5 rounded-md hover:bg-zinc-50">
+      <div className="flex h-7 items-center gap-2 pr-1.5 rounded-lg hover:bg-white/80">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -262,7 +274,7 @@ function FolderTreeRow({
           disabled={!hasChildren}
         >
           {hasChildren ? (
-            expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />
+            expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />
           ) : null}
         </button>
         <ChildTile color={folder.color} icon={folder.icon} fallback={FolderIcon} name={folder.name} />
@@ -273,11 +285,27 @@ function FolderTreeRow({
             folder={{ id: folder.id, name: folder.name, icon: folder.icon, color: folder.color }}
             onUpdated={onChanged}
           />
-          <FolderAddTrigger folderId={folder.id} onCreated={() => { setExpanded(true); onChanged(); }} />
+          <FolderAddTrigger
+            folderId={folder.id}
+            spaceId={spaceId}
+            onCreated={() => { setExpanded(true); onChanged(); }}
+          />
         </span>
       </div>
-      {expanded && (folder.boards.length > 0 || folder.docs.length > 0) ? (
-        <ul className="ml-5 mt-0.5 border-l border-zinc-100 pl-1.5">
+      {expanded &&
+       (folder.boards.length > 0 ||
+        folder.docs.length > 0 ||
+        folder.childFolders.length > 0) ? (
+        <ul className="ml-5 mt-0.5 border-l border-zinc-200/70 pl-2">
+          {folder.childFolders.map((cf) => (
+            <FolderTreeRow
+              key={cf.id}
+              folder={cf}
+              spaceId={spaceId}
+              spaceName={spaceName}
+              onChanged={onChanged}
+            />
+          ))}
           {folder.boards.map((b) => (
             <BoardTreeRow key={b.id} board={b} spaceName={spaceName} onChanged={onChanged} />
           ))}
@@ -302,7 +330,7 @@ function BoardTreeRow({
   const router = useRouter();
   return (
     <li className="group/boardrow relative">
-      <div className="flex items-center gap-1 pl-5 pr-1.5 py-0.5 rounded-md hover:bg-zinc-50">
+      <div className="flex h-7 items-center gap-2 pl-5 pr-1.5 rounded-lg hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
@@ -342,7 +370,7 @@ function TableTreeRow({
   const router = useRouter();
   return (
     <li className="group/tablerow relative">
-      <div className="flex items-center gap-1 pl-5 pr-1.5 py-0.5 rounded-md hover:bg-zinc-50">
+      <div className="flex h-7 items-center gap-2 pl-5 pr-1.5 rounded-lg hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
@@ -364,7 +392,7 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
   const router = useRouter();
   return (
     <li className="group/docrow relative">
-      <div className="flex items-center gap-1 pl-5 pr-1.5 py-0.5 rounded-md hover:bg-zinc-50">
+      <div className="flex h-7 items-center gap-2 pl-5 pr-1.5 rounded-lg hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
@@ -390,7 +418,7 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
   return (
     <li className="group/wbrow relative">
-      <div className="flex items-center gap-1 pl-5 pr-1.5 py-0.5 rounded-md hover:bg-zinc-50">
+      <div className="flex h-7 items-center gap-2 pl-5 pr-1.5 rounded-lg hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
@@ -427,28 +455,30 @@ function ChildTile({
   const bg = color ?? DEFAULT_COLOR;
   return (
     <span
-      className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
+      className="h-[18px] w-[18px] rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
       style={{ backgroundColor: bg }}
     >
-      {Icon ? createElement(Icon, { className: "h-2.5 w-2.5" }) : (name[0] ?? "?")}
+      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : (name[0] ?? "?")}
     </span>
   );
 }
 
 function FolderAddTrigger({
   folderId,
+  spaceId,
   onCreated,
 }: {
   folderId: string;
+  spaceId: string;
   onCreated: () => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<string | null>(null);
 
   const createDoc = async () => {
     if (creating) return;
-    setCreating(true);
+    setCreating("doc");
     try {
       const res = await fetch("/api/docs", {
         method: "POST",
@@ -467,7 +497,29 @@ function FolderAddTrigger({
         if (id) router.push(`/docs/${id}`);
       }
     } finally {
-      setCreating(false);
+      setCreating(null);
+    }
+  };
+
+  const createSubFolder = async () => {
+    if (creating) return;
+    setCreating("folder");
+    try {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          spaceId,
+          parentFolderId: folderId,
+          name: "New Folder",
+        }),
+      });
+      if (res.ok) {
+        onCreated();
+        setOpen(false);
+      }
+    } finally {
+      setCreating(null);
     }
   };
 
@@ -494,7 +546,7 @@ function FolderAddTrigger({
               <button
                 type="button"
                 onClick={createDoc}
-                disabled={creating}
+                disabled={Boolean(creating)}
                 className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
               >
                 <FileText className="w-3.5 h-3.5 text-blue-500" />
@@ -504,11 +556,22 @@ function FolderAddTrigger({
             <li>
               <button
                 type="button"
+                onClick={createSubFolder}
+                disabled={Boolean(creating)}
+                className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
+              >
+                <FolderIcon className="w-3.5 h-3.5 text-amber-500" />
+                Folder
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
                 disabled
                 title="Use the Space + menu for now"
                 className="w-full text-left px-3 py-1.5 text-[12.5px] text-zinc-400 inline-flex items-center gap-2 cursor-not-allowed"
               >
-                <FolderIcon className="w-3.5 h-3.5" />
+                <Plus className="w-3.5 h-3.5" />
                 List (use Space +)
               </button>
             </li>

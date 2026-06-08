@@ -7,12 +7,12 @@
 // past ~30 lines of UI should move to apps/<key>-sidebar.tsx.
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
   Video, Trophy, Clock,
   Inbox, MessageSquare, CheckSquare, MoreHorizontal,
-  Plus, ChevronDown, ChevronRight, Star, X,
+  Plus, ChevronDown, ChevronRight, Pin, Star, X,
   Megaphone, Briefcase, BookOpen, Wrench, Building2,
   HeartHandshake, GraduationCap, UserCheck, Award, ThumbsUp, FileSpreadsheet,
   HardDrive, Boxes,
@@ -23,13 +23,16 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { NoteActionMenu, useNoteMenu, type NoteTarget } from "@/components/docs/note-actions-menu";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { ShareSpaceDialog } from "./share-space-dialog";
 import { SpaceTreeRow } from "./space-tree-row";
 import { useSidebarSearch } from "./sidebar-search-context";
+import { useOsShell } from "./shell-context";
+import { MorePortal } from "./more-portal";
 
 export interface AppEntry {
   key: string;
@@ -123,14 +126,103 @@ function NavItem({
   return (
     <Link
       href={href}
-      className={`flex items-center gap-2.5 px-2 py-1 rounded-md text-[13px] ${
-        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
       }`}
     >
       <Icon className="w-3.5 h-3.5 flex-shrink-0 text-zinc-500" />
       <span className="truncate flex-1">{label}</span>
-      {badge !== undefined ? <span className="text-[10px] text-zinc-500">{badge}</span> : null}
+      {badge !== undefined ? <span className="text-[11px] text-zinc-500">{badge}</span> : null}
     </Link>
+  );
+}
+
+function MoreNavItem() {
+  const [open, setOpen] = useState(false);
+  const { openCustomize } = useOsShell();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  return (
+    <li className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="w-full flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] text-zinc-700 hover:bg-white/80"
+      >
+        <MoreHorizontal className="w-3.5 h-3.5 flex-shrink-0 text-zinc-500" />
+        <span className="truncate flex-1 text-left">More</span>
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
+          <MorePortal anchorRef={buttonRef} panelRef={panelRef} width={240} open={open} placement="right">
+            <ul className="bg-white border border-zinc-200 rounded-lg shadow-lg py-1.5">
+              <MoreItem href="#"        Icon={Inbox}      label="Drafts & Sent" disabled pinned />
+              <MoreItem href="/spaces"  Icon={Folder}     label="All Spaces"    onClick={() => setOpen(false)} pinned />
+              <MoreItem href="/tasks"   Icon={CheckSquare} label="All Tasks"    onClick={() => setOpen(false)} pinned />
+              <li className="h-px bg-zinc-100 my-1" />
+              <MoreItem
+                href="#"
+                Icon={SettingsIcon}
+                label="Customize"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setOpen(false);
+                  openCustomize();
+                }}
+              />
+            </ul>
+          </MorePortal>
+        </>
+      ) : null}
+    </li>
+  );
+}
+
+function MoreItem({
+  href,
+  Icon,
+  label,
+  disabled,
+  pinned,
+  onClick,
+}: {
+  href: string;
+  Icon: LucideIcon;
+  label: string;
+  disabled?: boolean;
+  pinned?: boolean;
+  onClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void;
+}) {
+  if (disabled) {
+    return (
+      <li>
+        <span
+          title="Coming soon"
+          className="flex items-center gap-2 px-2.5 py-1 text-[12px] text-zinc-400 cursor-not-allowed"
+        >
+          <Icon className="w-3.5 h-3.5 text-zinc-300" />
+          <span className="flex-1">{label}</span>
+          {pinned ? <Pin className="w-3.5 h-3.5 text-zinc-400" /> : null}
+        </span>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <Link
+        href={href}
+        onClick={onClick}
+        className="flex items-center gap-2 px-2.5 py-1 text-[12px] text-zinc-700 hover:bg-zinc-50"
+      >
+        <Icon className="w-3.5 h-3.5 text-zinc-500" />
+        <span className="flex-1">{label}</span>
+        {pinned ? <Pin className="w-3.5 h-3.5 text-zinc-400" /> : null}
+      </Link>
+    </li>
   );
 }
 
@@ -144,34 +236,44 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
 
   return (
     <>
-      <li className="relative">
+      <li className="relative group/taskrow">
         <Link
           href="/tasks"
-          className={`flex items-center gap-2.5 px-2 py-1 rounded-md text-[13px] ${
+          className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
             pathname === "/tasks"
-              ? "bg-zinc-100 text-zinc-900 font-medium"
-              : "text-zinc-700 hover:bg-zinc-50"
+              ? "bg-zinc-200/70 text-zinc-900 font-medium"
+              : "text-zinc-700 hover:bg-white/80"
           }`}
         >
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setExpanded((v) => !v);
-            }}
-            aria-label={expanded ? "Collapse My Tasks" : "Expand My Tasks"}
-            className="w-3.5 h-3.5 inline-flex items-center justify-center -mr-0.5 text-zinc-500 hover:text-zinc-700"
-          >
-            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-          </button>
-          <CheckSquare className="w-3.5 h-3.5 flex-shrink-0 text-zinc-500" />
+          <span className="relative h-5 w-3.5 shrink-0 text-zinc-500" aria-hidden>
+            <CheckSquare className="absolute left-1/2 top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 transition-opacity group-hover/taskrow:opacity-0 group-focus-within/taskrow:opacity-0" />
+          </span>
           <span className="truncate flex-1">My Tasks</span>
         </Link>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          aria-label={expanded ? "Collapse My Tasks" : "Expand My Tasks"}
+          className="absolute left-2.5 top-1/2 z-10 h-5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity hover:text-zinc-800 group-hover/taskrow:opacity-100 group-focus-within/taskrow:opacity-100"
+        >
+          <span
+            className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-md bg-zinc-200/80"
+            aria-hidden
+          />
+          {expanded ? (
+            <ChevronDown className="absolute left-1/2 top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2" />
+          ) : (
+            <ChevronRight className="absolute left-1/2 top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2" />
+          )}
+        </button>
       </li>
       {expanded ? (
         <li>
-          <ul className="ml-5 border-l border-zinc-100 pl-1">
+          <ul className="ml-5 border-l border-zinc-200/70 pl-2">
             <SubNavItem
               href="/tasks/assigned-to-me"
               Icon={UserCheck}
@@ -216,8 +318,8 @@ function SubNavItem({
     <li>
       <Link
         href={href}
-        className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
-          active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+        className={`flex h-7 items-center gap-2 px-2.5 rounded-lg text-[12.5px] ${
+          active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
         }`}
       >
         <Icon
@@ -232,7 +334,7 @@ function SubNavItem({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2 py-1.5 mt-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+    <div className="px-2.5 pt-3 pb-1 text-[12.5px] font-semibold text-zinc-500">
       {children}
     </div>
   );
@@ -437,19 +539,19 @@ function HomeSidebar() {
         <button
           type="button"
           onClick={() => setFavoritesOpen((v) => !v)}
-          className="flex items-center gap-1.5 px-2 py-1.5 mt-2 text-[13px] font-medium w-full text-zinc-700 hover:text-zinc-900"
+          className="flex h-8 items-center gap-2 px-2.5 mt-2 text-[13px] font-medium w-full text-zinc-700 hover:text-zinc-900"
         >
-          {favoritesOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          {favoritesOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
           <span>Favorites</span>
           {total > 0 ? (
-            <span className="ml-1 text-[10.5px] text-zinc-400 font-normal tabular-nums">
+            <span className="ml-1 text-[11px] text-zinc-400 font-normal tabular-nums">
               {total}
             </span>
           ) : null}
         </button>
         {favoritesOpen ? (
           total === 0 ? (
-            <div className="px-2 py-1 text-[11px] text-zinc-400">
+            <div className="px-2.5 py-1 text-[12px] text-zinc-400">
               Star a Space or Board to add it here.
             </div>
           ) : (
@@ -467,8 +569,8 @@ function HomeSidebar() {
                   <li key={`s-${s.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${s.slug}`}
-                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
-                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
                       <span
@@ -493,8 +595,8 @@ function HomeSidebar() {
                   <li key={`b-${b.id}`} className="group/fav relative">
                     <Link
                       href={`/boards/${b.slug}`}
-                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
-                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
                       <span
@@ -518,8 +620,8 @@ function HomeSidebar() {
                   <li key={`d-${d.id}`} className="group/fav relative">
                     <Link
                       href={`/docs/${d.id}`}
-                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
-                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
                       <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
@@ -538,7 +640,7 @@ function HomeSidebar() {
                   <li key={`f-${f.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${f.space.slug}#folder-${f.id}`}
-                      className="flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] text-zinc-700 hover:bg-zinc-50"
+                      className="flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] text-zinc-700 hover:bg-white/80"
                     >
                       <span
                         className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
@@ -561,8 +663,8 @@ function HomeSidebar() {
                   <li key={`t-${t.id}`} className="group/fav relative">
                     <Link
                       href={`/tables/${t.id}`}
-                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
-                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
                       <span
@@ -586,8 +688,8 @@ function HomeSidebar() {
                   <li key={`w-${w.id}`} className="group/fav relative">
                     <Link
                       href={`/whiteboards/${w.id}`}
-                      className={`flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] ${
-                        active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
                       <span
@@ -611,7 +713,7 @@ function HomeSidebar() {
                     href={f.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-2 py-1 rounded-md text-[12.5px] text-zinc-700 hover:bg-zinc-50"
+                    className="flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] text-zinc-700 hover:bg-white/80"
                   >
                     <span
                       className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold shrink-0"
@@ -637,57 +739,57 @@ function HomeSidebar() {
       ? spaces.filter((s) => s.name.toLowerCase().includes(q))
       : spaces;
     return (
-    <div key="spaces">
-      <div className="flex items-center gap-2 px-2 py-1.5 mt-1">
-        <span className="text-[13px] font-medium flex-1 text-zinc-700">
-          Spaces
-          {q && visibleSpaces.length !== spaces.length ? (
-            <span className="ml-1 text-[11px] text-zinc-400 font-normal">
-              {visibleSpaces.length}/{spaces.length}
-            </span>
-          ) : null}
-        </span>
-        <button
-          type="button"
-          onClick={() => setNewSpaceOpen(true)}
-          className="p-0.5 rounded text-zinc-500 hover:bg-zinc-100"
-          aria-label="New space"
-        >
-          <Plus className="w-3 h-3" />
-        </button>
-      </div>
-      <ul>
-        {visibleSpaces.map((s) => {
-          const isActive = pathname === `/spaces/${s.slug}`;
-          return (
-            <SpaceTreeRow
-              key={s.id}
-              space={s}
-              isActive={isActive}
-              onReloadSpaces={() => void reload()}
-              onRequestShareSpace={() => setShareDialogSpace(s)}
-              onRequestNewBoard={() => setBoardDialogSpaceId(s.id)}
-              onRequestNewFolder={() => setFolderDialogSpaceId(s.id)}
-            />
-          );
-        })}
-        {q && visibleSpaces.length === 0 ? (
-          <li className="px-2 py-2 text-[11.5px] text-zinc-400">
-            No Spaces match &ldquo;{searchQuery}&rdquo;
-          </li>
-        ) : null}
-        <li>
+      <div key="spaces">
+        <div className="flex h-8 items-center gap-2 px-2.5 mt-1">
+          <span className="text-[13px] font-medium flex-1 text-zinc-700">
+            Spaces
+            {q && visibleSpaces.length !== spaces.length ? (
+              <span className="ml-1 text-[11px] text-zinc-400 font-normal">
+                {visibleSpaces.length}/{spaces.length}
+              </span>
+            ) : null}
+          </span>
           <button
             type="button"
             onClick={() => setNewSpaceOpen(true)}
-            className="w-full flex items-center gap-2.5 px-2 py-1 rounded-md text-[13px] text-zinc-500 hover:bg-zinc-50"
+            className="h-6 w-6 inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100"
+            aria-label="New space"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Space</span>
+            <Plus className="w-4 h-4" />
           </button>
-        </li>
-      </ul>
-    </div>
+        </div>
+        <ul>
+          {visibleSpaces.map((s) => {
+            const isActive = pathname === `/spaces/${s.slug}`;
+            return (
+              <SpaceTreeRow
+                key={s.id}
+                space={s}
+                isActive={isActive}
+                onReloadSpaces={() => void reload()}
+                onRequestShareSpace={() => setShareDialogSpace(s)}
+                onRequestNewBoard={() => setBoardDialogSpaceId(s.id)}
+                onRequestNewFolder={() => setFolderDialogSpaceId(s.id)}
+              />
+            );
+          })}
+          {q && visibleSpaces.length === 0 ? (
+            <li className="px-2 py-2 text-[11.5px] text-zinc-400">
+              No Spaces match &ldquo;{searchQuery}&rdquo;
+            </li>
+          ) : null}
+          <li>
+            <button
+              type="button"
+              onClick={() => setNewSpaceOpen(true)}
+              className="w-full flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] text-zinc-500 hover:bg-white/80"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Space</span>
+            </button>
+          </li>
+        </ul>
+      </div>
     );
   };
 
@@ -697,7 +799,7 @@ function HomeSidebar() {
         <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={pathname.startsWith("/inbox")} />
         <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={pathname.startsWith("/assigned-comments")} />
         <MyTasksGroup pathname={pathname} />
-        <NavItem href="#" Icon={MoreHorizontal} label="More" />
+        <MoreNavItem />
       </ul>
 
       {/* Sections rendered in user's preferred order; hidden ones omitted. */}
@@ -814,63 +916,321 @@ function TeamsSidebar() {
 
 /* ───────────────────────── Notes sidebar ───────────────────────── */
 
-function DocsSidebar() {
-  const [favs, setFavs] = useState<Array<{ id: string; title: string; emoji?: string }>>([]);
-  const [favsLoaded, setFavsLoaded] = useState(false);
+type DocNode = { id: string; title: string; emoji?: string; parentId: string | null; isFolder: boolean; position: number };
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/preferences");
-        if (!res.ok) { setFavsLoaded(true); return; }
-        const d = await res.json();
-        const ids: string[] = d.effective?.home?.favoriteDocIds ?? [];
-        if (cancelled) return;
-        if (ids.length === 0) { setFavsLoaded(true); return; }
-        const docsRes = await fetch("/api/docs");
-        if (!docsRes.ok) { setFavsLoaded(true); return; }
-        const docsData = await docsRes.json();
-        const all = (docsData.docs ?? docsData.data ?? []) as Array<{ id: string; title: string; content?: { meta?: { icon?: string } } }>;
-        if (cancelled) return;
-        const byId = new Map(all.map((x) => [x.id, x]));
-        const list = ids
-          .map((id) => byId.get(id))
-          .filter((x): x is { id: string; title: string; content?: { meta?: { icon?: string } } } => !!x)
-          .map((x) => ({ id: x.id, title: x.title, emoji: x.content?.meta?.icon }));
-        setFavs(list);
-        setFavsLoaded(true);
-      } catch { setFavsLoaded(true); }
-    })();
-    return () => { cancelled = true; };
+const EXPANDED_KEY = "workwrk:notes-expanded";
+function loadExpanded(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try { return new Set<string>(JSON.parse(localStorage.getItem(EXPANDED_KEY) || "[]")); } catch { return new Set(); }
+}
+
+function DocsSidebar() {
+  const router = useRouter();
+  const pathname = usePathname() || "";
+  const { query } = useSidebarSearch();
+  const noteMenu = useNoteMenu();
+  const [docs, setDocs] = useState<DocNode[] | null>(null);
+  const [favIds, setFavIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(loadExpanded);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{ id: string; mode: "before" | "inside" | "after" } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [docsRes, prefRes] = await Promise.all([
+        fetch("/api/docs"),
+        fetch("/api/preferences").catch(() => null),
+      ]);
+      if (docsRes.ok) {
+        const d = await docsRes.json();
+        const all = (d.docs ?? d.data ?? []) as Array<{
+          id: string; title: string; parentId?: string | null; isFolder?: boolean; position?: number;
+          content?: { meta?: { icon?: string } };
+        }>;
+        setDocs(all.map((x) => ({
+          id: x.id, title: x.title, emoji: x.content?.meta?.icon,
+          parentId: x.parentId ?? null, isFolder: !!x.isFolder, position: x.position ?? 0,
+        })));
+      } else setDocs([]);
+      if (prefRes?.ok) {
+        const p = await prefRes.json();
+        setFavIds(new Set<string>(p.effective?.home?.favoriteDocIds ?? []));
+      }
+    } catch { setDocs([]); }
   }, []);
+
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const onChange = () => { void load(); };
+    window.addEventListener("workwrk:docs-changed", onChange);
+    window.addEventListener("workwrk:favs-changed", onChange);
+    return () => {
+      window.removeEventListener("workwrk:docs-changed", onChange);
+      window.removeEventListener("workwrk:favs-changed", onChange);
+    };
+  }, [load]);
+
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
+  // Children grouped by parent, each sibling list sorted by position. A
+  // child whose parent is missing (e.g. the parent was trashed) is promoted
+  // to the root so it never silently disappears from the tree.
+  const byParent = useMemo(() => {
+    const m = new Map<string | null, DocNode[]>();
+    const ids = new Set((docs ?? []).map((d) => d.id));
+    for (const d of docs ?? []) {
+      const k = d.parentId && ids.has(d.parentId) ? d.parentId : null;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k)!.push(d);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => (a.position - b.position) || a.title.localeCompare(b.title));
+    return m;
+  }, [docs]);
+
+  const descendantsOf = useCallback((id: string) => {
+    const out = new Set<string>();
+    const stack = [id];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      for (const c of byParent.get(cur) ?? []) { out.add(c.id); stack.push(c.id); }
+    }
+    return out;
+  }, [byParent]);
+
+  // Create a note. Pass a parentId to nest it inside another note (Notion
+  // style — any note can contain notes; there's no separate "folder" type).
+  async function create(parentId?: string | null) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/docs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Untitled note", content: {}, parentId: parentId ?? null }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        const id = d.doc?.id ?? d.data?.id ?? d.id;
+        if (parentId) {
+          setExpanded((s) => {
+            const n = new Set(s).add(parentId);
+            try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...n])); } catch { /* ignore */ }
+            return n;
+          });
+        }
+        window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+        if (id) router.push(`/docs/${id}`);
+      }
+    } finally { setBusy(false); }
+  }
+
+  async function performMove(id: string, parentId: string | null, position: number) {
+    // Optimistic — reposition locally, then persist; the docs-changed
+    // listener reloads to reconcile.
+    setDocs((prev) => prev ? prev.map((d) => d.id === id ? { ...d, parentId, position } : d) : prev);
+    if (parentId) setExpanded((s) => new Set(s).add(parentId));
+    try {
+      await fetch(`/api/docs/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentId, position }),
+      });
+      window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+    } catch { void load(); }
+  }
+
+  function dropOnto(target: DocNode | "root", mode: "before" | "inside" | "after") {
+    const id = dragId;
+    setDragId(null);
+    setDropHint(null);
+    if (!id) return;
+    if (target === "root") {
+      const roots = byParent.get(null) ?? [];
+      void performMove(id, null, (roots.length ? roots[roots.length - 1].position : 0) + 1);
+      return;
+    }
+    if (target.id === id) return;
+    if (descendantsOf(id).has(target.id)) return; // no cycles
+    if (mode === "inside") {
+      // Nest inside the target note (append to its children).
+      const kids = byParent.get(target.id) ?? [];
+      void performMove(id, target.id, (kids.length ? kids[kids.length - 1].position : 0) + 1);
+      return;
+    }
+    // Reorder as a sibling of the target — before or after it.
+    const sibs = (byParent.get(target.parentId) ?? []).filter((s) => s.id !== id);
+    const idx = sibs.findIndex((s) => s.id === target.id);
+    if (mode === "before") {
+      const prev = sibs[idx - 1];
+      void performMove(id, target.parentId, prev ? (prev.position + target.position) / 2 : target.position - 1);
+    } else {
+      const next = sibs[idx + 1];
+      void performMove(id, target.parentId, next ? (target.position + next.position) / 2 : target.position + 1);
+    }
+  }
+
+  const q = query.trim().toLowerCase();
+  const activeId = pathname.startsWith("/docs/") ? pathname.split("/")[2] : null;
+  const favorites = (docs ?? []).filter((d) => favIds.has(d.id) && (!q || d.title.toLowerCase().includes(q)));
+
+  const actionsFor = (d: DocNode) => (
+    <>
+      {/* Any note can contain notes — "+" adds a note inside this one. */}
+      <button
+        type="button"
+        className="opacity-0 group-hover/note:opacity-100 flex-shrink-0 w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
+        aria-label="Add a note inside"
+        title="Add a note inside"
+        onClick={(e) => { e.stopPropagation(); void create(d.id); }}
+      >
+        <Plus className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        className="opacity-0 group-hover/note:opacity-100 flex-shrink-0 w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
+        aria-label="Note actions"
+        onClick={(e) => { e.stopPropagation(); noteMenu.open(e, { id: d.id, title: d.title, favorite: favIds.has(d.id) }); }}
+      >
+        <MoreHorizontal className="w-3.5 h-3.5" />
+      </button>
+    </>
+  );
+
+  const renderNode = (node: DocNode, depth: number): React.ReactNode => {
+    const kids = byParent.get(node.id) ?? [];
+    const hasKids = kids.length > 0;
+    const isOpen = expanded.has(node.id);
+    const hint = dropHint && dropHint.id === node.id ? dropHint.mode : null;
+    return (
+      <li key={node.id}>
+        <div
+          className={`group/note relative flex items-center gap-1 pr-1 py-1 rounded-md text-[13px] cursor-pointer ${
+            activeId === node.id ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+          } ${hint === "inside" ? "ring-1 ring-blue-400 bg-blue-50/60" : ""} ${hint === "after" ? "shadow-[inset_0_-2px_0_0_#60a5fa]" : ""} ${hint === "before" ? "shadow-[inset_0_2px_0_0_#60a5fa]" : ""} ${dragId === node.id ? "opacity-40" : ""}`}
+          style={{ paddingLeft: depth * 13 + 4 }}
+          draggable
+          onDragStart={(e) => { setDragId(node.id); e.dataTransfer.effectAllowed = "move"; }}
+          onDragEnd={() => { setDragId(null); setDropHint(null); }}
+          onDragOver={(e) => {
+            if (!dragId || dragId === node.id) return;
+            e.preventDefault();
+            // Three zones: top → before, middle → inside (nest), bottom → after.
+            const r = e.currentTarget.getBoundingClientRect();
+            const rel = (e.clientY - r.top) / r.height;
+            const mode: "before" | "inside" | "after" = rel < 0.28 ? "before" : rel > 0.72 ? "after" : "inside";
+            setDropHint({ id: node.id, mode });
+          }}
+          onDragLeave={() => setDropHint((h) => (h && h.id === node.id ? null : h))}
+          onDrop={(e) => {
+            e.preventDefault(); e.stopPropagation();
+            dropOnto(node, dropHint?.id === node.id ? dropHint.mode : "inside");
+          }}
+          onClick={() => router.push(`/docs/${node.id}`)}
+          onContextMenu={(e) => noteMenu.open(e, { id: node.id, title: node.title, favorite: favIds.has(node.id) })}
+        >
+          <button
+            type="button"
+            className={`flex-shrink-0 w-4 h-4 grid place-items-center rounded text-zinc-400 hover:text-zinc-700 ${hasKids ? "" : "invisible"}`}
+            onClick={(e) => { e.stopPropagation(); toggleExpand(node.id); }}
+            aria-label={isOpen ? "Collapse" : "Expand"}
+          >
+            {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
+          <span className="w-4 flex-shrink-0 grid place-items-center text-[13px]">
+            {node.emoji ?? <FileText className="w-3.5 h-3.5 text-zinc-400" />}
+          </span>
+          <span className="truncate flex-1">{node.title || "Untitled note"}</span>
+          {actionsFor(node)}
+        </div>
+        {isOpen && hasKids && <ul>{kids.map((k) => renderNode(k, depth + 1))}</ul>}
+      </li>
+    );
+  };
+
+  const roots = byParent.get(null) ?? [];
+  const searchMatches = q ? (docs ?? []).filter((d) => d.title.toLowerCase().includes(q)) : null;
 
   return (
     <>
-      <ul>
-        <NavItem href="/docs" Icon={FileText} label="All notes" />
-        <NavItem href="/docs?mine=1" Icon={FileText} label="My notes" />
-        <NavItem href="/docs/trash" Icon={Trash2} label="Trash" />
-      </ul>
-      <SectionLabel>Favorites</SectionLabel>
-      {!favsLoaded ? (
-        <div className="px-3 py-2 text-[11px] text-zinc-400">Loading…</div>
-      ) : favs.length === 0 ? (
-        <EmptyState title="Star a note to see it here" />
-      ) : (
-        <ul>
-          {favs.map((f) => (
-            <li key={f.id}>
-              <Link
-                href={`/docs/${f.id}`}
-                className="flex items-center gap-2.5 px-2 py-1 rounded-md text-[13px] text-zinc-700 hover:bg-zinc-50"
+      <div className="flex items-center gap-1 px-1 pb-1">
+        <button
+          type="button"
+          onClick={() => void create()}
+          disabled={busy}
+          className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          <Plus className="w-3.5 h-3.5" /> New note
+        </button>
+        <Link
+          href="/docs/trash"
+          className="w-7 h-7 grid place-items-center rounded-md text-zinc-500 hover:bg-zinc-50"
+          title="Trash"
+          aria-label="Trash"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </Link>
+      </div>
+
+      {!q && favorites.length > 0 && (
+        <>
+          <SectionLabel>Favorites</SectionLabel>
+          <ul>
+            {favorites.map((d) => (
+              <li
+                key={`fav-${d.id}`}
+                className={`group/note flex items-center gap-2 px-2 py-1 rounded-md text-[13px] cursor-pointer ${
+                  activeId === d.id ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+                }`}
+                onClick={() => router.push(`/docs/${d.id}`)}
+                onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: true })}
               >
-                <span className="text-[13px] w-3.5 flex-shrink-0">{f.emoji ?? "📝"}</span>
-                <span className="truncate flex-1">{f.title || "Untitled note"}</span>
-              </Link>
-            </li>
-          ))}
+                <span className="w-4 flex-shrink-0 grid place-items-center text-[13px]">
+                  {d.emoji ?? <FileText className="w-3.5 h-3.5 text-zinc-400" />}
+                </span>
+                <span className="truncate flex-1">{d.title || "Untitled note"}</span>
+                {actionsFor(d)}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <SectionLabel>All notes</SectionLabel>
+      {docs === null ? (
+        <div className="px-3 py-2 text-[11px] text-zinc-400">Loading…</div>
+      ) : searchMatches ? (
+        searchMatches.length === 0 ? (
+          <EmptyState title="No notes match" />
+        ) : (
+          <ul>{searchMatches.map((d) => renderNode(d, 0))}</ul>
+        )
+      ) : roots.length === 0 ? (
+        <EmptyState title="No notes yet" body="Create your first note." />
+      ) : (
+        <ul
+          onDragOver={(e) => { if (dragId) { e.preventDefault(); } }}
+          onDrop={(e) => { e.preventDefault(); dropOnto("root", "after"); }}
+        >
+          {roots.map((d) => renderNode(d, 0))}
         </ul>
+      )}
+
+      {noteMenu.menu && (
+        <NoteActionMenu
+          target={noteMenu.menu.target as NoteTarget}
+          x={noteMenu.menu.x}
+          y={noteMenu.menu.y}
+          onClose={noteMenu.close}
+          onChanged={() => void load()}
+        />
       )}
     </>
   );

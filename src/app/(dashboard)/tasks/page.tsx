@@ -95,6 +95,8 @@ export default function MyTasksPage() {
   const [layoutsHydrated, setLayoutsHydrated] = useState(false);
   const [hiddenCards, setHiddenCards] = useState<Set<string>>(new Set());
   const [manageOpen, setManageOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showGreeting, setShowGreeting] = useState(true);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadRecents = useCallback(async () => {
@@ -157,9 +159,18 @@ export default function MyTasksPage() {
     });
   }, [saveHidden]);
 
-  useEffect(() => { void loadRecents(); }, [loadRecents]);
-  useEffect(() => { void loadAssigned(); }, [loadAssigned]);
-  useEffect(() => { void loadLayout(); }, [loadLayout]);
+  useEffect(() => {
+    const run = async () => { await loadRecents(); };
+    void run();
+  }, [loadRecents]);
+  useEffect(() => {
+    const run = async () => { await loadAssigned(); };
+    void run();
+  }, [loadAssigned]);
+  useEffect(() => {
+    const run = async () => { await loadLayout(); };
+    void run();
+  }, [loadLayout]);
 
   const saveLayout = useCallback((next: LayoutShape) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -195,23 +206,39 @@ export default function MyTasksPage() {
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Top header row */}
-      <div className="px-6 pt-4 pb-2 flex items-center justify-between">
-        <h1 className="text-base font-semibold text-zinc-900">My Tasks</h1>
+      <div className="px-5 pt-3 pb-2 flex items-center justify-between">
+        <h1 className="text-[15px] font-semibold text-zinc-900">My Tasks</h1>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setManageOpen(true)}
-            className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+            className="inline-flex items-center gap-1.5 h-8 !px-3 rounded-md text-[12.5px] border"
+            style={{
+              background: "color-mix(in srgb, var(--os-brand-rail) 12%, white)",
+              color: "var(--os-brand-rail)",
+              borderColor: "color-mix(in srgb, var(--os-brand-rail) 20%, transparent)",
+            }}
           >
             Manage cards
           </button>
-          <button
-            type="button"
-            aria-label="Settings"
-            className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500"
-          >
-            <Settings className="w-3.5 h-3.5" />
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((v) => !v)}
+              aria-label="Settings"
+              aria-expanded={settingsOpen}
+              className="inline-flex items-center justify-center w-8 h-8 rounded-md text-zinc-500 hover:bg-zinc-100"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
+            {settingsOpen ? (
+              <MyTasksSettingsPopover
+                showGreeting={showGreeting}
+                onShowGreetingChange={setShowGreeting}
+                onClose={() => setSettingsOpen(false)}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -223,22 +250,26 @@ export default function MyTasksPage() {
       />
 
       {/* Greeting */}
-      <div className="px-6 pb-4">
-        <p className="text-[22px] font-semibold text-zinc-900">
-          {timeGreeting()}, {firstName}
-        </p>
-      </div>
+      {showGreeting ? (
+        <div className="px-5 pb-3">
+          <p className="text-[20px] font-semibold text-zinc-900">
+            {timeGreeting()}, {firstName}
+          </p>
+        </div>
+      ) : null}
 
       {/* Card grid (draggable + resizable) */}
-      <div className="flex-1 overflow-y-auto px-4 pb-6">
+      <div className="flex-1 overflow-y-auto px-3 pb-5">
         <ResponsiveGridLayout
-          className="layout"
+          className="layout mytasks-grid"
           layouts={filterLayouts(layouts, hiddenCards)}
           breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
           cols={{ lg: 12, md: 12, sm: 12, xs: 6, xxs: 4 }}
-          rowHeight={56}
-          margin={[16, 16]}
-          draggableHandle=".dash-card-handle"
+          rowHeight={52}
+          margin={[12, 12]}
+          draggableCancel="a,button,input,textarea,select"
+          resizeHandles={["n", "e", "s", "w", "ne", "nw", "se", "sw"]}
+          compactType="vertical"
           isDraggable
           isResizable
           onLayoutChange={onLayoutChange}
@@ -530,12 +561,12 @@ function DashCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="h-full w-full rounded-xl border border-zinc-200 bg-white p-4 flex flex-col overflow-hidden">
-      <div className="dash-card-handle flex items-center justify-between mb-3 cursor-grab active:cursor-grabbing select-none">
+    <section className="h-full w-full rounded-lg border border-zinc-200 bg-white p-3 flex flex-col overflow-hidden">
+      <div className="dash-card-handle flex items-center justify-between mb-2.5 cursor-grab active:cursor-grabbing select-none">
         <div className="flex items-center gap-1.5 min-w-0">
           <GripVertical className="w-3 h-3 text-zinc-300 shrink-0" />
           {titleIcon}
-          <h2 className="text-sm font-semibold text-zinc-900 truncate">{title}</h2>
+          <h2 className="text-[13px] font-semibold text-zinc-900 truncate">{title}</h2>
           {subtitle ? (
             <span className="text-[11.5px] text-zinc-500 truncate">({subtitle})</span>
           ) : null}
@@ -579,16 +610,16 @@ function CardEmpty({ children }: { children: React.ReactNode }) {
   return <p className="text-[12px] text-zinc-500 px-2 py-3">{children}</p>;
 }
 
-const CARD_CATALOG: Array<{ key: string; label: string; description: string }> = [
-  { key: "recents",           label: "Recents",           description: "Items you opened recently" },
-  { key: "agenda",            label: "Agenda",            description: "Connect a calendar to see today's meetings" },
-  { key: "personal-list",     label: "Personal List",     description: "A home for your personal tasks" },
-  { key: "assigned-to-me",    label: "Assigned to me",    description: "Tasks across every visible board" },
-  { key: "reminders",         label: "Reminders",         description: "Add reminders that sit alongside tasks" },
-  { key: "assigned-comments", label: "Assigned comments", description: "Comments other people assigned to you" },
-  { key: "ai-standup",        label: "AI StandUp",        description: "What you've done in the last 7 days" },
-  { key: "priorities",        label: "Priorities",        description: "Your top-priority tasks in one list" },
-  { key: "my-work",           label: "My Work",           description: "All tasks + reminders owned by you" },
+const CARD_CATALOG: Array<{ key: string; label: string; description: string; accent: string }> = [
+  { key: "ai-standup",        label: "AI StandUp",        description: "AI generated standup.", accent: "from-violet-500 to-indigo-500" },
+  { key: "recents",           label: "Recents",           description: "A list of all the objects and locations you've recently viewed.", accent: "from-sky-500 to-blue-500" },
+  { key: "agenda",            label: "Agenda",            description: "Visualize tasks and events on your different calendars in one place.", accent: "from-purple-500 to-fuchsia-500" },
+  { key: "my-work",           label: "My Work",           description: "A list for all of your assigned tasks and reminders.", accent: "from-indigo-500 to-violet-500" },
+  { key: "assigned-to-me",    label: "Assigned to me",    description: "Consolidate your tasks across different lists that you have as an assignee.", accent: "from-indigo-500 to-violet-500" },
+  { key: "personal-list",     label: "Personal List",     description: "Keep track of your personal tasks in a list that is only visible to you.", accent: "from-indigo-500 to-violet-500" },
+  { key: "assigned-comments", label: "Assigned Comments", description: "Resolve and view any comment that has been assigned to you.", accent: "from-teal-500 to-cyan-500" },
+  { key: "priorities",        label: "Priorities",        description: "Prioritize your most important tasks into one concise list.", accent: "from-indigo-500 to-violet-500" },
+  { key: "reminders",         label: "Reminders",         description: "Add reminders that sit alongside tasks.", accent: "from-orange-500 to-amber-500" },
 ];
 
 function filterLayouts(layouts: LayoutShape, hidden: Set<string>): LayoutShape {
@@ -597,6 +628,45 @@ function filterLayouts(layouts: LayoutShape, hidden: Set<string>): LayoutShape {
     out[bp] = items.filter((it) => !hidden.has(it.i));
   }
   return out;
+}
+
+function MyTasksSettingsPopover({
+  showGreeting,
+  onShowGreetingChange,
+  onClose,
+}: {
+  showGreeting: boolean;
+  onShowGreetingChange: (value: boolean) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
+      <div className="absolute right-0 top-full z-50 mt-2 w-[280px] rounded-xl border border-zinc-200 bg-white p-5 shadow-lg">
+        <p className="mb-4 text-[13px] font-medium text-zinc-500">Layout</p>
+        <div className="flex items-center justify-between">
+          <span className="text-[15px] text-zinc-900">Page greeting</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showGreeting}
+            onClick={() => onShowGreetingChange(!showGreeting)}
+            className={`relative h-5 w-9 rounded-full border transition-colors ${
+              showGreeting
+                ? "border-[var(--os-brand-rail)] bg-[var(--os-brand-rail)]"
+                : "border-zinc-200 bg-zinc-100"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform ${
+                showGreeting ? "translate-x-[18px]" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+    </>
+  );
 }
 
 function ManageCardsModal({
@@ -612,15 +682,15 @@ function ManageCardsModal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Add Cards">
       <div
-        className="absolute inset-0 bg-black/30"
+        className="absolute inset-0 bg-transparent"
         onClick={onClose}
         aria-hidden
       />
-      <div className="relative z-10 bg-white rounded-xl shadow-lg w-[480px] max-w-[90vw] max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-100">
-          <h2 className="text-sm font-semibold text-zinc-900">Manage cards</h2>
+      <aside className="absolute right-1.5 top-10 bottom-1.5 z-10 w-[340px] max-w-[calc(100vw-24px)] rounded-xl border border-zinc-200 bg-white shadow-xl flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-100">
+          <h2 className="text-[15px] font-semibold text-zinc-900">Add Cards</h2>
           <button
             type="button"
             onClick={onClose}
@@ -630,40 +700,36 @@ function ManageCardsModal({
             <X className="w-4 h-4" />
           </button>
         </div>
-        <p className="px-5 pt-3 text-[12px] text-zinc-500">
-          Toggle which cards appear on My Tasks. Hidden cards keep their saved layout — re-enable any time.
-        </p>
-        <ul className="flex-1 overflow-y-auto p-3 space-y-1">
+        <ul className="flex-1 overflow-y-auto p-3 space-y-3">
           {CARD_CATALOG.map((c) => {
             const isHidden = hidden.has(c.key);
             return (
               <li key={c.key}>
-                <label className="flex items-start gap-3 px-3 py-2 rounded-md hover:bg-zinc-50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={!isHidden}
-                    onChange={() => onToggle(c.key)}
-                    className="mt-1 w-4 h-4 accent-zinc-900 cursor-pointer"
-                  />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-[13px] font-medium text-zinc-900">{c.label}</span>
-                    <span className="block text-[12px] text-zinc-500">{c.description}</span>
-                  </span>
-                </label>
+                <article className="rounded-lg border border-zinc-200 bg-white p-4">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <span className={`flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br ${c.accent} text-white shadow-sm`}>
+                      <Sparkles className="h-4 w-4" />
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onToggle(c.key)}
+                      className={`rounded-md !px-2 py-1 text-[11px] font-medium ${
+                        isHidden
+                          ? "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                          : "bg-[var(--os-brand-rail)] text-white"
+                      }`}
+                    >
+                      {isHidden ? "Add" : "✓ Added"}
+                    </button>
+                  </div>
+                  <h3 className="mb-1 text-[14px] font-semibold text-zinc-900">{c.label}</h3>
+                  <p className="text-[12px] leading-5 text-zinc-500">{c.description}</p>
+                </article>
               </li>
             );
           })}
         </ul>
-        <div className="px-5 py-3 border-t border-zinc-100 flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-[12.5px] px-3 py-1.5 rounded-md bg-zinc-900 text-white hover:bg-zinc-700"
-          >
-            Done
-          </button>
-        </div>
-      </div>
+      </aside>
     </div>
   );
 }

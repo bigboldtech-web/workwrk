@@ -10,11 +10,14 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Lock, Share2, Sparkles,
+  Lock, Share2, Sparkles, ChevronRight,
   List as ListIcon, LayoutGrid, Calendar as CalIcon, GanttChart, Table2,
   ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
   Filter, CheckCircle2, Users as UsersIcon, Search, Settings,
+  ListFilter, Glasses, Zap, Plus, Folder as FolderIcon,
 } from "lucide-react";
+import { createElement } from "react";
+import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
 import type { ViewType } from "@/generated/prisma";
 import { listBoardItems } from "@/lib/board-items";
 import { canEditSpace } from "@/lib/space";
@@ -73,8 +76,8 @@ export default async function BoardPage(props: {
   const board = await prisma.board.findFirst({
     where: { slug, organizationId: u.organizationId },
     include: {
-      space: { select: { id: true, slug: true, name: true, visibility: true } },
-      folder: { select: { id: true, name: true } },
+      space: { select: { id: true, slug: true, name: true, visibility: true, icon: true, color: true } },
+      folder: { select: { id: true, name: true, icon: true, color: true } },
       views: { orderBy: [{ isDefault: "desc" }, { displayOrder: "asc" }, { name: "asc" }] },
     },
   });
@@ -107,43 +110,87 @@ export default async function BoardPage(props: {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Breadcrumb + title row */}
-      <div className="px-6 pt-4 pb-2">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <Link href="/spaces" className="hover:text-zinc-900">Spaces</Link>
-          <span>/</span>
-          <Link href={`/spaces/${board.space.slug}`} className="hover:text-zinc-900">{board.space.name}</Link>
-          {board.folder ? (
-            <>
-              <span>/</span>
-              <span>{board.folder.name}</span>
-            </>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-3">
-          <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-2 min-w-0">
-            {board.visibility === "PRIVATE" ? (
-              <Lock className="w-4 h-4 text-zinc-500" />
-            ) : null}
-            <span className="truncate">{board.name}</span>
-            <BoardFavoriteButton boardId={board.id} initiallyStarred={initiallyStarred} />
-          </h1>
-          <div className="flex-1" />
-          <button
-            type="button"
-            className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-violet-500" />
-            Ask AI
-          </button>
-          <button
-            type="button"
-            className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            Share
-          </button>
-        </div>
+      {/* Title row — inline breadcrumb with Space tile + Folder + Board */}
+      <div className="px-6 pt-4 pb-2 flex items-center gap-1.5">
+        {/* Space tile + name */}
+        <Link
+          href={`/spaces/${board.space.slug}`}
+          className="inline-flex items-center gap-1.5 text-[13px] text-zinc-700 hover:text-zinc-900 min-w-0"
+        >
+          <SpaceTile
+            icon={board.space.icon}
+            color={board.space.color}
+            fallback={board.space.name[0] ?? "?"}
+          />
+          <span className="truncate">{board.space.name}</span>
+        </Link>
+
+        {/* Folder breadcrumb segment (when board lives in a folder) */}
+        {board.folder ? (
+          <>
+            <ChevronRight className="w-3 h-3 text-zinc-400 shrink-0" />
+            <span className="inline-flex items-center gap-1.5 text-[13px] text-zinc-700 min-w-0">
+              <FolderTile
+                icon={board.folder.icon}
+                color={board.folder.color}
+              />
+              <span className="truncate">{board.folder.name}</span>
+            </span>
+          </>
+        ) : null}
+
+        {/* Board (current) — bold + star + filter */}
+        <ChevronRight className="w-3 h-3 text-zinc-400 shrink-0" />
+        <h1 className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-zinc-900 min-w-0">
+          {board.visibility === "PRIVATE" ? (
+            <Lock className="w-3.5 h-3.5 text-zinc-500" />
+          ) : (
+            <BoardTile icon={board.icon} color={board.color} fallback={board.name[0] ?? "?"} />
+          )}
+          <span className="truncate">{board.name}</span>
+        </h1>
+        <BoardFavoriteButton boardId={board.id} initiallyStarred={initiallyStarred} />
+        <button
+          type="button"
+          aria-label="Filter board"
+          title="Filter"
+          className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+        >
+          <ListFilter className="w-3.5 h-3.5" />
+        </button>
+
+        <div className="flex-1" />
+
+        <button
+          type="button"
+          aria-label="Reader mode"
+          title="Reader mode"
+          className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500"
+        >
+          <Glasses className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+          title="Automations"
+        >
+          <Zap className="w-3.5 h-3.5 text-amber-500" />
+          Automate
+        </button>
+        <button
+          type="button"
+          className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+          Ask
+        </button>
+        <button
+          type="button"
+          className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+          Share
+        </button>
       </div>
 
       {/* View tabs — clicking switches the active view via ?view=<id>.
@@ -208,6 +255,15 @@ export default async function BoardPage(props: {
         <button type="button" className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500" aria-label="Settings">
           <Settings className="w-3.5 h-3.5" />
         </button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[12px] text-white"
+          style={{ background: "var(--os-brand)" }}
+          title="Add task"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Task
+        </button>
       </div>
 
       {/* Renderer */}
@@ -224,5 +280,47 @@ export default async function BoardPage(props: {
         />
       </div>
     </div>
+  );
+}
+
+function SpaceTile({ icon, color, fallback }: { icon: string | null; color: string | null; fallback: string }) {
+  const Icon = getSpaceIcon(icon);
+  const bg = color ?? "#71717A";
+  return (
+    <span
+      className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
+      style={{ backgroundColor: bg }}
+    >
+      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : fallback}
+    </span>
+  );
+}
+
+function FolderTile({ icon, color }: { icon: string | null; color: string | null }) {
+  const Icon = getSpaceIcon(icon);
+  const tint = color ?? "#71717A";
+  if (Icon) {
+    return (
+      <span
+        className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
+        style={{ backgroundColor: tint }}
+      >
+        {createElement(Icon, { className: "h-3 w-3" })}
+      </span>
+    );
+  }
+  return <FolderIcon className="h-3.5 w-3.5 shrink-0" style={{ color: tint }} />;
+}
+
+function BoardTile({ icon, color, fallback }: { icon: string | null; color: string | null; fallback: string }) {
+  const Icon = getSpaceIcon(icon);
+  const bg = color ?? "#A1A1AA";
+  return (
+    <span
+      className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
+      style={{ backgroundColor: bg }}
+    >
+      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : fallback}
+    </span>
   );
 }

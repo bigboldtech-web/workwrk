@@ -10,6 +10,29 @@ import { pushTaskToGoogle, deleteTaskFromGoogle } from "@/services/googleCalenda
 import { GOOGLE_CAL_SOURCE } from "@/services/googleCalendar";
 import { tagFilterIds } from "@/lib/tag-filter";
 
+type TaskStatusValue = "PLANNED" | "IN_PROGRESS" | "COMPLETED";
+type TaskPriorityValue = "LOW" | "NORMAL" | "HIGH" | "URGENT";
+type PrismaErrorLike = { code?: string; meta?: { field_name?: string }; message?: string };
+
+const TASK_STATUSES = new Set<TaskStatusValue>(["PLANNED", "IN_PROGRESS", "COMPLETED"]);
+const TASK_PRIORITIES = new Set<TaskPriorityValue>(["LOW", "NORMAL", "HIGH", "URGENT"]);
+
+function normalizeTaskStatus(value: unknown): TaskStatusValue | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.toUpperCase();
+  return TASK_STATUSES.has(normalized as TaskStatusValue) ? (normalized as TaskStatusValue) : undefined;
+}
+
+function normalizeTaskPriority(value: unknown): TaskPriorityValue | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.toUpperCase();
+  return TASK_PRIORITIES.has(normalized as TaskPriorityValue) ? (normalized as TaskPriorityValue) : undefined;
+}
+
+function toPrismaError(error: unknown): PrismaErrorLike {
+  return typeof error === "object" && error !== null ? (error as PrismaErrorLike) : {};
+}
+
 // GET: List tasks (calendar view)
 // Query params: userId, startDate, endDate, kraId
 export async function GET(req: NextRequest) {
@@ -17,7 +40,7 @@ export async function GET(req: NextRequest) {
   if (error) return error;
 
   const orgId = getOrgId(session);
-  const accessLevel = (session.user as any).accessLevel;
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel;
   const currentUserId = getUserId(session);
   const url = new URL(req.url);
 
@@ -29,7 +52,7 @@ export async function GET(req: NextRequest) {
   const kraId = url.searchParams.get("kraId");
 
   const where: Record<string, unknown> = { organizationId: orgId };
-  const isManagerLevel = ["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD"].includes(accessLevel);
+  const isManagerLevel = ["COMPANY_ADMIN", "SUPER_ADMIN", "HR", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD"].includes(accessLevel ?? "");
 
   if (userIds) {
     // Multi-select filter — accept any user IDs (frontend passes team members)
@@ -58,7 +81,7 @@ export async function GET(req: NextRequest) {
   if (startDate || endDate) {
     const from = startDate ? new Date(startDate) : null;
     const to = endDate ? new Date(endDate) : null;
-    const spanFilter: any = {};
+    const spanFilter: Record<string, unknown> = {};
     if (from && to) {
       spanFilter.OR = [
         { date: { gte: from, lte: to } },
@@ -121,7 +144,7 @@ export async function POST(req: NextRequest) {
   const {
     title, description, date, startAt, endAt, allDay,
     estimateHours, hoursSpent, category, assigneeId, kraId,
-    parentTaskId, labelIds,
+    parentTaskId, labelIds, status, priority,
   } = body;
 
   if (!title?.trim() || !date) {
@@ -138,6 +161,9 @@ export async function POST(req: NextRequest) {
     if (parent.parentTaskId) return jsonError("Sub-tasks cannot have their own sub-tasks", 400);
   }
 
+  const taskStatus = normalizeTaskStatus(status);
+  const taskPriority = normalizeTaskPriority(priority);
+
   let task;
   try {
     task = await prisma.task.create({
@@ -151,6 +177,8 @@ export async function POST(req: NextRequest) {
         estimateHours: estimateHours != null ? Number(estimateHours) : null,
         hoursSpent: hoursSpent != null ? Number(hoursSpent) : null,
         category: category || null,
+        status: taskStatus,
+        priority: taskPriority,
         assigneeId: assigneeId || currentUserId,
         kraId: kraId || null,
         parentTaskId: parentTaskId || null,
@@ -166,12 +194,13 @@ export async function POST(req: NextRequest) {
         _count: { select: { subTasks: true, comments: true } },
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const prismaError = toPrismaError(err);
     console.error("[Task POST] prisma.task.create failed:", err);
-    const code = err?.code;
-    if (code === "P2003") return jsonError(`Invalid reference: ${err.meta?.field_name || "foreign key"}`, 400);
+    const code = prismaError.code;
+    if (code === "P2003") return jsonError(`Invalid reference: ${prismaError.meta?.field_name || "foreign key"}`, 400);
     if (code === "P2025") return jsonError("Referenced record not found", 400);
-    return jsonError(err?.message || "Failed to create task", 500);
+    return jsonError(prismaError.message || "Failed to create task", 500);
   }
 
   // Side-effects below must not fail the create — the task row is already
@@ -410,7 +439,7 @@ export async function DELETE(req: NextRequest) {
 
   // Delete all future recurring tasks in the same group
   if (deleteAll) {
-    const where: any = {
+    const where: Record<string, unknown> = {
       organizationId: orgId,
       date: { gte: task.date },
       assigneeId: task.assigneeId,

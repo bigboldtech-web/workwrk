@@ -1,5 +1,5 @@
 /* ═════════════════════════════════════════════════════════════════
- * WorkwrK OS — Monday-style bright design system
+ * WorkwrK OS — ClickUp-style compact design system
  * All scoped to `.workwrk-os` so marketing site is untouched.
  * ═════════════════════════════════════════════════════════════════ */
 
@@ -57,23 +57,32 @@
   --os-r-pill: 999px;
 
   /* Shadows */
-  --os-shadow-card:  0 4px 12px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04);
-  --os-shadow-pop:   0 12px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
+  --os-shadow-card:  0 3px 10px rgba(0,0,0,0.055), 0 0 0 1px rgba(0,0,0,0.035);
+  --os-shadow-pop:   0 10px 26px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
   --os-shadow-rest:  0 1px 0 rgba(0,0,0,0.04);
 
   /* Layout */
-  --os-rail-w: 64px;
-  --os-side-w: 240px;
-  --os-top-h: 48px;
-  --os-title-h: 60px;
-  --os-tabs-h: 42px;
-  --os-filter-h: 48px;
+  --os-rail-w: 60px;
+  --os-side-w: 260px;
+  --os-top-h: 32px;
+  --os-title-h: 40px;
+  --os-tabs-h: 34px;
+  --os-filter-h: 34px;
+
+  /* Density */
+  --os-page-pad: 12px;
+  --os-card-pad: 12px;
+  --os-row-h: 28px;
+  --os-row-h-lg: 32px;
+  --os-control-h: 26px;
+  --os-control-h-sm: 22px;
+  --os-popover-w: 300px;
 
   /* Type */
   --os-font: var(--font-figtree), 'Figtree', -apple-system, BlinkMacSystemFont, sans-serif;
 
   font-family: var(--os-font);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--os-ink);
   background: var(--os-canvas);
@@ -97,7 +106,7 @@
 .workwrk-os ul, .workwrk-os ol { list-style: none; padding: 0; margin: 0; }
 .workwrk-os a { color: inherit; text-decoration: none; }
 .workwrk-os svg { display: block; }
-.workwrk-os ::-webkit-scrollbar { width: 10px; height: 10px; }
+.workwrk-os ::-webkit-scrollbar { width: 8px; height: 8px; }
 .workwrk-os ::-webkit-scrollbar-track { background: transparent; }
 .workwrk-os ::-webkit-scrollbar-thumb {
   background: var(--os-line);
@@ -106,7 +115,7 @@
 }
 .workwrk-os ::-webkit-scrollbar-thumb:hover { background: var(--os-ink-4); }
 /* Opt-out: scrollable surfaces that should never show a scrollbar
-   (e.g. the left app rail — its column is too narrow for a 10px thumb). */
+   (e.g. the left app rail — its column is too narrow for a thumb). */
 .workwrk-os .os-no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .workwrk-os .os-no-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .workwrk-os ::selection { background: var(--os-brand-soft); color: var(--os-brand-deep); }
@@ -16048,8 +16057,8 @@ table.os-tbl {
 /* ════════════════════════════════════════════════════════════════
  * BLOCK-BASED DOC EDITOR
  * ════════════════════════════════════════════════════════════════ */
-.bdoc { padding: 0 0 80px; max-width: 920px; margin: 0 auto; min-height: 100vh; }
-.bdoc__head { display: flex; justify-content: space-between; align-items: center; padding: 14px 24px; position: sticky; top: 0; background: rgba(255,255,255,0.95); backdrop-filter: blur(8px); z-index: 10; border-bottom: 1px solid var(--os-line); }
+.bdoc { padding: 0 0 80px; width: 100%; min-height: 100vh; }
+.bdoc__head { display: flex; justify-content: space-between; align-items: center; padding: 14px 24px; position: sticky; top: 0; background: color-mix(in srgb, var(--os-surface) 95%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 10; border-bottom: 1px solid var(--os-line); }
 .bdoc__back { width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; color: var(--os-ink-2); }
 .bdoc__back:hover { background: var(--os-surface-1); color: var(--os-ink); }
 .bdoc__back svg { width: 16px; height: 16px; }
@@ -16061,24 +16070,625 @@ table.os-tbl {
 .bdoc__spin { animation: spin 1s linear infinite; width: 20px; height: 20px; color: var(--os-brand); }
 @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 
-/* Notion-style page layout — generous padding, centered max-width,
- * roomy title. Body width caps at 760px for comfortable reading. */
+/* Page body fills the available width — no 860px center cap. Padding
+ * keeps the content off the rails on big screens; the editor itself
+ * (BlockNote) handles its own block layout. */
 .bdoc__page {
   padding: 56px 96px 80px;
-  max-width: 860px;
-  margin: 0 auto;
+  width: 100%;
 }
+@media (max-width: 1280px) { .bdoc__page { padding: 48px 64px 80px; } }
 @media (max-width: 1024px) { .bdoc__page { padding: 40px 32px 80px; } }
 @media (max-width: 640px)  { .bdoc__page { padding: 24px 16px 80px; } }
 
-.bdoc__title {
+/* BlockNote canvas — let the editor use the full content column. */
+.bdoc-bn { width: 100%; }
+.bdoc-bn .bn-container { background: transparent; }
+.bdoc-bn .bn-editor { padding: 0; }
+
+/* ──────────── BN custom block: Sub-page ──────────── */
+.bn-subpage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14.5px;
+  color: var(--os-ink);
+  text-align: left;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+/* Configured sub-page = Notion-style inline underlined link (not a card). */
+.bn-subpage--configured {
+  cursor: pointer;
+  display: inline-flex; width: auto; max-width: 100%;
+  padding: 2px 5px 2px 3px; gap: 5px;
+  background: transparent; border: 1px solid transparent; border-radius: 5px;
+  color: inherit;
+}
+.bn-subpage--configured:hover { background: color-mix(in srgb, currentColor 8%, transparent); border-color: transparent; }
+.bn-subpage--configured .bn-subpage__title {
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 3px;
+}
+.bn-subpage--configured .bn-subpage__icon { width: 18px; height: 18px; color: inherit; opacity: 0.75; }
+.bn-subpage--configured .bn-subpage__chev { display: none; }
+.bn-subpage__icon {
+  display: grid; place-items: center;
+  width: 22px; height: 22px;
+  color: var(--os-ink-2);
+  font-size: 16px;
+}
+.bn-subpage__icon svg { width: 16px; height: 16px; }
+.bn-subpage__title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.bn-subpage__chev { width: 14px; height: 14px; color: var(--os-ink-3); flex: 0 0 14px; }
+
+.bn-subpage--picker {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0;
+  gap: 0;
+  cursor: default;
+  overflow: hidden;
+}
+.bn-subpage__picker-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--os-line);
+}
+.bn-subpage__picker-head svg { width: 14px; height: 14px; color: var(--os-ink-3); }
+.bn-subpage__picker-head input {
+  flex: 1; background: transparent; border: none; outline: none;
+  font-size: 13px; color: var(--os-ink);
+}
+.bn-subpage__picker-list {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.bn-subpage__picker-row {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--os-ink);
+  text-align: left;
+}
+.bn-subpage__picker-row:hover { background: var(--os-line); }
+.bn-subpage__picker-row svg { width: 14px; height: 14px; color: var(--os-ink-3); }
+.bn-subpage__picker-empty {
+  padding: 18px 12px;
+  font-size: 12.5px;
+  color: var(--os-ink-3);
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+}
+.bn-subpage__spin { animation: spin 1s linear infinite; width: 14px; height: 14px; color: var(--os-brand); }
+
+/* ──────────── BN custom block: Callout ────────────
+   Tints use color-mix against transparent so they read correctly on both
+   the light and dark editor surfaces; body text inherits BlockNote's
+   theme-driven editor text color. */
+.bn-callout {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--os-r-md);
+  border: 1px solid color-mix(in srgb, var(--callout-hue) 28%, transparent);
+  background: color-mix(in srgb, var(--callout-hue) 9%, transparent);
+  color: inherit;
+}
+.bn-callout--gray   { --callout-hue: #8a8f99; }
+.bn-callout--blue   { --callout-hue: #2f80ed; }
+.bn-callout--green  { --callout-hue: #00c875; }
+.bn-callout--amber  { --callout-hue: #fdab3d; }
+.bn-callout--red    { --callout-hue: #e5484d; }
+.bn-callout--purple { --callout-hue: #8b5cf6; }
+
+.bn-callout__control { position: relative; flex: 0 0 auto; }
+.bn-callout__emoji {
+  display: grid; place-items: center;
+  width: 26px; height: 26px;
+  font-size: 17px; line-height: 1;
+  border-radius: var(--os-r-sm);
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  border: none;
+  transition: background 120ms ease;
+}
+.bn-callout__emoji:hover { background: color-mix(in srgb, var(--callout-hue) 18%, transparent); }
+.bn-callout__body { flex: 1; min-width: 0; line-height: 1.6; }
+.bn-callout__body > :first-child { margin-top: 0; }
+.bn-callout__body > :last-child { margin-bottom: 0; }
+
+.bn-callout__pop {
+  position: absolute; top: 32px; left: 0; z-index: 40;
+  display: flex; flex-direction: column; gap: 8px;
+  width: 236px; padding: 10px;
+  background: var(--bn-colors-menu-background, var(--os-canvas));
+  color: var(--bn-colors-menu-text, var(--os-ink));
+  border: 1px solid var(--bn-colors-border, var(--os-line));
+  border-radius: var(--os-r-md);
+  box-shadow: var(--os-shadow-pop);
+}
+.bn-callout__pop-colors { display: flex; gap: 6px; }
+.bn-callout__swatch {
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 2px solid transparent; cursor: pointer; padding: 0;
+  background: var(--sw);
+  transition: transform 100ms ease;
+}
+.bn-callout__swatch:hover { transform: scale(1.12); }
+.bn-callout__swatch--gray   { --sw: #8a8f99; }
+.bn-callout__swatch--blue   { --sw: #2f80ed; }
+.bn-callout__swatch--green  { --sw: #00c875; }
+.bn-callout__swatch--amber  { --sw: #fdab3d; }
+.bn-callout__swatch--red    { --sw: #e5484d; }
+.bn-callout__swatch--purple { --sw: #8b5cf6; }
+.bn-callout__swatch.is-on { border-color: var(--bn-colors-menu-text, var(--os-ink)); }
+.bn-callout__pop-emojis { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.bn-callout__emoji-cell {
+  display: grid; place-items: center;
+  height: 26px; font-size: 16px;
+  border-radius: var(--os-r-sm); cursor: pointer;
+  background: transparent; border: none;
+}
+.bn-callout__emoji-cell:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.bn-callout__emoji-cell.is-on { background: color-mix(in srgb, var(--os-brand) 16%, transparent); }
+
+/* ──────────── BN custom block: Table of contents ──────────── */
+.bn-toc {
+  width: 100%;
+  padding: 6px 0 6px 14px;
+  border-left: 2px solid color-mix(in srgb, var(--os-brand) 40%, transparent);
+}
+.bn-toc__head {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  opacity: .55; margin-bottom: 6px;
+}
+.bn-toc__head svg { width: 14px; height: 14px; }
+.bn-toc__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.bn-toc__link {
+  display: block; width: 100%; text-align: left;
+  padding: 3px 6px; border-radius: var(--os-r-sm);
+  font-size: 14px; line-height: 1.4; color: inherit;
+  opacity: .8; cursor: pointer; background: transparent; border: none;
+  transition: background 120ms ease, opacity 120ms ease, color 120ms ease;
+}
+.bn-toc__link:hover { opacity: 1; color: var(--os-brand); background: color-mix(in srgb, var(--os-brand) 8%, transparent); }
+.bn-toc__empty { font-size: 13px; opacity: .5; padding: 2px 6px; }
+
+/* ──────────── BN inline content: @-mention ──────────── */
+.bn-mention {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 6px 0 4px;
+  margin: 0 1px;
+  border-radius: var(--os-r-pill);
+  font-weight: 500;
+  font-size: 0.95em;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  vertical-align: baseline;
+  background: color-mix(in srgb, var(--men-hue) 14%, transparent);
+  color: var(--men-hue);
+  transition: background 120ms ease;
+}
+.bn-mention:hover { background: color-mix(in srgb, var(--men-hue) 24%, transparent); }
+.bn-mention--user { --men-hue: var(--os-brand); }
+.bn-mention--doc  { --men-hue: #8b5cf6; }
+.bn-mention__icon { width: 13px; height: 13px; flex: 0 0 13px; }
+.bn-mention__label { font-weight: 600; }
+
+/* ──────────── BN custom block: Equation (KaTeX) ──────────── */
+.bn-eq {
+  width: 100%;
+  padding: 10px 8px;
+  border-radius: var(--os-r-md);
+  text-align: center;
+  overflow-x: auto;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.bn-eq:hover { background: color-mix(in srgb, var(--os-brand) 5%, transparent); }
+.bn-eq--editing { cursor: default; text-align: left; background: color-mix(in srgb, var(--os-brand) 4%, transparent); }
+.bn-eq__input {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: var(--os-r-sm);
+  border: 1px solid var(--bn-colors-border, var(--os-line));
+  background: var(--bn-colors-editor-background, var(--os-canvas));
+  color: inherit;
+  outline: none;
+}
+.bn-eq__input:focus { border-color: var(--os-brand); }
+.bn-eq__preview { margin-top: 8px; text-align: center; overflow-x: auto; }
+.bn-eq__empty, .bn-eq__hint { color: inherit; opacity: .45; font-size: 14px; }
+
+/* ──────────── BN custom block: Web bookmark ──────────── */
+.bn-bookmark {
+  display: flex; align-items: stretch;
+  width: 100%;
+  min-height: 92px;
+  border: 1px solid var(--bn-colors-border, var(--os-line));
+  border-radius: var(--os-r-md);
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.bn-bookmark:hover { border-color: color-mix(in srgb, var(--os-brand) 45%, var(--bn-colors-border, var(--os-line))); background: color-mix(in srgb, var(--os-brand) 3%, transparent); }
+.bn-bookmark__body { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 12px 14px; }
+.bn-bookmark__title { font-weight: 600; font-size: 14px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+.bn-bookmark__desc { font-size: 12.5px; opacity: .6; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.bn-bookmark__foot { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.bn-bookmark__favicon { width: 15px; height: 15px; border-radius: 3px; flex: 0 0 15px; object-fit: cover; }
+.bn-bookmark__host { font-size: 12px; opacity: .55; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bn-bookmark__thumb { width: 160px; flex: 0 0 160px; object-fit: cover; background: var(--os-surface-1); }
+@media (max-width: 640px) { .bn-bookmark__thumb { display: none; } }
+
+.bn-bookmark--input { cursor: default; flex-direction: column; min-height: 0; padding: 10px 12px; gap: 6px; }
+.bn-bookmark--input:hover { background: transparent; }
+.bn-bookmark__input-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.bn-bookmark__input-icon { width: 16px; height: 16px; opacity: .5; flex: 0 0 16px; }
+.bn-bookmark__input-row input {
+  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  font-size: 14px; color: inherit;
+}
+.bn-bookmark__input-row button {
+  flex: 0 0 auto; padding: 5px 12px; border-radius: var(--os-r-sm);
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
+  background: var(--os-brand); color: #fff; border: none;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.bn-bookmark__input-row button:disabled { opacity: .5; cursor: not-allowed; }
+.bn-bookmark__err { font-size: 12px; color: #e5484d; }
+.bn-bookmark__spin { animation: spin 1s linear infinite; width: 14px; height: 14px; }
+
+/* ──────────── BN custom block: Columns (CSS column flow) ──────────── */
+.bn-columns { width: 100%; position: relative; }
+.bn-columns__toolbar {
+  position: absolute; top: -8px; right: 0; z-index: 5;
+  display: flex; gap: 2px; padding: 2px;
+  border-radius: var(--os-r-sm);
+  background: var(--bn-colors-menu-background, var(--os-canvas));
+  border: 1px solid var(--bn-colors-border, var(--os-line));
+  box-shadow: var(--os-shadow-rest);
+  opacity: 0; transition: opacity 120ms ease;
+}
+.bn-columns:hover .bn-columns__toolbar { opacity: 1; }
+.bn-columns__btn {
+  display: grid; place-items: center; width: 24px; height: 24px;
+  border-radius: 4px; cursor: pointer; background: transparent; border: none;
+  color: inherit; opacity: .55;
+}
+.bn-columns__btn svg { width: 15px; height: 15px; }
+.bn-columns__btn:hover { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
+.bn-columns__btn.is-on { opacity: 1; color: var(--os-brand); }
+.bn-columns__flow { column-gap: 28px; }
+.bn-columns__flow > * { break-inside: avoid; }
+
+/* Text selection in the editor picks up the workspace accent — a
+   theme-safe translucent tint so it works on light and dark surfaces. */
+.bdoc-bn { --bn-colors-selected-background: color-mix(in srgb, var(--os-brand) 18%, transparent); }
+
+/* ════════════════════════════════════════════════════════════════
+   Notion-grade editor chrome
+   Polishes BlockNote's built-in toolbar / slash menu / side menu /
+   popovers to the refined dark (and light) look of Notion. All rules use
+   BlockNote's own --bn-colors-* variables (which flip with the editor
+   theme) so light + dark both stay correct; the workspace brand is the
+   only accent layered on top.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── Body typography — Notion's reading rhythm ── */
+.bdoc-bn .bn-editor {
+  font-size: 16px;
+  line-height: 1.55;
+  letter-spacing: -0.003em;
+}
+.bdoc-bn .bn-block-content[data-content-type="heading"][data-level="1"] { font-size: 1.875em; font-weight: 700; letter-spacing: -0.02em; }
+.bdoc-bn .bn-block-content[data-content-type="heading"][data-level="2"] { font-size: 1.45em;  font-weight: 650; letter-spacing: -0.015em; }
+.bdoc-bn .bn-block-content[data-content-type="heading"][data-level="3"] { font-size: 1.2em;   font-weight: 600; letter-spacing: -0.01em; }
+/* Tighter top margin on the very first block so it sits close to the title. */
+.bdoc-bn .bn-block-group > .bn-block-outer:first-child .bn-block-content { margin-top: 2px; }
+
+/* ── Formatting (selection) toolbar — the floating dark card ── */
+.bdoc-bn .bn-toolbar {
+  gap: 2px;
+  padding: 5px;
+  border-radius: 11px;
+  border: 1px solid var(--bn-colors-border);
+  background: var(--bn-colors-menu-background);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.28), 0 0 0 0.5px rgba(0,0,0,0.04);
+}
+/* Buttons inside the toolbar — calm, rounded, brand-tinted hover/active. */
+.bdoc-bn .bn-toolbar button,
+.bdoc-bn .bn-toolbar .mantine-Button-root {
+  border-radius: 7px;
+  transition: background 110ms ease, color 110ms ease;
+}
+.bdoc-bn .bn-toolbar button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.bdoc-bn .bn-toolbar button[data-selected="true"],
+.bdoc-bn .bn-toolbar button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--os-brand) 22%, transparent);
+  color: var(--os-brand);
+}
+/* Block-type dropdown ("Heading 1 ›") reads as a single calm pill. */
+.bdoc-bn .bn-toolbar .bn-select,
+.bdoc-bn .bn-toolbar .mantine-Select-root { border-radius: 7px; }
+
+/* ── Slash / @ suggestion menu ── */
+.bdoc-bn .bn-suggestion-menu {
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--bn-colors-border);
+  background: var(--bn-colors-menu-background);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.26), 0 0 0 0.5px rgba(0,0,0,0.04);
+}
+/* Group headers ("Workspace", "People", "Pages") — small, muted, uppercase. */
+.bdoc-bn .bn-suggestion-menu-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.5;
+  padding: 8px 8px 4px;
+}
+.bdoc-bn .bn-suggestion-menu-item {
+  border-radius: 8px;
+  padding: 6px 8px;
+  gap: 10px;
+  transition: background 100ms ease;
+}
+.bdoc-bn .bn-suggestion-menu-item[aria-selected="true"],
+.bdoc-bn .bn-suggestion-menu-item:hover {
+  background: color-mix(in srgb, var(--os-brand) 14%, transparent);
+}
+.bdoc-bn .bn-mt-suggestion-menu-item-title { font-weight: 550; }
+.bdoc-bn .bn-mt-suggestion-menu-item-subtitle { opacity: 0.55; }
+/* The icon chip on each item — rounded, faint surface like Notion. */
+.bdoc-bn .bn-mt-suggestion-menu-item-section[data-position="left"] {
+  border-radius: 7px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* ── Side menu (drag handle + add button) ── */
+.bdoc-bn .bn-side-menu button { border-radius: 6px; opacity: 0.55; transition: opacity 110ms ease, background 110ms ease; }
+.bdoc-bn .bn-side-menu button:hover { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
+
+/* ── Drag-handle / table menus + generic popovers ── */
+.bdoc-bn .bn-drag-handle-menu,
+.bdoc-bn .bn-table-handle-menu,
+.bdoc-bn .bn-menu-dropdown,
+.bdoc-bn .bn-panel-popover,
+.bdoc-bn .bn-form-popover,
+.bdoc-bn .bn-emoji-picker-popover {
+  border-radius: 11px;
+  border: 1px solid var(--bn-colors-border);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.24), 0 0 0 0.5px rgba(0,0,0,0.04);
+}
+
+/* ── Block / drag-handle menu (Notion-style: Turn into / Copy link / … ) ──
+   Mantine portals this menu to <body>, outside the editor's color scope, so
+   it gets explicit colors (light default + a :root.dark override) with
+   !important to win over Mantine's defaults. */
+.bn-menu-dropdown, .bn-drag-handle-menu {
+  min-width: 248px; padding: 6px;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  color: #2f3338 !important;
+  border: 1px solid #e7e9ef !important;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.16), 0 0 0 0.5px rgba(0,0,0,0.04) !important;
+}
+:root.dark .bn-menu-dropdown, :root.dark .bn-drag-handle-menu {
+  background: #1f2229 !important;
+  color: #e8eaed !important;
+  border-color: rgba(255,255,255,0.1) !important;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.55) !important;
+}
+.bn-menu-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 7px 10px; border-radius: 8px;
+  font-size: 14px; line-height: 1.25; color: inherit; font-weight: 450;
+  cursor: pointer; transition: background 90ms ease;
+}
+.bn-menu-item:hover,
+.bn-menu-item[data-hovered],
+.bn-menu-item[data-highlighted] {
+  background: color-mix(in srgb, var(--os-brand, #0073EA) 14%, transparent) !important;
+}
+/* Consistent icon + label row for every item (custom + built-in Color). */
+.bn-mi { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; }
+.bn-mi__ico { width: 16px; height: 16px; flex: 0 0 16px; display: inline-grid; place-items: center; opacity: 0.6; }
+.bn-mi__ico svg { width: 16px; height: 16px; stroke-width: 1.9; }
+.bn-mi__lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bn-menu-item:hover .bn-mi__ico, .bn-menu-item[data-hovered] .bn-mi__ico { opacity: 0.9; }
+/* Right-side chevron on submenu triggers ("Turn into ›") pushes to the edge. */
+.bn-menu-item [data-position="right"] { margin-left: auto; }
+/* Block-type header row ("Sub-page", "Heading 3"). */
+.bn-drag-menu-label, .bn-menu-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.03em;
+  opacity: 0.45; padding: 8px 10px 5px; color: inherit;
+}
+/* Slim, calm dividers between groups. */
+.bn-menu-dropdown hr, .bn-menu-divider, .bn-drag-handle-menu hr {
+  margin: 5px 8px; border: none; height: 1px;
+  background: color-mix(in srgb, currentColor 12%, transparent); opacity: 1;
+}
+/* The side-menu buttons (＋ add, ⠿ drag handle). */
+.bdoc-bn .bn-side-menu .bn-button { border-radius: 6px; }
+
+/* ── Tooltips ── */
+.bdoc-bn .bn-tooltip { border-radius: 7px; font-size: 12px; }
+
+/* ── Divider — thin and subtle like Notion's ── */
+.bdoc-bn .bn-block-content[data-content-type="divider"] hr,
+.bdoc-bn hr {
+  border: none;
+  border-top: 1px solid var(--bn-colors-border);
+  opacity: 0.7;
+  margin: 6px 0;
+}
+
+/* ── Inline code — calmer surface ── */
+.bdoc-bn code {
+  border-radius: 5px;
+  padding: 0.12em 0.35em;
+  font-size: 0.88em;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+}
+
+/* ──────────── Side-by-side / split doc layout ──────────── */
+.bdoc-split {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  align-items: stretch;
+  background: var(--os-surface);
+}
+.bdoc-split__pane {
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  background: var(--os-surface);
+}
+.bdoc-split__pane--peek { border-left: 1px solid var(--os-line); }
+.bdoc-split__divider {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  position: relative;
+  transition: background 120ms ease;
+}
+.bdoc-split__divider:hover,
+.bdoc-split__divider:active { background: color-mix(in srgb, var(--os-brand) 12%, transparent); }
+.bdoc-split__divider-grip {
+  width: 2px;
+  height: 36px;
+  border-radius: 2px;
+  background: var(--os-line);
+}
+.bdoc-split__divider:hover .bdoc-split__divider-grip,
+.bdoc-split__divider:active .bdoc-split__divider-grip { background: var(--os-brand); }
+
+/* Sticky toolbar inside the peek pane: Close + Swap. Lives above the
+ * BlockDocEditor's own sticky head, in the pane's scroll context. */
+.bdoc-split__peek-bar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 8px 10px 0;
+  background: color-mix(in srgb, var(--os-surface) 95%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.bdoc-split__peek-act {
+  width: 28px; height: 28px; border-radius: 6px;
+  display: grid; place-items: center;
+  color: var(--os-ink-2);
+  background: transparent;
+  transition: background 120ms ease, color 120ms ease;
+}
+.bdoc-split__peek-act:hover { background: var(--os-surface-1); color: var(--os-ink); }
+.bdoc-split__peek-act svg { width: 15px; height: 15px; }
+
+/* ──────────── Side-pane picker popover (in head) ──────────── */
+.bdoc__peek-wrap { position: relative; display: inline-flex; }
+.bdoc__peek-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 320px;
+  background: var(--os-surface);
+  border: 1px solid var(--os-line);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+  z-index: 30;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.bdoc__peek-search {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--os-line);
+}
+.bdoc__peek-search svg { width: 14px; height: 14px; color: var(--os-ink-3); }
+.bdoc__peek-search input {
+  flex: 1;
+  background: transparent;
+  border: none; outline: none;
+  font-size: 13px;
+  color: var(--os-ink);
+}
+.bdoc__peek-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.bdoc__peek-row {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--os-ink);
+  text-align: left;
+}
+.bdoc__peek-row:hover { background: var(--os-surface-1); }
+.bdoc__peek-row svg { width: 14px; height: 14px; color: var(--os-ink-3); flex: 0 0 14px; }
+.bdoc__peek-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bdoc__peek-empty {
+  padding: 18px 12px;
+  font-size: 12.5px;
+  color: var(--os-ink-3);
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+}
+.bdoc__peek-close-current {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--os-line);
+  font-size: 12.5px;
+  color: var(--os-ink-2);
+  background: var(--os-surface-1);
+  width: 100%;
+  text-align: left;
+}
+.bdoc__peek-close-current:hover { background: var(--os-line); color: var(--os-ink); }
+.bdoc__peek-close-current svg { width: 12px; height: 12px; }
+
+/* Scoped under .workwrk-os so this wins the cascade against the global
+   `.workwrk-os input { font-size: inherit }` reset (which has higher
+   specificity than a bare `.bdoc__title`). Without this the title input
+   shrinks to the inherited body size. */
+.workwrk-os .bdoc__title {
   width: 100%;
   font-size: 44px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--os-ink);
   border: none; outline: none; background: transparent;
-  padding: 4px 0 8px;
-  margin: 0 0 6px;
+  padding: 2px 0 6px;
+  margin: 0;
   letter-spacing: -0.025em;
   line-height: 1.15;
   font-family: inherit;
@@ -16728,6 +17338,102 @@ table.os-tbl {
 .docs__new:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(0,0,0,.10); }
 .docs__new:disabled { opacity: 0.6; cursor: wait; }
 .docs__new svg { width: 14px; height: 14px; }
+
+/* Split-button group: primary "New note" + caret that opens templates */
+.docs__newgroup {
+  display: inline-flex;
+  align-items: stretch;
+  margin-left: auto;
+  border-radius: 9px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.06);
+  overflow: hidden;
+}
+.docs__newgroup .docs__new {
+  border-radius: 9px 0 0 9px;
+  margin-left: 0;
+  box-shadow: none;
+}
+.docs__new-alt {
+  display: inline-grid; place-items: center;
+  width: 36px; padding: 0;
+  background: var(--os-ink); color: white;
+  border: none; border-radius: 0 9px 9px 0; cursor: pointer;
+  border-left: 1px solid rgba(255,255,255,0.18);
+  transition: filter 120ms;
+}
+.docs__new-alt:hover:not(:disabled) { filter: brightness(1.08); }
+.docs__new-alt:disabled { opacity: 0.6; cursor: wait; }
+.docs__new-alt svg { width: 14px; height: 14px; }
+
+/* Library-style filter tabs */
+.docs__tabs { display: flex; align-items: center; gap: 4px; padding: 10px 28px 0; max-width: 1280px; margin: 0 auto; }
+.docs__tabs button {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: var(--os-ink-3);
+  background: transparent; border: none; transition: all 120ms;
+}
+.docs__tabs button:hover { background: var(--os-surface-1); color: var(--os-ink); }
+.docs__tabs button.is-on { background: var(--os-surface-2); color: var(--os-ink); font-weight: 600; }
+.docs__tabs svg { width: 14px; height: 14px; }
+
+/* Cards / List view toggle */
+.docs__viewtoggle { display: inline-flex; gap: 2px; margin-left: auto; padding: 3px; border-radius: 9px; background: var(--os-surface-1); border: 1px solid var(--os-line); }
+.docs__viewtoggle button { display: grid; place-items: center; width: 30px; height: 28px; border-radius: 6px; background: transparent; border: none; cursor: pointer; color: var(--os-ink-3); transition: all 120ms; }
+.docs__viewtoggle button:hover { color: var(--os-ink); }
+.docs__viewtoggle button.is-on { background: var(--os-canvas); color: var(--os-ink); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.docs__viewtoggle svg { width: 15px; height: 15px; }
+/* When the list toggle is present, the New-note group no longer needs auto. */
+.docs__viewtoggle + .docs__newgroup .docs__new { margin-left: 0; }
+
+/* ─── Library list/table view ─── */
+.docs-tbl { max-width: 1280px; margin: 0 auto; padding: 12px 28px 80px; }
+.docs-tbl__head { display: grid; grid-template-columns: 1fr 160px 150px 150px 36px; gap: 10px; padding: 0 10px 8px; border-bottom: 1px solid var(--os-line); }
+.docs-tbl__h { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: none; cursor: pointer; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--os-ink-3); text-align: left; padding: 0; }
+.docs-tbl__h:hover { color: var(--os-ink); }
+.docs-tbl__h svg { width: 12px; height: 12px; }
+.docs-tbl__h--act { cursor: default; }
+.docs-tbl__row { display: grid; grid-template-columns: 1fr 160px 150px 150px 36px; gap: 10px; align-items: center; padding: 9px 10px; border-bottom: 1px solid color-mix(in srgb, var(--os-line) 60%, transparent); cursor: pointer; border-radius: 8px; }
+.docs-tbl__row:hover { background: var(--os-surface-1); }
+.docs-tbl__name { display: flex; align-items: center; gap: 9px; min-width: 0; font-size: 14px; color: var(--os-ink); }
+.docs-tbl__name svg { width: 15px; height: 15px; color: var(--os-ink-3); flex: 0 0 15px; }
+.docs-tbl__name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docs-tbl__by { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; color: var(--os-ink-2); }
+.docs-tbl__by--empty { color: var(--os-ink-4); }
+.docs-tbl__by-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docs-tbl__avatar { width: 20px; height: 20px; border-radius: 50%; flex: 0 0 20px; object-fit: cover; }
+.docs-tbl__avatar--i { display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #fff; background: var(--os-brand); }
+.docs-tbl__src { font-size: 12.5px; color: var(--os-ink-3); text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docs-tbl__date { font-size: 12.5px; color: var(--os-ink-3); }
+.docs-tbl__more { opacity: 0; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; background: transparent; border: none; cursor: pointer; color: var(--os-ink-3); justify-self: end; }
+.docs-tbl__row:hover .docs-tbl__more { opacity: 1; }
+.docs-tbl__more:hover { background: var(--os-surface-2); color: var(--os-ink); }
+.docs-tbl__more svg { width: 16px; height: 16px; }
+.docs-tbl__tw {
+  width: 16px; height: 16px; flex: 0 0 16px; display: grid; place-items: center;
+  border: none; background: transparent; cursor: pointer; color: var(--os-ink-3);
+  border-radius: 4px; padding: 0; margin-right: -2px;
+}
+.docs-tbl__tw:hover { background: var(--os-surface-2); color: var(--os-ink); }
+.docs-tbl__tw.is-empty { cursor: default; pointer-events: none; }
+.docs-tbl__tw svg { width: 13px; height: 13px; }
+@media (max-width: 980px) {
+  .docs-tbl__head, .docs-tbl__row { grid-template-columns: 1fr 150px 150px 36px; }
+  .docs-tbl__by, .docs-tbl__h--by { display: none; }
+}
+@media (max-width: 720px) {
+  .docs-tbl__head, .docs-tbl__row { grid-template-columns: 1fr 110px 36px; }
+  .docs-tbl__src, .docs-tbl__h--src { display: none; }
+}
+
+/* Dual CTAs under the empty state — Blank note (primary) + Pick a template (ghost) */
+.docs__empty-ctas { display: inline-flex; gap: 10px; margin-top: -16px; }
+.docs__empty-cta--alt {
+  background: transparent !important;
+  color: var(--os-ink-2) !important;
+  border: 1px solid var(--os-line) !important;
+}
+.docs__empty-cta--alt:hover { background: var(--os-surface-1) !important; color: var(--os-ink) !important; }
 .docs__spin { width: 14px; height: 14px; animation: spin 1s linear infinite; }
 .docs__loading { padding: 60px 24px; text-align: center; color: var(--os-ink-3); font-size: 13px; }
 .docs { padding: 8px 28px 80px; max-width: 1280px; margin: 0 auto; }
@@ -31892,7 +32598,7 @@ a.prfh__contact:hover { color: var(--os-brand); }
 /* Doc page — cover + emoji + chrome */
 .bdoc__head-actions { display: inline-flex; align-items: center; gap: 6px; }
 .bdoc__cover {
-  position: relative; width: 100%; height: 200px;
+  position: relative; width: 100%; height: 270px;
   background-color: var(--os-surface-1);
   margin-bottom: 0; overflow: hidden;
 }
@@ -31911,20 +32617,37 @@ a.prfh__contact:hover { color: var(--os-brand); }
   display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
   position: relative;
 }
-.bdoc__emoji {
-  width: 56px; height: 56px; border-radius: 12px;
-  background: var(--os-surface-1); border: 1px solid transparent;
-  display: grid; place-items: center; font-size: 36px; cursor: pointer;
-  transition: all 120ms;
+/* Scoped under .workwrk-os to beat `.workwrk-os button { font-size: inherit }`
+   — the emoji glyph is a font-size-driven <span>, so without the extra
+   specificity it inherits the tiny body size. */
+.workwrk-os .bdoc__emoji {
+  width: 78px; height: 78px; border-radius: 14px;
+  background: transparent; border: 1px solid transparent;
+  display: grid; place-items: center; font-size: 64px; line-height: 1; cursor: pointer;
+  padding: 0;
+  transition: background 120ms;
 }
-.bdoc__emoji:hover { background: var(--os-surface); border-color: var(--os-line); }
-.bdoc__add-emoji, .bdoc__add-cover {
-  display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px;
-  font-size: 11.5px; color: var(--os-ink-3); background: transparent;
+.workwrk-os .bdoc__emoji:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+.workwrk-os .bdoc__emoji svg { width: 58px; height: 58px; }
+.workwrk-os .bdoc__emoji > span { font-size: inherit; line-height: 1; }
+/* Notion-style: the big icon overlaps the bottom of the cover image
+   (~half of the 78px icon sits over the cover). */
+.bdoc__page.has-cover .bdoc__chrome { margin-top: -46px; }
+/* Placeholder add-buttons (Add icon / Add cover / Add comment) are
+   hover-revealed, Notion-style — invisible at rest, fade in when the writer
+   hovers the page header area. The actual set icon (.bdoc__emoji) stays. */
+.bdoc__add-emoji, .bdoc__add-cover, .bdoc__add-comment {
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px;
+  font-size: 12.5px; color: var(--os-ink-3); background: transparent;
   border: 1px dashed transparent; border-radius: 6px; cursor: pointer;
+  opacity: 0; pointer-events: none;
+  transition: opacity 150ms ease, color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
-.bdoc__add-emoji:hover, .bdoc__add-cover:hover { color: var(--os-brand); border-color: var(--os-brand); background: var(--os-brand-soft); }
-.bdoc__add-emoji svg, .bdoc__add-cover svg { width: 12px; height: 12px; }
+.bdoc__page:hover .bdoc__add-emoji,
+.bdoc__page:hover .bdoc__add-cover,
+.bdoc__page:hover .bdoc__add-comment { opacity: 1; pointer-events: auto; }
+.bdoc__add-emoji:hover, .bdoc__add-cover:hover, .bdoc__add-comment:hover { color: var(--os-brand); border-color: var(--os-brand); background: var(--os-brand-soft); }
+.bdoc__add-emoji svg, .bdoc__add-cover svg, .bdoc__add-comment svg { width: 13px; height: 13px; }
 
 /* Emoji picker popover */
 .bdoc__emoji-pop, .bdoc__cover-pop {
@@ -31979,17 +32702,226 @@ a.prfh__contact:hover { color: var(--os-brand); }
 }
 .bdoc__cover-url button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ═══ Note icon button content (emoji / image / lucide) ═══ */
+/* Big Notion-style page icon — must match the 64px in the .bdoc__emoji block
+   above (this rule wins by cascade order, so keep them in sync). */
+.bdoc__emoji svg { width: 64px; height: 64px; }
+.note-icon-img { width: 100%; height: 100%; object-fit: cover; border-radius: 14px; display: block; }
+
+/* ═══ Notion-style icon picker (NoteIconPicker) ═══ */
+.nipick {
+  width: 380px; max-width: calc(100vw - 32px);
+  margin: 6px 0 14px;
+  background: var(--os-canvas);
+  border: 1px solid var(--os-line);
+  border-radius: 12px;
+  box-shadow: var(--os-shadow-pop);
+  overflow: hidden; display: flex; flex-direction: column;
+}
+:root.dark .nipick { background: #1d2026; border-color: rgba(255,255,255,0.08); }
+.nipick__tabs {
+  display: flex; align-items: center; gap: 2px;
+  padding: 8px 10px 0; border-bottom: 1px solid var(--os-line);
+}
+:root.dark .nipick__tabs { border-bottom-color: rgba(255,255,255,0.07); }
+.nipick__tabs button {
+  appearance: none; background: transparent; border: none; cursor: pointer;
+  font-size: 13px; color: inherit; opacity: 0.6;
+  padding: 6px 8px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.nipick__tabs button:hover { opacity: 0.9; }
+.nipick__tabs button.is-on { opacity: 1; font-weight: 600; border-bottom-color: var(--os-brand); }
+.nipick__remove { margin-left: auto; opacity: 0.55 !important; }
+.nipick__remove:hover { color: #e5484d; opacity: 1 !important; }
+.nipick__toolbar { display: flex; gap: 8px; padding: 10px; }
+.nipick__search {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 8px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+.nipick__search svg { width: 15px; height: 15px; opacity: 0.5; }
+.nipick__search input { flex: 1; background: transparent; border: none; outline: none; font-size: 13.5px; color: inherit; }
+.nipick__shuffle {
+  display: grid; place-items: center; width: 34px; flex: 0 0 34px;
+  border-radius: 8px; cursor: pointer; color: inherit; border: none;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+.nipick__shuffle:hover { background: color-mix(in srgb, var(--os-brand) 18%, transparent); color: var(--os-brand); }
+.nipick__shuffle svg { width: 16px; height: 16px; }
+.nipick__scroll { max-height: 300px; overflow-y: auto; padding: 0 10px 10px; }
+.nipick__section { margin-top: 4px; }
+.nipick__section-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; opacity: 0.5;
+  padding: 6px 2px 4px; position: sticky; top: 0; z-index: 1;
+  background: var(--os-canvas);
+}
+:root.dark .nipick__section-label { background: #1d2026; }
+.nipick__section-label svg { width: 12px; height: 12px; }
+.nipick__grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 1px; }
+.nipick__grid--icons { grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.nipick__cell {
+  aspect-ratio: 1; display: grid; place-items: center;
+  font-size: 21px; line-height: 1; border-radius: 6px;
+  background: transparent; border: none; cursor: pointer; color: inherit;
+  transition: background 80ms ease, transform 80ms ease;
+}
+.nipick__cell:hover { background: color-mix(in srgb, currentColor 10%, transparent); transform: scale(1.08); }
+.nipick__cell.is-on { background: color-mix(in srgb, var(--os-brand) 20%, transparent); }
+.nipick__cell--icon svg { width: 19px; height: 19px; }
+.nipick__empty { padding: 24px 10px; text-align: center; opacity: 0.5; font-size: 13px; }
+.nipick__catbar { display: flex; gap: 2px; padding: 6px 8px; border-top: 1px solid var(--os-line); }
+:root.dark .nipick__catbar { border-top-color: rgba(255,255,255,0.07); }
+.nipick__catbar button {
+  flex: 1; display: grid; place-items: center; height: 28px;
+  border-radius: 6px; background: transparent; border: none; cursor: pointer;
+  color: inherit; opacity: 0.5;
+}
+.nipick__catbar button:hover { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
+.nipick__catbar svg { width: 16px; height: 16px; }
+.nipick__upload-wrap { padding: 16px; }
+.nipick__upload {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 28px; border-radius: 10px; cursor: pointer; font-size: 13px; opacity: 0.85;
+  border: 1.5px dashed color-mix(in srgb, currentColor 25%, transparent);
+  transition: all 120ms ease;
+}
+.nipick__upload:hover { opacity: 1; border-color: var(--os-brand); color: var(--os-brand); }
+.nipick__upload svg { width: 18px; height: 18px; }
+.nipick__upload-hint { font-size: 11.5px; opacity: 0.5; text-align: center; margin: 10px 0 0; }
+.nipick__spin { animation: spin 1s linear infinite; width: 16px; height: 16px; }
+
+/* ═══ Cover picker: image gallery + dark surface ═══ */
+:root.dark .bdoc__cover-pop, :root.dark .bdoc__emoji-pop { background: #1d2026; border-color: rgba(255,255,255,0.08); }
+:root.dark .bdoc__cover-url input { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); }
+.bdoc__cover-sec { font-size: 11px; font-weight: 600; opacity: 0.5; margin: 12px 0 6px; }
+.bdoc__cover-sec:first-of-type { margin-top: 4px; }
+.bdoc__cover-grid--img { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.bdoc__cover-cell--img {
+  height: 56px; padding: 0; overflow: hidden; border-radius: 8px;
+  border: 2px solid transparent; background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.bdoc__cover-cell--img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bdoc__cover-cell--img.is-current { border-color: var(--os-brand); }
+
+/* ═══ Page-level comments ("Add a comment" under title) ═══ */
+.bdoc__pcmts { margin: 4px 0 14px; }
+.bdoc__pcmts-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.bdoc__pcmt { display: flex; gap: 10px; }
+.bdoc__pcmt-av {
+  width: 26px; height: 26px; border-radius: 50%; flex: 0 0 26px; object-fit: cover;
+  display: grid; place-items: center; font-size: 10.5px; font-weight: 700;
+}
+.bdoc__pcmt-av--i { background: color-mix(in srgb, var(--os-brand) 22%, transparent); color: var(--os-brand); }
+.bdoc__pcmt-body { flex: 1; min-width: 0; }
+.bdoc__pcmt-meta { display: flex; align-items: center; gap: 8px; }
+.bdoc__pcmt-name { font-size: 13px; font-weight: 600; }
+.bdoc__pcmt-time { font-size: 11.5px; opacity: 0.5; }
+.bdoc__pcmt-del { margin-left: auto; background: transparent; border: none; cursor: pointer; color: inherit; opacity: 0; padding: 2px; border-radius: 4px; }
+.bdoc__pcmt:hover .bdoc__pcmt-del { opacity: 0.5; }
+.bdoc__pcmt-del:hover { opacity: 1 !important; color: #e5484d; }
+.bdoc__pcmt-del svg { width: 13px; height: 13px; }
+.bdoc__pcmt-text { font-size: 14px; line-height: 1.5; margin-top: 2px; word-break: break-word; }
+.bdoc__pcmt-text a { color: var(--os-brand); }
+.bdoc__pcmt-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.bdoc__pcmt-imgs img { max-width: 220px; max-height: 160px; border-radius: 8px; display: block; }
+.bdoc__pcmts-compose {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px; border-radius: 10px; border: 1px solid var(--os-line);
+}
+:root.dark .bdoc__pcmts-compose { border-color: rgba(255,255,255,0.1); }
+.bdoc__pcmts-compose:focus-within { border-color: color-mix(in srgb, var(--os-brand) 50%, var(--os-line)); }
+.bdoc__pcmts-input {
+  flex: 1; resize: none; border: none; outline: none; background: transparent;
+  font-size: 14px; line-height: 1.4; color: inherit; max-height: 120px; padding: 4px 2px;
+}
+.bdoc__pcmts-actions { display: flex; align-items: center; gap: 2px; }
+.bdoc__pcmts-actions button {
+  display: grid; place-items: center; width: 28px; height: 28px;
+  border-radius: 6px; background: transparent; border: none; cursor: pointer; color: inherit; opacity: 0.55;
+}
+.bdoc__pcmts-actions button:hover:not(:disabled) { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
+.bdoc__pcmts-actions button:disabled { opacity: 0.3; cursor: default; }
+.bdoc__pcmts-actions svg { width: 16px; height: 16px; }
+.bdoc__pcmts-send { color: #fff !important; background: var(--os-brand) !important; opacity: 1 !important; }
+.bdoc__pcmts-send:hover:not(:disabled) { background: var(--os-brand-hover, var(--os-brand)) !important; }
+.bdoc__pcmts-send:disabled { background: color-mix(in srgb, currentColor 15%, transparent) !important; opacity: 0.4 !important; }
+
+/* ═══ Note context menu (right-click / "…") — portaled to <body> ═══
+   Body sits outside .workwrk-os so --os-* tokens don't resolve here; use
+   explicit light values + a :root.dark override. */
+.noteacts {
+  position: fixed; z-index: 10000;
+  min-width: 220px; padding: 5px;
+  background: #ffffff; color: #2f3338;
+  border: 1px solid #e6e9ef; border-radius: 11px;
+  box-shadow: 0 14px 38px rgba(0,0,0,0.16), 0 0 0 0.5px rgba(0,0,0,0.04);
+  font-size: 13.5px;
+}
+:root.dark .noteacts { background: #1f2228; color: #e5e7eb; border-color: rgba(255,255,255,0.1); box-shadow: 0 16px 40px rgba(0,0,0,0.55); }
+.noteacts__title {
+  padding: 5px 9px 6px; font-size: 11.5px; font-weight: 600; opacity: 0.5;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.noteacts__item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 9px; border-radius: 7px; cursor: pointer;
+  background: transparent; border: none; color: inherit; text-align: left;
+  font-size: 13.5px; line-height: 1.2;
+}
+.noteacts__item:hover { background: color-mix(in srgb, currentColor 9%, transparent); }
+.noteacts__item svg { width: 15px; height: 15px; opacity: 0.75; flex: 0 0 15px; }
+.noteacts__item svg.is-on { color: #f5b301; opacity: 1; fill: #f5b301; }
+.noteacts__item--danger { color: #e5484d; }
+.noteacts__item--danger svg { opacity: 0.9; }
+.noteacts__item--danger:hover { background: color-mix(in srgb, #e5484d 12%, transparent); }
+.noteacts__sep { height: 1px; margin: 5px 6px; background: color-mix(in srgb, currentColor 12%, transparent); }
+.noteacts__rename { padding: 4px; }
+.noteacts__rename input {
+  width: 100%; padding: 7px 9px; font-size: 13.5px; color: inherit;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  border: 1px solid color-mix(in srgb, #0073EA 50%, transparent);
+  border-radius: 7px; outline: none;
+}
+
+/* "…" actions button on /docs cards */
+.doc-card { position: relative; }
+.doc-card__more {
+  margin-left: auto; display: grid; place-items: center;
+  width: 26px; height: 26px; border-radius: 7px;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--os-ink-3); opacity: 0; transition: opacity 120ms ease, background 120ms ease;
+}
+.doc-card:hover .doc-card__more { opacity: 1; }
+.doc-card__more:hover { background: var(--os-surface-2); color: var(--os-ink); }
+.doc-card__more svg { width: 16px; height: 16px; }
+
 /* Notes templates dialog */
 .notes-tdlg {
-  position: fixed; inset: 0; background: rgba(15,18,28,0.55);
-  display: grid; place-items: center; z-index: 1000; padding: 24px;
-  backdrop-filter: blur(2px);
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 28, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 9999;
+  padding: 24px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: notesTdlgIn 140ms ease-out;
 }
+@keyframes notesTdlgIn { from { opacity: 0; } to { opacity: 1; } }
 .notes-tdlg__panel {
-  width: min(820px, 100%); max-height: 80vh; overflow-y: auto;
-  background: var(--os-surface); border-radius: 16px;
-  box-shadow: 0 24px 64px rgba(0,0,0,0.25); padding: 22px;
+  width: min(820px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  padding: 22px;
+  position: relative;
+  z-index: 1;
 }
+:root.dark .notes-tdlg__panel { background: #1a1d23; }
 .notes-tdlg__head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 20px; }
 .notes-tdlg__head > svg { width: 24px; height: 24px; color: var(--os-c-purple); margin-top: 4px; }
 .notes-tdlg__head h2 { font-size: 18px; font-weight: 800; color: var(--os-ink); margin: 0; }
@@ -32056,6 +32988,178 @@ a.prfh__contact:hover { color: var(--os-brand); }
  * at first glance. */
 .brow__handle--comment { opacity: 0.7; }
 .brow__handle--comment.is-on { opacity: 1; }
+
+/* ─── Link prompt (styled replacement for window.prompt) ─── */
+.lnkpr {
+  position: fixed; inset: 0;
+  background: rgba(15, 18, 28, 0.55);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  display: grid; place-items: center;
+  z-index: 10000; padding: 24px;
+  animation: notesTdlgIn 140ms ease-out;
+}
+.lnkpr__panel {
+  width: min(440px, 100%);
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  padding: 16px 18px 14px;
+}
+:root.dark .lnkpr__panel { background: #1f232b; color: #e5e7eb; }
+.lnkpr__head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--os-ink-3);
+  margin-bottom: 10px;
+}
+.lnkpr__head svg { width: 14px; height: 14px; color: var(--os-brand); }
+.lnkpr__head span { flex: 1; color: var(--os-ink); text-transform: none; letter-spacing: 0; font-weight: 700; font-size: 14px; }
+.lnkpr__x {
+  margin-left: auto; width: 26px; height: 26px;
+  display: grid; place-items: center;
+  background: transparent; color: var(--os-ink-3);
+  border: none; border-radius: 6px; cursor: pointer;
+}
+.lnkpr__x:hover { background: var(--os-surface-1); color: var(--os-ink); }
+.lnkpr__x svg { width: 13px; height: 13px; }
+.lnkpr__form { display: flex; gap: 8px; }
+.lnkpr__form input {
+  flex: 1; padding: 9px 12px; font-size: 14px;
+  border: 1px solid var(--os-line); border-radius: 8px;
+  background: var(--os-surface-1); color: var(--os-ink);
+  font-family: inherit; outline: none;
+}
+.lnkpr__form input:focus { border-color: var(--os-brand); }
+.lnkpr__form button {
+  padding: 9px 16px; font-size: 13px; font-weight: 600;
+  background: var(--os-brand); color: white;
+  border: none; border-radius: 8px; cursor: pointer;
+}
+.lnkpr__form button:hover { background: var(--os-brand-hover); }
+.lnkpr__hint { margin: 8px 2px 0; font-size: 11px; color: var(--os-ink-3); }
+
+/* ─── Dark-mode polish for the editor surfaces ─── */
+:root.dark .bdoc__title { color: #f1f4f8; }
+:root.dark .bdoc__title::placeholder { color: rgba(255,255,255,0.35); }
+:root.dark .brow__text { color: #e5e7eb; }
+:root.dark .brow__text-ph { color: rgba(255,255,255,0.42); }
+:root.dark .brow__text code {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c4b5fd;
+  border-color: rgba(168, 85, 247, 0.3);
+}
+:root.dark .brow__text a { color: #60a5fa; }
+:root.dark .brow__text .bmen-inline--user  { background: rgba(99,102,241,0.18); color: #a5b4fc; }
+:root.dark .brow__text .bmen-inline--task  { background: rgba(37,99,235,0.18);  color: #93c5fd; }
+:root.dark .brow__text .bmen-inline--board { background: rgba(168,85,247,0.18); color: #d8b4fe; }
+:root.dark .brow__text .bmen-inline--sop   { background: rgba(20,184,166,0.18); color: #5eead4; }
+:root.dark .brow__text .bmen-inline--kra   { background: rgba(245,158,11,0.18); color: #fcd34d; }
+:root.dark .brow__text .bmen-inline--space { background: rgba(236,72,153,0.18); color: #f9a8d4; }
+
+/* ColorMenu button is-active state — matches the rest of the toolbar */
+.bfmt__cmenu button.is-active { background: var(--os-brand); color: white; }
+.bfmt__cmenu button.is-active svg { color: white; }
+
+/* ─── Image lightbox ─── */
+.imglb {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: grid; place-items: center;
+  z-index: 10000; padding: 24px;
+  animation: imglbIn 140ms ease-out;
+  cursor: zoom-out;
+}
+@keyframes imglbIn { from { opacity: 0; } to { opacity: 1; } }
+.imglb__img {
+  max-width: 100%;
+  max-height: calc(100vh - 80px);
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  cursor: default;
+}
+.imglb__x {
+  position: absolute; top: 18px; right: 18px;
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  border: none; border-radius: 8px; cursor: pointer;
+  transition: background 100ms;
+}
+.imglb__x:hover { background: rgba(255, 255, 255, 0.22); }
+.imglb__x svg { width: 16px; height: 16px; }
+.imglb__alt {
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.7); font-size: 12.5px;
+  background: rgba(0, 0, 0, 0.4); padding: 6px 12px; border-radius: 6px;
+  max-width: 80%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Image blocks get a zoom cursor to advertise the lightbox */
+.brow__image img { cursor: zoom-in; transition: filter 100ms; }
+.brow__image img:hover { filter: brightness(1.04); }
+
+/* ─── Keyboard shortcuts cheat-sheet ─── */
+.kbsc {
+  position: fixed; inset: 0;
+  background: rgba(15, 18, 28, 0.7);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  display: grid; place-items: center;
+  z-index: 9999; padding: 24px;
+  animation: notesTdlgIn 140ms ease-out;
+}
+.kbsc__panel {
+  width: min(880px, 100%); max-height: 86vh; overflow-y: auto;
+  background: #ffffff; color: var(--os-ink);
+  border-radius: 16px; padding: 22px 24px 24px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+}
+:root.dark .kbsc__panel { background: #1a1d23; }
+.kbsc__head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+.kbsc__head > svg { width: 22px; height: 22px; color: var(--os-c-purple); margin-top: 4px; }
+.kbsc__head h2 { font-size: 18px; font-weight: 800; margin: 0; }
+.kbsc__head p { font-size: 12px; color: var(--os-ink-3); margin: 4px 0 0; }
+.kbsc__head p kbd { font-size: 11px; padding: 1px 5px; }
+.kbsc__x {
+  margin-left: auto; width: 30px; height: 30px;
+  display: grid; place-items: center; border-radius: 7px;
+  background: transparent; color: var(--os-ink-3); border: none; cursor: pointer;
+}
+.kbsc__x:hover { background: var(--os-surface-1); color: var(--os-ink); }
+.kbsc__x svg { width: 14px; height: 14px; }
+.kbsc__grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px;
+}
+.kbsc__group h3 {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--os-ink-3);
+  margin: 0 0 8px;
+}
+.kbsc__group ul { list-style: none; padding: 0; margin: 0; }
+.kbsc__group li {
+  display: flex; align-items: center;
+  padding: 6px 0; gap: 12px;
+  border-bottom: 1px dashed var(--os-line);
+}
+.kbsc__group li:last-child { border-bottom: none; }
+.kbsc__keys { display: inline-flex; align-items: center; gap: 0; min-width: 110px; flex-shrink: 0; }
+.kbsc__keys kbd {
+  display: inline-block;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-family: ui-monospace, SF Mono, Consolas, monospace;
+  font-size: 11.5px; font-weight: 600;
+  color: var(--os-ink);
+  white-space: nowrap;
+}
+.kbsc__plus { display: inline-block; padding: 0 4px; color: var(--os-ink-3); font-size: 10px; }
+.kbsc__desc { font-size: 13px; color: var(--os-ink-2); }
+
+@media (max-width: 640px) {
+  .kbsc__grid { grid-template-columns: 1fr; }
+}
 
 /* ─── Edit-conflict banner on docs ─── */
 .bdoc__conflict {
@@ -32134,31 +33238,38 @@ a.prfh__contact:hover { color: var(--os-brand); }
 
 /* ─── Compact icon-only doc header + More dropdown ─── */
 .bdoc__head { padding: 10px 20px; }
-.bdoc__head-actions { display: inline-flex; align-items: center; gap: 2px; }
+/* Cohesive segmented pill — reads as one control group, not loose icons.
+   Tints are currentColor-based so it adapts to the light/dark header. */
+.bdoc__head-actions {
+  display: inline-flex; align-items: center; gap: 1px;
+  padding: 3px; border-radius: 10px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 9%, transparent);
+}
 .bdoc__iact {
   display: inline-grid; place-items: center;
-  width: 32px; height: 32px;
+  width: 30px; height: 30px;
   border-radius: 7px;
   background: transparent; color: var(--os-ink-2);
   border: none; cursor: pointer;
   transition: background 100ms, color 100ms;
   position: relative;
 }
-.bdoc__iact:hover { background: var(--os-surface-1); color: var(--os-ink); }
-.bdoc__iact:active { background: var(--os-surface); }
+.bdoc__iact:hover { background: color-mix(in srgb, currentColor 12%, transparent); color: var(--os-ink); }
+.bdoc__iact:active { background: color-mix(in srgb, currentColor 18%, transparent); }
 .bdoc__iact.is-on {
-  background: var(--os-brand-soft); color: var(--os-brand);
+  background: color-mix(in srgb, var(--os-brand) 20%, transparent); color: var(--os-brand);
 }
 .bdoc__iact[aria-label="Favorite"].is-on {
-  background: color-mix(in srgb, #f59e0b 14%, transparent);
-  color: #b45309;
+  background: color-mix(in srgb, #f59e0b 18%, transparent);
+  color: #f59e0b;
 }
 .bdoc__iact[aria-label="Favorite"].is-on svg { fill: currentColor; }
 .bdoc__iact svg { width: 15px; height: 15px; }
 .bdoc__iact:disabled { opacity: 0.5; cursor: progress; }
 .bdoc__iact-sep {
-  display: inline-block; width: 1px; height: 18px;
-  background: var(--os-line); margin: 0 4px;
+  display: inline-block; width: 1px; height: 16px;
+  background: color-mix(in srgb, currentColor 14%, transparent); margin: 0 3px;
 }
 
 .bdoc__more { position: relative; }
@@ -32181,14 +33292,171 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .bdoc__more-menu button:disabled { opacity: 0.6; cursor: progress; }
 .bdoc__more-menu button svg { width: 14px; height: 14px; color: var(--os-ink-3); flex-shrink: 0; }
 
-/* Outline rail empty state — readable, not cramped */
-.bdoc__outline { width: 220px; padding: 10px; }
-.bdoc__outline-empty {
-  padding: 10px 6px; font-size: 11.5px; color: var(--os-ink-3);
-  font-style: italic; text-align: left; line-height: 1.45;
+/* ─────────── Page actions menu (Notion-style "…") ─────────── */
+.bdoc-pam {
+  width: 300px; min-width: 300px; padding: 0;
+  gap: 0; overflow: hidden;
+  border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.18);
 }
-@media (max-width: 1400px) { .bdoc__outline { width: 200px; right: 16px; } }
-@media (max-width: 1200px) { .bdoc__outline { display: none; } }
+/* Search */
+.bdoc-pam__search {
+  display: flex; align-items: center; gap: 8px;
+  margin: 8px; padding: 7px 10px;
+  border: 1px solid var(--os-line); border-radius: 8px;
+  background: var(--os-surface-1);
+}
+.bdoc-pam__search svg { width: 15px; height: 15px; color: var(--os-ink-3); flex-shrink: 0; }
+.bdoc-pam__search input {
+  flex: 1; min-width: 0; border: none; background: transparent;
+  font-size: 13px; color: var(--os-ink); outline: none; padding: 0;
+}
+.bdoc-pam__search input::placeholder { color: var(--os-ink-3); }
+/* Scroll body */
+.bdoc-pam__scroll { max-height: min(62vh, 560px); overflow-y: auto; padding: 2px 6px 4px; }
+.bdoc-pam__grp { display: flex; flex-direction: column; gap: 1px; padding: 4px 0; }
+.bdoc-pam__grp + .bdoc-pam__grp { border-top: 1px solid var(--os-line); }
+/* Rows */
+.bdoc-pam__row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 7px 8px; border-radius: 7px;
+  background: transparent; border: none; cursor: pointer;
+  text-align: left; font-size: 13.5px; font-weight: 500; color: var(--os-ink);
+}
+.bdoc-pam__row:hover { background: var(--os-surface-1); }
+.bdoc-pam__row:disabled { opacity: 0.55; cursor: progress; }
+.bdoc-pam__ico { display: inline-flex; width: 18px; justify-content: center; flex-shrink: 0; }
+.bdoc-pam__ico svg { width: 16px; height: 16px; color: var(--os-ink-2); }
+.bdoc-pam__lbl { flex: 1; min-width: 0; }
+.bdoc-pam__kbd {
+  font-size: 11.5px; color: var(--os-ink-3); letter-spacing: 0.02em;
+  font-weight: 500; flex-shrink: 0;
+}
+.bdoc-pam__row.is-danger { color: #dc2626; }
+.bdoc-pam__row.is-danger:hover { background: color-mix(in srgb, #dc2626 10%, transparent); }
+.bdoc-pam__row.is-danger .bdoc-pam__ico svg { color: #dc2626; }
+.bdoc-pam__chev { width: 15px !important; height: 15px !important; color: var(--os-ink-3); transition: transform 0.12s ease; }
+.bdoc-pam__chev.is-open { transform: rotate(90deg); }
+/* Switch */
+.bdoc-pam__sw {
+  width: 30px; height: 18px; border-radius: 999px;
+  background: var(--os-line); flex-shrink: 0; position: relative;
+  transition: background 0.14s ease;
+}
+.bdoc-pam__sw span {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  transition: transform 0.14s ease;
+}
+.bdoc-pam__sw.is-on { background: var(--os-accent, #2563eb); }
+.bdoc-pam__sw.is-on span { transform: translateX(12px); }
+/* Font picker */
+.bdoc-pam__fonts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 6px 2px 8px; }
+.bdoc-pam__font {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 4px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid transparent; color: var(--os-ink-2);
+}
+.bdoc-pam__font:hover { background: var(--os-surface-1); }
+.bdoc-pam__font.is-active { border-color: var(--os-accent, #2563eb); color: var(--os-ink); }
+.bdoc-pam__font-ag { font-size: 22px; line-height: 1; }
+.bdoc-pam__font.is-default .bdoc-pam__font-ag { font-family: var(--os-font, inherit); }
+.bdoc-pam__font.is-serif .bdoc-pam__font-ag { font-family: Georgia, "Times New Roman", serif; }
+.bdoc-pam__font.is-mono .bdoc-pam__font-ag { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.bdoc-pam__font.is-active .bdoc-pam__font-ag { color: var(--os-accent, #2563eb); }
+.bdoc-pam__font-lbl { font-size: 11px; font-weight: 600; }
+/* Footer */
+.bdoc-pam__foot {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 10px 14px; border-top: 1px solid var(--os-line);
+  background: var(--os-surface-1);
+  font-size: 11.5px; color: var(--os-ink-3);
+}
+.bdoc-pam__foot-line { font-size: 11px; }
+:root.dark .bdoc-pam { box-shadow: 0 16px 48px rgba(0,0,0,0.5); }
+:root.dark .bdoc-pam__sw span { background: #e8eaed; }
+
+/* ─────────── Page preferences (font / width / text / lock) ─────────── */
+/* Center the writing column by default; Full width removes the cap. */
+.bdoc__page { max-width: 920px; margin: 0 auto; }
+.bdoc--full-width .bdoc__page { max-width: none; }
+/* Font family applies to title + the BlockNote body. */
+.bdoc--font-serif .bdoc__title,
+.bdoc--font-serif .bdoc-bn .bn-editor { font-family: Georgia, "Times New Roman", serif; }
+.bdoc--font-mono .bdoc__title,
+.bdoc--font-mono .bdoc-bn .bn-editor { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+/* Small text shrinks the body copy (title stays prominent). */
+.bdoc--small-text .bdoc-bn .bn-editor { font-size: 14.5px; }
+/* Locked page: a subtle banner cue + non-editable canvas (set via readonly). */
+.bdoc--locked .bdoc__chrome { opacity: 0.92; }
+
+/* ─────────── Open-note tabs (DocTabsBar) ─────────── */
+.doctabs {
+  position: sticky; top: 0; z-index: 45;
+  display: flex; align-items: stretch; gap: 2px;
+  height: 40px; padding: 0 6px;
+  background: var(--os-surface-1);
+  border-bottom: 1px solid var(--os-line);
+  backdrop-filter: saturate(1.1) blur(6px);
+}
+.doctabs__scroll {
+  display: flex; align-items: stretch; gap: 2px;
+  flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+}
+.doctabs__scroll::-webkit-scrollbar { display: none; }
+.doctabs__tab {
+  display: flex; align-items: center; gap: 7px;
+  max-width: 220px; min-width: 96px; padding: 0 8px 0 11px;
+  border: none; border-radius: 8px 8px 0 0;
+  background: transparent; color: var(--os-ink-2);
+  cursor: pointer; font-size: 13px; font-weight: 500;
+  margin-top: 5px; position: relative;
+  transition: background 120ms ease, color 120ms ease;
+}
+.doctabs__tab:hover { background: color-mix(in srgb, var(--os-ink) 6%, transparent); color: var(--os-ink); }
+.doctabs__tab.is-active {
+  background: var(--os-surface); color: var(--os-ink);
+  box-shadow: 0 -1px 0 var(--os-line), -1px 0 0 var(--os-line), 1px 0 0 var(--os-line);
+}
+/* Active tab visually merges into the page below it. */
+.doctabs__tab.is-active::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 2px; background: var(--os-surface);
+}
+.doctabs__ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; flex-shrink: 0; font-size: 14px; line-height: 1;
+}
+.doctabs__ico svg { width: 14px; height: 14px; color: var(--os-ink-3); }
+.doctabs__ico .note-icon-img { width: 14px; height: 14px; border-radius: 3px; }
+.doctabs__title {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.doctabs__close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; flex-shrink: 0;
+  border: none; background: transparent; border-radius: 4px;
+  cursor: pointer; opacity: 0; color: var(--os-ink-3);
+  transition: opacity 110ms ease, background 110ms ease;
+}
+.doctabs__tab:hover .doctabs__close,
+.doctabs__tab.is-active .doctabs__close { opacity: 1; }
+.doctabs__close:hover { background: color-mix(in srgb, var(--os-ink) 12%, transparent); color: var(--os-ink); }
+.doctabs__close svg { width: 12px; height: 12px; }
+.doctabs__new {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; align-self: center; flex-shrink: 0;
+  border: none; background: transparent; border-radius: 6px;
+  cursor: pointer; color: var(--os-ink-3);
+  transition: background 110ms ease, color 110ms ease;
+}
+.doctabs__new:hover { background: color-mix(in srgb, var(--os-ink) 8%, transparent); color: var(--os-ink); }
+.doctabs__new svg { width: 16px; height: 16px; }
+:root.dark .doctabs { background: #15171c; border-bottom-color: rgba(255,255,255,0.07); }
+:root.dark .doctabs__tab.is-active { background: #1f2229; box-shadow: 0 -1px 0 rgba(255,255,255,0.08), -1px 0 0 rgba(255,255,255,0.08), 1px 0 0 rgba(255,255,255,0.08); }
+:root.dark .doctabs__tab.is-active::after { background: #1f2229; }
+
+/* (Outline minimap styles live in the consolidated block lower in this file.) */
 
 /* When the doc is in reading mode the header dims its icons slightly
  * so the experience feels more like presentation than editing. */
@@ -32477,6 +33745,28 @@ a.prfh__contact:hover { color: var(--os-brand); }
 :root.dark .bmen--inline { background: #1a1d23; }
 
 /* ─── Backlinks panel ("Linked from") ─── */
+/* Child pages — notes nested inside this note (Notion-style). */
+.bdoc__children { margin: 28px 0 8px; }
+.bdoc__children-list { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+.bdoc__child {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 8px; border-radius: 7px; cursor: pointer;
+  background: transparent; border: none; color: inherit; text-align: left;
+  font-size: 15px; transition: background 100ms ease;
+}
+.bdoc__child:hover { background: color-mix(in srgb, currentColor 7%, transparent); }
+.bdoc__child-icon { width: 17px; height: 17px; flex: 0 0 17px; opacity: 0.65; }
+.bdoc__child-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 25%, transparent); text-underline-offset: 3px; }
+.bdoc__child-chev { width: 13px; height: 13px; opacity: 0.4; flex: 0 0 13px; }
+.bdoc__child-add {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 8px; border-radius: 7px; cursor: pointer;
+  background: transparent; border: none; color: inherit; opacity: 0.5;
+  font-size: 14.5px; transition: opacity 100ms ease, background 100ms ease;
+}
+.bdoc__child-add:hover { opacity: 1; background: color-mix(in srgb, currentColor 7%, transparent); }
+.bdoc__child-add svg { width: 16px; height: 16px; }
+
 .bdoc__backlinks {
   margin: 36px 0 24px; padding: 16px 18px;
   border-top: 1px solid var(--os-line);
@@ -32859,46 +34149,87 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .brow__image-drop em { font-style: normal; font-size: 11px; color: var(--os-ink-3); }
 .brow__image--empty { padding: 12px; font-size: 12px; color: var(--os-ink-3); font-style: italic; }
 
-/* ─── Outline (TOC) right rail ─── */
+/* ═══ Outline minimap (Notion-style, retractable) ═══
+   Collapsed: a column of right-aligned tick lines (length encodes heading
+   level), the in-view section highlighted in brand. Hover expands it into a
+   labeled card. Colors lean on currentColor so the strip adapts to the
+   editor's light/dark text without per-token theming; only the expanded
+   card surface gets an explicit dark override below. */
 .bdoc { position: relative; }
 .bdoc__outline {
-  position: fixed; right: 24px; top: 90px;
-  width: 240px; max-height: calc(100vh - 120px);
-  background: var(--os-surface); border: 1px solid var(--os-line);
-  border-radius: 10px; padding: 12px;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.06);
-  display: flex; flex-direction: column;
-  z-index: 5;
+  position: fixed; right: 8px; top: 50%; transform: translateY(-50%);
+  z-index: 6; max-height: 72vh;
+  display: flex; flex-direction: column; align-items: flex-end;
+  padding: 10px 8px 10px 30px;              /* left pad = generous hover catch zone */
+  border: 1px solid transparent; border-radius: 12px;
+  transition: background 170ms ease, border-color 170ms ease, box-shadow 170ms ease, right 170ms ease;
 }
-.bdoc__outline-head {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--os-ink-3); margin-bottom: 8px;
+.bdoc__outline:hover {
+  right: 16px; align-items: stretch;
+  background: var(--os-canvas);
+  border-color: var(--os-line);
+  box-shadow: var(--os-shadow-pop);
 }
-.bdoc__outline-head svg { width: 12px; height: 12px; color: var(--os-c-indigo); }
-.bdoc__outline-head span { flex: 1; }
-.bdoc__outline-x {
-  width: 22px; height: 22px; display: grid; place-items: center;
-  border-radius: 5px; background: transparent; color: var(--os-ink-3);
-  border: none; cursor: pointer;
-}
-.bdoc__outline-x:hover { background: var(--os-surface-1); color: var(--os-ink); }
-.bdoc__outline-x svg { width: 12px; height: 12px; }
-.bdoc__outline-empty { padding: 12px; font-size: 11.5px; color: var(--os-ink-3); font-style: italic; text-align: center; }
-.bdoc__outline-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; }
-.bdoc__outline-item a {
-  display: block; padding: 4px 6px; border-radius: 5px;
-  font-size: 12.5px; color: var(--os-ink-2); text-decoration: none;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  transition: background 80ms, color 80ms;
-}
-.bdoc__outline-item a:hover { background: var(--os-surface-1); color: var(--os-ink); }
-.bdoc__outline-item--h1 a { font-weight: 700; font-size: 13px; }
-.bdoc__outline-item--h2 a { padding-left: 18px; }
-.bdoc__outline-item--h3 a { padding-left: 30px; font-size: 12px; }
 
-/* On smaller viewports, hide the floating outline rail to free reading space. */
-@media (max-width: 1280px) {
+.bdoc__outline-hide {
+  position: absolute; top: 6px; right: 6px;
+  width: 20px; height: 20px; display: none; place-items: center;
+  border: none; border-radius: 5px; background: transparent;
+  color: currentColor; opacity: 0.5; cursor: pointer;
+}
+.bdoc__outline:hover .bdoc__outline-hide { display: grid; }
+.bdoc__outline-hide:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+.bdoc__outline-hide svg { width: 12px; height: 12px; }
+
+.bdoc__outline-map {
+  display: flex; flex-direction: column; gap: 7px; width: 100%;
+  align-items: inherit; overflow: hidden;
+}
+.bdoc__outline:hover .bdoc__outline-map {
+  gap: 1px; overflow-y: auto; max-height: calc(72vh - 28px); padding-right: 2px; margin-top: 4px;
+}
+
+.bdoc__outline-tick {
+  display: flex; align-items: center; gap: 9px; justify-content: flex-end;
+  width: auto; padding: 2px 0; background: transparent; border: none; cursor: pointer;
+  border-radius: 6px;
+}
+.bdoc__outline:hover .bdoc__outline-tick { justify-content: flex-start; width: 100%; padding: 4px 8px; }
+.bdoc__outline:hover .bdoc__outline-tick:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+.bdoc__outline:hover .bdoc__outline-tick--h2 { padding-left: 22px; }
+.bdoc__outline:hover .bdoc__outline-tick--h3 { padding-left: 36px; }
+
+.bdoc__outline-line {
+  height: 2px; border-radius: 2px; flex: 0 0 auto;
+  background: color-mix(in srgb, currentColor 30%, transparent);
+  transition: width 160ms ease, background 140ms ease;
+}
+.bdoc__outline-tick--h1 .bdoc__outline-line { width: 16px; }
+.bdoc__outline-tick--h2 .bdoc__outline-line { width: 11px; }
+.bdoc__outline-tick--h3 .bdoc__outline-line { width: 7px; }
+.bdoc__outline-tick:hover .bdoc__outline-line { background: color-mix(in srgb, currentColor 60%, transparent); }
+.bdoc__outline-tick.is-active .bdoc__outline-line { background: var(--os-brand); width: 18px; }
+/* Expanded: lines shrink to uniform markers; hierarchy reads from indent. */
+.bdoc__outline:hover .bdoc__outline-line,
+.bdoc__outline:hover .bdoc__outline-tick.is-active .bdoc__outline-line { width: 6px; }
+
+.bdoc__outline-text {
+  max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 12.5px; line-height: 1.3; color: currentColor; text-align: left;
+  transition: max-width 220ms ease, opacity 150ms ease;
+}
+.bdoc__outline:hover .bdoc__outline-text { max-width: 190px; opacity: 0.8; }
+.bdoc__outline-tick.is-active .bdoc__outline-text { color: var(--os-brand); opacity: 1; font-weight: 600; }
+
+/* Dark editor: give the expanded card a proper dark surface. */
+:root.dark .bdoc__outline:hover {
+  background: #1c1f25;
+  border-color: rgba(255,255,255,0.08);
+  box-shadow: 0 14px 36px rgba(0,0,0,0.5);
+}
+
+/* On smaller viewports, hide the minimap to free reading space. */
+@media (max-width: 1180px) {
   .bdoc__outline { display: none; }
 }
 
@@ -33022,3 +34353,63 @@ a.prfh__contact:hover { color: var(--os-brand); }
 }
 .docs__empty-cta:hover { background: var(--os-brand-hover); }
 .docs__empty-cta svg { width: 14px; height: 14px; }
+
+/* My Tasks draggable dashboard: use the whole card as the drag surface and
+   full-edge resize zones instead of the default bottom-right arrow only. */
+.workwrk-os .mytasks-grid .react-grid-item {
+  cursor: grab;
+  transition: transform 160ms ease, width 160ms ease, height 160ms ease;
+}
+.workwrk-os .mytasks-grid .react-grid-item.react-draggable-dragging {
+  cursor: grabbing;
+  z-index: 20;
+  transition: none;
+}
+.workwrk-os .mytasks-grid .react-grid-item.react-grid-placeholder {
+  background: color-mix(in srgb, var(--os-brand-rail) 14%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--os-brand-rail) 38%, transparent);
+  border-radius: 12px;
+  opacity: 1;
+}
+.workwrk-os .mytasks-grid .react-resizable-handle {
+  opacity: 0;
+  background: transparent;
+  z-index: 8;
+}
+.workwrk-os .mytasks-grid .react-grid-item:hover .react-resizable-handle {
+  opacity: 1;
+}
+.workwrk-os .mytasks-grid .react-resizable-handle::after {
+  display: none;
+}
+.workwrk-os .mytasks-grid .react-resizable-handle-n,
+.workwrk-os .mytasks-grid .react-resizable-handle-s {
+  left: 18px;
+  right: 18px;
+  width: auto;
+  height: 12px;
+  cursor: ns-resize;
+}
+.workwrk-os .mytasks-grid .react-resizable-handle-n { top: -6px; }
+.workwrk-os .mytasks-grid .react-resizable-handle-s { bottom: -6px; }
+.workwrk-os .mytasks-grid .react-resizable-handle-e,
+.workwrk-os .mytasks-grid .react-resizable-handle-w {
+  top: 18px;
+  bottom: 18px;
+  width: 12px;
+  height: auto;
+  cursor: ew-resize;
+}
+.workwrk-os .mytasks-grid .react-resizable-handle-e { right: -6px; }
+.workwrk-os .mytasks-grid .react-resizable-handle-w { left: -6px; }
+.workwrk-os .mytasks-grid .react-resizable-handle-ne,
+.workwrk-os .mytasks-grid .react-resizable-handle-nw,
+.workwrk-os .mytasks-grid .react-resizable-handle-se,
+.workwrk-os .mytasks-grid .react-resizable-handle-sw {
+  width: 20px;
+  height: 20px;
+}
+.workwrk-os .mytasks-grid .react-resizable-handle-ne { top: -7px; right: -7px; cursor: nesw-resize; }
+.workwrk-os .mytasks-grid .react-resizable-handle-nw { top: -7px; left: -7px; cursor: nwse-resize; }
+.workwrk-os .mytasks-grid .react-resizable-handle-se { bottom: -7px; right: -7px; cursor: nwse-resize; }
+.workwrk-os .mytasks-grid .react-resizable-handle-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }

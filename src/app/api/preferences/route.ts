@@ -66,6 +66,15 @@ const patchSchema = z.object({
       h: z.number(),
     }))).optional(),
     taskCardsHidden: z.array(z.string()).optional(),
+    // Space Overview card layout — same shape, separate key.
+    overviewCardLayout: z.record(z.string(), z.array(z.object({
+      i: z.string(),
+      x: z.number(),
+      y: z.number(),
+      w: z.number(),
+      h: z.number(),
+    }))).optional(),
+    overviewCardsHidden: z.array(z.string()).optional(),
   }).optional(),
   theme: z.object({
     appearance: z.enum(["LIGHT", "DARK", "AUTO"]).optional(),

@@ -17,7 +17,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useOsShell } from "./shell-context";
 import {
-  ChevronDown, Search, Inbox,
+  Calendar, ChevronDown, Search, Inbox,
 } from "lucide-react";
 import { WorkspaceMenu } from "./workspace-menu";
 import { AskAiButton } from "./ask-ai-button";
@@ -35,14 +35,14 @@ export function ClickTopbar() {
     .map((k) => PROFILE_TOOL_MAP[k])
     .filter((t): t is NonNullable<typeof t> => Boolean(t));
   return (
-    <header className="relative h-8 flex-shrink-0 flex items-center gap-1.5">
+    <header className="relative h-8 flex-shrink-0 flex items-center gap-2">
       {/* Workspace card */}
-      <div className="h-full flex items-center bg-white rounded-lg border border-zinc-200 px-1">
+      <div className="h-full flex items-center gap-1">
         <button
           ref={switcherRef}
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
-          className="flex items-center gap-1.5 px-1.5 py-0.5 rounded-md hover:bg-zinc-100"
+          className="flex items-center gap-1.5 h-7 px-2 rounded-lg bg-zinc-100 hover:bg-zinc-200/80"
           aria-label="Switch workspace"
           aria-expanded={menuOpen}
         >
@@ -52,6 +52,14 @@ export function ClickTopbar() {
           <span className="text-[13px] font-medium text-zinc-900 leading-none">Cashkr Team</span>
           <ChevronDown className="w-3 h-3 text-zinc-500" />
         </button>
+        <Link
+          href="/calendar"
+          aria-label="Calendar"
+          title="Calendar"
+          className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100"
+        >
+          <Calendar className="w-[14px] h-[14px]" />
+        </Link>
         <WorkspaceMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={switcherRef} />
       </div>
 
@@ -60,7 +68,7 @@ export function ClickTopbar() {
 
       {/* Search card — search trigger on the left, Ask AI pill on the right.
           Two distinct click targets inside one rounded card. */}
-      <div className="h-full flex items-center bg-white rounded-lg border border-zinc-200 hover:border-zinc-300 hover:shadow-sm transition-all w-[520px] max-w-[44vw] pl-2.5 pr-0.5 py-0.5 gap-1.5">
+      <div className="h-full flex items-center bg-white rounded-full border border-zinc-200 hover:border-zinc-300 hover:shadow-sm transition-all w-[520px] max-w-[44vw] pl-3 pr-1 py-0.5 gap-1.5">
         <button
           type="button"
           onClick={openPalette}

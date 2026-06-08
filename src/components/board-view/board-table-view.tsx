@@ -57,21 +57,33 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   })();
   const [groupBy, setGroupByState] = useState<string | null>(initialGroupBy);
 
-  // Persist groupBy changes back to the View row when this table is
-  // rendering inside a saved view. Fire-and-forget — UI updates
-  // optimistically; failure leaves the UI ahead of the server which
-  // self-heals on next page load.
-  const setGroupBy = useCallback((next: string | null) => {
-    setGroupByState(next);
+  // Direction for the grouped buckets. Default ascending. Persists per-view.
+  const initialGroupDir: "asc" | "desc" = (() => {
+    const raw = viewConfig?.groupDirection;
+    return raw === "desc" ? "desc" : "asc";
+  })();
+  const [groupDirection, setGroupDirectionState] = useState<"asc" | "desc">(initialGroupDir);
+
+  const persistView = useCallback((patch: Record<string, unknown>) => {
     if (!viewId) return;
     void fetch(`/api/boards/${boardId}/views/${viewId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        config: { ...(viewConfig ?? {}), groupBy: next },
+        config: { ...(viewConfig ?? {}), ...patch },
       }),
     }).catch(() => {});
   }, [viewId, boardId, viewConfig]);
+
+  const setGroupBy = useCallback((next: string | null) => {
+    setGroupByState(next);
+    persistView({ groupBy: next });
+  }, [persistView]);
+
+  const setGroupDirection = useCallback((next: "asc" | "desc") => {
+    setGroupDirectionState(next);
+    persistView({ groupDirection: next });
+  }, [persistView]);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   // Multi-select state for bulk actions (Phase 70).
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -248,8 +260,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (finalUnset.length > 0) {
       resolved.push({ key: "__unset__", label: "Unset", color: "#A1A1AA", rows: finalUnset });
     }
+    if (groupDirection === "desc") resolved.reverse();
     return resolved;
-  }, [groupBy, topLevel, customFields]);
+  }, [groupBy, topLevel, customFields, groupDirection]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => {
@@ -512,38 +525,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         </div>
       ) : null}
 
-      {/* Group-by selector — Phase 66. Compact details/summary popover. */}
+      {/* Group-by selector — ClickUp parity (2026-06-07). Toolbar pill
+          shows the active field; click → "Group by" popover with field +
+          direction dropdowns + trash to clear. */}
       <div className="px-3 py-2 border-b border-zinc-100 flex items-center gap-2">
-        <details className="relative">
-          <summary className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-[11.5px] text-zinc-700 hover:bg-zinc-50 select-none">
-            <Layers className="w-3 h-3" />
-            <span className="text-zinc-400">Group:</span>
-            <span className="font-medium">
-              {groupBy
-                ? groupOptions.find((o) => o.key === groupBy)?.label ?? "Custom"
-                : "None"}
-            </span>
-            <ChevronDown className="w-3 h-3 text-zinc-400" />
-          </summary>
-          <div className="absolute left-0 top-full mt-1 z-50 w-[200px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
-            {groupOptions.map((o) => {
-              const active = (o.key === "__none__" && groupBy === null) || o.key === groupBy;
-              return (
-                <button
-                  key={o.key}
-                  type="button"
-                  onClick={() => setGroupBy(o.key === "__none__" ? null : o.key)}
-                  className={`flex items-center justify-between w-full text-left px-3 py-1.5 text-[12.5px] ${
-                    active ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
-                  }`}
-                >
-                  <span>{o.label}</span>
-                  {active ? <span className="text-zinc-400 text-[10px]">✓</span> : null}
-                </button>
-              );
-            })}
-          </div>
-        </details>
+        <GroupByPill
+          groupBy={groupBy}
+          groupDirection={groupDirection}
+          groupOptions={groupOptions}
+          onGroupBy={setGroupBy}
+          onDirection={setGroupDirection}
+        />
         <span className="text-[11px] text-zinc-400">
           {items.length} item{items.length === 1 ? "" : "s"}
         </span>
@@ -1297,5 +1289,157 @@ function OwnerCell({ row }: { row: BoardItemRow }) {
       </span>
       <span className="text-sm">{row.owner.firstName} {row.owner.lastName}</span>
     </span>
+  );
+}
+
+function GroupByPill({
+  groupBy,
+  groupDirection,
+  groupOptions,
+  onGroupBy,
+  onDirection,
+}: {
+  groupBy: string | null;
+  groupDirection: "asc" | "desc";
+  groupOptions: Array<{ key: string; label: string }>;
+  onGroupBy: (next: string | null) => void;
+  onDirection: (next: "asc" | "desc") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [fieldOpen, setFieldOpen] = useState(false);
+  const [dirOpen, setDirOpen] = useState(false);
+
+  const activeField = groupBy ? groupOptions.find((o) => o.key === groupBy) : null;
+  const activeLabel = activeField?.label ?? "None";
+  const fieldOptions = groupOptions.filter((o) => o.key !== "__none__");
+
+  if (!groupBy) {
+    // Compact dropdown like ClickUp's collapsed state — single pill that
+    // opens the field picker directly.
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-[11.5px] text-zinc-500 hover:bg-zinc-50"
+        >
+          <Layers className="w-3 h-3" />
+          <span>Group</span>
+        </button>
+        {open ? (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
+            <div className="absolute left-0 top-full mt-1 z-40 w-[200px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+              {fieldOptions.map((o) => (
+                <button
+                  key={o.key}
+                  type="button"
+                  onClick={() => { onGroupBy(o.key); setOpen(false); }}
+                  className="flex items-center w-full text-left px-3 py-1.5 text-[12.5px] text-zinc-700 hover:bg-zinc-50"
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-zinc-100 text-[11.5px] text-zinc-800 hover:bg-zinc-200"
+      >
+        <Layers className="w-3 h-3" />
+        <span className="font-medium">{activeLabel}</span>
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
+          <div className="absolute left-0 top-full mt-1 z-40 w-[340px] rounded-lg border border-zinc-200 bg-white shadow-lg p-3">
+            <p className="text-[11.5px] text-zinc-500 mb-2">Group by</p>
+            <div className="flex items-center gap-2">
+              {/* Field picker */}
+              <div className="relative flex-1">
+                <button
+                  type="button"
+                  onClick={() => { setFieldOpen((v) => !v); setDirOpen(false); }}
+                  className="w-full inline-flex items-center justify-between gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-800 hover:bg-zinc-50"
+                >
+                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                    <Layers className="w-3 h-3 text-zinc-500 shrink-0" />
+                    <span className="truncate">{activeLabel}</span>
+                  </span>
+                  <ChevronDown className="w-3 h-3 text-zinc-400 shrink-0" />
+                </button>
+                {fieldOpen ? (
+                  <div className="absolute left-0 top-full mt-1 z-50 w-full rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+                    {fieldOptions.map((o) => (
+                      <button
+                        key={o.key}
+                        type="button"
+                        onClick={() => { onGroupBy(o.key); setFieldOpen(false); }}
+                        className={`flex items-center w-full text-left px-3 py-1.5 text-[12.5px] ${
+                          o.key === groupBy ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              {/* Direction picker */}
+              <div className="relative w-[120px]">
+                <button
+                  type="button"
+                  onClick={() => { setDirOpen((v) => !v); setFieldOpen(false); }}
+                  className="w-full inline-flex items-center justify-between gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-800 hover:bg-zinc-50"
+                >
+                  <span className="truncate">{groupDirection === "asc" ? "Ascending" : "Descending"}</span>
+                  <ChevronDown className="w-3 h-3 text-zinc-400 shrink-0" />
+                </button>
+                {dirOpen ? (
+                  <div className="absolute left-0 top-full mt-1 z-50 w-full rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+                    <button
+                      type="button"
+                      onClick={() => { onDirection("asc"); setDirOpen(false); }}
+                      className={`flex items-center w-full text-left px-3 py-1.5 text-[12.5px] ${
+                        groupDirection === "asc" ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      Ascending
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { onDirection("desc"); setDirOpen(false); }}
+                      className={`flex items-center w-full text-left px-3 py-1.5 text-[12.5px] ${
+                        groupDirection === "desc" ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      Descending
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              {/* Clear grouping */}
+              <button
+                type="button"
+                onClick={() => { onGroupBy(null); setOpen(false); }}
+                aria-label="Remove grouping"
+                title="Remove grouping"
+                className="p-1.5 rounded text-zinc-400 hover:text-red-600 hover:bg-red-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }

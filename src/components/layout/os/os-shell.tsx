@@ -19,6 +19,7 @@
 
 import { OsShellProvider, useOsShell } from "./shell-context";
 import { OsCommandPalette } from "./command-palette";
+import { QuickCaptureHandler } from "./quick-capture";
 import { OsItemDrawer } from "./item-drawer";
 import { OsToastProvider } from "./toast";
 import { CustomizePanel } from "./customize-panel";
@@ -27,7 +28,6 @@ import { ClickAppRail } from "./click-app-rail";
 import { ClickSidebar } from "./click-sidebar";
 import { ClickTopbar } from "./click-topbar";
 import { AppsMorePopover } from "./apps-more-popover";
-import { NotificationBanner } from "./notification-banner";
 import { OsSidekickPanel } from "./sidekick-panel";
 import { SetStatusModal } from "./set-status-modal";
 
@@ -37,18 +37,14 @@ function CustomizeMount() {
 }
 
 export function OsShell({ children }: { children: React.ReactNode }) {
-  // Cards-style shell: the outer container is the "page" (zinc-100 in light,
-  // very-dark in dark). Each major surface — topbar groups, rail, sidebar,
-  // main canvas — is a rounded card floating on top. `gap-1.5` (6px) is
-  // the visible seam between cards. The topbar is split into 3 sibling
-  // cards (workspace+calendar / search / icons+avatar) inside ClickTopbar.
+  // ClickUp-style shell: compact topbar over rounded rail, sidebar, and
+  // content panels with small page-background gutters between them.
   return (
     <OsShellProvider>
       <OsToastProvider>
         <ThemeApplier />
         <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5 overflow-hidden">
           <ClickTopbar />
-          <NotificationBanner />
           <div className="flex-1 flex min-h-0 relative gap-1.5 overflow-hidden">
             <ClickAppRail />
             <ClickSidebar />
@@ -62,6 +58,7 @@ export function OsShell({ children }: { children: React.ReactNode }) {
           <OsItemDrawer />
           <CustomizeMount />
           <SetStatusModal />
+          <QuickCaptureHandler />
         </div>
       </OsToastProvider>
     </OsShellProvider>

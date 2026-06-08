@@ -43,6 +43,9 @@ export interface HomePref {
   taskCardLayout?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
   // Hidden card keys on My Tasks (Manage cards menu)
   taskCardsHidden?: string[];
+  // Space Overview tab — same shape, separate key.
+  overviewCardLayout?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
+  overviewCardsHidden?: string[];
 }
 
 export interface ThemePref {
@@ -63,7 +66,10 @@ export interface EffectivePreferences {
 // ── Defaults ───────────────────────────────────────────────────────
 
 export const DEFAULT_SIDEBAR: SidebarPref = {
-  pinned: ["home", "inbox", "my-tasks", "assigned-comments"],
+  pinned: [
+    "home", "planner", "ai", "teams", "docs", "dashboards",
+    "library", "forms", "clips", "goals", "timesheets",
+  ],
   hidden: [],
   order: [
     "home", "spaces", "planner", "ai", "teams", "docs", "dashboards",

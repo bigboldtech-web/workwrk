@@ -6141,6 +6141,15 @@ model Doc {
   entityType String? // "TASK" | "TICKET" | "BOARD_ROW" | …
   entityId   String?
 
+  // Notion-style page tree (standalone notes only). A note may live inside
+  // another note or a folder; `isFolder` marks pure containers. `position`
+  // orders siblings (fractional so drag-inserts don't renumber the list).
+  parentId String?
+  parent   Doc?    @relation("DocTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Doc[]   @relation("DocTree")
+  isFolder Boolean @default(false)
+  position Float   @default(0)
+
   createdById String?
   archivedAt  DateTime? // soft-archive only; never hard-delete
 
@@ -6158,6 +6167,7 @@ model Doc {
   @@index([organizationId])
   @@index([entityType, entityId])
   @@index([createdById])
+  @@index([parentId])
 }
 
 model DocVersion {

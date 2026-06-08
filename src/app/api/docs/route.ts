@@ -16,6 +16,9 @@ const createSchema = z.object({
   content: z.unknown().optional(),
   entityType: z.string().max(40).nullable().optional(),
   entityId: z.string().max(80).nullable().optional(),
+  parentId: z.string().nullable().optional(),
+  isFolder: z.boolean().optional(),
+  position: z.number().optional(),
 });
 
 export async function GET(req: Request) {
@@ -39,9 +42,10 @@ export async function GET(req: Request) {
     select: {
       id: true, title: true, excerpt: true, entityType: true, entityId: true,
       createdById: true, createdAt: true, updatedAt: true, archivedAt: true,
+      parentId: true, isFolder: true, position: true,
     },
     orderBy: { updatedAt: "desc" },
-    take: 100,
+    take: 200,
   });
 
   // Phase 37 — gate per row via docAccessible, which handles SPACE +
@@ -54,7 +58,22 @@ export async function GET(req: Request) {
   );
   const gated = docs.filter((_, i) => flags[i]);
 
-  return NextResponse.json({ docs: gated });
+  // Attach creator display info for list views ("Created by" column).
+  const creatorIds = [...new Set(gated.map((d) => d.createdById).filter((x): x is string => !!x))];
+  const creators = creatorIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: creatorIds } },
+        select: { id: true, firstName: true, lastName: true, avatar: true },
+      })
+    : [];
+  const creatorById = new Map(creators.map((u) => [u.id, u]));
+  const enriched = gated.map((d) => {
+    const u = d.createdById ? creatorById.get(d.createdById) : undefined;
+    const name = u ? (`${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || null) : null;
+    return { ...d, createdBy: u ? { name, avatar: u.avatar } : null };
+  });
+
+  return NextResponse.json({ docs: enriched });
 }
 
 export async function POST(req: Request) {
@@ -84,6 +103,11 @@ export async function POST(req: Request) {
       content,
       entityType: parsed.data.entityType ?? null,
       entityId: parsed.data.entityId ?? null,
+      parentId: parsed.data.parentId ?? null,
+      isFolder: parsed.data.isFolder ?? false,
+      // Default to a monotonically increasing position so new items land at
+      // the bottom of their sibling list (sorted ascending in the tree).
+      position: parsed.data.position ?? Date.now(),
       createdById: ctx.userId,
       // Snapshot v1 immediately so every Doc has at least one version.
       versions: {

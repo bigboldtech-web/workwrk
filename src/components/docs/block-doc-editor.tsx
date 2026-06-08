@@ -1,6 +1,6 @@
 "use client";
 
-/* BlockDocEditor — chrome around the BlockEditor for a /docs/[id] page.
+/* BlockDocEditor — chrome around the BlockNote canvas for /docs/[id].
  *
  * Adds Notion-grade page polish on top of the block editor:
  *   - Cover gradient or image at the top of the page
@@ -13,24 +13,51 @@
  *   { blocks: Block[]; meta?: { icon?: string; coverGradient?: string; coverUrl?: string } }
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Link as LinkIcon, Sparkles, Loader2, Table as TableIcon,
   ImagePlus, Smile, Trash2, MessageSquare, ListTree, X, Send, Star,
   ArrowDownLeft, FileText, BookCopy, BookOpen, History, RotateCcw,
-  MoreHorizontal, Download,
+  MoreHorizontal, Download, Copy, PanelRightOpen, Search, ArrowUp, AtSign,
+  ClipboardCopy, Type as TypeIcon, MoveHorizontal, Lock, ChevronRight,
 } from "lucide-react";
-import { BlockEditor, type Block, type Comment, type CommentsByBlock } from "./block-editor";
+import { useSearchParams } from "next/navigation";
+import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block, type Comment, type CommentsByBlock } from "./block-editor";
+import dynamic from "next/dynamic";
+import { BlockNoteCanvas } from "./blocknote-canvas";
+import type { PartialBlock } from "@blocknote/core";
 import { useOsToast } from "@/components/layout/os/toast";
+import { renderNoteIcon } from "./note-icon";
 
-type DocMeta = { icon?: string; coverGradient?: string; coverUrl?: string };
+// Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
+// the writer actually opens the picker — keeps the doc page light + fast.
+const NoteIconPicker = dynamic(
+  () => import("./note-icon-picker").then((m) => m.NoteIconPicker),
+  { ssr: false },
+);
+
+type DocFont = "default" | "serif" | "mono";
+type DocMeta = {
+  icon?: string;
+  coverGradient?: string;
+  coverUrl?: string;
+  // Notion-style page preferences (all additive — older docs default sensibly).
+  font?: DocFont;
+  smallText?: boolean;
+  fullWidth?: boolean;
+  locked?: boolean;
+};
 
 type DocPayload = {
   id: string;
   title: string;
-  content: { blocks?: Block[]; html?: string; meta?: DocMeta; comments?: CommentsByBlock } | null;
+  // Content shape evolves:
+  //   v1 (legacy): { blocks: Block[] }            — custom editor
+  //   v2:          { bnDoc: PartialBlock[], blocks: Block[] (mirror), version: 2 }
+  // We read both shapes and migrate v1 → v2 lazily on first save.
+  content: { bnDoc?: PartialBlock[]; blocks?: Block[]; html?: string; meta?: DocMeta; comments?: CommentsByBlock; version?: number } | null;
   summary?: string | null;
   summarizedAt?: string | null;
   updatedAt: string;
@@ -40,6 +67,41 @@ type DocPayload = {
 type MeUser = { id: string; firstName?: string | null; lastName?: string | null; email?: string; avatar?: string | null };
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
+
+// Legacy block kinds that BlockNote can't render natively. These are
+// the kinds whose original data we preserve across BN edits — see
+// preservedLegacyRef in BlockDocEditor. Anything in this set that
+// survives in the BN doc as a paragraph proxy gets spliced back into
+// the persisted `blocks` mirror so server-side readers (EntityLink
+// sync, S3 presign) see the original embed, not the proxy.
+// Note: kinds that BlockNote can now round-trip natively (e.g. "subpage")
+// MUST NOT be in this set — otherwise the frozen original would mask any
+// in-BN edits to the block's props.
+const LEGACY_CUSTOM_EMBED_KINDS = new Set<Block["kind"]>([
+  "sop_card", "task_card", "note_card", "entity_link", "ai_write",
+  "tasks_view", "studio_board", "sops_list", "meetings_view", "form", "data_table",
+  "embed", "image", "file",
+  // NOTE: "callout" is intentionally absent — it round-trips as a native
+  // BlockNote block now, so freezing the original would mask in-BN edits to
+  // its emoji/color/text (same reasoning as "subpage").
+]);
+
+function collectLegacyCustomEmbeds(blocks: Block[]): Map<string, Block> {
+  const m = new Map<string, Block>();
+  for (const b of blocks) {
+    if (LEGACY_CUSTOM_EMBED_KINDS.has(b.kind)) m.set(b.id, b);
+  }
+  return m;
+}
+
+// Splice preserved originals back into a BN-derived mirror. The mirror
+// keeps block ordering; for each mirror entry whose id matches a
+// preserved legacy block, we swap in the original. Mirror entries
+// without a preserved match pass through untouched.
+function rehydrateMirrorWithLegacyEmbeds(mirror: Block[], preserved: Map<string, Block>): Block[] {
+  if (preserved.size === 0) return mirror;
+  return mirror.map((b) => preserved.get(b.id) ?? b);
+}
 
 // Convert legacy HTML into a one-shot paragraph-per-line block array.
 function htmlToBlocks(html: string): Block[] {
@@ -57,14 +119,6 @@ function htmlToBlocks(html: string): Block[] {
   return lines.map((t) => ({ id: newId(), kind: "paragraph" as const, text: t }));
 }
 
-// Curated emoji palette — covers the 90% of cases a workspace note needs.
-const EMOJI_SET = [
-  "📝", "📌", "✅", "📊", "📈", "📉", "💡", "🎯", "🚀", "🔥",
-  "⭐", "🛠️", "🧩", "📚", "📁", "📎", "🗓️", "🗒️", "🧭", "🔍",
-  "💬", "🔔", "⚙️", "🧠", "🤝", "💼", "🏆", "✏️", "📢", "🛡️",
-  "🌱", "🌟", "🪄", "📦", "🏷️", "📍", "🧷", "🎉", "💸", "🧾",
-];
-
 // Curated gradient palette — matches the rest of the OS shell tone-set.
 const COVER_GRADIENTS: { key: string; label: string; css: string }[] = [
   { key: "indigo",  label: "Indigo",  css: "linear-gradient(135deg, #6366f1, #8b5cf6)" },
@@ -79,19 +133,55 @@ function gradientCSS(key?: string): string {
   return COVER_GRADIENTS.find((g) => g.key === key)?.css ?? COVER_GRADIENTS[0].css;
 }
 
-interface Props { docId: string }
+// Curated cover-image gallery. Seeded picsum URLs are stable + free (no API
+// key) so the gallery always renders real photos as thumbnails — the full
+// cover uses the wide variant, the picker shows a small one.
+const COVER_SEEDS = [
+  "ridge", "harbor", "dunes", "aurora", "canyon", "tide",
+  "forest", "summit", "meadow", "city9", "coast4", "valley7",
+];
+const coverImageUrl = (seed: string, w: number, h: number) =>
+  `https://picsum.photos/seed/${seed}/${w}/${h}`;
 
-export function BlockDocEditor({ docId }: Props) {
+interface Props {
+  docId: string;
+  // "primary" (default) is the main pane. "peek" is the right pane in a
+  // split view — its chrome hides the back button + open-side-panel button
+  // because the surrounding DocSplitView owns those actions.
+  pane?: "primary" | "peek";
+}
+
+export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useOsToast();
+  // Peek picker — popover state + fetched recent docs for the picker list.
+  const [peekPickerOpen, setPeekPickerOpen] = useState(false);
+  const [peekQuery, setPeekQuery] = useState("");
+  const [peekDocs, setPeekDocs] = useState<{ id: string; title: string; updatedAt: string }[] | null>(null);
   const [doc, setDoc] = useState<DocPayload | null>(null);
   const [title, setTitle] = useState("");
+  // bnDoc is BlockNote's native JSON — the source of truth for editing.
+  // `blocks` is a derived mirror (LegacyBlock[]) the surrounding chrome
+  // reads for the outline / word count without rewriting those components.
+  const [bnDoc, setBnDoc] = useState<PartialBlock[] | null>(null);
   const [blocks, setBlocks] = useState<Block[] | null>(null);
+  // Preserved legacy custom-embed blocks. BlockNote can't render kinds
+  // like sop_card / task_card / subpage / entity_link, so the migration
+  // shadows them as paragraph proxies. We keep the originals keyed by
+  // block id; on save, if the proxy still lives in the BN doc we splice
+  // the original back into the persisted `blocks` mirror so the
+  // EntityLink graph and other server-side readers don't see ghosts.
+  const preservedLegacyRef = useRef<Map<string, Block>>(new Map());
   const [meta, setMeta] = useState<DocMeta>({});
   const [legacy, setLegacy] = useState<string | null>(null);
+  // Bumps on history-restore so the BlockNote canvas force-remounts with
+  // the restored content instead of holding the previous in-memory doc.
+  const [restoreNonce, setRestoreNonce] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
+  const [commentOpen, setCommentOpen] = useState(false);
   // Single side-panel slot — only one of Ask/History/Comments can be
   // open at a time so they never overlap or fight for focus. The
   // Comments variant carries the block id it belongs to.
@@ -117,6 +207,50 @@ export function BlockDocEditor({ docId }: Props) {
     return () => { cancelled = true; };
   }, []);
 
+  // Load the doc list when the peek picker opens. Lazy + once per open
+  // is plenty — a workspace's doc count is small enough to filter client-side.
+  useEffect(() => {
+    if (!peekPickerOpen || peekDocs !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/docs");
+        if (!res.ok) return;
+        const d = await res.json();
+        const rows: { id: string; title: string; updatedAt: string }[] = (d.docs ?? d.data ?? d ?? [])
+          .filter((r: { id: string }) => r.id !== docId);
+        if (!cancelled) setPeekDocs(rows);
+      } catch { /* picker just stays empty */ }
+    })();
+    return () => { cancelled = true; };
+  }, [peekPickerOpen, peekDocs, docId]);
+
+  // Dismiss the peek picker on outside click / Esc.
+  useEffect(() => {
+    if (!peekPickerOpen) return;
+    function onDocClick(e: MouseEvent) {
+      const t = e.target as Element | null;
+      if (!t || !t.closest(".bdoc__peek-picker, .bdoc__iact--peek")) {
+        setPeekPickerOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setPeekPickerOpen(false); }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [peekPickerOpen]);
+
+  function openPeek(pickedId: string) {
+    setPeekPickerOpen(false);
+    setPeekQuery("");
+    // If we're already in a split, the current URL is /docs/<docId>?peek=<existingPeek>.
+    // Replacing peek with the picked id keeps us in split mode.
+    router.push(`/docs/${docId}?peek=${pickedId}`);
+  }
+
   // Dismiss the More menu when clicking elsewhere or hitting Esc.
   useEffect(() => {
     if (!moreOpen) return;
@@ -132,6 +266,16 @@ export function BlockDocEditor({ docId }: Props) {
       document.removeEventListener("keydown", onKey);
     };
   }, [moreOpen]);
+
+  // Register this note with the open-note tab strip (DocTabsBar). Fires on
+  // load and whenever the title or icon changes, so the tab stays in sync.
+  // Only the primary editor announces tabs — peek panes don't open a tab.
+  useEffect(() => {
+    if (!doc || pane === "peek") return;
+    window.dispatchEvent(new CustomEvent("workwrk:doc-tab:open", {
+      detail: { id: docId, title: title || "Untitled note", icon: meta.icon },
+    }));
+  }, [doc, pane, docId, title, meta.icon]);
 
   // Load whether this doc is in the user's favorites.
   useEffect(() => {
@@ -206,13 +350,28 @@ export function BlockDocEditor({ docId }: Props) {
         lastUpdatedAtRef.current = d.updatedAt ?? null;
         const c = d.content;
         setMeta((c?.meta as DocMeta) ?? {});
-        if (c && Array.isArray((c as { blocks?: Block[] }).blocks)) {
-          setBlocks((c as { blocks: Block[] }).blocks);
+        // v2: native BlockNote JSON. Preferred.
+        // v1: legacy {blocks:[...]} — passed through to the canvas which
+        //     converts it transparently. The next save persists v2 shape.
+        // legacy html: still shows the convert-to-blocks banner.
+        if (c && Array.isArray((c as { bnDoc?: PartialBlock[] }).bnDoc)) {
+          setBnDoc((c as { bnDoc: PartialBlock[] }).bnDoc);
+          const persistedBlocks = Array.isArray((c as { blocks?: Block[] }).blocks) ? (c as { blocks: Block[] }).blocks : [];
+          setBlocks(persistedBlocks);
+          preservedLegacyRef.current = collectLegacyCustomEmbeds(persistedBlocks);
+          setLegacy(null);
+        } else if (c && Array.isArray((c as { blocks?: Block[] }).blocks)) {
+          setBnDoc(null);
+          const persistedBlocks = (c as { blocks: Block[] }).blocks;
+          setBlocks(persistedBlocks);
+          preservedLegacyRef.current = collectLegacyCustomEmbeds(persistedBlocks);
           setLegacy(null);
         } else if (c && typeof (c as { html?: string }).html === "string") {
           setLegacy((c as { html: string }).html);
+          setBnDoc(null);
           setBlocks(null);
         } else {
+          setBnDoc(null);
           setBlocks([]);
         }
       } catch (e) {
@@ -223,13 +382,42 @@ export function BlockDocEditor({ docId }: Props) {
     return () => { cancelled = true; };
   }, [docId, refetchComments]);
 
-  const persist = useCallback(async (nextBlocks: Block[], nextMeta: DocMeta) => {
+  // Serialize content saves so a debounced PUT never overtakes one
+  // that's still in flight. Without this, the second save sends a
+  // pre-server-response lastUpdatedAtRef and the server 409s the
+  // client against itself. We coalesce: while one save is running,
+  // newer args overwrite a single "pending" slot; the in-flight
+  // completion fires the latest pending with the now-fresh ref.
+  const saveInFlightRef = useRef(false);
+  const pendingPersistRef = useRef<
+    null | { bnDoc: PartialBlock[] | null; blocks: Block[]; meta: DocMeta; excerpt?: string }
+  >(null);
+
+  // Persist accepts the full editor state: BlockNote doc (source of truth),
+  // legacy mirror (for chrome + legacy readers), and the doc meta.
+  const persist = useCallback(async (
+    nextBnDoc: PartialBlock[] | null,
+    nextBlocks: Block[],
+    nextMeta: DocMeta,
+    nextExcerpt?: string,
+  ) => {
+    if (saveInFlightRef.current) {
+      pendingPersistRef.current = { bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta, excerpt: nextExcerpt };
+      return;
+    }
+    saveInFlightRef.current = true;
     try {
-      const text = nextBlocks
+      const text = (nextExcerpt ?? nextBlocks
         .map((b) => "text" in b ? (b as { text: string }).text : "")
         .filter(Boolean)
-        .join(" ")
+        .join(" "))
         .slice(0, 400);
+      const content: { bnDoc?: PartialBlock[]; blocks: Block[]; meta: DocMeta; version: 2 } = {
+        ...(nextBnDoc ? { bnDoc: nextBnDoc } : {}),
+        blocks: nextBlocks,
+        meta: nextMeta,
+        version: 2,
+      };
       const res = await fetch(`/api/docs/${docId}`, {
         method: "PUT",
         headers: {
@@ -240,7 +428,7 @@ export function BlockDocEditor({ docId }: Props) {
         },
         body: JSON.stringify({
           title: title.trim() || "Untitled note",
-          content: { blocks: nextBlocks, meta: nextMeta },
+          content,
           excerpt: text || null,
           knownUpdatedAt: lastUpdatedAtRef.current,
         }),
@@ -255,28 +443,70 @@ export function BlockDocEditor({ docId }: Props) {
       // the local view is still in sync.
       if (data?.doc?.updatedAt) lastUpdatedAtRef.current = data.doc.updatedAt;
     } catch { toast("Couldn't save"); }
+    finally {
+      saveInFlightRef.current = false;
+      // Drain a coalesced pending save with the now-fresh updatedAt.
+      const queued = pendingPersistRef.current;
+      pendingPersistRef.current = null;
+      if (queued) void persist(queued.bnDoc, queued.blocks, queued.meta, queued.excerpt);
+    }
   }, [docId, title, toast]);
 
+  // Called by BlockNoteCanvas on every (debounced) edit. We update both the
+  // BN source of truth and the derived legacy mirror, then persist.
+  //
+  // The mirror is BN→legacy and is lossy for custom embeds (sop_card,
+  // task_card, subpage, entity_link, etc.) — BN renders those as plain
+  // paragraphs. Before persisting, we splice the originals back in by
+  // matching block ids. Result: as long as the writer keeps the proxy
+  // paragraph in place, the EntityLink graph keeps pointing at the
+  // original embed. If they delete the proxy, the original disappears
+  // from the next save — exactly the right behavior.
+  const handleEditorChange = useCallback((nextBnDoc: PartialBlock[], mirror: Block[], plainText: string) => {
+    const enrichedMirror = rehydrateMirrorWithLegacyEmbeds(mirror, preservedLegacyRef.current);
+    setBnDoc(nextBnDoc);
+    setBlocks(enrichedMirror);
+    void persist(nextBnDoc, enrichedMirror, meta, plainText);
+  }, [persist, meta]);
+
   const saveBlocks = useCallback(async (next: Block[]) => {
+    // Legacy entry point — still used by convertLegacy() for the v0 html flow.
+    // We don't have a BN doc here; persist with bnDoc=null so the next edit
+    // (which goes through the canvas) regenerates it.
     setBlocks(next);
-    await persist(next, meta);
+    setBnDoc(null);
+    await persist(null, next, meta);
   }, [persist, meta]);
 
   const saveMeta = useCallback(async (patch: Partial<DocMeta>) => {
     const next = { ...meta, ...patch };
     setMeta(next);
-    if (blocks) await persist(blocks, next);
-  }, [persist, meta, blocks]);
+    if (blocks) await persist(bnDoc, blocks, next);
+  }, [persist, meta, blocks, bnDoc]);
 
   function saveTitle(next: string) {
     setTitle(next);
     if (titleTimer.current) clearTimeout(titleTimer.current);
     titleTimer.current = setTimeout(async () => {
       try {
-        await fetch(`/api/docs/${docId}`, {
+        // Title saves must participate in the same optimistic-concurrency
+        // protocol as content saves. Without this coordination, a title
+        // PUT bumps the server's updatedAt while lastUpdatedAtRef stays
+        // pinned — the next content save then trips 409 against itself.
+        const res = await fetch(`/api/docs/${docId}`, {
           method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: next.trim() || "Untitled note" }),
+          body: JSON.stringify({
+            title: next.trim() || "Untitled note",
+            knownUpdatedAt: lastUpdatedAtRef.current,
+          }),
         });
+        if (res.status === 409) {
+          setConflict(true);
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (data?.doc?.updatedAt) lastUpdatedAtRef.current = data.doc.updatedAt;
       } catch { /* ignore */ }
     }, 700);
   }
@@ -293,6 +523,30 @@ export function BlockDocEditor({ docId }: Props) {
   function copyLink() {
     const url = `${window.location.origin}/docs/${docId}`;
     navigator.clipboard.writeText(url).then(() => toast("Link copied"));
+  }
+
+  // Copy the whole page as Markdown — reuses the export endpoint so the
+  // clipboard content matches an exported file exactly.
+  async function copyContents() {
+    try {
+      const res = await fetch(`/api/docs/${docId}/export?format=md`);
+      if (!res.ok) { toast("Couldn't copy contents"); return; }
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      toast("Page contents copied");
+    } catch { toast("Couldn't copy contents"); }
+  }
+
+  // Soft-archive (DELETE = move to Trash; the row + versions persist).
+  async function trashDoc() {
+    if (!confirm("Move this note to Trash? You can restore it later.")) return;
+    try {
+      const res = await fetch(`/api/docs/${docId}`, { method: "DELETE" });
+      if (!res.ok) { toast("Couldn't move to Trash"); return; }
+      window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+      toast("Moved to Trash");
+      router.push("/docs");
+    } catch { toast("Couldn't move to Trash"); }
   }
 
   const [summarizing, setSummarizing] = useState(false);
@@ -356,11 +610,28 @@ export function BlockDocEditor({ docId }: Props) {
     : { background: gradientCSS(meta.coverGradient) };
 
   return (
-    <div className={`bdoc ${readingMode ? "bdoc--reading" : ""}`}>
+    <>
+    <ImageLightbox />
+    <KeyboardShortcutsOverlay />
+    <LinkPromptOverlay />
+    <div
+      className={[
+        "bdoc",
+        readingMode ? "bdoc--reading" : "",
+        meta.font === "serif" ? "bdoc--font-serif" : meta.font === "mono" ? "bdoc--font-mono" : "",
+        meta.smallText ? "bdoc--small-text" : "",
+        meta.fullWidth ? "bdoc--full-width" : "",
+        meta.locked && !readingMode ? "bdoc--locked" : "",
+      ].filter(Boolean).join(" ")}
+    >
       <header className="bdoc__head">
-        <button type="button" className="bdoc__back" onClick={() => router.back()} aria-label="Back">
-          <ArrowLeft />
-        </button>
+        {/* Peek panes have no back button — the surrounding DocSplitView
+            provides Close + Swap controls instead. */}
+        {pane !== "peek" && (
+          <button type="button" className="bdoc__back" onClick={() => router.back()} aria-label="Back">
+            <ArrowLeft />
+          </button>
+        )}
 
         {/* Tight, icon-only action bar. Primary controls inline; the rest
             tuck under a More menu so the header never looks crowded. */}
@@ -424,6 +695,72 @@ export function BlockDocEditor({ docId }: Props) {
             <LinkIcon />
           </button>
 
+          {/* Open another doc in a side pane. Hidden on peek panes — the
+              surrounding DocSplitView's own toolbar already lets the
+              writer swap or close from there. */}
+          {pane !== "peek" && (
+            <div className="bdoc__peek-wrap">
+              <button
+                type="button"
+                className={`bdoc__iact bdoc__iact--peek ${peekPickerOpen ? "is-on" : ""}`}
+                onClick={() => setPeekPickerOpen((s) => !s)}
+                title="Open another note side-by-side"
+                aria-haspopup="dialog"
+                aria-expanded={peekPickerOpen}
+                aria-label="Open side pane"
+              >
+                <PanelRightOpen />
+              </button>
+              {peekPickerOpen && (
+                <div className="bdoc__peek-picker" role="dialog" aria-label="Pick a note to open in side pane">
+                  <div className="bdoc__peek-search">
+                    <Search />
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="Search notes…"
+                      value={peekQuery}
+                      onChange={(e) => setPeekQuery(e.target.value)}
+                    />
+                  </div>
+                  <div className="bdoc__peek-list">
+                    {peekDocs === null ? (
+                      <div className="bdoc__peek-empty"><Loader2 className="bdoc__spin" /> Loading notes…</div>
+                    ) : (() => {
+                      const q = peekQuery.trim().toLowerCase();
+                      const rows = q
+                        ? peekDocs.filter((d) => (d.title || "").toLowerCase().includes(q))
+                        : peekDocs.slice(0, 12);
+                      if (rows.length === 0) {
+                        return <div className="bdoc__peek-empty">No matches</div>;
+                      }
+                      return rows.map((d) => (
+                        <button
+                          key={d.id}
+                          type="button"
+                          className="bdoc__peek-row"
+                          onClick={() => openPeek(d.id)}
+                        >
+                          <FileText />
+                          <span className="bdoc__peek-title">{d.title || "Untitled note"}</span>
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                  {searchParams.get("peek") && (
+                    <button
+                      type="button"
+                      className="bdoc__peek-close-current"
+                      onClick={() => { setPeekPickerOpen(false); router.push(`/docs/${docId}`); }}
+                    >
+                      <X /> Close current side pane
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* More menu: secondary AI + power-user actions go here so the
               header stays calm at first glance. */}
           <div className="bdoc__more">
@@ -439,37 +776,34 @@ export function BlockDocEditor({ docId }: Props) {
               <MoreHorizontal />
             </button>
             {moreOpen && (
-              <div className="bdoc__more-menu" role="menu" onMouseDown={(e) => e.preventDefault()}>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => { setMoreOpen(false); void summarize(); }}
-                  disabled={summarizing}
-                >
-                  {summarizing ? <Loader2 className="bdoc__spin" /> : <Sparkles />}
-                  <span>{summary ? "Re-summarize" : "Summarize with AI"}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => { setMoreOpen(false); void extractTable(); }}
-                  disabled={extracting}
-                >
-                  {extracting ? <Loader2 className="bdoc__spin" /> : <TableIcon />}
-                  <span>Extract table</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    window.location.href = `/api/docs/${docId}/export?format=md`;
-                  }}
-                >
-                  <Download />
-                  <span>Export as markdown</span>
-                </button>
-              </div>
+              <PageActionsMenu
+                meta={meta}
+                blocks={blocks}
+                doc={doc}
+                me={me}
+                summary={summary}
+                summarizing={summarizing}
+                extracting={extracting}
+                onClose={() => setMoreOpen(false)}
+                onSetMeta={(patch) => void saveMeta(patch)}
+                onCopyLink={copyLink}
+                onCopyContents={() => void copyContents()}
+                onExport={() => { window.location.href = `/api/docs/${docId}/export?format=md`; }}
+                onDuplicate={async () => {
+                  try {
+                    const res = await fetch(`/api/docs/${docId}/duplicate`, { method: "POST" });
+                    if (!res.ok) { toast("Couldn't duplicate"); return; }
+                    const d = await res.json();
+                    const id = d.doc?.id ?? d.data?.id ?? d.id;
+                    if (id) router.push(`/docs/${id}`);
+                  } catch { toast("Couldn't duplicate"); }
+                }}
+                onTrash={() => void trashDoc()}
+                onSummarize={() => void summarize()}
+                onExtractTable={() => void extractTable()}
+                onVersionHistory={() => setPanel({ kind: "history" })}
+                onShortcuts={() => window.dispatchEvent(new CustomEvent("workwrk:notes:shortcuts"))}
+              />
             )}
           </div>
         </div>
@@ -513,9 +847,9 @@ export function BlockDocEditor({ docId }: Props) {
               type="button"
               className="bdoc__emoji"
               onClick={() => setEmojiOpen((s) => !s)}
-              aria-label="Change emoji"
+              aria-label="Change icon"
             >
-              <span>{meta.icon}</span>
+              {renderNoteIcon(meta.icon)}
             </button>
           ) : (
             <button type="button" className="bdoc__add-emoji" onClick={() => setEmojiOpen((s) => !s)}>
@@ -528,12 +862,16 @@ export function BlockDocEditor({ docId }: Props) {
               <ImagePlus /> Add cover
             </button>
           )}
+
+          <button type="button" className="bdoc__add-comment" onClick={() => setCommentOpen(true)}>
+            <MessageSquare /> Add comment
+          </button>
         </div>
 
         {emojiOpen && (
-          <EmojiPicker
+          <NoteIconPicker
             current={meta.icon}
-            onPick={(emoji) => { void saveMeta({ icon: emoji }); setEmojiOpen(false); }}
+            onPick={(value) => { void saveMeta({ icon: value }); setEmojiOpen(false); }}
             onClear={() => { void saveMeta({ icon: undefined }); setEmojiOpen(false); }}
           />
         )}
@@ -556,6 +894,10 @@ export function BlockDocEditor({ docId }: Props) {
 
         {blocks && <DocMetaStrip blocks={blocks} doc={doc} />}
 
+        {!readingMode && (
+          <PageComments docId={docId} me={me} open={commentOpen} onClose={() => setCommentOpen(false)} />
+        )}
+
         {summary && (
           <details className="bdoc__summary" open>
             <summary><Sparkles /> AI summary</summary>
@@ -575,16 +917,18 @@ export function BlockDocEditor({ docId }: Props) {
         ) : blocks === null ? (
           <div className="bdoc__loading"><Loader2 className="bdoc__spin" /> Loading content…</div>
         ) : (
-          // Key by docId so a fresh BlockEditor mounts per document —
-          // avoids stale useState lock-in across navigations. Reading
-          // mode flips readonly so the toolbar/handles disappear.
-          <BlockEditor
-            key={`${docId}:${readingMode ? "r" : "e"}`}
-            initialBlocks={blocks}
-            onSave={saveBlocks}
-            readonly={readingMode}
-            comments={comments}
-            onOpenComments={(blockId) => setPanel({ kind: "comments", blockId })}
+          // Key by docId + reading-mode + restoreNonce so the editor
+          // force-remounts on doc switch, reading-mode toggle, or version
+          // restore — never holds a stale in-memory document.
+          <BlockNoteCanvas
+            key={`${docId}:${readingMode ? "r" : "e"}:${meta.locked ? "l" : "u"}:${restoreNonce}`}
+            initialBnDoc={bnDoc}
+            legacyBlocks={blocks}
+            readonly={readingMode || !!meta.locked}
+            onChange={handleEditorChange}
+            docId={docId}
+            onComment={(blockId) => setPanel({ kind: "comments", blockId })}
+            onAskAI={() => setPanel({ kind: "ask" })}
           />
         )}
 
@@ -604,10 +948,15 @@ export function BlockDocEditor({ docId }: Props) {
           docId={docId}
           onClose={() => setPanel(null)}
           onRestore={(restoredBlocks, restoredMeta, restoredTitle) => {
+            // Restoring an old version: drop the live BN doc and let the
+            // canvas re-convert from the legacy blocks. restoreNonce bump
+            // force-remounts the editor with the restored content.
             setBlocks(restoredBlocks);
+            setBnDoc(null);
             setMeta(restoredMeta);
             setTitle(restoredTitle);
-            void persist(restoredBlocks, restoredMeta);
+            setRestoreNonce((n) => n + 1);
+            void persist(null, restoredBlocks, restoredMeta);
             setPanel(null);
           }}
         />
@@ -621,6 +970,196 @@ export function BlockDocEditor({ docId }: Props) {
           onClose={() => setPanel(null)}
           onThreadChanged={() => { void refetchComments(); }}
         />
+      )}
+    </div>
+    </>
+  );
+}
+
+// ───────── Page-level comments (Notion-style "Add a comment" under title) ─────────
+//
+// A lightweight inline thread anchored to the whole page. Backed by the same
+// ItemUpdate store as block comments (entityType="DOC_BLOCK") using the
+// reserved blockId "__page__", so it reuses /api/item-updates with no schema
+// changes. Existing comments render above an always-visible composer row that
+// mirrors Notion's avatar + input + attach/mention/send layout.
+function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser | null; open: boolean; onClose: () => void }) {
+  const { toast } = useOsToast();
+  const [thread, setThread] = useState<Comment[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const entityId = `${docId}:__page__`;
+
+  // Focus the composer when it's opened from the hover "Add comment" button.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const url = new URL("/api/item-updates", window.location.origin);
+      url.searchParams.set("entityType", "DOC_BLOCK");
+      url.searchParams.set("entityId", entityId);
+      const res = await fetch(url.toString());
+      if (!res.ok) return;
+      const d = await res.json();
+      const rows = (d.updates ?? []) as Array<{
+        id: string; body: string; authorId: string | null; authorName: string | null;
+        authorImage: string | null; createdAt: string;
+      }>;
+      setThread(rows.slice().reverse().map((u) => ({
+        id: u.id,
+        authorId: u.authorId ?? "",
+        authorName: u.authorName ?? "Unknown",
+        authorAvatar: u.authorImage,
+        text: u.body,
+        createdAt: u.createdAt,
+        resolved: false,
+      })));
+    } catch { /* ignore */ }
+  }, [entityId]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const meName = me ? (`${me.firstName ?? ""} ${me.lastName ?? ""}`.trim() || me.email || "You") : "You";
+  const meInitials = meName.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase();
+
+  async function post() {
+    const text = draft.trim();
+    if (!text || !me) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/item-updates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityType: "DOC_BLOCK", entityId, body: text }),
+      });
+      if (res.ok) { setDraft(""); await refresh(); }
+      else toast("Couldn't add comment");
+    } finally { setBusy(false); }
+  }
+
+  async function attachImage(file: File) {
+    if (!file.type.startsWith("image/")) { toast("Not an image"); return; }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!res.ok) { toast("Upload failed"); return; }
+      const d = await res.json();
+      if (d.url) setDraft((prev) => (prev ? `${prev} ${d.url}` : d.url));
+      inputRef.current?.focus();
+    } catch { toast("Upload failed"); }
+    finally { setUploading(false); }
+  }
+
+  async function deleteComment(id: string) {
+    if (!confirm("Delete this comment?")) return;
+    const res = await fetch(`/api/item-updates/${id}`, { method: "DELETE" });
+    if (res.ok) await refresh();
+  }
+
+  // Nothing to show until there's a comment or the writer opened the
+  // composer via the hover "Add comment" affordance.
+  const showComposer = open || thread.length > 0;
+  if (thread.length === 0 && !open) return null;
+
+  return (
+    <div className="bdoc__pcmts">
+      {thread.length > 0 && (
+        <ul className="bdoc__pcmts-list">
+          {thread.map((c) => (
+            <li key={c.id} className="bdoc__pcmt">
+              {c.authorAvatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="bdoc__pcmt-av" src={c.authorAvatar} alt="" />
+              ) : (
+                <span className="bdoc__pcmt-av bdoc__pcmt-av--i">
+                  {c.authorName.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase()}
+                </span>
+              )}
+              <div className="bdoc__pcmt-body">
+                <div className="bdoc__pcmt-meta">
+                  <span className="bdoc__pcmt-name">{c.authorName}</span>
+                  <span className="bdoc__pcmt-time">{relTimeShort(c.createdAt)}</span>
+                  {me && c.authorId === me.id && (
+                    <button type="button" className="bdoc__pcmt-del" onClick={() => deleteComment(c.id)} aria-label="Delete comment">
+                      <Trash2 />
+                    </button>
+                  )}
+                </div>
+                <CommentText text={c.text} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {showComposer && (
+      <div className="bdoc__pcmts-compose">
+        {me?.avatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className="bdoc__pcmt-av" src={me.avatar} alt="" />
+        ) : (
+          <span className="bdoc__pcmt-av bdoc__pcmt-av--i">{meInitials}</span>
+        )}
+        <textarea
+          ref={inputRef}
+          className="bdoc__pcmts-input"
+          placeholder="Add a comment…"
+          rows={1}
+          value={draft}
+          disabled={!me || busy}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void post(); }
+            if (e.key === "Escape" && !draft.trim()) { e.preventDefault(); onClose(); }
+          }}
+        />
+        <div className="bdoc__pcmts-actions">
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void attachImage(f); }} />
+          <button type="button" title="Attach image" aria-label="Attach image" disabled={!me || uploading} onClick={() => fileRef.current?.click()}>
+            {uploading ? <Loader2 className="bdoc__spin" /> : <ImagePlus />}
+          </button>
+          <button type="button" title="Mention" aria-label="Mention" disabled={!me} onClick={() => { setDraft((p) => `${p}@`); inputRef.current?.focus(); }}>
+            <AtSign />
+          </button>
+          <button type="button" className="bdoc__pcmts-send" title="Comment" aria-label="Send comment" disabled={!me || busy || !draft.trim()} onClick={() => void post()}>
+            {busy ? <Loader2 className="bdoc__spin" /> : <ArrowUp />}
+          </button>
+        </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
+// Render comment text, linkifying bare image URLs into inline thumbnails so
+// "attach image" reads as an image rather than a raw link.
+function CommentText({ text }: { text: string }) {
+  const parts = text.split(/(\s+)/);
+  const isImg = (s: string) => /^https?:\/\/\S+\.(png|jpe?g|gif|webp|svg)(\?\S*)?$/i.test(s);
+  const hasImg = parts.some(isImg);
+  return (
+    <div className="bdoc__pcmt-text">
+      <span>
+        {parts.map((p, i) =>
+          /^https?:\/\/\S+$/.test(p) && !isImg(p)
+            ? <a key={i} href={p} target="_blank" rel="noopener noreferrer">{p}</a>
+            : isImg(p) ? "" : p,
+        )}
+      </span>
+      {hasImg && (
+        <div className="bdoc__pcmt-imgs">
+          {parts.filter(isImg).map((src, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <a key={i} href={src} target="_blank" rel="noopener noreferrer"><img src={src} alt="" /></a>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -665,53 +1204,275 @@ function DocMetaStrip({ blocks, doc }: { blocks: Block[]; doc: DocPayload }) {
   );
 }
 
-// ───────── Outline (TOC) right rail ─────────
+// A plain action row in the page menu: icon · label · optional shortcut hint.
+function PamRow({ icon, label, kbd, onClick, danger, disabled }: {
+  icon: ReactNode; label: string; kbd?: string; onClick: () => void; danger?: boolean; disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button" role="menuitem" disabled={disabled}
+      className={`bdoc-pam__row ${danger ? "is-danger" : ""}`}
+      onClick={onClick}
+    >
+      <span className="bdoc-pam__ico">{icon}</span>
+      <span className="bdoc-pam__lbl">{label}</span>
+      {kbd && <span className="bdoc-pam__kbd">{kbd}</span>}
+    </button>
+  );
+}
+
+// A toggle row: icon · label · switch. Stays open after toggling.
+function PamToggle({ icon, label, on, onToggle }: {
+  icon: ReactNode; label: string; on: boolean; onToggle: () => void;
+}) {
+  return (
+    <button type="button" role="menuitemcheckbox" aria-checked={on} className="bdoc-pam__row" onClick={onToggle}>
+      <span className="bdoc-pam__ico">{icon}</span>
+      <span className="bdoc-pam__lbl">{label}</span>
+      <span className={`bdoc-pam__sw ${on ? "is-on" : ""}`} aria-hidden><span /></span>
+    </button>
+  );
+}
+
+// ───────── Page actions menu (the top-right "…") ─────────
+//
+// Notion's page-level menu, in our own tone: a searchable list of page
+// actions, a font switcher, view toggles (Small text / Full width / Lock),
+// an inline "Use with AI" group, and a live word-count + last-edited footer.
+// Every item is wired to something real — no decorative dead rows.
+function PageActionsMenu({
+  meta, blocks, doc, me, summary, summarizing, extracting,
+  onClose, onSetMeta, onCopyLink, onCopyContents, onExport, onDuplicate,
+  onTrash, onSummarize, onExtractTable, onVersionHistory, onShortcuts,
+}: {
+  meta: DocMeta;
+  blocks: Block[] | null;
+  doc: DocPayload;
+  me: MeUser | null;
+  summary: string | null;
+  summarizing: boolean;
+  extracting: boolean;
+  onClose: () => void;
+  onSetMeta: (patch: Partial<DocMeta>) => void;
+  onCopyLink: () => void;
+  onCopyContents: () => void;
+  onExport: () => void;
+  onDuplicate: () => void;
+  onTrash: () => void;
+  onSummarize: () => void;
+  onExtractTable: () => void;
+  onVersionHistory: () => void;
+  onShortcuts: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [aiOpen, setAiOpen] = useState(false);
+  const needle = q.trim().toLowerCase();
+  const match = (label: string) => !needle || label.toLowerCase().includes(needle);
+
+  // Live word count (same logic as the meta strip) for the footer.
+  const words = useMemo(() => {
+    if (!blocks) return 0;
+    let n = 0;
+    for (const b of blocks) {
+      if (!("text" in b)) continue;
+      const plain = (b as { text: string }).text.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " ");
+      n += plain.split(/\s+/).filter(Boolean).length;
+    }
+    return n;
+  }, [blocks]);
+
+  const editorName = me
+    ? [me.firstName, me.lastName].filter(Boolean).join(" ") || me.email || "you"
+    : "you";
+  const editedAt = new Date(doc.updatedAt).toLocaleString("en-US", {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+
+  const font: DocFont = meta.font ?? "default";
+  const FONTS: { key: DocFont; label: string; cls: string }[] = [
+    { key: "default", label: "Default", cls: "is-default" },
+    { key: "serif", label: "Serif", cls: "is-serif" },
+    { key: "mono", label: "Mono", cls: "is-mono" },
+  ];
+
+  // Wrap an action so selecting it also dismisses the menu (Notion behaviour
+  // for actions; toggles stay open).
+  const act = (fn: () => void) => () => { onClose(); fn(); };
+
+  const grp1 = ["copy link", "copy page contents", "duplicate", "move to trash"].some(match);
+  const grp2 = ["small text", "full width", "lock page"].some(match);
+  const grp3 = ["use with ai", "summarize", "re-summarize", "extract table"].some(match);
+  const grp4 = ["export", "version history", "keyboard shortcuts"].some(match);
+
+  return (
+    <div className="bdoc__more-menu bdoc-pam" role="menu" onMouseDown={(e) => e.preventDefault()}>
+      <div className="bdoc-pam__search">
+        <Search />
+        <input
+          type="text" autoFocus placeholder="Search actions…"
+          value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}
+        />
+      </div>
+
+      <div className="bdoc-pam__scroll">
+        {!needle && (
+          <div className="bdoc-pam__fonts">
+            {FONTS.map((f) => (
+              <button
+                key={f.key} type="button"
+                className={`bdoc-pam__font ${f.cls} ${font === f.key ? "is-active" : ""}`}
+                onClick={() => onSetMeta({ font: f.key })}
+              >
+                <span className="bdoc-pam__font-ag">Ag</span>
+                <span className="bdoc-pam__font-lbl">{f.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {grp1 && (
+          <div className="bdoc-pam__grp">
+            {match("Copy link") && <PamRow icon={<LinkIcon />} label="Copy link" kbd="⌘L" onClick={act(onCopyLink)} />}
+            {match("Copy page contents") && <PamRow icon={<ClipboardCopy />} label="Copy page contents" onClick={act(onCopyContents)} />}
+            {match("Duplicate") && <PamRow icon={<Copy />} label="Duplicate" kbd="⌘D" onClick={act(onDuplicate)} />}
+            {match("Move to Trash") && <PamRow icon={<Trash2 />} label="Move to Trash" danger onClick={act(onTrash)} />}
+          </div>
+        )}
+
+        {grp2 && (
+          <div className="bdoc-pam__grp">
+            {match("Small text") && <PamToggle icon={<TypeIcon />} label="Small text" on={!!meta.smallText} onToggle={() => onSetMeta({ smallText: !meta.smallText })} />}
+            {match("Full width") && <PamToggle icon={<MoveHorizontal />} label="Full width" on={!!meta.fullWidth} onToggle={() => onSetMeta({ fullWidth: !meta.fullWidth })} />}
+            {match("Lock page") && <PamToggle icon={<Lock />} label="Lock page" on={!!meta.locked} onToggle={() => onSetMeta({ locked: !meta.locked })} />}
+          </div>
+        )}
+
+        {grp3 && (
+          <div className="bdoc-pam__grp">
+            {match("Use with AI") && (
+              <button type="button" className="bdoc-pam__row" aria-expanded={aiOpen} onClick={() => setAiOpen((s) => !s)}>
+                <span className="bdoc-pam__ico"><Sparkles /></span>
+                <span className="bdoc-pam__lbl">Use with AI</span>
+                <ChevronRight className={`bdoc-pam__chev ${aiOpen ? "is-open" : ""}`} />
+              </button>
+            )}
+            {(aiOpen || needle) && (
+              <>
+                {match("Summarize") && (
+                  <PamRow
+                    icon={summarizing ? <Loader2 className="bdoc__spin" /> : <Sparkles />}
+                    label={summary ? "Re-summarize" : "Summarize with AI"}
+                    disabled={summarizing} onClick={act(onSummarize)}
+                  />
+                )}
+                {match("Extract table") && (
+                  <PamRow
+                    icon={extracting ? <Loader2 className="bdoc__spin" /> : <TableIcon />}
+                    label="Extract table" disabled={extracting} onClick={act(onExtractTable)}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {grp4 && (
+          <div className="bdoc-pam__grp">
+            {match("Export") && <PamRow icon={<Download />} label="Export as Markdown" onClick={act(onExport)} />}
+            {match("Version history") && <PamRow icon={<History />} label="Version history" onClick={act(onVersionHistory)} />}
+            {match("Keyboard shortcuts") && <PamRow icon={<TypeIcon />} label="Keyboard shortcuts" kbd="?" onClick={act(onShortcuts)} />}
+          </div>
+        )}
+      </div>
+
+      <div className="bdoc-pam__foot">
+        <span>{words.toLocaleString()} word{words === 1 ? "" : "s"}</span>
+        <span className="bdoc-pam__foot-line">Last edited by {editorName}</span>
+        <span className="bdoc-pam__foot-line">{editedAt}</span>
+      </div>
+    </div>
+  );
+}
+
+// ───────── Outline minimap (Notion-style) ─────────
+//
+// Collapsed: a thin column of right-aligned tick lines (length by heading
+// level), with the section currently in view highlighted. On hover the
+// whole thing expands into a labeled, clickable panel. Scroll-spy is driven
+// by an IntersectionObserver against the live heading DOM nodes (located by
+// their BlockNote `data-id`). Renders nothing when there are no headings.
 function OutlineRail({ blocks, onClose }: { blocks: Block[]; onClose: () => void }) {
   const headings = useMemo(() => {
     return blocks
-      .map((b, idx) => {
-        if (b.kind === "h1" || b.kind === "h2" || b.kind === "h3") {
-          return { id: b.id, kind: b.kind, text: (b as { text: string }).text || "Untitled section", idx };
-        }
-        return null;
-      })
-      .filter((x): x is { id: string; kind: "h1" | "h2" | "h3"; text: string; idx: number } => !!x);
+      .map((b) =>
+        b.kind === "h1" || b.kind === "h2" || b.kind === "h3"
+          ? { id: b.id, kind: b.kind, text: (b as { text: string }).text || "Untitled section" }
+          : null,
+      )
+      .filter((x): x is { id: string; kind: "h1" | "h2" | "h3"; text: string } => !!x);
   }, [blocks]);
 
-  if (headings.length === 0) {
-    return (
-      <aside className="bdoc__outline">
-        <header className="bdoc__outline-head">
-          <ListTree /> <span>Outline</span>
-          <button type="button" className="bdoc__outline-x" onClick={onClose} aria-label="Hide outline"><X /></button>
-        </header>
-        <div className="bdoc__outline-empty">Add headings (#, ##, ###) to build an outline.</div>
-      </aside>
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  // Scroll-spy. Re-runs whenever the heading set changes. rootMargin pins
+  // the "active" band near the top of the viewport so the highlighted tick
+  // tracks the heading you're reading. root:null works regardless of which
+  // ancestor actually scrolls.
+  useEffect(() => {
+    if (headings.length === 0) return;
+    const els = headings
+      .map((h) => document.querySelector(`[data-id="${h.id}"]`))
+      .filter((el): el is Element => !!el);
+    if (els.length === 0) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting);
+        if (visible.length === 0) return;
+        const topMost = visible.reduce((a, b) =>
+          a.boundingClientRect.top < b.boundingClientRect.top ? a : b,
+        );
+        const id = topMost.target.getAttribute("data-id");
+        if (id) setActiveId(id);
+      },
+      { rootMargin: "-80px 0px -70% 0px", threshold: 0 },
     );
-  }
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [headings]);
+
+  if (headings.length === 0) return null;
+
+  const scrollTo = (id: string) => {
+    const el = document.querySelector(`[data-id="${id}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
-    <aside className="bdoc__outline">
-      <header className="bdoc__outline-head">
-        <ListTree /> <span>Outline</span>
-        <button type="button" className="bdoc__outline-x" onClick={onClose} aria-label="Hide outline"><X /></button>
-      </header>
-      <ol className="bdoc__outline-list">
+    <aside className="bdoc__outline" aria-label="Document outline">
+      <button
+        type="button"
+        className="bdoc__outline-hide"
+        onClick={onClose}
+        title="Hide outline"
+        aria-label="Hide outline"
+      >
+        <X />
+      </button>
+      <nav className="bdoc__outline-map">
         {headings.map((h) => (
-          <li key={h.id} className={`bdoc__outline-item bdoc__outline-item--${h.kind}`}>
-            <a
-              href={`#b-${h.id}`}
-              onClick={(e) => {
-                e.preventDefault();
-                const el = document.getElementById(`b-${h.id}`);
-                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-              }}
-            >
-              {h.text}
-            </a>
-          </li>
+          <button
+            key={h.id}
+            type="button"
+            className={`bdoc__outline-tick bdoc__outline-tick--${h.kind} ${activeId === h.id ? "is-active" : ""}`}
+            onClick={() => scrollTo(h.id)}
+            title={h.text}
+          >
+            <span className="bdoc__outline-line" aria-hidden />
+            <span className="bdoc__outline-text">{h.text}</span>
+          </button>
         ))}
-      </ol>
+      </nav>
     </aside>
   );
 }
@@ -826,33 +1587,6 @@ function AskDocPanel({ docId, docTitle, onClose }: { docId: string; docTitle: st
   );
 }
 
-// ───────── Emoji picker (curated set) ─────────
-function EmojiPicker({ current, onPick, onClear }: { current?: string; onPick: (e: string) => void; onClear: () => void }) {
-  return (
-    <div className="bdoc__emoji-pop" onClick={(e) => e.stopPropagation()}>
-      <header className="bdoc__emoji-head">
-        <Smile /> <span>Pick an icon</span>
-        {current && (
-          <button type="button" className="bdoc__emoji-clear" onClick={onClear}>
-            <Trash2 /> Remove
-          </button>
-        )}
-      </header>
-      <div className="bdoc__emoji-grid">
-        {EMOJI_SET.map((e) => (
-          <button
-            key={e}
-            type="button"
-            className={`bdoc__emoji-cell ${current === e ? "is-current" : ""}`}
-            onClick={() => onPick(e)}
-          >
-            {e}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // ───────── Block comments thread slide-over (real endpoints) ─────────
 //
@@ -1149,7 +1883,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
             <>
               <div className="bdoc__hist-preview-title">{preview.title || "Untitled"}</div>
               <div className="bdoc__hist-preview-body">
-                <BlockEditor initialBlocks={preview.blocks} onSave={() => {}} readonly />
+                <BlockNoteCanvas initialBnDoc={null} legacyBlocks={preview.blocks} readonly onChange={() => {}} />
               </div>
               <footer className="bdoc__hist-foot">
                 <button type="button" className="bdoc__hist-restore" onClick={restore} disabled={restoring}>
@@ -1241,7 +1975,25 @@ export function BacklinksPanel({ kind, id }: { kind: "doc" | "sop"; id: string }
 
 // ───────── Cover picker (gradient + URL) ─────────
 function CoverPicker({ meta, onPick, onClear }: { meta: DocMeta; onPick: (m: Partial<DocMeta>) => void; onClear: () => void }) {
+  const { toast } = useOsToast();
   const [url, setUrl] = useState(meta.coverUrl ?? "");
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  async function uploadFile(file: File) {
+    if (!file.type.startsWith("image/")) { toast("Not an image"); return; }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!res.ok) { toast("Upload failed"); return; }
+      const d = await res.json();
+      onPick({ coverUrl: d.url, coverGradient: undefined });
+    } catch { toast("Upload failed"); }
+    finally { setUploading(false); }
+  }
+
   return (
     <div className="bdoc__cover-pop" onClick={(e) => e.stopPropagation()}>
       <header className="bdoc__cover-head">
@@ -1252,6 +2004,54 @@ function CoverPicker({ meta, onPick, onClear }: { meta: DocMeta; onPick: (m: Par
           </button>
         )}
       </header>
+
+      {/* Upload-from-file button + drag-drop zone */}
+      <div
+        className={`bdoc__cover-upload ${uploading ? "is-busy" : ""}`}
+        onClick={() => fileRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const f = e.dataTransfer.files?.[0];
+          if (f) void uploadFile(f);
+        }}
+      >
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void uploadFile(f);
+          }}
+        />
+        {uploading ? <><Loader2 className="bdoc__spin" /> Uploading…</> : <><ImagePlus /> Upload from device</>}
+      </div>
+
+      {/* Image gallery — real photo thumbnails */}
+      <div className="bdoc__cover-sec">Gallery</div>
+      <div className="bdoc__cover-grid bdoc__cover-grid--img">
+        {COVER_SEEDS.map((seed) => {
+          const full = coverImageUrl(seed, 1600, 400);
+          return (
+            <button
+              key={seed}
+              type="button"
+              className={`bdoc__cover-cell bdoc__cover-cell--img ${meta.coverUrl === full ? "is-current" : ""}`}
+              onClick={() => onPick({ coverUrl: full, coverGradient: undefined })}
+              aria-label={`Cover ${seed}`}
+              title="Use this cover"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={coverImageUrl(seed, 240, 90)} alt="" loading="lazy" />
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Solid gradients */}
+      <div className="bdoc__cover-sec">Gradients</div>
       <div className="bdoc__cover-grid">
         {COVER_GRADIENTS.map((g) => (
           <button
