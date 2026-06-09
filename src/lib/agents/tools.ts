@@ -1773,11 +1773,25 @@ const invitePersonWithRole: ToolDefinition = {
     const sopCount = await prisma.sOP.count({ where: { id: { in: sopIds }, organizationId: ctx.orgId } });
     if (sopCount !== sopIds.length) throw new Error("One or more SOPs don't belong to this org");
 
+    // An AI agent must never mint privileged access. The accessLevel arrives
+    // from model output, which can be steered by untrusted content surfaced via
+    // search_* tool results (indirect prompt injection). Clamp to a fixed set of
+    // non-privileged tiers — anything above MANAGER must go through a human admin
+    // on POST /api/invitations, never an autonomous run.
+    const AGENT_INVITE_ALLOWED = new Set(["EMPLOYEE", "TEAM_LEAD", "MANAGER"]);
+    const requestedLevel = (input.accessLevel as string | undefined)?.trim().toUpperCase() || "EMPLOYEE";
+    if (!AGENT_INVITE_ALLOWED.has(requestedLevel)) {
+      throw new Error(
+        `Agents may only invite at EMPLOYEE, TEAM_LEAD, or MANAGER. '${requestedLevel}' requires a human admin via the invitations page.`,
+      );
+    }
+    const accessLevel = requestedLevel as "EMPLOYEE" | "TEAM_LEAD" | "MANAGER";
+
     const crypto = await import("crypto");
     const invitation = await prisma.invitation.create({
       data: {
         email,
-        accessLevel: ((input.accessLevel as string | undefined) ?? "EMPLOYEE") as "EMPLOYEE",
+        accessLevel,
         token: crypto.randomBytes(32).toString("hex"),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         organizationId: ctx.orgId,
