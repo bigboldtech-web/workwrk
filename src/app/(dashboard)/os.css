@@ -16058,7 +16058,7 @@ table.os-tbl {
  * BLOCK-BASED DOC EDITOR
  * ════════════════════════════════════════════════════════════════ */
 .bdoc { padding: 0 0 80px; width: 100%; min-height: 100vh; }
-.bdoc__head { display: flex; justify-content: space-between; align-items: center; padding: 14px 24px; position: sticky; top: 0; background: color-mix(in srgb, var(--os-surface) 95%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 10; border-bottom: 1px solid var(--os-line); }
+.bdoc__head { display: flex; justify-content: space-between; align-items: center; padding: 14px 24px; position: sticky; top: var(--doctabs-h, 0px); background: color-mix(in srgb, var(--os-surface) 95%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 10; border-bottom: 1px solid var(--os-line); }
 .bdoc__back { width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; color: var(--os-ink-2); }
 .bdoc__back:hover { background: var(--os-surface-1); color: var(--os-ink); }
 .bdoc__back svg { width: 16px; height: 16px; }
@@ -32703,9 +32703,9 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .bdoc__cover-url button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ═══ Note icon button content (emoji / image / lucide) ═══ */
-/* Big Notion-style page icon — must match the 64px in the .bdoc__emoji block
-   above (this rule wins by cascade order, so keep them in sync). */
-.bdoc__emoji svg { width: 64px; height: 64px; }
+/* Big Notion-style page icon. The scoped `.workwrk-os .bdoc__emoji svg` rule
+   (58px) actually wins by specificity; kept in sync here for clarity. */
+.bdoc__emoji svg { width: 58px; height: 58px; }
 .note-icon-img { width: 100%; height: 100%; object-fit: cover; border-radius: 14px; display: block; }
 
 /* ═══ Notion-style icon picker (NoteIconPicker) ═══ */
@@ -32805,47 +32805,51 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .bdoc__cover-cell--img.is-current { border-color: var(--os-brand); }
 
 /* ═══ Page-level comments ("Add a comment" under title) ═══ */
-.bdoc__pcmts { margin: 4px 0 14px; }
-.bdoc__pcmts-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
-.bdoc__pcmt { display: flex; gap: 10px; }
+/* Page comments — clean Notion-style thread directly under the title. */
+.bdoc__pcmts { margin: 10px 0 4px; padding-bottom: 18px; border-bottom: 1px solid var(--os-line); }
+.bdoc__pcmts-list { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.bdoc__pcmt { display: flex; gap: 12px; }
 .bdoc__pcmt-av {
-  width: 26px; height: 26px; border-radius: 50%; flex: 0 0 26px; object-fit: cover;
-  display: grid; place-items: center; font-size: 10.5px; font-weight: 700;
+  width: 30px; height: 30px; border-radius: 50%; flex: 0 0 30px; object-fit: cover;
+  display: grid; place-items: center; font-size: 11.5px; font-weight: 700;
 }
-.bdoc__pcmt-av--i { background: color-mix(in srgb, var(--os-brand) 22%, transparent); color: var(--os-brand); }
+.bdoc__pcmt-av--i { background: color-mix(in srgb, var(--os-brand) 20%, transparent); color: var(--os-brand); }
 .bdoc__pcmt-body { flex: 1; min-width: 0; }
-.bdoc__pcmt-meta { display: flex; align-items: center; gap: 8px; }
-.bdoc__pcmt-name { font-size: 13px; font-weight: 600; }
-.bdoc__pcmt-time { font-size: 11.5px; opacity: 0.5; }
+.bdoc__pcmt-meta { display: flex; align-items: baseline; gap: 8px; }
+.bdoc__pcmt-name { font-size: 14px; font-weight: 600; color: var(--os-ink); }
+.bdoc__pcmt-time { font-size: 12px; color: var(--os-ink-3); }
 .bdoc__pcmt-del { margin-left: auto; background: transparent; border: none; cursor: pointer; color: inherit; opacity: 0; padding: 2px; border-radius: 4px; }
 .bdoc__pcmt:hover .bdoc__pcmt-del { opacity: 0.5; }
 .bdoc__pcmt-del:hover { opacity: 1 !important; color: #e5484d; }
 .bdoc__pcmt-del svg { width: 13px; height: 13px; }
-.bdoc__pcmt-text { font-size: 14px; line-height: 1.5; margin-top: 2px; word-break: break-word; }
+.bdoc__pcmt-text { font-size: 14.5px; line-height: 1.5; margin-top: 3px; color: var(--os-ink); word-break: break-word; }
 .bdoc__pcmt-text a { color: var(--os-brand); }
 .bdoc__pcmt-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .bdoc__pcmt-imgs img { max-width: 220px; max-height: 160px; border-radius: 8px; display: block; }
+/* Composer: borderless row — avatar · growing input · right-aligned actions. */
 .bdoc__pcmts-compose {
-  display: flex; align-items: center; gap: 10px;
-  padding: 6px; border-radius: 10px; border: 1px solid var(--os-line);
+  display: flex; align-items: center; gap: 12px;
+  padding: 2px 0;
 }
-:root.dark .bdoc__pcmts-compose { border-color: rgba(255,255,255,0.1); }
-.bdoc__pcmts-compose:focus-within { border-color: color-mix(in srgb, var(--os-brand) 50%, var(--os-line)); }
 .bdoc__pcmts-input {
   flex: 1; resize: none; border: none; outline: none; background: transparent;
-  font-size: 14px; line-height: 1.4; color: inherit; max-height: 120px; padding: 4px 2px;
+  font-size: 14.5px; line-height: 1.5; color: var(--os-ink); max-height: 140px; padding: 5px 0;
 }
-.bdoc__pcmts-actions { display: flex; align-items: center; gap: 2px; }
+.bdoc__pcmts-input::placeholder { color: var(--os-ink-3); }
+.bdoc__pcmts-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .bdoc__pcmts-actions button {
-  display: grid; place-items: center; width: 28px; height: 28px;
-  border-radius: 6px; background: transparent; border: none; cursor: pointer; color: inherit; opacity: 0.55;
+  display: grid; place-items: center; width: 30px; height: 30px;
+  border-radius: 50%; background: transparent; border: none; cursor: pointer; color: var(--os-ink-3); opacity: 1;
+  transition: background 120ms ease, color 120ms ease;
 }
-.bdoc__pcmts-actions button:hover:not(:disabled) { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
-.bdoc__pcmts-actions button:disabled { opacity: 0.3; cursor: default; }
-.bdoc__pcmts-actions svg { width: 16px; height: 16px; }
-.bdoc__pcmts-send { color: #fff !important; background: var(--os-brand) !important; opacity: 1 !important; }
-.bdoc__pcmts-send:hover:not(:disabled) { background: var(--os-brand-hover, var(--os-brand)) !important; }
-.bdoc__pcmts-send:disabled { background: color-mix(in srgb, currentColor 15%, transparent) !important; opacity: 0.4 !important; }
+.bdoc__pcmts-actions button:hover:not(:disabled) { color: var(--os-ink); background: color-mix(in srgb, currentColor 12%, transparent); }
+.bdoc__pcmts-actions button:disabled { opacity: 0.35; cursor: default; }
+.bdoc__pcmts-actions svg { width: 17px; height: 17px; }
+/* Send: filled blue circle with the up-arrow, mirroring the screenshot. */
+.bdoc__pcmts-send { color: #fff !important; background: #2563eb !important; }
+.bdoc__pcmts-send:hover:not(:disabled) { background: #1d4ed8 !important; color: #fff !important; }
+.bdoc__pcmts-send svg { width: 16px; height: 16px; }
+.bdoc__pcmts-send:disabled { background: color-mix(in srgb, var(--os-ink) 18%, transparent) !important; color: #fff !important; opacity: 1 !important; }
 
 /* ═══ Note context menu (right-click / "…") — portaled to <body> ═══
    Body sits outside .workwrk-os so --os-* tokens don't resolve here; use

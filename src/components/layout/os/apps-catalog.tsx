@@ -126,7 +126,7 @@ function NavItem({
   return (
     <Link
       href={href}
-      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
       }`}
     >
@@ -150,7 +150,7 @@ function MoreNavItem() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="w-full flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] text-zinc-700 hover:bg-white/80"
+        className="w-full flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] text-zinc-700 hover:bg-white/80"
       >
         <MoreHorizontal className="w-3.5 h-3.5 flex-shrink-0 text-zinc-500" />
         <span className="truncate flex-1 text-left">More</span>
@@ -239,14 +239,14 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
       <li className="relative group/taskrow">
         <Link
           href="/tasks"
-          className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+          className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
             pathname === "/tasks"
               ? "bg-zinc-200/70 text-zinc-900 font-medium"
               : "text-zinc-700 hover:bg-white/80"
           }`}
         >
-          <span className="relative h-5 w-3.5 shrink-0 text-zinc-500" aria-hidden>
-            <CheckSquare className="absolute left-1/2 top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 transition-opacity group-hover/taskrow:opacity-0 group-focus-within/taskrow:opacity-0" />
+          <span className="relative h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden>
+            <CheckSquare className="h-3.5 w-3.5" />
           </span>
           <span className="truncate flex-1">My Tasks</span>
         </Link>
@@ -258,7 +258,7 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
             setExpanded((v) => !v);
           }}
           aria-label={expanded ? "Collapse My Tasks" : "Expand My Tasks"}
-          className="absolute left-2.5 top-1/2 z-10 h-5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity hover:text-zinc-800 group-hover/taskrow:opacity-100 group-focus-within/taskrow:opacity-100"
+          className="absolute left-2 top-1/2 z-10 h-5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity hover:opacity-100 hover:text-zinc-800 focus-visible:opacity-100"
         >
           <span
             className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-md bg-zinc-200/80"
@@ -273,7 +273,7 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
       </li>
       {expanded ? (
         <li>
-          <ul className="ml-5 border-l border-zinc-200/70 pl-2">
+          <ul className="ml-[18px] border-l border-zinc-200/70 pl-2">
             <SubNavItem
               href="/tasks/assigned-to-me"
               Icon={UserCheck}
@@ -318,7 +318,7 @@ function SubNavItem({
     <li>
       <Link
         href={href}
-        className={`flex h-7 items-center gap-2 px-2.5 rounded-lg text-[12.5px] ${
+        className={`flex h-[25px] items-center gap-2 px-2 rounded-md text-[12px] ${
           active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
         }`}
       >
@@ -334,7 +334,7 @@ function SubNavItem({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2.5 pt-3 pb-1 text-[12.5px] font-semibold text-zinc-500">
+    <div className="px-2 pt-2.5 pb-1 text-[12px] font-semibold text-zinc-500">
       {children}
     </div>
   );
@@ -539,9 +539,9 @@ function HomeSidebar() {
         <button
           type="button"
           onClick={() => setFavoritesOpen((v) => !v)}
-          className="flex h-8 items-center gap-2 px-2.5 mt-2 text-[13px] font-medium w-full text-zinc-700 hover:text-zinc-900"
+          className="flex h-7 items-center gap-2 px-2 mt-2 text-[12px] font-medium w-full text-zinc-700 hover:text-zinc-900"
         >
-          {favoritesOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          {favoritesOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
           <span>Favorites</span>
           {total > 0 ? (
             <span className="ml-1 text-[11px] text-zinc-400 font-normal tabular-nums">
@@ -569,7 +569,7 @@ function HomeSidebar() {
                   <li key={`s-${s.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${s.slug}`}
-                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -595,7 +595,7 @@ function HomeSidebar() {
                   <li key={`b-${b.id}`} className="group/fav relative">
                     <Link
                       href={`/boards/${b.slug}`}
-                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -620,7 +620,7 @@ function HomeSidebar() {
                   <li key={`d-${d.id}`} className="group/fav relative">
                     <Link
                       href={`/docs/${d.id}`}
-                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -640,7 +640,7 @@ function HomeSidebar() {
                   <li key={`f-${f.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${f.space.slug}#folder-${f.id}`}
-                      className="flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] text-zinc-700 hover:bg-white/80"
+                      className="flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] text-zinc-700 hover:bg-white/80"
                     >
                       <span
                         className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
@@ -663,7 +663,7 @@ function HomeSidebar() {
                   <li key={`t-${t.id}`} className="group/fav relative">
                     <Link
                       href={`/tables/${t.id}`}
-                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -688,7 +688,7 @@ function HomeSidebar() {
                   <li key={`w-${w.id}`} className="group/fav relative">
                     <Link
                       href={`/whiteboards/${w.id}`}
-                      className={`flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] ${
+                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -713,7 +713,7 @@ function HomeSidebar() {
                     href={f.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] text-zinc-700 hover:bg-white/80"
+                    className="flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] text-zinc-700 hover:bg-white/80"
                   >
                     <span
                       className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold shrink-0"
@@ -740,8 +740,8 @@ function HomeSidebar() {
       : spaces;
     return (
       <div key="spaces">
-        <div className="flex h-8 items-center gap-2 px-2.5 mt-1">
-          <span className="text-[13px] font-medium flex-1 text-zinc-700">
+        <div className="flex h-7 items-center gap-2 px-2 mt-1">
+          <span className="text-[12px] font-medium flex-1 text-zinc-700">
             Spaces
             {q && visibleSpaces.length !== spaces.length ? (
               <span className="ml-1 text-[11px] text-zinc-400 font-normal">
@@ -752,7 +752,7 @@ function HomeSidebar() {
           <button
             type="button"
             onClick={() => setNewSpaceOpen(true)}
-            className="h-6 w-6 inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100"
+            className="h-[22px] w-[22px] inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100"
             aria-label="New space"
           >
             <Plus className="w-4 h-4" />
@@ -782,7 +782,7 @@ function HomeSidebar() {
             <button
               type="button"
               onClick={() => setNewSpaceOpen(true)}
-              className="w-full flex h-7 items-center gap-2.5 px-2.5 rounded-lg text-[12.5px] text-zinc-500 hover:bg-white/80"
+              className="w-full flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] text-zinc-500 hover:bg-white/80"
             >
               <Plus className="w-4 h-4" />
               <span>New Space</span>

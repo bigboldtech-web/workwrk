@@ -2215,6 +2215,11 @@ export function KeyboardShortcutsOverlay() {
             <Row keys={["?"]} desc="Open this shortcuts sheet" />
             <Row keys={["⌘", "K"]} desc="Universal search palette" />
           </Group>
+          <Group label="Open-note tabs">
+            <Row keys={["⌥", "1–9"]} desc="Jump to the Nth open note tab" />
+            <Row keys={["⌥", "]"]} desc="Next tab" />
+            <Row keys={["⌥", "["]} desc="Previous tab" />
+          </Group>
         </div>
       </div>
     </div>,

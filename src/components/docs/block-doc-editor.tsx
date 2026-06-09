@@ -21,7 +21,7 @@ import {
   ImagePlus, Smile, Trash2, MessageSquare, ListTree, X, Send, Star,
   ArrowDownLeft, FileText, BookCopy, BookOpen, History, RotateCcw,
   MoreHorizontal, Download, Copy, PanelRightOpen, Search, ArrowUp, AtSign,
-  ClipboardCopy, Type as TypeIcon, MoveHorizontal, Lock, ChevronRight,
+  ClipboardCopy, Type as TypeIcon, MoveHorizontal, Lock, ChevronRight, Paperclip,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block, type Comment, type CommentsByBlock } from "./block-editor";
@@ -890,6 +890,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
           placeholder="Untitled note"
+          readOnly={readingMode || !!meta.locked}
         />
 
         {blocks && <DocMetaStrip blocks={blocks} doc={doc} />}
@@ -1042,8 +1043,7 @@ function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser 
     } finally { setBusy(false); }
   }
 
-  async function attachImage(file: File) {
-    if (!file.type.startsWith("image/")) { toast("Not an image"); return; }
+  async function attachFile(file: File) {
     setUploading(true);
     try {
       const fd = new FormData();
@@ -1051,6 +1051,7 @@ function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser 
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       if (!res.ok) { toast("Upload failed"); return; }
       const d = await res.json();
+      // Images linkify into inline thumbnails; other files post as a link.
       if (d.url) setDraft((prev) => (prev ? `${prev} ${d.url}` : d.url));
       inputRef.current?.focus();
     } catch { toast("Upload failed"); }
@@ -1121,9 +1122,9 @@ function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser 
           }}
         />
         <div className="bdoc__pcmts-actions">
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void attachImage(f); }} />
-          <button type="button" title="Attach image" aria-label="Attach image" disabled={!me || uploading} onClick={() => fileRef.current?.click()}>
-            {uploading ? <Loader2 className="bdoc__spin" /> : <ImagePlus />}
+          <input ref={fileRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void attachFile(f); }} />
+          <button type="button" title="Attach file" aria-label="Attach file" disabled={!me || uploading} onClick={() => fileRef.current?.click()}>
+            {uploading ? <Loader2 className="bdoc__spin" /> : <Paperclip />}
           </button>
           <button type="button" title="Mention" aria-label="Mention" disabled={!me} onClick={() => { setDraft((p) => `${p}@`); inputRef.current?.focus(); }}>
             <AtSign />
@@ -1180,9 +1181,12 @@ function DocMetaStrip({ blocks, doc }: { blocks: Block[]; doc: DocPayload }) {
     return { words, minutes };
   }, [blocks]);
 
+  // Capture "now" once at mount (lazy init) so the render path stays pure —
+  // a relative timestamp doesn't need to re-tick every render.
+  const [now] = useState(() => Date.now());
   const updated = useMemo(() => {
     const d = new Date(doc.updatedAt);
-    const diff = Date.now() - d.getTime();
+    const diff = now - d.getTime();
     const mins = Math.floor(diff / 60_000);
     if (mins < 1) return "just now";
     if (mins < 60) return `${mins}m ago`;
@@ -1191,7 +1195,7 @@ function DocMetaStrip({ blocks, doc }: { blocks: Block[]; doc: DocPayload }) {
     const days = Math.floor(hrs / 24);
     if (days < 7) return `${days}d ago`;
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  }, [doc.updatedAt]);
+  }, [doc.updatedAt, now]);
 
   return (
     <div className="bdoc__meta">

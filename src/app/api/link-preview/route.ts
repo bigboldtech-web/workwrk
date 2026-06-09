@@ -42,6 +42,27 @@ function metaPatterns(key: string, kind: "property" | "name"): RegExp[] {
   ];
 }
 
+// Block SSRF to internal/private addresses. The unfurl is authenticated and
+// best-effort, but an attacker could otherwise point it at the cloud metadata
+// endpoint (169.254.169.254), loopback, or RFC-1918 hosts.
+function isBlockedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return true;
+  if (h === "::1" || h === "::") return true; // IPv6 loopback / unspecified
+  if (/^fe80:/i.test(h) || /^f[cd][0-9a-f]{2}:/i.test(h)) return true; // link-local / unique-local
+  const v4 = h.startsWith("::ffff:") ? h.slice(7) : h; // IPv4-mapped IPv6
+  const m = v4.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]);
+    if (a === 0 || a === 10 || a === 127) return true;        // this-host / RFC1918 / loopback
+    if (a === 169 && b === 254) return true;                  // link-local + cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;         // RFC1918
+    if (a === 192 && b === 168) return true;                  // RFC1918
+    if (a === 100 && b >= 64 && b <= 127) return true;        // CGNAT
+  }
+  return false;
+}
+
 export async function GET(req: NextRequest) {
   const { error } = await getSessionOrFail();
   if (error) return error;
@@ -59,6 +80,10 @@ export async function GET(req: NextRequest) {
     return jsonError("Invalid url", 400);
   }
 
+  if (isBlockedHost(target.hostname)) {
+    return jsonError("URL host is not allowed", 400);
+  }
+
   const hostname = target.hostname.replace(/^www\./, "");
   const fallback = {
     url: target.toString(),
@@ -72,15 +97,31 @@ export async function GET(req: NextRequest) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(target.toString(), {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: {
-        // Some sites gate OG tags behind a real UA.
-        "user-agent": "Mozilla/5.0 (compatible; WorkwrKBot/1.0; +https://workwrk.app)",
-        accept: "text/html,application/xhtml+xml",
-      },
-    });
+    // Follow redirects manually so each hop's host is re-validated — otherwise a
+    // public URL could 30x-redirect into the private network (SSRF guard bypass).
+    let current = target;
+    let res: Response;
+    for (let hop = 0; ; hop++) {
+      res = await fetch(current.toString(), {
+        signal: controller.signal,
+        redirect: "manual",
+        headers: {
+          // Some sites gate OG tags behind a real UA.
+          "user-agent": "Mozilla/5.0 (compatible; WorkwrKBot/1.0; +https://workwrk.app)",
+          accept: "text/html,application/xhtml+xml",
+        },
+      });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) break;
+      if (hop >= 3) { clearTimeout(timeout); return jsonSuccess(fallback); }
+      let next: URL;
+      try { next = new URL(location, current); } catch { clearTimeout(timeout); return jsonSuccess(fallback); }
+      if ((next.protocol !== "http:" && next.protocol !== "https:") || isBlockedHost(next.hostname)) {
+        clearTimeout(timeout);
+        return jsonSuccess(fallback);
+      }
+      current = next;
+    }
     clearTimeout(timeout);
     if (!res.ok) return jsonSuccess(fallback);
 

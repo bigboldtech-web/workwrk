@@ -550,6 +550,7 @@ export function TaskListSurface() {
     if (patch.name !== undefined) body.title = patch.name;
     if (patch.status !== undefined) body.status = uiStatusToApiStatus(patch.status);
     if (patch.priority !== undefined) body.priority = uiPriorityToApiPriority(patch.priority);
+    if (patch.tags !== undefined) body.labelIds = await ensureLabelIds(patch.tags) ?? [];
 
     try {
       if (Object.keys(body).length <= 1) return;
@@ -1308,6 +1309,8 @@ function TaskRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(task.name);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const [tagQuery, setTagQuery] = useState("");
 
   const commitRename = () => {
     const nextName = draftName.trim();
@@ -1318,6 +1321,17 @@ function TaskRow({
     }
     if (nextName !== task.name) void onTaskChange(task.id, { name: nextName });
     setEditing(false);
+  };
+
+  const addTag = () => {
+    const nextTag = tagQuery.trim();
+    if (!nextTag) return;
+    const existing = new Set(task.tags.map((tag) => tag.toLowerCase()));
+    if (!existing.has(nextTag.toLowerCase())) {
+      void onTaskChange(task.id, { tags: [...task.tags, nextTag] });
+    }
+    setTagQuery("");
+    setTagMenuOpen(false);
   };
 
   return (
@@ -1382,7 +1396,18 @@ function TaskRow({
         {!task.parentId ? (
           <span className="ml-2 hidden items-center gap-1 group-hover:inline-flex">
             <RowHoverButton Icon={Plus} label="Add subtask" onClick={onAddSubtask} />
-            <RowHoverButton Icon={Tag} label="Edit tags" />
+            <span className="relative">
+              <RowHoverButton Icon={Tag} label="Edit tags" onClick={() => setTagMenuOpen((open) => !open)} />
+              {tagMenuOpen ? (
+                <TagEditorPopover
+                  tags={task.tags}
+                  query={tagQuery}
+                  onQueryChange={setTagQuery}
+                  onCreate={addTag}
+                  onRemove={(tag) => void onTaskChange(task.id, { tags: task.tags.filter((item) => item !== tag) })}
+                />
+              ) : null}
+            </span>
             <RowHoverButton
               Icon={Pencil}
               label="Rename"
@@ -1401,7 +1426,7 @@ function TaskRow({
       ))}
       <button
         type="button"
-      className="inline-flex h-6 w-6 items-center justify-center justify-self-end rounded-md text-zinc-400 opacity-0 hover:bg-zinc-100 hover:text-zinc-700 group-hover:opacity-100"
+        className="inline-flex h-6 w-6 items-center justify-center justify-self-end rounded-md text-zinc-400 opacity-0 hover:bg-zinc-100 hover:text-zinc-700 group-hover:opacity-100"
         aria-label="Task actions"
       >
         <MoreHorizontal className="h-3.5 w-3.5" />
@@ -1847,7 +1872,7 @@ function BoardMode({
         })}
         <button
           type="button"
-      className="flex h-7 shrink-0 items-center gap-2 rounded-md !px-2.5 text-[12px] text-zinc-500 hover:bg-zinc-100"
+          className="flex h-7 shrink-0 items-center gap-2 rounded-md !px-2.5 text-[12px] text-zinc-500 hover:bg-zinc-100"
         >
           <Plus className="h-3.5 w-3.5" />
           Add group
@@ -2212,6 +2237,8 @@ function TaskDetailModal({
   onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
 }) {
   const statusMeta = getStatusMeta(task.status);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [priorityOpen, setPriorityOpen] = useState(false);
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 !p-8" onClick={onClose}>
@@ -2249,15 +2276,17 @@ function TaskDetailModal({
 
             <div className="grid max-w-[760px] grid-cols-2 gap-x-12 gap-y-3 text-[12px]">
               <TaskDetailField Icon={CheckCircle2} label="Status">
-                <div className="flex items-center gap-1.5">
+                <div className="relative flex items-center gap-1.5">
                   <button
                     type="button"
                     className="inline-flex h-6 items-center gap-1 rounded-md !px-2 text-[11px] font-semibold text-white"
                     style={{ backgroundColor: statusMeta.color }}
-                    onClick={() => void onTaskChange(task.id, { status: nextStatus(task.status) })}
+                    onClick={() => setStatusOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={statusOpen}
                   >
                     {statusMeta.label}
-                    <ChevronRight className="h-3 w-3" />
+                    <ChevronDown className="h-3 w-3" />
                   </button>
                   <button
                     type="button"
@@ -2266,6 +2295,24 @@ function TaskDetailModal({
                   >
                     <Check className="h-3.5 w-3.5" />
                   </button>
+                  {statusOpen ? (
+                    <div className="absolute left-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
+                      {STATUS_COLUMNS.map((status) => (
+                        <button
+                          key={status.key}
+                          type="button"
+                          className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                          onClick={() => {
+                            setStatusOpen(false);
+                            void onTaskChange(task.id, { status: status.key });
+                          }}
+                        >
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
+                          {status.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </TaskDetailField>
               <TaskDetailField Icon={Users} label="Assignees">
@@ -2275,13 +2322,36 @@ function TaskDetailModal({
                 {task.dueDate || "Start → Due"}
               </TaskDetailField>
               <TaskDetailField Icon={Flag} label="Priority">
-                <button
-                  type="button"
-                  className="hover:text-zinc-900"
-                  onClick={() => void onTaskChange(task.id, { priority: task.priority ? "" : "Normal" })}
-                >
-                  {task.priority || "Empty"}
-                </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="inline-flex h-6 items-center gap-1.5 rounded-md !px-1.5 text-left hover:bg-zinc-100 hover:text-zinc-900"
+                    onClick={() => setPriorityOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={priorityOpen}
+                  >
+                    {task.priority ? <PriorityBadge priority={task.priority} /> : "Empty"}
+                    <ChevronDown className="h-3 w-3 text-zinc-400" />
+                  </button>
+                  {priorityOpen ? (
+                    <div className="absolute left-0 top-full z-20 mt-1 w-36 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
+                      {(["Urgent", "High", "Normal", "Low", ""] as TaskPriority[]).map((priority) => (
+                        <button
+                          key={priority || "clear"}
+                          type="button"
+                          className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                          onClick={() => {
+                            setPriorityOpen(false);
+                            void onTaskChange(task.id, { priority });
+                          }}
+                        >
+                          {priority ? <Flag className={`h-3.5 w-3.5 ${priorityColorClass(priority)}`} /> : <CircleDashed className="h-3.5 w-3.5 text-zinc-400" />}
+                          {priority || "Clear"}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </TaskDetailField>
               <TaskDetailField Icon={Tag} label="Tags">
                 {task.tags.length > 0 ? task.tags.join(", ") : "Empty"}
@@ -2363,7 +2433,7 @@ function TaskDetailField({
         <Icon className="h-3.5 w-3.5" />
         {label}
       </span>
-      <span className="min-w-0 truncate text-zinc-600">{children}</span>
+      <span className="min-w-0 text-zinc-600">{children}</span>
     </div>
   );
 }
@@ -2664,10 +2734,71 @@ function ToolbarIconButton({
       className={`inline-flex h-6 w-6 items-center justify-center rounded-md ${
         active ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
       } ${framed ? "border border-zinc-200" : ""}`}
-      onClick={onClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.();
+      }}
     >
       <Icon className="h-3.5 w-3.5" />
     </button>
+  );
+}
+
+function TagEditorPopover({
+  tags,
+  query,
+  onQueryChange,
+  onCreate,
+  onRemove,
+}: {
+  tags: string[];
+  query: string;
+  onQueryChange: (value: string) => void;
+  onCreate: () => void;
+  onRemove: (tag: string) => void;
+}) {
+  return (
+    <div
+      className="absolute left-0 top-7 z-[90] w-[220px] overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <input
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") onCreate();
+        }}
+        className="h-8 w-full border-b border-zinc-100 !px-2 text-[12px] outline-none"
+        placeholder="Search or create tag"
+        autoFocus
+      />
+      <div className="!p-1.5">
+        {tags.length > 0 ? (
+          <div className="mb-1 flex flex-wrap gap-1">
+            {tags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="inline-flex h-6 items-center gap-1 rounded-full bg-violet-50 !px-2 text-[11px] text-violet-700 hover:bg-violet-100"
+                onClick={() => onRemove(tag)}
+              >
+                {tag}
+                <X className="h-3 w-3" />
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+          disabled={!query.trim()}
+          onClick={onCreate}
+        >
+          <Tag className="h-3.5 w-3.5 text-zinc-500" />
+          Create {query.trim() ? <span className="rounded-full bg-violet-100 !px-1.5 text-violet-700">{query.trim()}</span> : "tag"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2890,8 +3021,14 @@ function renderTaskValue(task: TaskItem, column: ColumnDef) {
 }
 
 function PriorityBadge({ priority }: { priority: TaskItem["priority"] }) {
-  const color = priority === "Urgent" ? "text-red-600" : priority === "High" ? "text-orange-600" : priority === "Low" ? "text-zinc-500" : "text-zinc-600";
-  return <span className={color}>{priority}</span>;
+  return <span className={priorityColorClass(priority)}>{priority}</span>;
+}
+
+function priorityColorClass(priority: TaskPriority) {
+  if (priority === "Urgent") return "text-red-600";
+  if (priority === "High") return "text-orange-600";
+  if (priority === "Low") return "text-zinc-500";
+  return "text-zinc-600";
 }
 
 function getGroupLabel(task: TaskItem, key: GroupKey) {
@@ -2977,12 +3114,6 @@ function statusLabel(status: TaskItem["status"]) {
 
 function getStatusMeta(status: TaskItem["status"]) {
   return STATUS_COLUMNS.find((item) => item.key === status) ?? STATUS_COLUMNS[0];
-}
-
-function nextStatus(status: TaskItem["status"]): TaskItem["status"] {
-  if (status === "to_do") return "in_progress";
-  if (status === "in_progress") return "complete";
-  return "to_do";
 }
 
 function statusFromGroup(label: string): TaskItem["status"] {

@@ -140,7 +140,7 @@ export function SpaceTreeRow({
   return (
     <li className="group/space relative">
       <div
-        className={`flex h-8 items-center gap-2 px-2.5 rounded-lg ${
+        className={`flex h-[26px] items-center gap-2 px-2 rounded-md ${
           isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
         }`}
       >
@@ -159,7 +159,7 @@ export function SpaceTreeRow({
         </button>
         <Link
           href={`/spaces/${space.slug}`}
-          className={`flex items-center gap-2 text-[12.5px] flex-1 min-w-0 ${
+          className={`flex items-center gap-2 text-[12px] flex-1 min-w-0 ${
             isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
           }`}
         >
@@ -186,7 +186,7 @@ export function SpaceTreeRow({
       </div>
 
       {expanded ? (
-        <ul className="ml-5 mt-0.5 mb-1 border-l border-zinc-200/70 pl-2">
+        <ul className="ml-[18px] mt-0.5 mb-1 border-l border-zinc-200/70 pl-2">
           {loading && data === null ? (
             <li className="px-2 py-1 inline-flex items-center gap-1.5 text-[11.5px] text-zinc-400">
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -237,7 +237,7 @@ function SpaceTile({ space }: { space: SpaceRow }) {
   const bg = space.color ?? DEFAULT_COLOR;
   return (
     <span
-      className="h-5 w-5 rounded-md flex items-center justify-center text-white text-[10.5px] font-semibold uppercase shrink-0"
+      className="h-[18px] w-[18px] rounded-md flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
       style={{ backgroundColor: bg }}
     >
       {Icon ? createElement(Icon, { className: "h-3 w-3" }) : (space.name[0] ?? "?")}
@@ -265,7 +265,7 @@ function FolderTreeRow({
 
   return (
     <li className="group/folderrow relative">
-      <div className="flex h-7 items-center gap-2 pr-1.5 rounded-lg hover:bg-white/80">
+      <div className="flex h-[25px] items-center gap-2 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -278,7 +278,7 @@ function FolderTreeRow({
           ) : null}
         </button>
         <ChildTile color={folder.color} icon={folder.icon} fallback={FolderIcon} name={folder.name} />
-        <span className="text-[12.5px] text-zinc-700 truncate flex-1">{folder.name}</span>
+        <span className="text-[12px] text-zinc-700 truncate flex-1">{folder.name}</span>
         <span className="opacity-0 group-hover/folderrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
           <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
@@ -296,7 +296,7 @@ function FolderTreeRow({
        (folder.boards.length > 0 ||
         folder.docs.length > 0 ||
         folder.childFolders.length > 0) ? (
-        <ul className="ml-5 mt-0.5 border-l border-zinc-200/70 pl-2">
+        <ul className="ml-[18px] mt-0.5 border-l border-zinc-200/70 pl-2">
           {folder.childFolders.map((cf) => (
             <FolderTreeRow
               key={cf.id}
@@ -330,11 +330,11 @@ function BoardTreeRow({
   const router = useRouter();
   return (
     <li className="group/boardrow relative">
-      <div className="flex h-7 items-center gap-2 pl-5 pr-1.5 rounded-lg hover:bg-white/80">
+      <div className="flex h-[25px] items-center gap-2 pl-[18px] pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
-          className="flex items-center gap-2 text-[12.5px] text-zinc-700 flex-1 min-w-0 text-left"
+          className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
           <ChildTile color={board.color} icon={board.icon} fallback={null} name={board.name} />
           <span className="truncate">{board.name}</span>
@@ -370,11 +370,11 @@ function TableTreeRow({
   const router = useRouter();
   return (
     <li className="group/tablerow relative">
-      <div className="flex h-7 items-center gap-2 pl-5 pr-1.5 rounded-lg hover:bg-white/80">
+      <div className="flex h-[25px] items-center gap-2 pl-[18px] pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
-          className="flex items-center gap-2 text-[12.5px] text-zinc-700 flex-1 min-w-0 text-left"
+          className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
           <ChildTile color="#0EA5E9" icon={null} fallback={TableIcon} name={table.name} />
           <span className="truncate">{table.name}</span>
@@ -392,11 +392,11 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
   const router = useRouter();
   return (
     <li className="group/docrow relative">
-      <div className="flex h-7 items-center gap-2 pl-5 pr-1.5 rounded-lg hover:bg-white/80">
+      <div className="flex h-[25px] items-center gap-2 pl-[18px] pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
-          className="flex items-center gap-2 text-[12.5px] text-zinc-700 flex-1 min-w-0 text-left"
+          className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
           <span
             className="h-4 w-4 rounded flex items-center justify-center text-white shrink-0"
@@ -418,11 +418,11 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
   return (
     <li className="group/wbrow relative">
-      <div className="flex h-7 items-center gap-2 pl-5 pr-1.5 rounded-lg hover:bg-white/80">
+      <div className="flex h-[25px] items-center gap-2 pl-[18px] pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
-          className="flex items-center gap-2 text-[12.5px] text-zinc-700 flex-1 min-w-0 text-left"
+          className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
           <span
             className="h-4 w-4 rounded flex items-center justify-center text-white shrink-0"
@@ -547,7 +547,7 @@ function FolderAddTrigger({
                 type="button"
                 onClick={createDoc}
                 disabled={Boolean(creating)}
-                className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
+                className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
               >
                 <FileText className="w-3.5 h-3.5 text-blue-500" />
                 Doc
@@ -558,7 +558,7 @@ function FolderAddTrigger({
                 type="button"
                 onClick={createSubFolder}
                 disabled={Boolean(creating)}
-                className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
+                className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
               >
                 <FolderIcon className="w-3.5 h-3.5 text-amber-500" />
                 Folder
@@ -569,7 +569,7 @@ function FolderAddTrigger({
                 type="button"
                 disabled
                 title="Use the Space + menu for now"
-                className="w-full text-left px-3 py-1.5 text-[12.5px] text-zinc-400 inline-flex items-center gap-2 cursor-not-allowed"
+                className="w-full text-left px-3 py-1.5 text-[12px] text-zinc-400 inline-flex items-center gap-2 cursor-not-allowed"
               >
                 <Plus className="w-3.5 h-3.5" />
                 List (use Space +)

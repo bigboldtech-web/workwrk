@@ -17,13 +17,21 @@
  * Keyboard: ⌘/Ctrl + 1–9 jumps to the Nth tab (Notion / browser parity).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { X, Plus, FileText } from "lucide-react";
 import { renderNoteIcon } from "./note-icon";
 
 type DocTab = { id: string; title: string; icon?: string };
 const LS_KEY = "workwrk:doc-tabs";
+
+// Hydration-safe "are we on the client yet" flag. Server + first client render
+// both see `false` (matching HTML), then it flips to `true` post-hydration —
+// avoids a mismatch when tabs are restored from localStorage on the client.
+const noopSubscribe = () => () => {};
+function useHydrated() {
+  return useSyncExternalStore(noopSubscribe, () => true, () => false);
+}
 
 function loadTabs(): DocTab[] {
   if (typeof window === "undefined") return [];
@@ -39,6 +47,7 @@ function persist(tabs: DocTab[]) {
 export function DocTabsBar() {
   const router = useRouter();
   const pathname = usePathname();
+  const hydrated = useHydrated();
   // Lazy-init from localStorage (repo convention — guarded for SSR). Avoids a
   // synchronous setState-in-effect for hydration.
   const [tabs, setTabs] = useState<DocTab[]>(loadTabs);
@@ -55,6 +64,15 @@ export function DocTabsBar() {
 
   // Persist on every change.
   useEffect(() => { persist(tabs); }, [tabs]);
+
+  // Publish the bar's height so the sticky doc header (.bdoc__head) can dock
+  // *below* it instead of being hidden under it when the note is scrolled.
+  // Cleared to 0 when there are no tabs (the bar renders nothing).
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--doctabs-h", tabs.length > 0 ? "40px" : "0px");
+    return () => { root.style.setProperty("--doctabs-h", "0px"); };
+  }, [tabs.length]);
 
   // Self-registration from the editor: add the note if new, merge title/icon
   // if it already has a tab. Appends to the end (left-to-right open order).
@@ -157,7 +175,8 @@ export function DocTabsBar() {
   }
 
   // Nothing open → no bar (keeps the library view clean until a note opens).
-  if (tabs.length === 0) return null;
+  // Also render nothing until hydrated, so server + client HTML agree.
+  if (!hydrated || tabs.length === 0) return null;
 
   return (
     <div className="doctabs" role="tablist" aria-label="Open notes">

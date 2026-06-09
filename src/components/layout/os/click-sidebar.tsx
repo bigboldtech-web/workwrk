@@ -35,9 +35,9 @@ import { SidebarSearchProvider, useSidebarSearch } from "./sidebar-search-contex
 import { MorePortal } from "./more-portal";
 
 const SIDEBAR_WIDTH_KEY = "workwrk:os:sidebar-width";
-const DEFAULT_SIDEBAR_WIDTH = 260;
-const MIN_SIDEBAR_WIDTH = 220;
-const MAX_SIDEBAR_WIDTH = 340;
+const DEFAULT_SIDEBAR_WIDTH = 244;
+const MIN_SIDEBAR_WIDTH = 200;
+const MAX_SIDEBAR_WIDTH = 320;
 
 function clampSidebarWidth(width: number) {
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
@@ -227,7 +227,7 @@ function ClickSidebarBody() {
       }}
     >
       <div className="h-full flex flex-col overflow-hidden rounded-[13px]">
-        <div className="px-3.5 pt-3.5 pb-2">
+        <div className="px-3 pt-3 pb-1.5">
           {searching ? (
             <div className="flex items-center gap-2 h-7 px-2.5 rounded-md border border-zinc-200 bg-white focus-within:border-zinc-400">
               <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
@@ -251,7 +251,7 @@ function ClickSidebarBody() {
             </div>
           ) : (
             <div className="flex h-8 items-center gap-1">
-              <h2 className="text-[16px] font-semibold flex-1 truncate text-zinc-900 tracking-[-0.02em]">{title}</h2>
+              <h2 className="text-[15px] font-semibold flex-1 truncate text-zinc-900 tracking-[-0.02em]">{title}</h2>
               <button
                 type="button"
                 onClick={openSearch}
@@ -265,7 +265,7 @@ function ClickSidebarBody() {
                 ref={createButtonRef}
                 type="button"
                 onClick={() => setCreateOpen((v) => !v)}
-                className="h-7 shrink-0 inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 text-zinc-900 shadow-sm hover:bg-zinc-50"
+                className="h-[26px] shrink-0 inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 text-zinc-900 shadow-sm hover:bg-zinc-50"
                 aria-label="Create"
                 aria-haspopup="menu"
                 aria-expanded={createOpen}
@@ -286,15 +286,15 @@ function ClickSidebarBody() {
           )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3.5 pb-2">
+        <nav className="flex-1 overflow-y-auto px-3 pb-2">
           <app.Sidebar />
         </nav>
 
-        <div className="px-3.5 pb-3 pt-2 flex justify-start">
+        <div className="px-3 pb-3 pt-2 flex justify-start">
           <button
             type="button"
             onClick={openCustomize}
-            className="inline-flex items-center justify-center gap-2 w-full h-7 rounded-lg text-[12.5px] font-medium text-zinc-700 bg-zinc-200/70 hover:bg-zinc-200 transition-colors"
+            className="inline-flex items-center justify-center gap-2 w-full h-[26px] rounded-lg text-[12px] font-medium text-zinc-700 bg-zinc-200/70 hover:bg-zinc-200 transition-colors"
           >
             <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500" />
             <span>Customize Sidebar</span>
@@ -439,7 +439,7 @@ function ClickSidebarBody() {
             resetWidth();
           }
         }}
-        className={`absolute -right-1 top-2 bottom-2 z-20 w-2 touch-none rounded-full outline-none focus-visible:bg-zinc-300/55 ${
+        className={`absolute -right-1 top-2 bottom-2 z-20 w-2 touch-none cursor-ew-resize rounded-full outline-none focus-visible:bg-zinc-300/55 ${
           resizing ? "bg-zinc-300/55" : "bg-transparent"
         }`}
         style={{ cursor: "ew-resize" }}
@@ -447,7 +447,7 @@ function ClickSidebarBody() {
         title="Drag to resize · Double-click to reset"
       >
         <span
-          className={`absolute left-1/2 top-2 bottom-2 w-px -translate-x-1/2 rounded-full transition-colors ${
+          className={`absolute left-1/2 top-2 bottom-2 w-px -translate-x-1/2 cursor-ew-resize rounded-full transition-colors ${
             resizing ? "bg-zinc-400" : "bg-transparent group-hover/sidebar:bg-zinc-300"
           }`}
           aria-hidden

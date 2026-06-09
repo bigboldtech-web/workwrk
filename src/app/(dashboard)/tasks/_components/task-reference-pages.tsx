@@ -95,7 +95,7 @@ function TaskSurface({
   return (
     <div className="flex h-full flex-col bg-white">
       <header className="flex h-10 shrink-0 items-center justify-between overflow-visible border-b border-zinc-200 !px-4">
-        <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[14px] font-semibold leading-none text-zinc-900">
+        <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[14px] font-semibold leading-5 text-zinc-900">
           {titlePrefix ? <span className="shrink-0 font-medium text-zinc-500">{titlePrefix} /</span> : null}
           <span className="truncate">{title}</span>
           {title === "Personal List" ? (
