@@ -1,9 +1,13 @@
 # Rafter scanner config — false-positive suppressions.
 # Each entry was traced input -> sink before suppressing (see PR notes).
 ignore:
-  # R-E98AA: "input type=text should be type=email". Fired on 93 inputs that are
-  # company-name, first/last-name, domain, logo-URL and search/filter fields —
-  # none are email inputs. Forcing type="email" on them would be incorrect.
+  # R-E98AA: "input type=text should be type=email". Scanned all 93 flagged
+  # inputs: 92 are company-name, first/last-name, domain, logo-URL and
+  # search/filter fields — not email. The 1 with an email hint
+  # (task-list-surface AssigneeMenu, "Search or enter email...") is a
+  # dual-purpose search/invite combobox with no value/onChange/form binding;
+  # type="email"+required would break name search and is meaningless off a form.
+  # Heuristic fires on every <input type="text">; no email-only sink exists.
   - rule: R-E98AA
 
   # R-374DB: path.join "traversal". All flagged sinks build paths from constants,
