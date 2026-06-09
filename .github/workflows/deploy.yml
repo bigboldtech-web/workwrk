@@ -1,0 +1,64 @@
+name: Deploy
+
+# CD: on merge to main, wait for CI to pass, then SSH to the aaPanel server and
+# pull → install → build (build runs migrations via scripts/deploy-migrations.mjs)
+# → reload the PM2 process.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to aaPanel
+    runs-on: ubuntu-latest
+    # Only deploy when the triggering CI run actually succeeded.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          # Pass the deploy path into the remote script.
+          envs: DEPLOY_PATH
+          script_stop: true
+          script: |
+            set -euo pipefail
+            # Non-interactive SSH has a minimal PATH; pin the aaPanel Node
+            # install so node/npm/npx/pm2 resolve (they live here, not on the
+            # default PATH).
+            export PATH="/www/server/nodejs/v20.20.0/bin:$PATH"
+            cd "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}"
+
+            echo "==> Fetching latest main"
+            git fetch --prune origin main
+            git reset --hard origin/main
+
+            echo "==> Installing dependencies"
+            npm ci
+
+            # Build runs scripts/deploy-migrations.mjs (prisma migrate deploy
+            # with advisory-lock retry) + prisma generate + next build.
+            echo "==> Building (includes DB migrations)"
+            npm run build
+
+            # Build ran as root; the app runs as www. Hand ownership back so
+            # the runtime can read/write .next, node_modules, uploads, etc.
+            echo "==> Restoring ownership to www"
+            chown -R www:www "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}"
+
+            echo "==> Reloading PM2 process"
+            pm2 reload workwrk --update-env
+
+            echo "==> Deploy complete"
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
