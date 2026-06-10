@@ -31,6 +31,10 @@
       "schedule": "0 9 * * 1-5"
     },
     {
+      "path": "/api/cron/review-cycles",
+      "schedule": "0 8 * * *"
+    },
+    {
       "path": "/api/cron/announcements-publish",
       "schedule": "*/5 * * * *"
     },
@@ -71,6 +75,9 @@
       "maxDuration": 120
     },
     "src/app/api/cron/okr-reminders/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/review-cycles/route.ts": {
       "maxDuration": 60
     },
     "src/app/api/cron/surveys-rotate/route.ts": {

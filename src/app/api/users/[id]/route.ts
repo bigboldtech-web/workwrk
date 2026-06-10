@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { getLatestScore, getScoreHistory } from "@/services/performanceScoreService";
+import { seedAlignmentForUser } from "@/lib/alignment-assign";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -120,7 +121,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Verify target user is in same org
   const targetUser = await prisma.user.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, accessLevel: true },
+    select: { id: true, accessLevel: true, roleId: true },
   });
   if (!targetUser) return jsonError("User not found", 404);
 
@@ -151,6 +152,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     where: { id },
     data,
   });
+
+  // Hybrid assignment: when the user moves into a (new) role, seed their
+  // KRA/SOP defaults from that role's templates. Idempotent + best-effort
+  // — a seeding hiccup must not fail the profile update.
+  if (data.roleId && data.roleId !== targetUser.roleId) {
+    try {
+      await seedAlignmentForUser({
+        userId: id,
+        roleId: data.roleId,
+        organizationId: orgId,
+        assignedBy: getUserId(session),
+      });
+    } catch (e) {
+      console.error("seedAlignmentForUser failed", e);
+    }
+  }
 
   return jsonSuccess({ ...user, passwordHash: undefined });
 }

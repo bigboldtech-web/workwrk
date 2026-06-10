@@ -8,9 +8,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Users2, Plus, Star, Award, AlertTriangle, Heart, Briefcase,
-  TrendingUp, ChevronRight, Activity, Target,
+  TrendingUp, ChevronRight, Activity, Target, Calendar,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -71,9 +72,14 @@ const GRID_ORDER: { pot: 1 | 2 | 3; perf: 1 | 2 | 3; key: string }[] = [
 ];
 
 export default function TalentPage() {
+  const router = useRouter();
   const [assessments, setAssessments] = useState<ApiAssessment[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedBox, setSelectedBox] = useState<string | null>(null);
+  // null = "All periods". Defaults to the latest period once data loads so
+  // the box shows one coherent snapshot instead of stacking every cycle.
+  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
+  const [periodTouched, setPeriodTouched] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -93,24 +99,41 @@ export default function TalentPage() {
   const v = rowVersion("talent");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
+  // Distinct periods, newest first (works for "YYYY-Qn" and "YYYY-MM").
+  const periods = useMemo(
+    () => Array.from(new Set((assessments ?? []).map((a) => a.period))).sort((a, b) => b.localeCompare(a)),
+    [assessments],
+  );
+
+  // Default to the latest period the first time data arrives.
+  useEffect(() => {
+    if (!periodTouched && selectedPeriod === null && periods.length > 0) {
+      setSelectedPeriod(periods[0]);
+    }
+  }, [periods, periodTouched, selectedPeriod]);
+
+  const visible = useMemo(
+    () => (selectedPeriod ? (assessments ?? []).filter((a) => a.period === selectedPeriod) : (assessments ?? [])),
+    [assessments, selectedPeriod],
+  );
+
   const byBox = useMemo(() => {
     const m = new Map<string, ApiAssessment[]>();
     for (const k of Object.keys(BOX_LABELS)) m.set(k, []);
-    for (const a of assessments ?? []) {
+    for (const a of visible) {
       if (!m.has(a.boxPosition)) m.set(a.boxPosition, []);
       m.get(a.boxPosition)!.push(a);
     }
     return m;
-  }, [assessments]);
+  }, [visible]);
 
   const stats = useMemo(() => {
-    const list = assessments ?? [];
     const stars = (byBox.get("3-3") ?? []).length;
     const futureLeaders = (byBox.get("2-3") ?? []).length + (byBox.get("1-3") ?? []).length;
     const atRisk = (byBox.get("1-1") ?? []).length + (byBox.get("1-2") ?? []).length;
     const core = (byBox.get("2-2") ?? []).length + (byBox.get("3-2") ?? []).length + (byBox.get("2-1") ?? []).length;
-    return { total: list.length, stars, futureLeaders, atRisk, core };
-  }, [assessments, byBox]);
+    return { total: visible.length, stars, futureLeaders, atRisk, core };
+  }, [visible, byBox]);
 
   const selectedAssessments = selectedBox ? (byBox.get(selectedBox) ?? []) : [];
 
@@ -141,7 +164,7 @@ export default function TalentPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={Users2} iconGradient={GRAD.redPink} title="Couldn't load assessments" subtitle={loadError} cta="Retry" />
+          <OsEmptyView Icon={Users2} iconGradient={GRAD.redPink} title="Couldn't load assessments" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : assessments === null ? (
           <div className="tal__loading">Loading…</div>
         ) : stats.total === 0 ? (
@@ -152,9 +175,25 @@ export default function TalentPage() {
             subtitle="Use the 9-box during calibration to map each person on performance × potential. Sets up succession planning and development conversations."
             chips={["Stars", "Future leaders", "Core players", "At risk"]}
             cta="Run calibration"
+            onCta={() => router.push("/reviews")}
           />
         ) : (
           <div className="tal__grid-wrap">
+            {periods.length > 0 && (
+              <div className="tal__toolbar" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <Calendar style={{ width: 14, height: 14, color: "var(--os-ink-3)" }} />
+                <span style={{ fontSize: 12, color: "var(--os-ink-3)" }}>Period</span>
+                <select
+                  value={selectedPeriod ?? "__all__"}
+                  onChange={(e) => { setPeriodTouched(true); setSelectedPeriod(e.target.value === "__all__" ? null : e.target.value); setSelectedBox(null); }}
+                  style={{ height: 28, padding: "0 8px", borderRadius: 6, border: "1px solid var(--os-line)", fontSize: 12.5, background: "var(--os-surface, #fff)", color: "var(--os-ink)" }}
+                >
+                  <option value="__all__">All periods</option>
+                  {periods.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <span style={{ fontSize: 11.5, color: "var(--os-ink-3)" }}>{stats.total} assessed</span>
+              </div>
+            )}
             {/* 9-box grid */}
             <section className="tal__box">
               <header className="tal__box-head">

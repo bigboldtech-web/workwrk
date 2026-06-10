@@ -182,6 +182,60 @@ export function currentPeriodKey(cadence: CadenceKey, date: Date = new Date()): 
   }
 }
 
+/* ───────────────────────── period windows (cron) ───────────────────────── */
+
+export interface CadenceWindow {
+  /** Period key, e.g. "2026-06" / "2026-Q2" / "2026". */
+  key: string;
+  /** Inclusive UTC start of the period. */
+  start: Date;
+  /** Inclusive UTC end of the period. */
+  end: Date;
+}
+
+/** The [start,end] window of the period a cadence is currently in. */
+export function cadenceWindow(cadence: CadenceKey, now: Date = new Date()): CadenceWindow {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  if (cadence === "weekly") {
+    const start = weekStartFor(now);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 6);
+    return { key: weekKeyFor(now), start, end };
+  }
+  if (cadence === "monthly") {
+    return { key: monthKeyFor(now), start: new Date(Date.UTC(y, m, 1)), end: new Date(Date.UTC(y, m + 1, 0)) };
+  }
+  if (cadence === "quarterly") {
+    const q0 = Math.floor(m / 3) * 3;
+    return { key: quarterKeyFor(now), start: new Date(Date.UTC(y, q0, 1)), end: new Date(Date.UTC(y, q0 + 3, 0)) };
+  }
+  return { key: yearKeyFor(now), start: new Date(Date.UTC(y, 0, 1)), end: new Date(Date.UTC(y, 11, 31)) };
+}
+
+/**
+ * Has the cadence's anchor point been reached within the current period?
+ * Interpretation of `setting.anchor` is per-cadence (see CadenceSetting).
+ * A daily cron calls this; once true it stays true for the rest of the
+ * period, so dedup on the period window (not on this) for idempotency.
+ */
+export function anchorReached(cadence: CadenceKey, anchor: number, now: Date = new Date()): boolean {
+  if (cadence === "weekly") {
+    const isoWeekday = ((now.getUTCDay() + 6) % 7) + 1; // 1=Mon..7=Sun
+    return isoWeekday >= anchor;
+  }
+  if (cadence === "monthly") {
+    return now.getUTCDate() >= anchor;
+  }
+  if (cadence === "quarterly") {
+    const { start } = cadenceWindow("quarterly", now);
+    const dayOfQuarter = Math.floor((now.getTime() - start.getTime()) / 86_400_000) + 1;
+    return dayOfQuarter >= anchor;
+  }
+  // annual — anchor is the month-of-year (1..12) the appraisal opens.
+  return now.getUTCMonth() + 1 >= anchor;
+}
+
 /* ───────────────────────── validation (settings API) ───────────────────────── */
 
 export interface ValidationResult {

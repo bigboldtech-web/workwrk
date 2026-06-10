@@ -15,12 +15,12 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { resolveAccess, meets } from "@/lib/access";
-import { getTeamAlignment, type TeamMember } from "@/lib/team-alignment";
+import { getTeamAlignment } from "@/lib/team-alignment";
 import Link from "next/link";
 import {
-  Target, ChartLine, BookOpenCheck, Users as UsersIcon, AlertCircle, ChevronRight, GitBranchPlus,
-  ClipboardCheck, Clock, CheckCircle2,
+  Target, ChartLine, BookOpenCheck, Users as UsersIcon, ChevronRight, ClipboardCheck,
 } from "lucide-react";
+import { TeamAlignmentBoard } from "./team-alignment-board";
 
 export const dynamic = "force-dynamic";
 
@@ -103,16 +103,7 @@ export default async function TeamAlignmentPage() {
             />
           </section>
 
-          <section>
-            <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Reports</h2>
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {data.members.map((m) => (
-                <li key={m.id}>
-                  <MemberCard m={m} />
-                </li>
-              ))}
-            </ul>
-          </section>
+          <TeamAlignmentBoard members={data.members} />
         </>
       )}
     </div>
@@ -142,147 +133,6 @@ function StatCard({
         {label}
       </div>
       <div className={`text-2xl font-semibold mt-1 ${valueColor ?? ""}`}>{value}</div>
-    </div>
-  );
-}
-
-function MemberCard({ m }: { m: TeamMember }) {
-  const initials = `${m.firstName?.[0] ?? ""}${m.lastName?.[0] ?? ""}`.toUpperCase() || "?";
-  return (
-    <article className="rounded-lg border border-zinc-200 bg-white">
-      <header className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200">
-        <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-zinc-100 text-sm font-medium">
-          {initials}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate">
-            {m.firstName} {m.lastName}
-          </div>
-          <div className="text-xs text-zinc-500 truncate">{m.email}</div>
-        </div>
-        {m.via === "dotted" ? (
-          <span
-            title="Dotted-line report"
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500"
-          >
-            <GitBranchPlus className="w-3 h-3" /> Dotted
-          </span>
-        ) : null}
-        <Link href={`/people/${m.id}`} className="text-zinc-500 hover:text-zinc-900">
-          <ChevronRight className="w-4 h-4" />
-        </Link>
-      </header>
-
-      <div className="px-4 py-3 grid grid-cols-2 gap-3">
-        <Metric
-          Icon={Target}
-          label="KRAs"
-          value={m.activeKras.length}
-          sub={m.activeKras.length > 0 ? m.activeKras.slice(0, 2).map((k) => k.name).join(" · ") : "None assigned"}
-        />
-        <Metric
-          Icon={ChartLine}
-          label="KPI compliance"
-          value={`${m.kpis.compliancePct}%`}
-          sub={m.kpis.total > 0
-            ? `${m.kpis.submitted + m.kpis.approved}/${m.kpis.total} on time`
-            : "No KPIs yet"}
-          tone={complianceTone(m.kpis.compliancePct)}
-        />
-        <Metric
-          Icon={BookOpenCheck}
-          label="SOP read-rate"
-          value={`${m.sops.readRatePct}%`}
-          sub={m.sops.total > 0
-            ? `${m.sops.completed}/${m.sops.total} acknowledged`
-            : "No SOPs assigned"}
-          tone={complianceTone(m.sops.readRatePct)}
-        />
-        <WeeklyReviewMetric review={m.weeklyReview} />
-      </div>
-      {m.sops.mandatoryPending > 0 ? (
-        <div className="px-4 py-2 border-t border-zinc-200 text-xs text-red-700 bg-red-500/5 flex items-center gap-2">
-          <AlertCircle className="w-3 h-3" />
-          {m.sops.mandatoryPending} mandatory SOP{m.sops.mandatoryPending === 1 ? "" : "s"} pending
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-function WeeklyReviewMetric({ review }: { review: TeamMember["weeklyReview"] }) {
-  if (!review.status) {
-    return (
-      <Metric
-        Icon={ClipboardCheck}
-        label="This week's review"
-        value="—"
-        sub="Not started"
-        tone="bad"
-      />
-    );
-  }
-  if (review.status === "DRAFT") {
-    return (
-      <Metric
-        Icon={ClipboardCheck}
-        label="This week's review"
-        value="Draft"
-        sub="Not yet submitted"
-        tone="warn"
-      />
-    );
-  }
-  if (review.status === "SUBMITTED") {
-    return (
-      <Metric
-        Icon={Clock}
-        label="This week's review"
-        value="Submitted"
-        sub="Awaiting your action"
-        tone="warn"
-      />
-    );
-  }
-  // ACKNOWLEDGED
-  const approved = review.managerStatus === "APPROVED";
-  return (
-    <Metric
-      Icon={CheckCircle2}
-      label="This week's review"
-      value={approved ? "Approved" : "Changes"}
-      sub={approved ? "Decided this week" : "Awaiting revision"}
-      tone={approved ? "good" : "bad"}
-    />
-  );
-}
-
-function Metric({
-  Icon,
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  Icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: string | number;
-  sub: string;
-  tone?: "good" | "warn" | "bad";
-}) {
-  const valueColor =
-    tone === "bad" ? "text-red-600" :
-    tone === "warn" ? "text-amber-600" :
-    tone === "good" ? "text-emerald-600" :
-    undefined;
-  return (
-    <div>
-      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-        <Icon className="w-3 h-3" />
-        {label}
-      </div>
-      <div className={`text-base font-semibold ${valueColor ?? ""}`}>{value}</div>
-      <div className="text-[11px] text-zinc-500 truncate" title={sub}>{sub}</div>
     </div>
   );
 }

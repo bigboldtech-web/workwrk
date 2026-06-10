@@ -28,6 +28,28 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { getScoringBands, bandFor, DEFAULT_SCORING_BANDS, type ScoringBand } from "@/lib/review-cadence";
+
+/* localStorage-backed drafts so unsaved manager edits survive a refresh.
+ * Keyed per subject+period. Cleared once the draft is saved server-side. */
+const DRAFT_NS = "workwrk:kpi-review-draft";
+type DraftPatch = { actual?: string; notes?: string };
+function draftKey(userId: string, period: string) { return `${DRAFT_NS}:${userId}:${period}`; }
+function loadDraft(userId: string, period: string): Map<string, DraftPatch> {
+  if (typeof window === "undefined") return new Map();
+  try {
+    const raw = localStorage.getItem(draftKey(userId, period));
+    if (!raw) return new Map();
+    return new Map(Object.entries(JSON.parse(raw) as Record<string, DraftPatch>));
+  } catch { return new Map(); }
+}
+function persistDraft(userId: string, period: string, draft: Map<string, DraftPatch>) {
+  if (typeof window === "undefined") return;
+  try {
+    if (draft.size === 0) localStorage.removeItem(draftKey(userId, period));
+    else localStorage.setItem(draftKey(userId, period), JSON.stringify(Object.fromEntries(draft)));
+  } catch { /* quota / private mode — non-fatal */ }
+}
 
 type ApiUser = { id: string; firstName?: string | null; lastName?: string | null; department?: { name?: string | null } | null; role?: { title?: string | null } | null };
 type ApiKra = { id: string; name: string; category?: string | null; kpis?: { id: string; name: string; unit?: string | null; targetValue?: number | null; lowerIsBetter?: boolean }[] };
@@ -76,10 +98,20 @@ export default function ReviewPage() {
   const [subjectMap, setSubjectMap] = useState<Map<string, SubjectState>>(new Map());
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [bands, setBands] = useState<ScoringBand[]>(DEFAULT_SCORING_BANDS);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
   const period$ = periodKey(period);
+
+  // Org scoring bands drive the score-chip color + legend (set in
+  // Settings → Scoring & reviews).
+  useEffect(() => {
+    fetch("/api/settings", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.settings) setBands(getScoringBands(d.settings)); })
+      .catch(() => {});
+  }, []);
 
   // Load direct reports once
   const loadReports = useCallback(async () => {
@@ -149,9 +181,12 @@ export default function ReviewPage() {
       const user = (reports ?? []).find((u) => u.id === userId);
       if (!user) return;
 
+      // Re-hydrate any unsaved draft from localStorage so a refresh
+      // mid-review doesn't lose the manager's typing.
+      const restoredDraft = loadDraft(userId, period$);
       setSubjectMap((prev) => {
         const n = new Map(prev);
-        n.set(userId + ":" + period$, { user, kpis, records: recordMap, draft: new Map() });
+        n.set(userId + ":" + period$, { user, kpis, records: recordMap, draft: restoredDraft });
         return n;
       });
     } catch (e) {
@@ -174,6 +209,7 @@ export default function ReviewPage() {
       if (!cur) return prev;
       const d = new Map(cur.draft);
       d.set(kpiId, { ...d.get(kpiId), ...patch });
+      persistDraft(selectedId, period$, d);
       n.set(key, { ...cur, draft: d });
       return n;
     });
@@ -207,6 +243,8 @@ export default function ReviewPage() {
         saved += 1;
       }
       toast(`Saved ${saved} update${saved === 1 ? "" : "s"} for ${period$}`);
+      // Saved server-side — drop the local draft so it isn't re-restored.
+      persistDraft(selectedId, period$, new Map());
       // Force reload of this subject for the period
       setSubjectMap((prev) => {
         const n = new Map(prev);
@@ -331,7 +369,11 @@ export default function ReviewPage() {
                             <h4>{k.name}</h4>
                           </div>
                           {score != null ? (
-                            <span className="review-kpi__score" style={{ background: scoreColor(score, k.lowerIsBetter) }}>
+                            <span
+                              className="review-kpi__score"
+                              style={{ background: bandFor(score, bands)?.color ?? scoreColor(score, k.lowerIsBetter) }}
+                              title={bandFor(score, bands)?.label ?? undefined}
+                            >
                               {score.toFixed(0)}%
                             </span>
                           ) : (
@@ -388,6 +430,16 @@ export default function ReviewPage() {
         <span><span className="review-person__dot review-person__dot--done" /> All scored</span>
         <span><span className="review-person__dot review-person__dot--partial" /> Some scored</span>
         <span><span className="review-person__dot review-person__dot--empty" /> Not started</span>
+        <span aria-hidden style={{ width: 1, height: 12, background: "var(--os-line)", margin: "0 2px" }} />
+        {bands.map((b) => (
+          <span key={b.label} title={`${b.min}–${b.max}%`}>
+            <span
+              className="review-person__dot"
+              style={{ background: b.color?.startsWith("#") || /^[a-z]+$/i.test(b.color) ? b.color : "var(--os-ink-3)" }}
+            />
+            {b.label}
+          </span>
+        ))}
       </div>
       </div>
     </>

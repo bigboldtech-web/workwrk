@@ -6,6 +6,7 @@ import { checkPlanLimit } from "@/lib/plan-limits";
 import { logActivity } from "@/lib/activity";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
+import { seedAlignmentForUser } from "@/lib/alignment-assign";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -127,6 +128,20 @@ export async function POST(req: NextRequest) {
     targetId: user.id,
     targetType: "user",
   });
+
+  // Hybrid assignment: seed KRA/SOP defaults from the hire's role template.
+  if (roleId) {
+    try {
+      await seedAlignmentForUser({
+        userId: user.id,
+        roleId,
+        organizationId: getOrgId(session),
+        assignedBy: getUserId(session),
+      });
+    } catch (e) {
+      console.error("seedAlignmentForUser failed", e);
+    }
+  }
 
   return jsonSuccess(user, 201);
 }
