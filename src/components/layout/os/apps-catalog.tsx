@@ -126,12 +126,12 @@ function NavItem({
   return (
     <Link
       href={href}
-      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
+      className={`flex h-7 items-center gap-2 rounded-md px-2 text-[12px] leading-none ${
         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
       }`}
     >
-      <Icon className="w-3.5 h-3.5 flex-shrink-0 text-zinc-500" />
-      <span className="truncate flex-1">{label}</span>
+      <Icon className="h-4 w-4 shrink-0 text-zinc-500" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
       {badge !== undefined ? <span className="text-[11px] text-zinc-500">{badge}</span> : null}
     </Link>
   );
@@ -150,10 +150,10 @@ function MoreNavItem() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="w-full flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] text-zinc-700 hover:bg-white/80"
+        className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-[12px] leading-none text-zinc-700 hover:bg-white/80"
       >
-        <MoreHorizontal className="w-3.5 h-3.5 flex-shrink-0 text-zinc-500" />
-        <span className="truncate flex-1 text-left">More</span>
+        <MoreHorizontal className="h-4 w-4 shrink-0 text-zinc-500" />
+        <span className="min-w-0 flex-1 truncate text-left">More</span>
       </button>
       {open ? (
         <>
@@ -239,16 +239,16 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
       <li className="relative group/taskrow">
         <Link
           href="/tasks"
-          className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
+          className={`flex h-7 items-center gap-2 rounded-md px-2 text-[12px] leading-none ${
             pathname === "/tasks"
               ? "bg-zinc-200/70 text-zinc-900 font-medium"
               : "text-zinc-700 hover:bg-white/80"
           }`}
         >
-          <span className="relative h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden>
-            <CheckSquare className="h-3.5 w-3.5" />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500" aria-hidden>
+            <CheckSquare className="h-4 w-4 transition-opacity group-hover/taskrow:opacity-0" />
           </span>
-          <span className="truncate flex-1">My Tasks</span>
+          <span className="min-w-0 flex-1 truncate">My Tasks</span>
         </Link>
         <button
           type="button"
@@ -258,16 +258,12 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
             setExpanded((v) => !v);
           }}
           aria-label={expanded ? "Collapse My Tasks" : "Expand My Tasks"}
-          className="absolute left-2 top-1/2 z-10 h-5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity hover:opacity-100 hover:text-zinc-800 focus-visible:opacity-100"
+          className="absolute left-2 top-1/2 z-10 flex h-5 w-4 -translate-y-1/2 items-center justify-center rounded-md bg-zinc-200/80 text-zinc-600 opacity-0 transition-opacity hover:text-zinc-900 group-hover/taskrow:opacity-100 focus-visible:opacity-100"
         >
-          <span
-            className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-md bg-zinc-200/80"
-            aria-hidden
-          />
           {expanded ? (
-            <ChevronDown className="absolute left-1/2 top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2" />
+            <ChevronDown className="h-3.5 w-3.5" />
           ) : (
-            <ChevronRight className="absolute left-1/2 top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2" />
+            <ChevronRight className="h-3.5 w-3.5" />
           )}
         </button>
       </li>
@@ -318,15 +314,15 @@ function SubNavItem({
     <li>
       <Link
         href={href}
-        className={`flex h-[25px] items-center gap-2 px-2 rounded-md text-[12px] ${
+        className={`flex h-7 items-center gap-2 rounded-md px-2 text-[12px] leading-none ${
           active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
         }`}
       >
         <Icon
-          className="w-3.5 h-3.5 flex-shrink-0"
+          className="h-4 w-4 shrink-0"
           style={iconTint ? { color: iconTint } : { color: "var(--os-ink, #71717a)" }}
         />
-        <span className="truncate flex-1">{label}</span>
+        <span className="min-w-0 flex-1 truncate">{label}</span>
       </Link>
     </li>
   );

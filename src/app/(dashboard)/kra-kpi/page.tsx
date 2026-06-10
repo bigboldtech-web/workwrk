@@ -18,6 +18,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { NewKraDialog } from "./new-kra-dialog";
 
 type ApiKpi = {
   id: string;
@@ -58,6 +59,7 @@ export default function KraKpiPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -76,24 +78,6 @@ export default function KraKpiPage() {
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("kra-kpi");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
-
-  async function quickAdd() {
-    const name = (typeof window !== "undefined" ? window.prompt("KRA name?") : "")?.trim();
-    if (!name) return;
-    try {
-      const res = await fetch("/api/kras", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, category: activeCategory ?? "Uncategorized" }),
-      });
-      if (!res.ok) {
-        if (res.status === 403) toast("Only HR can create KRAs");
-        else toast("Couldn't create");
-        return;
-      }
-      toast("KRA created");
-      void load();
-    } catch { toast("Couldn't create"); }
-  }
 
   const filtered = useMemo(() => {
     let list = kras ?? [];
@@ -144,7 +128,7 @@ export default function KraKpiPage() {
           <div className="kra__head-actions">
             <Link href="/kra-kpi/review" className="kra__nav-link"><Activity /> KPI review cycle</Link>
             <Link href="/reviews" className="kra__nav-link"><Award /> Reviews</Link>
-            <button type="button" className="kra__btn-primary" onClick={quickAdd}>
+            <button type="button" className="kra__btn-primary" onClick={() => setNewOpen(true)}>
               <Plus /> New KRA
             </button>
           </div>
@@ -182,7 +166,7 @@ export default function KraKpiPage() {
         )}
 
         {loadError ? (
-          <OsEmptyView Icon={Target} iconGradient={GRAD.redPink} title="Couldn't load KRAs" subtitle={loadError} cta="Retry" />
+          <OsEmptyView Icon={Target} iconGradient={GRAD.redPink} title="Couldn't load KRAs" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : kras === null ? (
           <div className="kra__loading">Loading…</div>
         ) : stats.total === 0 ? (
@@ -193,6 +177,7 @@ export default function KraKpiPage() {
             subtitle="KRAs (Key Result Areas) define outcomes you measure with KPIs. Assign them to roles or individuals."
             chips={["Sales", "Engineering", "Operations", "Marketing"]}
             cta="New KRA"
+            onCta={() => setNewOpen(true)}
           />
         ) : grouped.length === 0 ? (
           <div className="kra__empty">
@@ -215,6 +200,14 @@ export default function KraKpiPage() {
           ))
         )}
       </div>
+
+      <NewKraDialog
+        open={newOpen}
+        onOpenChange={setNewOpen}
+        categories={categories.map(([c]) => c)}
+        defaultCategory={activeCategory}
+        onCreated={(msg) => { toast(msg); void load(); }}
+      />
     </>
   );
 }

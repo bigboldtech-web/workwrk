@@ -6,7 +6,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { canEditSpace, getSpaceForReader, listSpacesForUser } from "@/lib/space";
+import { prisma } from "@/lib/prisma";
 
 const VIEW_TYPES = [
   "TABLE", "KANBAN", "GANTT", "CALENDAR", "TIMELINE", "CHART", "DOC", "FORM",
@@ -32,6 +33,27 @@ export async function GET(req: Request) {
   const spaceId = url.searchParams.get("spaceId");
   const folderId = url.searchParams.get("folderId");
   const includeArchived = url.searchParams.get("includeArchived") === "1";
+
+  // Flat org-wide listing across every Space the viewer can read. Used
+  // by cross-entity pickers (e.g. linking Boards to an OKR) where the
+  // caller has no single Space context. Backwards-compatible: only
+  // triggers on ?all=1.
+  if (url.searchParams.get("all") === "1") {
+    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel });
+    const spaceIds = spaces.map((s) => s.id);
+    const boards = spaceIds.length
+      ? await prisma.board.findMany({
+          where: {
+            organizationId: c.organizationId,
+            spaceId: { in: spaceIds },
+            ...(includeArchived ? {} : { archivedAt: null }),
+          },
+          select: { id: true, slug: true, name: true, icon: true, color: true, spaceId: true },
+          orderBy: { name: "asc" },
+        })
+      : [];
+    return NextResponse.json({ boards });
+  }
 
   if (folderId) {
     const boards = await listBoardsInFolder(folderId, { includeArchived });

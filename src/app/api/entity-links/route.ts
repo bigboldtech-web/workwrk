@@ -26,9 +26,9 @@ import type { EntityLinkType, EntityLinkRelation } from "@/generated/prisma";
 
 const ENTITY_TYPES = [
   "TASK", "BOARD", "BOARD_ITEM", "SPACE", "FOLDER", "KRA", "KPI", "KPI_PROMPT",
-  "SOP", "REVIEW", "REVIEW_CYCLE", "WEEKLY_REVIEW", "NOTE", "DOC", "WHITEBOARD",
-  "FILE", "FORM", "TABLE", "USER", "DEPARTMENT", "ROLE", "ANNOUNCEMENT",
-  "KUDOS", "CANDOR", "SURVEY", "CONTRACT", "CANDIDATE", "JOB",
+  "SOP", "OKR", "KEY_RESULT", "REVIEW", "REVIEW_CYCLE", "WEEKLY_REVIEW", "NOTE",
+  "DOC", "WHITEBOARD", "FILE", "FORM", "TABLE", "USER", "DEPARTMENT", "ROLE",
+  "ANNOUNCEMENT", "KUDOS", "CANDOR", "SURVEY", "CONTRACT", "CANDIDATE", "JOB",
 ] as const;
 
 const RELATION_KINDS = ["LINKED", "EMBEDDED", "REQUIRED_READING", "REFERENCES"] as const;
@@ -102,6 +102,49 @@ async function hydrate(
           select: { id: true, name: true, category: true },
         });
         for (const k of kras) titleByKey.set(`${type}:${k.id}`, { title: k.name, subtitle: k.category });
+      } else if (type === "BOARD") {
+        const boards = await prisma.board.findMany({
+          where: { organizationId: orgId, id: { in: ids } },
+          select: { id: true, name: true, slug: true, spaceId: true },
+        });
+        for (const b of boards) {
+          titleByKey.set(`${type}:${b.id}`, { title: b.name, subtitle: "Board", href: `/boards/${b.slug}` });
+          if (b.spaceId) targetSpaceId.set(`${type}:${b.id}`, b.spaceId);
+        }
+      } else if (type === "SPACE") {
+        const spaces = await prisma.space.findMany({
+          where: { organizationId: orgId, id: { in: ids } },
+          select: { id: true, name: true, slug: true },
+        });
+        for (const s of spaces) {
+          titleByKey.set(`${type}:${s.id}`, { title: s.name, subtitle: "Space", href: `/spaces/${s.slug}` });
+          // Gate on the Space's own visibility.
+          targetSpaceId.set(`${type}:${s.id}`, s.id);
+        }
+      } else if (type === "OKR") {
+        const okrs = await prisma.oKR.findMany({
+          where: { organizationId: orgId, id: { in: ids } },
+          select: { id: true, title: true, level: true, status: true },
+        });
+        for (const o of okrs) {
+          titleByKey.set(`${type}:${o.id}`, {
+            title: o.title,
+            subtitle: `${o.level} · ${o.status}`,
+            href: `/okrs/${o.id}`,
+          });
+        }
+      } else if (type === "KEY_RESULT") {
+        const krs = await prisma.keyResult.findMany({
+          where: { okr: { organizationId: orgId }, id: { in: ids } },
+          select: { id: true, title: true, progress: true, okrId: true },
+        });
+        for (const kr of krs) {
+          titleByKey.set(`${type}:${kr.id}`, {
+            title: kr.title,
+            subtitle: `${Math.round(kr.progress)}% complete`,
+            href: `/okrs/${kr.okrId}`,
+          });
+        }
       } else if (type === "FILE") {
         const files = await prisma.fileEntry.findMany({
           where: { organizationId: orgId, id: { in: ids } },

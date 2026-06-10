@@ -10,9 +10,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   BookCopy, Plus, Search, ClipboardCheck, Hash, ChevronRight, FileText,
-  CheckCircle2, Activity, Archive, Layers, Eye, Edit3, AlertTriangle, BookOpen,
+  CheckCircle2, Activity, Archive, Layers, Eye, Edit3, AlertTriangle, BookOpen, Target,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -32,6 +33,7 @@ type ApiSop = {
   publishedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  kra?: { id: string; name: string } | null;
   _count?: { assignments?: number; steps?: number };
 };
 
@@ -57,6 +59,7 @@ function categoryColor(name: string): string {
 }
 
 export default function SopsPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<ApiSop[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -202,7 +205,7 @@ export default function SopsPage() {
         )}
 
         {loadError ? (
-          <OsEmptyView Icon={BookCopy} iconGradient={GRAD.redPink} title="Couldn't load SOPs" subtitle={loadError} cta="Retry" />
+          <OsEmptyView Icon={BookCopy} iconGradient={GRAD.redPink} title="Couldn't load SOPs" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : rows === null ? (
           <div className="sop__loading">Loading…</div>
         ) : stats.total === 0 ? (
@@ -213,6 +216,7 @@ export default function SopsPage() {
             subtitle="Document a process once, then assign it to teammates. SOPs version automatically as you edit."
             chips={["Text", "Checklist", "Video"]}
             cta="New SOP"
+            onCta={() => router.push("/sops/new")}
           />
         ) : grouped.length === 0 ? (
           <div className="sop__no-match"><AlertTriangle /> No SOPs match the current filter.</div>
@@ -255,6 +259,7 @@ function SopCard({ s }: { s: ApiSop }) {
         </div>
       )}
       <footer className="sop__card-foot">
+        {s.kra && <span title={`Measures KRA: ${s.kra.name}`}><Target /> {s.kra.name}</span>}
         {s._count?.steps != null && <span><BookOpen /> {s._count.steps} step{s._count.steps === 1 ? "" : "s"}</span>}
         {s._count?.assignments != null && <span><ClipboardCheck /> {s._count.assignments}</span>}
         <span className="sop__card-updated">

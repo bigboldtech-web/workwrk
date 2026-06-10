@@ -9,8 +9,13 @@ import { TaskListSurface } from "./task-list-surface";
 
 export function AssignedToMeReferencePage() {
   return (
-    <TaskSurface title="Assigned to me">
-      <TaskListSurface />
+    <TaskSurface title="Assigned to me" titlePrefix="My Tasks">
+      <TaskListSurface
+        initialAssignedOnly
+        initialGroupBy="dueDate"
+        initialSortKey="dueDate"
+        initialVisibleColumns={["priority", "dueDate"]}
+      />
     </TaskSurface>
   );
 }
@@ -94,8 +99,12 @@ function TaskSurface({
 }) {
   return (
     <div className="flex h-full flex-col bg-white">
-      <header className="flex h-10 shrink-0 items-center justify-between overflow-visible border-b border-zinc-200 !px-4">
-        <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[14px] font-semibold leading-5 text-zinc-900">
+      <header className="flex h-10 shrink-0 items-center justify-between border-b border-zinc-200 !px-4">
+        <div
+          role="heading"
+          aria-level={1}
+          className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[14px] font-semibold leading-5 text-zinc-900"
+        >
           {titlePrefix ? <span className="shrink-0 font-medium text-zinc-500">{titlePrefix} /</span> : null}
           <span className="truncate">{title}</span>
           {title === "Personal List" ? (
@@ -104,7 +113,7 @@ function TaskSurface({
               <Star className="h-4 w-4 shrink-0 text-zinc-500" />
             </>
           ) : null}
-        </h1>
+        </div>
         {headerRight ? <div className="shrink-0">{headerRight}</div> : null}
       </header>
       {children}

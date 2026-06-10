@@ -14,6 +14,43 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 
+const INTERNAL_TASK_FIELDS = {
+  notes: { label: "Notes", fieldType: "TEXTAREA" as const, position: 9000 },
+  relatedItems: { label: "Related items", fieldType: "TEXTAREA" as const, position: 9001 },
+  taskLinks: { label: "Task links", fieldType: "TEXTAREA" as const, position: 9002 },
+  checklist: { label: "Checklist", fieldType: "TEXTAREA" as const, position: 9003 },
+};
+
+async function ensureInternalTaskFields(orgId: string, entityType: string, keys: string[]) {
+  if (entityType !== "TASK") return;
+
+  const internalKeys = Array.from(
+    new Set(keys.filter((key): key is keyof typeof INTERNAL_TASK_FIELDS => key in INTERNAL_TASK_FIELDS)),
+  );
+  if (internalKeys.length === 0) return;
+
+  const existing = await prisma.customFieldDefinition.findMany({
+    where: { organizationId: orgId, targetType: entityType, key: { in: internalKeys } },
+    select: { key: true },
+  });
+  const existingKeys = new Set(existing.map((field) => field.key));
+  const missing = internalKeys.filter((key) => !existingKeys.has(key));
+  if (missing.length === 0) return;
+
+  await prisma.customFieldDefinition.createMany({
+    data: missing.map((key) => ({
+      organizationId: orgId,
+      targetType: entityType,
+      key,
+      label: INTERNAL_TASK_FIELDS[key].label,
+      fieldType: INTERNAL_TASK_FIELDS[key].fieldType,
+      position: INTERNAL_TASK_FIELDS[key].position,
+      active: true,
+    })),
+    skipDuplicates: true,
+  });
+}
+
 async function ctx() {
   const session = await getServerSession(authOptions);
   if (!session?.user) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
@@ -89,6 +126,8 @@ export async function PUT(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const parsed = putSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+
+  await ensureInternalTaskFields(c.orgId, parsed.data.entityType, Object.keys(parsed.data.values));
 
   const definitions = await prisma.customFieldDefinition.findMany({
     where: {

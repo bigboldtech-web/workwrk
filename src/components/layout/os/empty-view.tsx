@@ -11,6 +11,8 @@ export function OsEmptyView({
   subtitle,
   chips = [],
   cta,
+  onCta,
+  hideCta = false,
 }: {
   Icon: LucideIcon;
   iconGradient: string;
@@ -18,6 +20,11 @@ export function OsEmptyView({
   subtitle: string;
   chips?: string[];
   cta?: string;
+  /** Click handler for the CTA. When omitted the button still renders
+   *  (legacy behavior) but does nothing — pass this to make it live. */
+  onCta?: () => void;
+  /** Hide the CTA entirely (e.g. read-only surfaces). */
+  hideCta?: boolean;
 }) {
   return (
     <div className="os-empty">
@@ -33,10 +40,12 @@ export function OsEmptyView({
           ))}
         </div>
       ) : null}
-      <button type="button" className="os-empty__cta">
-        <Plus />
-        <span>{cta ?? "Get started"}</span>
-      </button>
+      {hideCta ? null : (
+        <button type="button" className="os-empty__cta" onClick={onCta}>
+          <Plus />
+          <span>{cta ?? "Get started"}</span>
+        </button>
+      )}
     </div>
   );
 }

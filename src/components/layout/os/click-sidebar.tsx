@@ -175,7 +175,7 @@ function ClickSidebarBody() {
     if (!resizing) return;
     const originalCursor = document.body.style.cursor;
     const originalUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "ew-resize";
+    document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
 
     const onPointerMove = (event: PointerEvent) => {
@@ -439,15 +439,15 @@ function ClickSidebarBody() {
             resetWidth();
           }
         }}
-        className={`absolute -right-1 top-2 bottom-2 z-20 w-2 touch-none cursor-ew-resize rounded-full outline-none focus-visible:bg-zinc-300/55 ${
+        className={`absolute -right-1.5 top-2 bottom-2 z-30 w-3 touch-none select-none cursor-col-resize rounded-full outline-none focus-visible:bg-zinc-300/55 ${
           resizing ? "bg-zinc-300/55" : "bg-transparent"
         }`}
-        style={{ cursor: "ew-resize" }}
+        style={{ cursor: "col-resize" }}
         aria-label="Resize sidebar"
         title="Drag to resize · Double-click to reset"
       >
         <span
-          className={`absolute left-1/2 top-2 bottom-2 w-px -translate-x-1/2 cursor-ew-resize rounded-full transition-colors ${
+          className={`pointer-events-none absolute left-1/2 top-2 bottom-2 w-px -translate-x-1/2 rounded-full transition-colors ${
             resizing ? "bg-zinc-400" : "bg-transparent group-hover/sidebar:bg-zinc-300"
           }`}
           aria-hidden

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import {
   Activity,
   AlignLeft,
@@ -51,6 +51,7 @@ import {
   Users,
   Workflow,
   X,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 
@@ -77,7 +78,10 @@ type PanelKey = "fields" | "customize" | null;
 type FieldMode = "create" | "existing";
 type TaskPriority = "" | "Urgent" | "High" | "Normal" | "Low";
 type TaskOptionMenu = "type" | "assignee" | "date" | "priority" | "tags" | null;
+type ChecklistItem = { id: string; label: string; done: boolean };
+type TaskCellMenu = "status" | "assignee" | "date" | "priority" | "tags" | "type" | "custom" | null;
 type TaskSortKey = "none" | "name" | "dueDate" | "dateCreated" | "priority";
+type TaskSidePanel = "activity" | "related" | "links" | "fields" | "checklist" | null;
 
 interface ViewOptions {
   stackFields: boolean;
@@ -111,23 +115,36 @@ interface ColumnDef {
 interface TaskItem {
   id: string;
   name: string;
+  description?: string;
   status: "to_do" | "in_progress" | "complete";
   assignee: string;
+  assigneeId?: string;
   dueDate: string;
+  dueDateISO?: string;
   priority: TaskPriority;
   dateCreated: string;
   taskType: string;
   tags: string[];
+  customFields?: Record<string, string>;
   subtaskCount: number;
   comments: number;
   attachments: number;
   parentId?: string;
 }
 
+interface TaskListSurfaceProps {
+  initialAssignedOnly?: boolean;
+  initialGroupBy?: GroupKey;
+  initialSortKey?: TaskSortKey;
+  initialVisibleColumns?: string[];
+}
+
 interface DraftTask {
   name: string;
+  description?: string;
   status: TaskItem["status"];
   assignee: string;
+  assigneeId?: string;
   dueDate: string;
   dueDateISO?: string;
   priority: TaskPriority;
@@ -139,6 +156,7 @@ interface DraftTask {
 interface ApiTask {
   id: string;
   title: string;
+  description?: string | null;
   date: string;
   createdAt?: string;
   status?: "PLANNED" | "IN_PROGRESS" | "COMPLETED";
@@ -146,17 +164,53 @@ interface ApiTask {
   category?: string | null;
   parentTaskId?: string | null;
   assignee?: {
+    id?: string | null;
     firstName?: string | null;
     lastName?: string | null;
     email?: string | null;
+    avatar?: string | null;
   } | null;
   labels?: { label?: { name?: string | null } | null }[];
   _count?: { subTasks?: number; comments?: number };
+  customFields?: Record<string, string | number | boolean | null>;
 }
 
 interface ApiLabel {
   id: string;
   name: string;
+}
+
+interface ApiCustomField {
+  key: string;
+  label: string;
+  fieldType: string;
+}
+
+interface ApiPerson {
+  id: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  avatar?: string | null;
+}
+
+interface ApiTaskComment {
+  id: string;
+  body: string;
+  createdAt?: string;
+  author?: {
+    firstName?: string | null;
+    lastName?: string | null;
+    avatar?: string | null;
+  } | null;
+}
+
+interface AssigneeOption {
+  id: string;
+  name: string;
+  email?: string;
+  avatar?: string;
+  initials: string;
 }
 
 const INITIAL_VIEWS: ViewDef[] = [
@@ -288,17 +342,29 @@ const STATUS_COLUMNS = [
   { key: "complete" as const, label: "COMPLETE", color: "#16A34A", bg: "#F0FDF4" },
 ];
 
-export function TaskListSurface() {
+export function TaskListSurface({
+  initialAssignedOnly = false,
+  initialGroupBy = "none",
+  initialSortKey = "none",
+  initialVisibleColumns,
+}: TaskListSurfaceProps = {}) {
   const [views, setViews] = useState<ViewDef[]>(INITIAL_VIEWS);
   const [activeViewId, setActiveViewId] = useState("list");
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [groupMenuOpen, setGroupMenuOpen] = useState(false);
   const [panel, setPanel] = useState<PanelKey>(null);
   const [fieldMode, setFieldMode] = useState<FieldMode>("existing");
-  const [groupBy, setGroupBy] = useState<GroupKey>("none");
+  const [groupBy, setGroupBy] = useState<GroupKey>(initialGroupBy);
   const [subtasksCollapsed, setSubtasksCollapsed] = useState(true);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [columns, setColumns] = useState<ColumnDef[]>([...DEFAULT_COLUMNS, ...OPTIONAL_FIELDS]);
+  const [columns, setColumns] = useState<ColumnDef[]>(() => {
+    if (!initialVisibleColumns) return [...DEFAULT_COLUMNS, ...OPTIONAL_FIELDS];
+    const visibleKeys = new Set(["name", ...initialVisibleColumns]);
+    return [...DEFAULT_COLUMNS, ...OPTIONAL_FIELDS].map((column) => ({
+      ...column,
+      visible: visibleKeys.has(column.key),
+    }));
+  });
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [taskError, setTaskError] = useState<string | null>(null);
@@ -311,10 +377,11 @@ export function TaskListSurface() {
   const [taskQuery, setTaskQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [showClosed, setShowClosed] = useState(true);
-  const [assignedOnly, setAssignedOnly] = useState(false);
-  const [sortKey, setSortKey] = useState<TaskSortKey>("none");
+  const [assignedOnly, setAssignedOnly] = useState(initialAssignedOnly);
+  const [sortKey, setSortKey] = useState<TaskSortKey>(initialSortKey);
   const [viewOptions, setViewOptions] = useState<ViewOptions>(DEFAULT_VIEW_OPTIONS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [assignees, setAssignees] = useState<AssigneeOption[]>([]);
 
   const visibleViews = useMemo(() => dedupeViews(views), [views]);
   const activeView = visibleViews.find((view) => view.id === activeViewId) ?? visibleViews[0];
@@ -325,6 +392,19 @@ export function TaskListSurface() {
     const trailing = tableColumns.map((column) => `minmax(${column.width}px, ${column.width}px)`).join(" ");
     return `minmax(300px,1fr) ${trailing} 36px`;
   }, [tableColumns]);
+  const assigneeOptions = useMemo(() => {
+    const byId = new Map<string, AssigneeOption>();
+    assignees.forEach((assignee) => byId.set(assignee.id, assignee));
+    tasks.forEach((task) => {
+      if (!task.assigneeId || byId.has(task.assigneeId)) return;
+      byId.set(task.assigneeId, {
+        id: task.assigneeId,
+        name: task.assignee || "Unassigned",
+        initials: initialsFromName(task.assignee || "Unassigned"),
+      });
+    });
+    return Array.from(byId.values()).sort((first, second) => first.name.localeCompare(second.name));
+  }, [assignees, tasks]);
 
   useEffect(() => {
     let cancelled = false;
@@ -345,6 +425,62 @@ export function TaskListSurface() {
     }
 
     void loadTasks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAssignees() {
+      try {
+        const response = await fetch("/api/v1/people?limit=100", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as { data?: ApiPerson[] };
+        if (cancelled || !Array.isArray(data.data)) return;
+        setAssignees(data.data.map(mapApiPersonToAssigneeOption).filter(Boolean));
+      } catch {
+      }
+    }
+
+    void loadAssignees();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCustomFieldColumns() {
+      try {
+        const response = await fetch("/api/custom-fields/values?entityType=TASK", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as { fields?: ApiCustomField[] };
+        if (cancelled || !Array.isArray(data.fields)) return;
+        const fields = data.fields;
+        setColumns((current) => {
+          const existingKeys = new Set(current.map((column) => column.key));
+          const additions = fields
+            .filter((field) => !existingKeys.has(field.key))
+            .map((field) => ({
+              key: field.key,
+              label: field.label,
+              Icon: customFieldIcon(field.fieldType),
+              width: 170,
+              visible: true,
+              custom: true,
+            }));
+          return additions.length > 0 ? [...current, ...additions] : current;
+        });
+      } catch {
+      }
+    }
+
+    void loadCustomFieldColumns();
 
     return () => {
       cancelled = true;
@@ -378,13 +514,19 @@ export function TaskListSurface() {
   const groupedTasks = useMemo(() => {
     if (groupBy === "none") return [];
     const groups = new Map<string, TaskItem[]>();
-    const labels = groupBy === "status" ? STATUS_COLUMNS.map((status) => status.label) : [];
+    const labels = groupBy === "status"
+      ? STATUS_COLUMNS.map((status) => status.label)
+      : groupBy === "dueDate"
+        ? ["Overdue", "Today", "Tomorrow", "Upcoming", "No due date"]
+        : [];
     labels.forEach((label) => groups.set(label, []));
     displayTasks.forEach((task) => {
       const label = getGroupLabel(task, groupBy);
       groups.set(label, [...(groups.get(label) ?? []), task]);
     });
-    return Array.from(groups.entries()).map(([label, items]) => ({ label, items }));
+    return Array.from(groups.entries())
+      .filter(([, items]) => groupBy !== "dueDate" || items.length > 0)
+      .map(([label, items]) => ({ label, items }));
   }, [displayTasks, groupBy]);
 
   const ensureLabelIds = async (tagNames: string[]) => {
@@ -427,10 +569,12 @@ export function TaskListSurface() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: taskDraft.name.trim() || fallbackName,
+        description: taskDraft.description?.trim() || undefined,
         date: taskDraft.dueDateISO ?? formatDateInput(new Date()),
         status: uiStatusToApiStatus(taskDraft.status),
         priority: uiPriorityToApiPriority(taskDraft.priority),
         category: taskDraft.taskType || (taskDraft.parentId ? "Subtask" : "Task"),
+        assigneeId: taskDraft.assigneeId,
         parentTaskId: taskDraft.parentId,
         labelIds,
       }),
@@ -474,6 +618,7 @@ export function TaskListSurface() {
         {
           ...createdTask,
           assignee: draftTask.assignee || createdTask.assignee,
+          assigneeId: draftTask.assigneeId || createdTask.assigneeId,
           dueDate: draftTask.dueDate,
           priority: draftTask.priority || createdTask.priority,
           tags: createdTask.tags.length > 0 ? createdTask.tags : draftTask.tags,
@@ -498,12 +643,46 @@ export function TaskListSurface() {
     );
   };
 
-  const createColumn = (label: string) => {
-    const key = `custom-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+  const createColumn = async (label: string) => {
+    let key = makeCustomFieldKey(label);
+    let persisted = false;
+    let persistenceWarning: string | null = null;
+    setTaskError(null);
+
+    try {
+      const response = await fetch("/api/custom-fields", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetType: "TASK",
+          key,
+          label,
+          fieldType: customFieldTypeForLabel(label),
+        }),
+      });
+
+      if (response.ok) {
+        const definition = (await response.json()) as { key?: string; label?: string };
+        key = definition.key || key;
+        persisted = true;
+      } else if (response.status === 409) {
+        persisted = true;
+      } else if (response.status !== 403) {
+        throw new Error(await readApiError(response, "Failed to create custom field"));
+      } else {
+        persistenceWarning = "Custom field added to this view. Admin permission is required to persist new workspace fields.";
+      }
+    } catch (error) {
+      setTaskError(error instanceof Error ? error.message : "Failed to create custom field");
+    }
+
     setColumns((current) => [
-      ...current,
-      { key, label, Icon: FileText, width: 170, visible: true, custom: true },
+      ...current.filter((column) => column.key !== key),
+      { key, label, Icon: customFieldIcon(customFieldTypeForLabel(label)), width: 170, visible: true, custom: true },
     ]);
+    if (!persisted && persistenceWarning) {
+      setTaskError(persistenceWarning);
+    }
     setPanel("fields");
     setFieldMode("existing");
   };
@@ -544,24 +723,61 @@ export function TaskListSurface() {
 
   const updateTask = async (taskId: string, patch: Partial<TaskItem>) => {
     const previousTasks = tasks;
-    setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, ...patch } : task)));
+    const customFieldPatch = patch.customFields;
+    setTasks((current) => current.map((task) => (
+      task.id === taskId
+        ? {
+            ...task,
+            ...patch,
+            customFields: customFieldPatch
+              ? mergeCustomFields(task.customFields, customFieldPatch)
+              : task.customFields,
+          }
+        : task
+    )));
 
     const body: Record<string, unknown> = { id: taskId };
     if (patch.name !== undefined) body.title = patch.name;
+    if (patch.description !== undefined) body.description = patch.description;
     if (patch.status !== undefined) body.status = uiStatusToApiStatus(patch.status);
-    if (patch.priority !== undefined) body.priority = uiPriorityToApiPriority(patch.priority);
+    if (patch.priority !== undefined) body.priority = patch.priority ? uiPriorityToApiPriority(patch.priority) : null;
+    if (patch.assigneeId !== undefined) body.assigneeId = patch.assigneeId || null;
+    if (patch.dueDateISO !== undefined) body.date = patch.dueDateISO;
+    else if (patch.dueDate !== undefined) {
+      const dateInput = displayDateToInputDate(patch.dueDate);
+      if (dateInput) body.date = dateInput;
+    }
+    if (patch.taskType !== undefined) body.category = patch.taskType;
     if (patch.tags !== undefined) body.labelIds = await ensureLabelIds(patch.tags) ?? [];
 
     try {
-      if (Object.keys(body).length <= 1) return;
-      const response = await fetch("/api/tasks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error(await readApiError(response, "Failed to update task"));
-      const savedTask = mapApiTaskToTaskItem((await response.json()) as ApiTask);
-      setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, ...savedTask } : task)));
+      let savedTask: TaskItem | null = null;
+      if (Object.keys(body).length > 1) {
+        const response = await fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error(await readApiError(response, "Failed to update task"));
+        savedTask = mapApiTaskToTaskItem((await response.json()) as ApiTask);
+      }
+
+      if (customFieldPatch) {
+        const response = await fetch("/api/custom-fields/values", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entityType: "TASK", entityId: taskId, values: customFieldPatch }),
+        });
+        if (!response.ok) throw new Error(await readApiError(response, "Failed to update custom field"));
+      }
+
+      if (savedTask) {
+        setTasks((current) => current.map((task) => (
+          task.id === taskId
+            ? { ...task, ...savedTask, customFields: task.customFields }
+            : task
+        )));
+      }
     } catch (error) {
       setTasks(previousTasks);
       setTaskError(error instanceof Error ? error.message : "Failed to update task");
@@ -749,6 +965,7 @@ export function TaskListSurface() {
               groupBy={groupBy}
               tableColumns={tableColumns}
               tableTemplate={tableTemplate}
+              assigneeOptions={assigneeOptions}
               loading={tasksLoading}
               error={taskError}
               saving={savingTask}
@@ -793,6 +1010,36 @@ export function TaskListSurface() {
             <GanttMode tasks={displayTasks} activeView={activeView} onOpenTask={(task) => setSelectedTaskId(task.id)} />
           ) : activeView.kind === "doc" ? (
             <DocMode tasks={displayTasks} activeView={activeView} />
+          ) : activeView.kind === "form" ? (
+            <FormMode
+              activeView={activeView}
+              saving={savingTask}
+              onCreateTask={async (formDraft) => {
+                if (savingTask) return;
+                setSavingTask(true);
+                setTaskError(null);
+                try {
+                  const createdTask = await persistTask(formDraft, formDraft.name || `New task ${tasks.length + 1}`);
+                  setTasks((current) => [
+                    ...current,
+                    {
+                      ...createdTask,
+                      assignee: formDraft.assignee || createdTask.assignee,
+                      assigneeId: formDraft.assigneeId || createdTask.assigneeId,
+                      dueDate: formDraft.dueDate || createdTask.dueDate,
+                      dueDateISO: formDraft.dueDateISO ?? createdTask.dueDateISO,
+                      priority: formDraft.priority || createdTask.priority,
+                      tags: createdTask.tags.length > 0 ? createdTask.tags : formDraft.tags,
+                    },
+                  ]);
+                } catch (error) {
+                  setTaskError(error instanceof Error ? error.message : "Failed to create task");
+                } finally {
+                  setSavingTask(false);
+                }
+              }}
+              assigneeOptions={assigneeOptions}
+            />
           ) : (
             <PlaceholderMode activeView={activeView} tasks={displayTasks} onOpenTask={(task) => setSelectedTaskId(task.id)} />
           )}
@@ -840,8 +1087,13 @@ export function TaskListSurface() {
       {selectedTask ? (
         <TaskDetailModal
           task={selectedTask}
+          assigneeOptions={assigneeOptions}
           onClose={() => setSelectedTaskId(null)}
           onTaskChange={updateTask}
+          onAddSubtask={(parentId) => {
+            startDraftTask("to_do", parentId);
+            setSelectedTaskId(null);
+          }}
         />
       ) : null}
     </div>
@@ -951,6 +1203,7 @@ function ListMode({
   groupBy,
   tableColumns,
   tableTemplate,
+  assigneeOptions,
   loading,
   error,
   saving,
@@ -972,6 +1225,7 @@ function ListMode({
   groupBy: GroupKey;
   tableColumns: ColumnDef[];
   tableTemplate: string;
+  assigneeOptions: AssigneeOption[];
   loading: boolean;
   error: string | null;
   saving: boolean;
@@ -988,10 +1242,29 @@ function ListMode({
   onOpenTask: (task: TaskItem) => void;
   onOpenFields: () => void;
 }) {
+  const [openGroupMenu, setOpenGroupMenu] = useState<string | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const rootTasks = tasks.filter((task) => !task.parentId);
   const parentIds = new Set(rootTasks.map((task) => task.id));
   const orphanSubtasks = tasks.filter((task) => task.parentId && !parentIds.has(task.parentId));
   const draftRendersUnderParent = Boolean(draftTask?.parentId && parentIds.has(draftTask.parentId));
+
+  const setTaskSelected = (taskId: string, selected: boolean) => {
+    setSelectedTaskIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(taskId);
+      else next.delete(taskId);
+      return next;
+    });
+  };
+
+  const selectTasks = (taskIds: string[]) => {
+    setSelectedTaskIds((current) => {
+      const next = new Set(current);
+      taskIds.forEach((taskId) => next.add(taskId));
+      return next;
+    });
+  };
 
   const renderCreateRow = (draft: DraftTask) => (
     <CreateTaskRow
@@ -1003,11 +1276,12 @@ function ListMode({
       onCancel={onCancelDraft}
       saving={saving}
       tableTemplate={tableTemplate}
+      assigneeOptions={assigneeOptions}
     />
   );
 
   return (
-    <div className="min-w-[860px] !px-5 py-4">
+    <div className="min-w-[860px] !px-4 py-3">
       {error ? (
         <div className="mb-3 rounded-lg border border-red-100 bg-red-50 !px-3 py-2 text-[12px] font-medium text-red-700">
           {error}
@@ -1050,6 +1324,9 @@ function ListMode({
                   task={task}
                   tableColumns={tableColumns}
                   tableTemplate={tableTemplate}
+                  assigneeOptions={assigneeOptions}
+                  selected={selectedTaskIds.has(task.id)}
+                  onSelectedChange={(selected) => setTaskSelected(task.id, selected)}
                   onAddSubtask={() => onStartTask(task.status, task.id)}
                   onTaskChange={onTaskChange}
                   onOpenTask={() => onOpenTask(task)}
@@ -1060,6 +1337,9 @@ function ListMode({
                     task={childTask}
                     tableColumns={tableColumns}
                     tableTemplate={tableTemplate}
+                    assigneeOptions={assigneeOptions}
+                    selected={selectedTaskIds.has(childTask.id)}
+                    onSelectedChange={(selected) => setTaskSelected(childTask.id, selected)}
                     onAddSubtask={() => onStartTask(childTask.status, childTask.id)}
                     onTaskChange={onTaskChange}
                     onOpenTask={() => onOpenTask(childTask)}
@@ -1077,16 +1357,57 @@ function ListMode({
           {groupedTasks.map((group) => {
             const collapsed = collapsedGroups.has(group.label);
             return (
-              <section key={group.label}>
-                <button
-                  type="button"
-                  className="mb-2 inline-flex items-center gap-2 text-left text-[13px] font-medium text-zinc-700"
-                  onClick={() => onToggleGroup(group.label)}
-                >
-                  <ChevronDown className={`h-4 w-4 text-zinc-400 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
-                  <GroupBadge label={group.label} />
-                  <span className="text-zinc-500">{group.items.length}</span>
-                </button>
+              <section key={group.label} className="group/listgroup relative">
+                <div className="mb-2 flex h-7 items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="inline-flex h-7 items-center gap-2 rounded-md text-left text-[13px] font-medium text-zinc-700"
+                    onClick={() => onToggleGroup(group.label)}
+                  >
+                    <ChevronDown className={`h-4 w-4 text-zinc-400 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+                    <GroupBadge label={group.label} />
+                    <span className="text-zinc-500">{group.items.length}</span>
+                  </button>
+                  <div className="relative opacity-0 transition-opacity group-hover/listgroup:opacity-100 group-focus-within/listgroup:opacity-100">
+                    <button
+                      type="button"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-zinc-100 text-zinc-500 hover:text-zinc-900"
+                      aria-label={`${group.label} group options`}
+                      onClick={() => setOpenGroupMenu((current) => (current === group.label ? null : group.label))}
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                    {openGroupMenu === group.label ? (
+                      <GroupOptionsMenu
+                        groupLabel={group.label}
+                        groupName={getGroupName(groupBy).toLowerCase()}
+                        onSelectAll={() => {
+                          selectTasks(group.items.map((task) => task.id));
+                          setOpenGroupMenu(null);
+                        }}
+                        onCollapseGroup={() => {
+                          if (!collapsedGroups.has(group.label)) onToggleGroup(group.label);
+                          setOpenGroupMenu(null);
+                        }}
+                        onCollapseAll={() => {
+                          groupedTasks.forEach((item) => {
+                            if (!collapsedGroups.has(item.label)) onToggleGroup(item.label);
+                          });
+                          setOpenGroupMenu(null);
+                        }}
+                        onClose={() => setOpenGroupMenu(null)}
+                      />
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 opacity-0 hover:bg-zinc-100 hover:text-zinc-900 group-hover/listgroup:opacity-100"
+                    aria-label={`Add task to ${group.label}`}
+                    onClick={() => onStartTask(statusFromGroup(group.label))}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
                 {!collapsed ? (
                   <>
                     <div
@@ -1105,6 +1426,9 @@ function ListMode({
                         task={task}
                         tableColumns={tableColumns}
                         tableTemplate={tableTemplate}
+                        assigneeOptions={assigneeOptions}
+                        selected={selectedTaskIds.has(task.id)}
+                        onSelectedChange={(selected) => setTaskSelected(task.id, selected)}
                         onAddSubtask={() => onStartTask(task.status, task.id)}
                         onTaskChange={onTaskChange}
                         onOpenTask={() => onOpenTask(task)}
@@ -1120,6 +1444,7 @@ function ListMode({
                         onCancel={onCancelDraft}
                         saving={saving}
                         tableTemplate={tableTemplate}
+                        assigneeOptions={assigneeOptions}
                       />
                     ) : null}
                     <AddTaskRow tableTemplate={tableTemplate} onClick={() => onStartTask(statusFromGroup(group.label))} />
@@ -1140,6 +1465,7 @@ function ListMode({
                   onCancel={onCancelDraft}
                   saving={saving}
                   tableTemplate={tableTemplate}
+                  assigneeOptions={assigneeOptions}
                 />
               ) : null}
               <AddTaskRow tableTemplate={tableTemplate} onClick={() => onStartTask()} />
@@ -1154,6 +1480,7 @@ function ListMode({
 function CreateTaskRow({
   draftTask,
   openMenu,
+  assigneeOptions,
   onDraftChange,
   onOpenMenuChange,
   onSave,
@@ -1163,6 +1490,7 @@ function CreateTaskRow({
 }: {
   draftTask: DraftTask;
   openMenu: TaskOptionMenu;
+  assigneeOptions: AssigneeOption[];
   onDraftChange: (patch: Partial<DraftTask>) => void;
   onOpenMenuChange: (menu: TaskOptionMenu) => void;
   onSave: () => void | Promise<void>;
@@ -1251,8 +1579,9 @@ function CreateTaskRow({
           ) : null}
           {openMenu === "assignee" ? (
             <AssigneeMenu
+              options={assigneeOptions}
               onSelect={(assignee) => {
-                onDraftChange({ assignee });
+                onDraftChange({ assignee: assignee.name, assigneeId: assignee.id });
                 onOpenMenuChange(null);
               }}
             />
@@ -1296,6 +1625,9 @@ function TaskRow({
   task,
   tableColumns,
   tableTemplate,
+  assigneeOptions,
+  selected,
+  onSelectedChange,
   onAddSubtask,
   onTaskChange,
   onOpenTask,
@@ -1303,6 +1635,9 @@ function TaskRow({
   task: TaskItem;
   tableColumns: ColumnDef[];
   tableTemplate: string;
+  assigneeOptions: AssigneeOption[];
+  selected: boolean;
+  onSelectedChange: (selected: boolean) => void;
   onAddSubtask: () => void;
   onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
   onOpenTask: () => void;
@@ -1343,7 +1678,21 @@ function TaskRow({
         <span className="w-4 shrink-0 opacity-0 group-hover:opacity-100">
           <MoreHorizontal className="h-3.5 w-3.5 rotate-90 text-zinc-400" />
         </span>
-        <span className="h-3.5 w-3.5 shrink-0 rounded border border-zinc-300 bg-white opacity-0 group-hover:opacity-100" />
+        <button
+          type="button"
+          className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+            selected
+              ? "border-[var(--os-brand-rail)] bg-[var(--os-brand-rail)] text-white opacity-100"
+              : "border-zinc-300 bg-white opacity-0 group-hover:opacity-100"
+          }`}
+          aria-label={selected ? "Deselect task" : "Select task"}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelectedChange(!selected);
+          }}
+        >
+          {selected ? <Check className="h-3 w-3" /> : null}
+        </button>
         {!task.parentId && task.subtaskCount > 0 ? <ChevronRight className="h-3.5 w-3.5 text-zinc-400" /> : null}
         <button
           type="button"
@@ -1420,9 +1769,13 @@ function TaskRow({
         ) : null}
       </span>
       {tableColumns.map((column) => (
-        <span key={column.key} className="truncate pr-3 text-zinc-600">
-          {renderTaskValue(task, column)}
-        </span>
+        <TaskFieldCell
+          key={column.key}
+          task={task}
+          column={column}
+          assigneeOptions={assigneeOptions}
+          onTaskChange={onTaskChange}
+        />
       ))}
       <button
         type="button"
@@ -1433,6 +1786,222 @@ function TaskRow({
       </button>
     </div>
   );
+}
+
+function TaskFieldCell({
+  task,
+  column,
+  assigneeOptions,
+  onTaskChange,
+}: {
+  task: TaskItem;
+  column: ColumnDef;
+  assigneeOptions: AssigneeOption[];
+  onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
+}) {
+  const [openMenu, setOpenMenu] = useState<TaskCellMenu>(null);
+  const [tagQuery, setTagQuery] = useState("");
+  const [customDraft, setCustomDraft] = useState(task.customFields?.[column.key] ?? "");
+
+  const buttonClass = "inline-flex h-6 max-w-full items-center gap-1.5 truncate rounded-md !px-1.5 text-left text-[12px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900";
+
+  const addTag = () => {
+    const nextTag = tagQuery.trim();
+    if (!nextTag) return;
+    const existingTags = new Set(task.tags.map((tag) => tag.toLowerCase()));
+    if (!existingTags.has(nextTag.toLowerCase())) {
+      void onTaskChange(task.id, { tags: [...task.tags, nextTag] });
+    }
+    setTagQuery("");
+    setOpenMenu(null);
+  };
+
+  const saveCustomField = () => {
+    const value = customDraft.trim();
+    void onTaskChange(task.id, { customFields: { [column.key]: value } });
+    setOpenMenu(null);
+  };
+
+  if (column.key === "dateCreated") {
+    return <span className="truncate pr-3 text-[12px] text-zinc-600">{task.dateCreated}</span>;
+  }
+
+  if (column.custom || column.key === "notes" || column.key === "linkedDocs") {
+    const value = task.customFields?.[column.key] ?? "";
+    return (
+      <span className="relative min-w-0 pr-3">
+        <button
+          type="button"
+          className={`${buttonClass} ${value ? "" : "text-zinc-400 opacity-0 group-hover:opacity-100"}`}
+          onClick={() => {
+            setCustomDraft(value);
+            setOpenMenu(openMenu === "custom" ? null : "custom");
+          }}
+        >
+          {value || `Add ${column.label.toLowerCase()}`}
+        </button>
+        {openMenu === "custom" ? (
+          <CustomFieldPopover
+            label={column.label}
+            value={customDraft}
+            onChange={setCustomDraft}
+            onSave={saveCustomField}
+            onClear={() => {
+              setCustomDraft("");
+              void onTaskChange(task.id, { customFields: { [column.key]: "" } });
+              setOpenMenu(null);
+            }}
+          />
+        ) : null}
+      </span>
+    );
+  }
+
+  switch (column.key) {
+    case "status": {
+      const statusMeta = getStatusMeta(task.status);
+      return (
+        <span className="relative min-w-0 pr-3">
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => setOpenMenu(openMenu === "status" ? null : "status")}
+          >
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: statusMeta.color }} />
+            <span className="truncate">{statusMeta.label}</span>
+          </button>
+          {openMenu === "status" ? (
+            <StatusMenu
+              onSelect={(status) => {
+                void onTaskChange(task.id, { status });
+                setOpenMenu(null);
+              }}
+            />
+          ) : null}
+        </span>
+      );
+    }
+    case "assignee":
+      return (
+        <span className="relative min-w-0 pr-3">
+          <button
+            type="button"
+            className={`${buttonClass} ${task.assignee ? "" : "text-zinc-400 opacity-0 group-hover:opacity-100"}`}
+            onClick={() => setOpenMenu(openMenu === "assignee" ? null : "assignee")}
+          >
+            <UserRound className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{task.assignee || "Assign"}</span>
+          </button>
+          {openMenu === "assignee" ? (
+            <AssigneeMenu
+              options={assigneeOptions}
+              onSelect={(assignee) => {
+                void onTaskChange(task.id, { assignee: assignee.name, assigneeId: assignee.id });
+                setOpenMenu(null);
+              }}
+            />
+          ) : null}
+        </span>
+      );
+    case "dueDate":
+      return (
+        <span className="relative min-w-0 pr-3">
+          <button
+            type="button"
+            className={`${buttonClass} ${task.dueDate ? "text-red-500" : "text-zinc-400 opacity-0 group-hover:opacity-100"}`}
+            onClick={() => setOpenMenu(openMenu === "date" ? null : "date")}
+          >
+            <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{task.dueDate || "Set date"}</span>
+          </button>
+          {openMenu === "date" ? (
+            <DateMenu
+              onSelect={(dueDate, dueDateISO) => {
+                void onTaskChange(task.id, { dueDate, dueDateISO });
+                setOpenMenu(null);
+              }}
+            />
+          ) : null}
+        </span>
+      );
+    case "priority":
+      return (
+        <span className="relative min-w-0 pr-3">
+          <button
+            type="button"
+            className={`${buttonClass} ${task.priority ? "" : "text-zinc-400 opacity-0 group-hover:opacity-100"}`}
+            onClick={() => setOpenMenu(openMenu === "priority" ? null : "priority")}
+          >
+            {task.priority ? (
+              <PriorityBadge priority={task.priority} />
+            ) : (
+              <>
+                <Flag className="h-3.5 w-3.5 shrink-0" />
+                <span>Priority</span>
+              </>
+            )}
+          </button>
+          {openMenu === "priority" ? (
+            <PriorityMenu
+              onSelect={(priority) => {
+                void onTaskChange(task.id, { priority });
+                setOpenMenu(null);
+              }}
+            />
+          ) : null}
+        </span>
+      );
+    case "tags":
+      return (
+        <span className="relative min-w-0 pr-3">
+          <button
+            type="button"
+            className={`${buttonClass} ${task.tags.length ? "" : "text-zinc-400 opacity-0 group-hover:opacity-100"}`}
+            onClick={() => setOpenMenu(openMenu === "tags" ? null : "tags")}
+          >
+            <Tag className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{task.tags.length ? task.tags.join(", ") : "Tags"}</span>
+          </button>
+          {openMenu === "tags" ? (
+            <TagEditorPopover
+              tags={task.tags}
+              query={tagQuery}
+              onQueryChange={setTagQuery}
+              onCreate={addTag}
+              onRemove={(tag) => void onTaskChange(task.id, { tags: task.tags.filter((item) => item !== tag) })}
+            />
+          ) : null}
+        </span>
+      );
+    case "taskType":
+      return (
+        <span className="relative min-w-0 pr-3">
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => setOpenMenu(openMenu === "type" ? null : "type")}
+          >
+            <Box className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{task.taskType || "Task"}</span>
+          </button>
+          {openMenu === "type" ? (
+            <TaskTypeMenu
+              value={task.taskType || "Task"}
+              onSelect={(taskType) => {
+                void onTaskChange(task.id, { taskType });
+                setOpenMenu(null);
+              }}
+            />
+          ) : null}
+        </span>
+      );
+    default:
+      return (
+        <span className="truncate pr-3 text-[12px] text-zinc-600">
+          {renderTaskValue(task, column)}
+        </span>
+      );
+  }
 }
 
 function AddTaskRow({ tableTemplate, onClick }: { tableTemplate: string; onClick: () => void }) {
@@ -1503,6 +2072,25 @@ function RowHoverButton({
   );
 }
 
+function StatusMenu({ onSelect }: { onSelect: (value: TaskItem["status"]) => void }) {
+  return (
+    <DropdownPanel className="left-0 top-7 w-[170px] overflow-hidden !p-1.5">
+      <PanelLabel>Status</PanelLabel>
+      {STATUS_COLUMNS.map((status) => (
+        <button
+          key={status.key}
+          type="button"
+          className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+          onClick={() => onSelect(status.key)}
+        >
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
+          {status.label}
+        </button>
+      ))}
+    </DropdownPanel>
+  );
+}
+
 function TaskTypeMenu({
   value,
   onSelect,
@@ -1540,13 +2128,29 @@ function TaskTypeMenu({
   );
 }
 
-function AssigneeMenu({ onSelect }: { onSelect: (value: string) => void }) {
+function AssigneeMenu({
+  options,
+  onSelect,
+}: {
+  options: AssigneeOption[];
+  onSelect: (value: AssigneeOption) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredOptions = options.filter((option) => (
+    !normalizedQuery
+    || option.name.toLowerCase().includes(normalizedQuery)
+    || option.email?.toLowerCase().includes(normalizedQuery)
+  ));
+
   return (
     <DropdownPanel className="left-0 top-7 w-[320px] overflow-hidden">
       <div className="flex h-9 items-center gap-2 border-b border-zinc-100 !px-2.5">
         <Search className="h-4 w-4 text-zinc-500" />
         <input
           type="text"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
           placeholder="Search or enter email..."
           className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-500"
           autoFocus
@@ -1554,26 +2158,42 @@ function AssigneeMenu({ onSelect }: { onSelect: (value: string) => void }) {
       </div>
       <div className="!p-2.5">
         <PanelLabel>People</PanelLabel>
-        <button
-          type="button"
-          className="mb-1 flex h-8 w-full items-center gap-2 rounded-md bg-zinc-100 !px-2 text-left text-[12px] text-zinc-900"
-          onClick={() => onSelect("Me")}
-        >
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--os-brand-rail)] text-[10px] font-semibold text-white">ME</span>
-          Me
-        </button>
+        <div className="max-h-44 overflow-y-auto">
+          {filteredOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className="mb-1 flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-100"
+              onClick={() => onSelect(option)}
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--os-brand-rail)] text-[10px] font-semibold text-white">
+                {option.initials}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate">{option.name}</span>
+                {option.email ? <span className="block truncate text-[10px] text-zinc-400">{option.email}</span> : null}
+              </span>
+            </button>
+          ))}
+          {filteredOptions.length === 0 ? (
+            <div className="rounded-md bg-zinc-50 !px-2 py-2 text-[12px] text-zinc-500">
+              No workspace people found.
+            </div>
+          ) : null}
+        </div>
         <PanelLabel>Agents</PanelLabel>
         <button
           type="button"
-          className="flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
-          onClick={() => onSelect("Project Kickoff Scope Manager")}
+          className="flex h-8 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-400"
+          disabled
         >
           <span className="h-6 w-6 rounded-full bg-gradient-to-br from-orange-200 to-pink-300" />
           Project Kickoff Scope Manager
         </button>
         <button
           type="button"
-          className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] font-medium text-zinc-800 hover:bg-zinc-50"
+          className="flex h-7 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] font-medium text-zinc-400"
+          disabled
         >
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--os-brand-rail)_12%,white)] text-[var(--os-brand-rail)]">
             <Plus className="h-3.5 w-3.5" />
@@ -1586,8 +2206,11 @@ function AssigneeMenu({ onSelect }: { onSelect: (value: string) => void }) {
 }
 
 function DateMenu({ onSelect }: { onSelect: (label: string, isoDate: string) => void }) {
-  const days = ["31", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];
   const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const calendarStart = addDays(monthStart, -monthStart.getDay());
+  const calendarDays = Array.from({ length: 42 }, (_, index) => addDays(calendarStart, index));
+  const monthLabel = today.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const nextWeekend = getNextSaturday(today);
   const quick = [
     { label: "Today", hint: formatWeekday(today), date: today },
@@ -1632,7 +2255,7 @@ function DateMenu({ onSelect }: { onSelect: (label: string, isoDate: string) => 
         </div>
         <div className="!p-3">
           <div className="mb-3 flex items-center justify-between">
-            <span className="text-[13px] font-medium text-zinc-900">June 2026</span>
+            <span className="text-[13px] font-medium text-zinc-900">{monthLabel}</span>
             <span className="inline-flex items-center gap-3 text-[12px] text-zinc-600">
               Today
               <ChevronDown className="h-4 w-4 rotate-180" />
@@ -1643,19 +2266,19 @@ function DateMenu({ onSelect }: { onSelect: (label: string, isoDate: string) => 
             {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
               <span key={day} className="text-zinc-400">{day}</span>
             ))}
-            {days.map((day, index) => {
-              const calendarDate = addDays(new Date(2026, 4, 31), index);
+            {calendarDays.map((calendarDate) => {
               const isToday = formatDateInput(calendarDate) === formatDateInput(today);
+              const isOutsideMonth = calendarDate.getMonth() !== today.getMonth();
               return (
                 <button
-                  key={`${day}-${index}`}
+                  key={formatDateInput(calendarDate)}
                   type="button"
                   className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full ${
-                    isToday ? "bg-red-500 text-white" : index < 7 ? "text-zinc-300" : "text-zinc-900 hover:bg-zinc-100"
+                    isToday ? "bg-red-500 text-white" : isOutsideMonth ? "text-zinc-300" : "text-zinc-900 hover:bg-zinc-100"
                   }`}
                   onClick={() => onSelect(formatCalendarLabel(calendarDate), formatDateInput(calendarDate))}
                 >
-                  {day}
+                  {calendarDate.getDate()}
                 </button>
               );
             })}
@@ -1788,6 +2411,7 @@ function BoardMode({
     const task = tasks.find((item) => item.id === taskId);
     if (!task || task.status === status) return;
     void onTaskChange(taskId, { status });
+    setDraggingTaskId(null);
   };
 
   return (
@@ -1817,14 +2441,17 @@ function BoardMode({
             <section
               key={status.key}
               className={`min-h-[82px] w-[220px] shrink-0 rounded-lg border !p-2 transition ${
-                draggingTaskId ? "border-dashed border-zinc-300" : "border-zinc-100"
+                draggingTaskId ? "border-dashed border-[var(--os-brand-rail)] ring-1 ring-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)]" : "border-zinc-100"
               }`}
               style={{ backgroundColor: status.bg }}
               onDragOver={(event) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
               }}
-              onDrop={(event) => moveDraggedTask(event, status.key)}
+              onDrop={(event) => {
+                event.stopPropagation();
+                moveDraggedTask(event, status.key);
+              }}
             >
               <div className="mb-1.5 flex items-center justify-between">
                 <span className="inline-flex items-center gap-1.5 rounded-md !px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: status.color }}>
@@ -1839,6 +2466,7 @@ function BoardMode({
                     key={task.id}
                     task={task}
                     onOpen={() => onOpenTask(task)}
+                    onTaskChange={(patch) => void onTaskChange(task.id, patch)}
                     onMove={(nextStatus) => void onTaskChange(task.id, { status: nextStatus })}
                     onComplete={() => void onTaskChange(task.id, { status: task.status === "complete" ? "to_do" : "complete" })}
                     onDragStart={(event) => {
@@ -1873,6 +2501,7 @@ function BoardMode({
         <button
           type="button"
           className="flex h-7 shrink-0 items-center gap-2 rounded-md !px-2.5 text-[12px] text-zinc-500 hover:bg-zinc-100"
+          onClick={onCustomize}
         >
           <Plus className="h-3.5 w-3.5" />
           Add group
@@ -1885,6 +2514,7 @@ function BoardMode({
 function BoardTaskCard({
   task,
   onOpen,
+  onTaskChange,
   onMove,
   onComplete,
   onDragStart,
@@ -1892,11 +2522,14 @@ function BoardTaskCard({
 }: {
   task: TaskItem;
   onOpen: () => void;
+  onTaskChange: (patch: Partial<TaskItem>) => void | Promise<void>;
   onMove: (status: TaskItem["status"]) => void;
   onComplete: () => void;
   onDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
 }) {
+  const [quickMenu, setQuickMenu] = useState<"status" | "date" | "priority" | null>(null);
+  const dragStartedRef = useRef(false);
   const currentIndex = STATUS_COLUMNS.findIndex((status) => status.key === task.status);
   const previousStatus = STATUS_COLUMNS[Math.max(0, currentIndex - 1)]?.key;
   const nextStatus = STATUS_COLUMNS[Math.min(STATUS_COLUMNS.length - 1, currentIndex + 1)]?.key;
@@ -1907,15 +2540,29 @@ function BoardTaskCard({
       tabIndex={0}
       draggable
       className="group/card w-full cursor-grab rounded-md border border-zinc-200 bg-white !p-2 text-left text-[12px] shadow-sm transition hover:-translate-y-px hover:border-zinc-300 hover:shadow-md active:cursor-grabbing"
-      onClick={onOpen}
+      onClick={(event) => {
+        if (dragStartedRef.current) {
+          event.preventDefault();
+          return;
+        }
+        onOpen();
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onOpen();
         }
       }}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      onDragStart={(event) => {
+        dragStartedRef.current = true;
+        onDragStart(event);
+      }}
+      onDragEnd={() => {
+        onDragEnd();
+        window.setTimeout(() => {
+          dragStartedRef.current = false;
+        }, 0);
+      }}
     >
       <div className="flex items-start gap-2">
         <span className={`mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full ${
@@ -1941,6 +2588,51 @@ function BoardTaskCard({
           label={task.status === "complete" ? "Reopen" : "Complete"}
           onClick={onComplete}
         />
+        <span className="relative" onClick={(event) => event.stopPropagation()}>
+          <CardActionButton
+            Icon={Circle}
+            label="Change status"
+            onClick={() => setQuickMenu((menu) => (menu === "status" ? null : "status"))}
+          />
+          {quickMenu === "status" ? (
+            <StatusMenu
+              onSelect={(status) => {
+                onMove(status);
+                setQuickMenu(null);
+              }}
+            />
+          ) : null}
+        </span>
+        <span className="relative" onClick={(event) => event.stopPropagation()}>
+          <CardActionButton
+            Icon={CalendarDays}
+            label="Set due date"
+            onClick={() => setQuickMenu((menu) => (menu === "date" ? null : "date"))}
+          />
+          {quickMenu === "date" ? (
+            <DateMenu
+              onSelect={(dueDate, dueDateISO) => {
+                void onTaskChange({ dueDate, dueDateISO });
+                setQuickMenu(null);
+              }}
+            />
+          ) : null}
+        </span>
+        <span className="relative" onClick={(event) => event.stopPropagation()}>
+          <CardActionButton
+            Icon={Flag}
+            label="Set priority"
+            onClick={() => setQuickMenu((menu) => (menu === "priority" ? null : "priority"))}
+          />
+          {quickMenu === "priority" ? (
+            <PriorityMenu
+              onSelect={(priority) => {
+                void onTaskChange({ priority });
+                setQuickMenu(null);
+              }}
+            />
+          ) : null}
+        </span>
         <CardActionButton
           Icon={ChevronRight}
           label="Move left"
@@ -2189,6 +2881,210 @@ function DocMode({ tasks, activeView }: { tasks: TaskItem[]; activeView: ViewDef
   );
 }
 
+function FormMode({
+  activeView,
+  saving,
+  assigneeOptions,
+  onCreateTask,
+}: {
+  activeView: ViewDef;
+  saving: boolean;
+  assigneeOptions: AssigneeOption[];
+  onCreateTask: (draft: DraftTask) => void | Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const [assigneeId, setAssigneeId] = useState<string | undefined>();
+  const [dueDate, setDueDate] = useState("");
+  const [dueDateISO, setDueDateISO] = useState<string | undefined>();
+  const [priority, setPriority] = useState<TaskPriority>("");
+  const [taskType, setTaskType] = useState("Task");
+  const [tagDraft, setTagDraft] = useState("");
+  const [openMenu, setOpenMenu] = useState<TaskOptionMenu>(null);
+
+  const submitForm = async () => {
+    const name = title.trim();
+    if (!name || saving) return;
+    const tags = tagDraft.split(",").map((tag) => tag.trim()).filter(Boolean);
+    await onCreateTask({
+      name,
+      status: "to_do",
+      assignee,
+      assigneeId,
+      dueDate,
+      dueDateISO,
+      priority,
+      taskType,
+      tags,
+    });
+    setTitle("");
+    setAssignee("");
+    setAssigneeId(undefined);
+    setDueDate("");
+    setDueDateISO(undefined);
+    setPriority("");
+    setTaskType("Task");
+    setTagDraft("");
+    setOpenMenu(null);
+  };
+
+  return (
+    <div className="min-w-[860px] !p-4">
+      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-violet-100 bg-violet-50 !px-2 text-[11px] font-medium text-violet-700">
+        <activeView.Icon className="h-3.5 w-3.5" />
+        {activeView.label}
+      </div>
+      <form
+        className="max-w-[720px] rounded-xl border border-zinc-200 bg-white shadow-sm"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submitForm();
+        }}
+      >
+        <div className="border-b border-zinc-100 !px-4 py-3">
+          <h2 className="text-[14px] font-semibold text-zinc-900">Task intake form</h2>
+          <p className="mt-1 text-[12px] text-zinc-500">Create list tasks without leaving the current view.</p>
+        </div>
+        <div className="grid gap-3 !p-4 text-[12px]">
+          <label className="grid gap-1.5">
+            <span className="font-medium text-zinc-700">Task name</span>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Enter task name"
+              className="h-9 rounded-lg border border-zinc-200 !px-3 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
+              autoFocus
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="relative">
+              <button
+                type="button"
+                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setOpenMenu(openMenu === "assignee" ? null : "assignee")}
+              >
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  <Users className="h-3.5 w-3.5 text-zinc-500" />
+                  <span className="truncate">{assignee || "Assign person"}</span>
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+              </button>
+              {openMenu === "assignee" ? (
+                <AssigneeMenu
+                  options={assigneeOptions}
+                  onSelect={(value) => {
+                    setAssignee(value.name);
+                    setAssigneeId(value.id);
+                    setOpenMenu(null);
+                  }}
+                />
+              ) : null}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setOpenMenu(openMenu === "date" ? null : "date")}
+              >
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  <CalendarDays className="h-3.5 w-3.5 text-zinc-500" />
+                  <span className="truncate">{dueDate || "Due date"}</span>
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+              </button>
+              {openMenu === "date" ? (
+                <DateMenu
+                  onSelect={(label, isoDate) => {
+                    setDueDate(label);
+                    setDueDateISO(isoDate);
+                    setOpenMenu(null);
+                  }}
+                />
+              ) : null}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setOpenMenu(openMenu === "priority" ? null : "priority")}
+              >
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  <Flag className="h-3.5 w-3.5 text-zinc-500" />
+                  <span className="truncate">{priority || "Priority"}</span>
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+              </button>
+              {openMenu === "priority" ? (
+                <PriorityMenu
+                  onSelect={(value) => {
+                    setPriority(value);
+                    setOpenMenu(null);
+                  }}
+                />
+              ) : null}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setOpenMenu(openMenu === "type" ? null : "type")}
+              >
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  <Box className="h-3.5 w-3.5 text-zinc-500" />
+                  <span className="truncate">{taskType}</span>
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+              </button>
+              {openMenu === "type" ? (
+                <TaskTypeMenu
+                  value={taskType}
+                  onSelect={(value) => {
+                    setTaskType(value);
+                    setOpenMenu(null);
+                  }}
+                />
+              ) : null}
+            </div>
+          </div>
+          <label className="grid gap-1.5">
+            <span className="font-medium text-zinc-700">Tags</span>
+            <input
+              value={tagDraft}
+              onChange={(event) => setTagDraft(event.target.value)}
+              placeholder="Comma separated tags"
+              className="h-9 rounded-lg border border-zinc-200 !px-3 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
+            />
+          </label>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-zinc-100 !px-4 py-3">
+          <button
+            type="button"
+            className="h-8 rounded-md !px-3 text-[12px] text-zinc-500 hover:bg-zinc-100"
+            onClick={() => {
+              setTitle("");
+              setAssignee("");
+              setDueDate("");
+              setDueDateISO(undefined);
+              setPriority("");
+              setTaskType("Task");
+              setTagDraft("");
+            }}
+          >
+            Reset
+          </button>
+          <button
+            type="submit"
+            disabled={!title.trim() || saving}
+            className="h-8 rounded-md bg-[var(--os-brand-rail)] !px-3 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Creating…" : "Create task"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function PlaceholderMode({
   activeView,
   tasks,
@@ -2229,16 +3125,45 @@ function PlaceholderMode({
 
 function TaskDetailModal({
   task,
+  assigneeOptions,
   onClose,
   onTaskChange,
+  onAddSubtask,
 }: {
   task: TaskItem;
+  assigneeOptions: AssigneeOption[];
   onClose: () => void;
   onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
+  onAddSubtask: (parentId: string) => void;
 }) {
   const statusMeta = getStatusMeta(task.status);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [tagQuery, setTagQuery] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState(task.description ?? "");
+  const [sidePanel, setSidePanel] = useState<TaskSidePanel>("activity");
+
+  const addTag = () => {
+    const nextTag = tagQuery.trim();
+    if (!nextTag) return;
+    const existing = new Set(task.tags.map((tag) => tag.toLowerCase()));
+    if (!existing.has(nextTag.toLowerCase())) {
+      void onTaskChange(task.id, { tags: [...task.tags, nextTag] });
+    }
+    setTagQuery("");
+    setTagsOpen(false);
+  };
+
+  const commitDescription = () => {
+    const nextDescription = descriptionDraft.trim();
+    if (nextDescription !== (task.description ?? "")) {
+      void onTaskChange(task.id, { description: nextDescription });
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 !p-8" onClick={onClose}>
@@ -2265,8 +3190,25 @@ function TaskDetailModal({
           <div className="min-h-0 flex-1 overflow-auto !px-10 py-7">
             <div className="mb-4 inline-flex h-6 items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50 !px-2 text-[11px] text-zinc-700">
               <CircleDashed className="h-3.5 w-3.5" />
-              {task.taskType || "Task"}
-              <ChevronDown className="h-3.5 w-3.5" />
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 hover:text-zinc-950"
+                onClick={() => setTypeOpen((open) => !open)}
+              >
+                {task.taskType || "Task"}
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              <span className="relative">
+                {typeOpen ? (
+                  <TaskTypeMenu
+                    value={task.taskType || "Task"}
+                    onSelect={(taskType) => {
+                      setTypeOpen(false);
+                      void onTaskChange(task.id, { taskType });
+                    }}
+                  />
+                ) : null}
+              </span>
             </div>
             <h2 className="mb-4 text-[24px] font-semibold leading-tight text-zinc-950">{task.name}</h2>
             <div className="mb-5 rounded-lg bg-zinc-50 !px-3 py-2 text-[12px] text-zinc-600">
@@ -2316,10 +3258,47 @@ function TaskDetailModal({
                 </div>
               </TaskDetailField>
               <TaskDetailField Icon={Users} label="Assignees">
-                {task.assignee || "Empty"}
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-md !px-1.5 hover:bg-zinc-100 hover:text-zinc-900"
+                    onClick={() => setAssigneeOpen((open) => !open)}
+                  >
+                    <UserRound className="h-3.5 w-3.5 text-zinc-500" />
+                    <span className="truncate">{task.assignee || "Empty"}</span>
+                    <ChevronDown className="h-3 w-3 text-zinc-400" />
+                  </button>
+                  {assigneeOpen ? (
+                    <AssigneeMenu
+                      options={assigneeOptions}
+                      onSelect={(assignee) => {
+                        setAssigneeOpen(false);
+                        void onTaskChange(task.id, { assignee: assignee.name, assigneeId: assignee.id });
+                      }}
+                    />
+                  ) : null}
+                </div>
               </TaskDetailField>
               <TaskDetailField Icon={CalendarDays} label="Dates">
-                {task.dueDate || "Start → Due"}
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="inline-flex h-6 items-center gap-1.5 rounded-md !px-1.5 hover:bg-zinc-100 hover:text-zinc-900"
+                    onClick={() => setDateOpen((open) => !open)}
+                  >
+                    <CalendarDays className="h-3.5 w-3.5 text-zinc-500" />
+                    <span>{task.dueDate || "Start → Due"}</span>
+                    <ChevronDown className="h-3 w-3 text-zinc-400" />
+                  </button>
+                  {dateOpen ? (
+                    <DateMenu
+                      onSelect={(dueDate, dueDateISO) => {
+                        setDateOpen(false);
+                        void onTaskChange(task.id, { dueDate, dueDateISO });
+                      }}
+                    />
+                  ) : null}
+                </div>
               </TaskDetailField>
               <TaskDetailField Icon={Flag} label="Priority">
                 <div className="relative">
@@ -2354,7 +3333,36 @@ function TaskDetailModal({
                 </div>
               </TaskDetailField>
               <TaskDetailField Icon={Tag} label="Tags">
-                {task.tags.length > 0 ? task.tags.join(", ") : "Empty"}
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="inline-flex min-h-6 max-w-full items-center gap-1.5 rounded-md !px-1.5 hover:bg-zinc-100 hover:text-zinc-900"
+                    onClick={() => setTagsOpen((open) => !open)}
+                  >
+                    {task.tags.length > 0 ? (
+                      <span className="flex min-w-0 flex-wrap gap-1">
+                        {task.tags.slice(0, 3).map((tag) => (
+                          <span key={tag} className="rounded-full bg-violet-50 !px-1.5 py-0.5 text-[11px] text-violet-700">
+                            {tag}
+                          </span>
+                        ))}
+                        {task.tags.length > 3 ? <span className="text-zinc-400">+{task.tags.length - 3}</span> : null}
+                      </span>
+                    ) : (
+                      "Empty"
+                    )}
+                    <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" />
+                  </button>
+                  {tagsOpen ? (
+                    <TagEditorPopover
+                      tags={task.tags}
+                      query={tagQuery}
+                      onQueryChange={setTagQuery}
+                      onCreate={addTag}
+                      onRemove={(tag) => void onTaskChange(task.id, { tags: task.tags.filter((item) => item !== tag) })}
+                    />
+                  ) : null}
+                </div>
               </TaskDetailField>
               <TaskDetailField Icon={Activity} label="Track time">
                 Start
@@ -2362,19 +3370,36 @@ function TaskDetailModal({
             </div>
 
             <div className="my-6 h-px max-w-[760px] bg-zinc-100" />
-            <button type="button" className="mb-16 text-left text-[13px] text-zinc-400 hover:text-zinc-700">
-              Add description, or write with AI
-            </button>
+            <textarea
+              value={descriptionDraft}
+              onChange={(event) => setDescriptionDraft(event.target.value)}
+              onBlur={commitDescription}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.currentTarget.blur();
+                }
+              }}
+              placeholder="Add description, or write with AI"
+              className="mb-12 min-h-[72px] w-full max-w-[760px] resize-y rounded-lg border border-transparent bg-white !p-2 text-[13px] leading-5 text-zinc-700 outline-none placeholder:text-zinc-400 hover:border-zinc-100 focus:border-[var(--os-brand-rail)]"
+            />
 
             <div className="grid max-w-[360px] gap-3 text-[12px] text-zinc-700">
               {[
-                { label: "Add fields", Icon: Pencil },
+                { label: "Add fields", Icon: Pencil, panel: "fields" as const },
                 { label: "Add subtask", Icon: GitBranch },
-                { label: "Relate items or add dependencies", Icon: Link2 },
-                { label: "Create checklist", Icon: ClipboardList },
-                { label: "Attach file", Icon: Paperclip },
+                { label: "Relate items or add dependencies", Icon: Link2, panel: "related" as const },
+                { label: "Create checklist", Icon: ClipboardList, panel: "checklist" as const },
+                { label: "Attach file", Icon: Paperclip, panel: "links" as const },
               ].map((item) => (
-                <button key={item.label} type="button" className="flex h-7 items-center gap-2 rounded-md text-left hover:bg-zinc-50">
+                <button
+                  key={item.label}
+                  type="button"
+                  className="flex h-7 items-center gap-2 rounded-md text-left hover:bg-zinc-50"
+                  onClick={() => {
+                    if (item.label === "Add subtask") onAddSubtask(task.id);
+                    if (item.panel) setSidePanel(item.panel);
+                  }}
+                >
                   <item.Icon className="h-3.5 w-3.5 text-zinc-500" />
                   {item.label}
                 </button>
@@ -2383,38 +3408,556 @@ function TaskDetailModal({
           </div>
         </div>
 
-        <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
-          <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
-            <h3 className="text-[13px] font-semibold text-zinc-900">Activity</h3>
-            <div className="flex items-center gap-2 text-zinc-500">
-              <Search className="h-3.5 w-3.5" />
-              <MessageSquare className="h-3.5 w-3.5" />
-              <ListFilter className="h-3.5 w-3.5" />
-            </div>
-          </div>
-          <div className="flex flex-1 items-end !p-3 text-[11px] text-zinc-400">
-            <span>You created this task</span>
-            <span className="ml-auto">{task.dateCreated}</span>
-          </div>
-          <div className="border-t border-zinc-200 !p-3">
-            <div className="rounded-lg border border-zinc-200 bg-white !p-2 shadow-sm">
-              <input
-                type="text"
-                placeholder="Write a comment..."
-                className="mb-2 h-8 w-full bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
-              />
-              <div className="flex items-center gap-1 text-zinc-400">
-                <Plus className="h-4 w-4" />
-                <span className="rounded-md bg-zinc-100 !px-2 py-1 text-[11px] text-zinc-600">Comment</span>
-                <Bot className="h-4 w-4 text-fuchsia-500" />
-                <Paperclip className="h-4 w-4" />
-                <button type="button" className="ml-auto rounded-md bg-zinc-100 !px-2 py-1 text-[11px] text-zinc-500">Send</button>
-              </div>
-            </div>
-          </div>
-        </aside>
+        <TaskModalRail activePanel={sidePanel} onChange={setSidePanel} />
+        {sidePanel ? <TaskSidePanelView panel={sidePanel} task={task} onTaskChange={onTaskChange} /> : null}
       </section>
     </div>
+  );
+}
+
+function TaskModalRail({
+  activePanel,
+  onChange,
+}: {
+  activePanel: TaskSidePanel;
+  onChange: (panel: TaskSidePanel) => void;
+}) {
+  const railItems: { key: Exclude<TaskSidePanel, null>; label: string; Icon: LucideIcon }[] = [
+    { key: "activity", label: "Activity", Icon: MessageSquare },
+    { key: "related", label: "Related items", Icon: GitBranch },
+    { key: "links", label: "Add links", Icon: LayoutGrid },
+  ];
+
+  return (
+    <div className="flex w-8 shrink-0 flex-col items-center border-l border-zinc-200 bg-white py-12 text-zinc-500">
+      <button
+        type="button"
+        className="mb-2 inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-zinc-100 hover:text-zinc-900"
+        title={activePanel ? "Collapse" : "Activity"}
+        aria-label={activePanel ? "Collapse side panel" : "Open activity panel"}
+        onClick={() => onChange(activePanel ? null : "activity")}
+      >
+        <ChevronRight className={`h-4 w-4 transition-transform ${activePanel ? "" : "rotate-180"}`} />
+      </button>
+      {railItems.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          className={`mb-1 inline-flex h-7 w-7 items-center justify-center rounded-md ${
+            activePanel === item.key ? "bg-zinc-100 text-zinc-900" : "hover:bg-zinc-100 hover:text-zinc-900"
+          }`}
+          title={item.label}
+          aria-label={item.label}
+          onClick={() => onChange(item.key)}
+        >
+          <item.Icon className="h-3.5 w-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TaskSidePanelView({
+  panel,
+  task,
+  onTaskChange,
+}: {
+  panel: Exclude<TaskSidePanel, null>;
+  task: TaskItem;
+  onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
+}) {
+  if (panel === "related") return <RelatedItemsPanel task={task} onTaskChange={onTaskChange} />;
+  if (panel === "links") return <AddLinksPanel task={task} onTaskChange={onTaskChange} />;
+  if (panel === "fields") return <TaskFieldsPanel task={task} onTaskChange={onTaskChange} />;
+  if (panel === "checklist") return <ChecklistPanel task={task} onTaskChange={onTaskChange} />;
+  return <ActivityPanel task={task} />;
+}
+
+function ActivityPanel({ task }: { task: TaskItem }) {
+  const [commentDraft, setCommentDraft] = useState("");
+  const [comments, setComments] = useState<ApiTaskComment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadComments() {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(`/api/tasks/${task.id}/comments`, { cache: "no-store" });
+        if (!response.ok) throw new Error(await readApiError(response, "Failed to load comments"));
+        const data = (await response.json()) as ApiTaskComment[];
+        if (!cancelled) setComments(Array.isArray(data) ? data : []);
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Failed to load comments");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadComments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [task.id]);
+
+  const addComment = async () => {
+    const text = commentDraft.trim();
+    if (!text || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/tasks/${task.id}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text }),
+      });
+      if (!response.ok) throw new Error(await readApiError(response, "Failed to add comment"));
+      const created = (await response.json()) as ApiTaskComment;
+      setComments((current) => [...current, created]);
+      setCommentDraft("");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to add comment");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
+      <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
+        <h3 className="text-[13px] font-semibold text-zinc-900">Activity</h3>
+        <div className="flex items-center gap-2 text-zinc-500">
+          <Search className="h-3.5 w-3.5" />
+          <MessageSquare className="h-3.5 w-3.5" />
+          <ListFilter className="h-3.5 w-3.5" />
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[11px] text-zinc-500">
+        <div className="mb-3 flex">
+          <span>You created this task</span>
+          <span className="ml-auto">{task.dateCreated}</span>
+        </div>
+        {loading ? <div className="text-[11px] text-zinc-400">Loading activity…</div> : null}
+        {error ? <div className="mb-2 rounded-md bg-red-50 !px-2 py-1 text-[11px] text-red-600">{error}</div> : null}
+        <div className="space-y-2">
+          {comments.map((comment) => (
+            <div key={comment.id} className="rounded-lg border border-zinc-200 bg-white !p-2 text-[12px] text-zinc-700 shadow-sm">
+              <div className="mb-1 flex items-center gap-2 text-[10px] font-medium text-zinc-400">
+                <UserRound className="h-3 w-3" />
+                <span>{commentAuthorName(comment)}</span>
+                {comment.createdAt ? <span className="ml-auto">{formatActivityTime(comment.createdAt)}</span> : null}
+              </div>
+              <p className="whitespace-pre-wrap text-zinc-700">{comment.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="border-t border-zinc-200 !p-3">
+        <div className="rounded-lg border border-zinc-200 bg-white !p-2 shadow-sm">
+          <input
+            type="text"
+            value={commentDraft}
+            onChange={(event) => setCommentDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void addComment();
+            }}
+            placeholder="Write a comment..."
+            className="mb-2 h-8 w-full bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
+          />
+          <div className="flex items-center gap-1 text-zinc-400">
+            <Plus className="h-4 w-4" />
+            <span className="rounded-md bg-zinc-100 !px-2 py-1 text-[11px] text-zinc-600">Comment</span>
+            <Bot className="h-4 w-4 text-fuchsia-500" />
+            <Paperclip className="h-4 w-4" />
+            <button
+              type="button"
+              className="ml-auto rounded-md bg-zinc-100 !px-2 py-1 text-[11px] text-zinc-500 hover:bg-zinc-200 disabled:opacity-50"
+              disabled={!commentDraft.trim() || saving}
+              onClick={() => void addComment()}
+            >
+              {saving ? "Sending…" : "Send"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function RelatedItemsPanel({
+  task,
+  onTaskChange,
+}: {
+  task: TaskItem;
+  onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [items, setItems] = useState<string[]>(() => parseListField(task.customFields?.relatedItems));
+
+  useEffect(() => {
+    setItems(parseListField(task.customFields?.relatedItems));
+  }, [task.customFields?.relatedItems]);
+
+  const addItem = () => {
+    const nextItem = draft.trim();
+    if (!nextItem) return;
+    const nextItems = [...items, nextItem];
+    setItems(nextItems);
+    void onTaskChange(task.id, { customFields: { relatedItems: JSON.stringify(nextItems) } });
+    setDraft("");
+    setAdding(false);
+  };
+
+  const removeItem = (item: string) => {
+    const nextItems = items.filter((entry) => entry !== item);
+    setItems(nextItems);
+    void onTaskChange(task.id, { customFields: { relatedItems: JSON.stringify(nextItems) } });
+  };
+
+  return (
+    <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
+      <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
+        <h3 className="text-[13px] font-semibold text-zinc-900">Related items</h3>
+        <div className="flex items-center gap-2 text-zinc-500">
+          <Search className="h-3.5 w-3.5" />
+          <Plus className="h-3.5 w-3.5" />
+        </div>
+      </div>
+      <div className="border-b border-zinc-100 !p-2">
+        <div className="grid grid-cols-2 rounded-md bg-zinc-100 !p-0.5 text-[11px] text-zinc-500">
+          <button type="button" className="h-6 rounded bg-white font-medium text-zinc-700 shadow-sm">Relationships</button>
+          <button type="button" className="h-6 rounded">References</button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto !p-3">
+        {items.length === 0 && !adding ? (
+          <div className="flex min-h-[280px] items-center justify-center text-center">
+            <div className="max-w-[220px]">
+              <span className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-400">
+                <GitBranch className="h-4 w-4" />
+              </span>
+              <p className="text-[12px] font-semibold text-zinc-700">No related items</p>
+              <p className="mt-1 text-[11px] leading-4 text-zinc-400">Link related Tasks or Docs to organize and quickly access them here.</p>
+              <button
+                type="button"
+                className="mt-3 h-7 rounded-md border border-zinc-200 bg-white !px-2.5 text-[11px] text-zinc-600 shadow-sm hover:bg-zinc-50"
+                onClick={() => setAdding(true)}
+              >
+                + Relate a Task or Doc
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {items.length > 0 ? (
+          <div className="space-y-1.5">
+            {items.map((item) => (
+              <div key={item} className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2 text-[12px] text-zinc-700">
+                <GitBranch className="h-3.5 w-3.5 text-zinc-500" />
+                <span className="min-w-0 flex-1 truncate">{item}</span>
+                <button type="button" className="text-zinc-400 hover:text-zinc-700" onClick={() => removeItem(item)}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {adding ? (
+          <div className="rounded-lg border border-zinc-200 bg-white !p-2 shadow-sm">
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") addItem();
+                if (event.key === "Escape") setAdding(false);
+              }}
+              placeholder="Search or enter task/doc name"
+              className="h-8 w-full bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
+              autoFocus
+            />
+            <div className="mt-1 flex justify-end gap-1">
+              <button type="button" className="h-7 rounded-md !px-2 text-[11px] text-zinc-500 hover:bg-zinc-100" onClick={() => setAdding(false)}>
+                Cancel
+              </button>
+              <button type="button" className="h-7 rounded-md bg-[var(--os-brand-rail)] !px-2 text-[11px] font-medium text-white disabled:opacity-50" disabled={!draft.trim()} onClick={addItem}>
+                Relate
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {items.length > 0 && !adding ? (
+          <button
+            type="button"
+            className="mt-3 h-7 rounded-md border border-zinc-200 bg-white !px-2.5 text-[11px] text-zinc-600 shadow-sm hover:bg-zinc-50"
+            onClick={() => setAdding(true)}
+          >
+            + Relate a Task or Doc
+          </button>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
+
+function TaskFieldsPanel({
+  task,
+  onTaskChange,
+}: {
+  task: TaskItem;
+  onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
+}) {
+  const [notesDraft, setNotesDraft] = useState(task.customFields?.notes ?? "");
+  const customEntries = Object.entries(task.customFields ?? {}).filter(
+    ([key]) => !["notes", "relatedItems", "taskLinks", "checklist"].includes(key),
+  );
+
+  useEffect(() => {
+    setNotesDraft(task.customFields?.notes ?? "");
+  }, [task.customFields?.notes]);
+
+  const saveNotes = () => {
+    const nextNotes = notesDraft.trim();
+    if (nextNotes !== (task.customFields?.notes ?? "")) {
+      void onTaskChange(task.id, { customFields: { notes: nextNotes } });
+    }
+  };
+
+  const updateField = (key: string, value: string) => {
+    void onTaskChange(task.id, { customFields: { [key]: value } });
+  };
+
+  return (
+    <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
+      <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
+        <h3 className="text-[13px] font-semibold text-zinc-900">Fields</h3>
+        <Settings className="h-3.5 w-3.5 text-zinc-500" />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[12px]">
+        <label className="block">
+          <span className="mb-1.5 block text-[11px] font-medium text-zinc-500">Notes</span>
+          <textarea
+            value={notesDraft}
+            onChange={(event) => setNotesDraft(event.target.value)}
+            onBlur={saveNotes}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.currentTarget.blur();
+            }}
+            placeholder="Attach notes to this task"
+            className="min-h-[104px] w-full resize-y rounded-lg border border-zinc-200 bg-white !p-2 text-[12px] leading-5 outline-none placeholder:text-zinc-400 focus:border-[var(--os-brand-rail)]"
+          />
+        </label>
+        <div className="mt-4 border-t border-zinc-100 pt-3">
+          <p className="mb-2 text-[11px] font-medium text-zinc-500">Custom fields</p>
+          {customEntries.length > 0 ? (
+            <div className="space-y-2">
+              {customEntries.map(([key, value]) => (
+                <label key={key} className="block">
+                  <span className="mb-1 block truncate text-[11px] font-medium text-zinc-500">{key}</span>
+                  <input
+                    defaultValue={value}
+                    onBlur={(event) => updateField(key, event.currentTarget.value.trim())}
+                    className="h-8 w-full rounded-md border border-zinc-200 bg-white !px-2 text-[12px] outline-none focus:border-[var(--os-brand-rail)]"
+                  />
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-zinc-200 bg-white !p-3 text-[11px] leading-4 text-zinc-500">
+              No custom fields are attached yet. Use the table column panel to add workspace fields, or save notes here.
+            </p>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function ChecklistPanel({
+  task,
+  onTaskChange,
+}: {
+  task: TaskItem;
+  onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [items, setItems] = useState<ChecklistItem[]>(() => parseChecklistField(task.customFields?.checklist));
+
+  useEffect(() => {
+    setItems(parseChecklistField(task.customFields?.checklist));
+  }, [task.customFields?.checklist]);
+
+  const persist = (nextItems: ChecklistItem[]) => {
+    setItems(nextItems);
+    void onTaskChange(task.id, { customFields: { checklist: JSON.stringify(nextItems) } });
+  };
+
+  const addItem = () => {
+    const label = draft.trim();
+    if (!label) return;
+    persist([...items, { id: createClientId(), label, done: false }]);
+    setDraft("");
+  };
+
+  const completed = items.filter((item) => item.done).length;
+
+  return (
+    <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
+      <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
+        <h3 className="text-[13px] font-semibold text-zinc-900">Checklist</h3>
+        <span className="text-[11px] text-zinc-500">{completed}/{items.length}</span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[12px]">
+        <div className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2">
+          <ClipboardList className="h-3.5 w-3.5 text-zinc-400" />
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") addItem();
+            }}
+            placeholder="Add checklist item"
+            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
+          />
+          <button
+            type="button"
+            className="rounded bg-zinc-100 !px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 disabled:opacity-40"
+            disabled={!draft.trim()}
+            onClick={addItem}
+          >
+            Add
+          </button>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          {items.map((item) => (
+            <div key={item.id} className="flex min-h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2 py-1.5">
+              <button
+                type="button"
+                className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                  item.done ? "border-emerald-500 bg-emerald-500 text-white" : "border-zinc-300 text-transparent"
+                }`}
+                onClick={() => persist(items.map((entry) => (entry.id === item.id ? { ...entry, done: !entry.done } : entry)))}
+              >
+                <Check className="h-3 w-3" />
+              </button>
+              <span className={`min-w-0 flex-1 truncate ${item.done ? "text-zinc-400 line-through" : "text-zinc-700"}`}>{item.label}</span>
+              <button
+                type="button"
+                className="text-zinc-400 hover:text-zinc-700"
+                onClick={() => persist(items.filter((entry) => entry.id !== item.id))}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+          {items.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-zinc-200 bg-white !p-3 text-[11px] leading-4 text-zinc-500">
+              Add checklist items to track smaller steps inside this task.
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function AddLinksPanel({
+  task,
+  onTaskChange,
+}: {
+  task: TaskItem;
+  onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
+}) {
+  const [url, setUrl] = useState("");
+  const [links, setLinks] = useState<string[]>(() => parseListField(task.customFields?.taskLinks));
+
+  useEffect(() => {
+    setLinks(parseListField(task.customFields?.taskLinks));
+  }, [task.customFields?.taskLinks]);
+
+  const addLink = () => {
+    const nextUrl = url.trim();
+    if (!nextUrl) return;
+    const nextLinks = [...links, nextUrl];
+    setLinks(nextLinks);
+    void onTaskChange(task.id, { customFields: { taskLinks: JSON.stringify(nextLinks) } });
+    setUrl("");
+  };
+
+  const removeLink = (link: string) => {
+    const nextLinks = links.filter((item) => item !== link);
+    setLinks(nextLinks);
+    void onTaskChange(task.id, { customFields: { taskLinks: JSON.stringify(nextLinks) } });
+  };
+
+  return (
+    <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
+      <div className="flex h-10 items-center border-b border-zinc-200 !px-3">
+        <h3 className="text-[13px] font-semibold text-zinc-900">Add a link to this task</h3>
+      </div>
+      <div className="!p-3 text-[12px]">
+        <p className="mb-1.5 text-[11px] font-medium text-zinc-500">Add a link</p>
+        <div className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2">
+          <Link2 className="h-3.5 w-3.5 text-zinc-400" />
+          <input
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") addLink();
+            }}
+            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
+            placeholder="Paste URL"
+          />
+          <button
+            type="button"
+            className="rounded bg-zinc-100 !px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 disabled:opacity-40"
+            disabled={!url.trim()}
+            onClick={addLink}
+          >
+            Add
+          </button>
+        </div>
+        {links.length > 0 ? (
+          <div className="mt-3 space-y-1.5">
+            {links.map((link) => (
+              <div key={link} className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2 text-[12px] text-zinc-700">
+                <Link2 className="h-3.5 w-3.5 text-zinc-500" />
+                <span className="min-w-0 flex-1 truncate">{link}</span>
+                <button type="button" className="text-zinc-400 hover:text-zinc-700" onClick={() => removeLink(link)}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="mt-2 flex items-center gap-2 text-[11px] text-zinc-500">
+          {["#7C3AED", "#F43F5E", "#0EA5E9", "#18181B", "#22C55E", "#2563EB"].map((color) => (
+            <span key={color} className="h-3.5 w-3.5 rounded-full" style={{ backgroundColor: color }} />
+          ))}
+          <span>and more</span>
+          <ChevronRight className="h-3 w-3" />
+        </div>
+        <p className="mb-2 mt-5 text-[11px] font-medium text-zinc-500">Or relate items</p>
+        <div className="space-y-1">
+          <LinkPanelItem Icon={GitBranch} label="Task or Doc" />
+          <LinkPanelItem Icon={Workflow} label="Dependencies" />
+          <LinkPanelItem Icon={Plus} label="Custom" />
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function LinkPanelItem({ Icon, label }: { Icon: LucideIcon; label: string }) {
+  return (
+    <button type="button" className="flex h-7 w-full items-center gap-2 rounded-md !px-1 text-left text-[12px] text-zinc-700 hover:bg-zinc-100">
+      <Icon className="h-3.5 w-3.5 text-zinc-500" />
+      {label}
+    </button>
   );
 }
 
@@ -2630,6 +4173,62 @@ function GroupMenu({ value, onChange }: { value: GroupKey; onChange: (value: Gro
   );
 }
 
+function GroupOptionsMenu({
+  groupLabel,
+  groupName,
+  onSelectAll,
+  onCollapseGroup,
+  onCollapseAll,
+  onClose,
+}: {
+  groupLabel: string;
+  groupName: string;
+  onSelectAll: () => void;
+  onCollapseGroup: () => void;
+  onCollapseAll: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div className="fixed inset-0 z-[75]" onClick={onClose} aria-hidden />
+      <div className="absolute left-0 top-7 z-[80] w-[260px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl">
+        <div className="!px-4 py-3 text-[12px] font-medium text-zinc-500">Group options</div>
+        <div className="!px-2 pb-2">
+          <GroupOptionsItem Icon={CheckCircle2} label="Select all" onClick={onSelectAll} />
+          <GroupOptionsItem Icon={ChevronRight} label="Collapse group" onClick={onCollapseGroup} rotate />
+          <GroupOptionsItem Icon={Columns3} label="Collapse all groups" onClick={onCollapseAll} />
+        </div>
+        <div className="border-t border-zinc-100 !px-2 py-2">
+          <GroupOptionsItem Icon={Zap} label={`Automate ${groupName || groupLabel.toLowerCase()}`} onClick={onClose} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function GroupOptionsItem({
+  Icon,
+  label,
+  rotate,
+  onClick,
+}: {
+  Icon: LucideIcon;
+  label: string;
+  rotate?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
+      onClick={onClick}
+    >
+      <Icon className={`h-3.5 w-3.5 text-zinc-500 ${rotate ? "-rotate-90" : ""}`} />
+      {label}
+    </button>
+  );
+}
+
 function FilterMenu({
   query,
   showClosed,
@@ -2799,6 +4398,62 @@ function TagEditorPopover({
         </button>
       </div>
     </div>
+  );
+}
+
+function CustomFieldPopover({
+  label,
+  value,
+  onChange,
+  onSave,
+  onClear,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <form
+      className="absolute left-0 top-7 z-[90] w-[240px] overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg"
+      onClick={(event) => event.stopPropagation()}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave();
+      }}
+    >
+      <div className="border-b border-zinc-100 !px-2.5 py-2 text-[11px] font-medium text-zinc-500">
+        {label}
+      </div>
+      <div className="!p-2">
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") onClear();
+          }}
+          placeholder={`Add ${label.toLowerCase()}`}
+          className="h-8 w-full rounded-md border border-zinc-200 !px-2 text-[12px] outline-none focus:border-[var(--os-brand-rail)]"
+          autoFocus
+        />
+        <div className="mt-2 flex items-center justify-end gap-1.5">
+          <button
+            type="button"
+            className="h-7 rounded-md !px-2 text-[11px] text-zinc-500 hover:bg-zinc-100"
+            onClick={onClear}
+          >
+            Clear
+          </button>
+          <button
+            type="submit"
+            className="h-7 rounded-md bg-[var(--os-brand-rail)] !px-2.5 text-[11px] font-medium text-white"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </form>
   );
 }
 
@@ -3044,7 +4699,7 @@ function getGroupLabel(task: TaskItem, key: GroupKey) {
     case "tags":
       return task.tags[0] ?? "No tag";
     case "dueDate":
-      return task.dueDate || "No due date";
+      return dueDateGroupLabel(task.dueDate);
     case "taskType":
       return task.taskType || "Task";
     case "none":
@@ -3065,7 +4720,7 @@ function shouldShowDraftInGroup(draftTask: DraftTask, key: GroupKey, label: stri
     case "tags":
       return (draftTask.tags[0] ?? "No tag") === label;
     case "dueDate":
-      return (draftTask.dueDate || "No due date") === label;
+      return dueDateGroupLabel(draftTask.dueDate) === label;
     case "taskType":
       return (draftTask.taskType || "Task") === label;
     case "none":
@@ -3086,6 +4741,7 @@ function sortTasks(tasks: TaskItem[], sortKey: TaskSortKey) {
 
   return [...tasks].sort((first, second) => {
     if (sortKey === "priority") return priorityRank(second.priority) - priorityRank(first.priority);
+    if (sortKey === "dueDate") return dueDateSortValue(first.dueDate) - dueDateSortValue(second.dueDate);
     const firstValue = sortableValue(first, sortKey);
     const secondValue = sortableValue(second, sortKey);
     return firstValue.localeCompare(secondValue, undefined, { numeric: true, sensitivity: "base" });
@@ -3120,6 +4776,38 @@ function statusFromGroup(label: string): TaskItem["status"] {
   if (label === "IN PROGRESS") return "in_progress";
   if (label === "COMPLETE") return "complete";
   return "to_do";
+}
+
+function dueDateGroupLabel(dueDate: string) {
+  if (!dueDate) return "No due date";
+  if (dueDate === "Today") return "Today";
+  if (dueDate === "Tomorrow") return "Tomorrow";
+  const parsedDate = parseTaskDisplayDate(dueDate);
+  if (!parsedDate) return dueDate === "Yesterday" ? "Overdue" : "Upcoming";
+  return parsedDate.getTime() < startOfDay(new Date()).getTime() ? "Overdue" : "Upcoming";
+}
+
+function dueDateSortValue(dueDate: string) {
+  if (!dueDate) return Number.MAX_SAFE_INTEGER;
+  const parsedDate = parseTaskDisplayDate(dueDate);
+  return parsedDate?.getTime() ?? Number.MAX_SAFE_INTEGER - 1;
+}
+
+function parseTaskDisplayDate(value: string) {
+  if (!value) return null;
+  const today = startOfDay(new Date());
+  if (value === "Today") return today;
+  if (value === "Tomorrow") return addDays(today, 1);
+  if (value === "Yesterday") return addDays(today, -1);
+
+  const directDate = new Date(value);
+  if (!Number.isNaN(directDate.getTime())) return startOfDay(directDate);
+
+  const shortDate = value.match(/^([A-Z][a-z]{2}) (\d{1,2})$/);
+  if (!shortDate) return null;
+  const parsedDate = new Date(`${shortDate[1]} ${shortDate[2]}, ${today.getFullYear()}`);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+  return startOfDay(parsedDate);
 }
 
 function getCalendarBucket(dueDate: string) {
@@ -3160,13 +4848,145 @@ async function readApiError(response: Response, fallback: string) {
   }
 }
 
+function mergeCustomFields(
+  current: TaskItem["customFields"] = {},
+  patch: Record<string, string | number | boolean | null>,
+) {
+  const next = { ...current };
+  for (const [key, rawValue] of Object.entries(patch)) {
+    const value = rawValue == null ? "" : String(rawValue).trim();
+    if (value) next[key] = value;
+    else delete next[key];
+  }
+  return next;
+}
+
+function makeCustomFieldKey(label: string) {
+  const base = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const safeBase = base || "custom_field";
+  return /^[a-z]/.test(safeBase) ? safeBase : `field_${safeBase}`;
+}
+
+function customFieldTypeForLabel(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes("date")) return "DATE";
+  if (normalized.includes("number") || normalized.includes("money") || normalized.includes("rating") || normalized.includes("progress")) return "NUMBER";
+  if (normalized.includes("checkbox")) return "CHECKBOX";
+  if (normalized.includes("dropdown") || normalized.includes("label") || normalized.includes("people")) return "SELECT";
+  if (normalized.includes("email")) return "EMAIL";
+  if (normalized.includes("website")) return "URL";
+  if (normalized.includes("notes") || normalized.includes("summary") || normalized.includes("text area")) return "TEXTAREA";
+  return "TEXT";
+}
+
+function customFieldIcon(fieldType: string): LucideIcon {
+  if (fieldType === "DATE") return CalendarDays;
+  if (fieldType === "NUMBER") return Hash;
+  if (fieldType === "CHECKBOX") return CheckCircle2;
+  if (fieldType === "SELECT" || fieldType === "MULTI_SELECT") return Columns3;
+  if (fieldType === "EMAIL") return Mail;
+  if (fieldType === "URL") return Globe;
+  if (fieldType === "TEXTAREA") return AlignLeft;
+  return FileText;
+}
+
+function normalizeCustomFields(customFields: ApiTask["customFields"]) {
+  if (!customFields) return undefined;
+  const normalized: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(customFields)) {
+    if (rawValue == null) continue;
+    const value = String(rawValue).trim();
+    if (value) normalized[key] = value;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function parseListField(value?: string) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch {
+    return value.split("\n").map((item) => item.trim()).filter(Boolean);
+  }
+}
+
+function parseChecklistField(value?: string): ChecklistItem[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const record = item as Partial<ChecklistItem>;
+      const label = String(record.label ?? "").trim();
+      if (!label) return [];
+      return [{
+        id: String(record.id ?? createClientId()),
+        label,
+        done: Boolean(record.done),
+      }];
+    });
+  } catch {
+    return value
+      .split("\n")
+      .map((label) => label.trim())
+      .filter(Boolean)
+      .map((label) => ({ id: createClientId(), label, done: false }));
+  }
+}
+
+function createClientId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `item-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function initialsFromName(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const initials = parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+  return initials || "U";
+}
+
+function mapApiPersonToAssigneeOption(person: ApiPerson): AssigneeOption {
+  const fullName = [person.firstName, person.lastName].filter(Boolean).join(" ").trim();
+  const name = fullName || person.email || "Unnamed person";
+  return {
+    id: person.id,
+    name,
+    email: person.email ?? undefined,
+    avatar: person.avatar ?? undefined,
+    initials: initialsFromName(name),
+  };
+}
+
+function commentAuthorName(comment: ApiTaskComment) {
+  const name = [comment.author?.firstName, comment.author?.lastName].filter(Boolean).join(" ").trim();
+  return name || "You";
+}
+
+function formatActivityTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 function mapApiTaskToTaskItem(task: ApiTask): TaskItem {
+  const taskDate = new Date(task.date);
   return {
     id: task.id,
     name: task.title || "Untitled",
+    description: task.description ?? undefined,
     status: apiStatusToUiStatus(task.status),
     assignee: formatAssigneeName(task.assignee),
+    assigneeId: task.assignee?.id ?? undefined,
     dueDate: formatRelativeTaskDate(task.date),
+    dueDateISO: Number.isNaN(taskDate.getTime()) ? undefined : formatDateInput(taskDate),
     priority: apiPriorityToUiPriority(task.priority),
     dateCreated: task.createdAt ? formatRelativeTaskDate(task.createdAt) : "Today",
     taskType: task.category || (task.parentTaskId ? "Subtask" : "Task"),
@@ -3175,6 +4995,7 @@ function mapApiTaskToTaskItem(task: ApiTask): TaskItem {
     comments: task._count?.comments ?? 0,
     attachments: 0,
     parentId: task.parentTaskId ?? undefined,
+    customFields: normalizeCustomFields(task.customFields),
   };
 }
 
@@ -3193,6 +5014,7 @@ function uiStatusToApiStatus(status: TaskItem["status"]) {
 function apiPriorityToUiPriority(priority: ApiTask["priority"]): TaskPriority {
   if (priority === "URGENT") return "Urgent";
   if (priority === "HIGH") return "High";
+  if (priority === "NORMAL") return "Normal";
   if (priority === "LOW") return "Low";
   return "";
 }
@@ -3223,6 +5045,13 @@ function formatRelativeTaskDate(value: string) {
   if (diffDays === 1) return "Tomorrow";
   if (diffDays === -1) return "Yesterday";
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function displayDateToInputDate(value: string) {
+  if (!value) return undefined;
+  if (value === "Later") return formatDateInput(new Date());
+  const parsedDate = parseTaskDisplayDate(value);
+  return parsedDate ? formatDateInput(parsedDate) : undefined;
 }
 
 function formatDateInput(date: Date) {

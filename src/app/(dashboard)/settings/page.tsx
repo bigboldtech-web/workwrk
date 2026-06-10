@@ -151,14 +151,14 @@ export default function SettingsPage() {
       title: "Scoring & reviews",
       cards: [
         {
-          href: "/settings",
+          href: "/settings/scoring",
           title: "Review cadence",
-          description: "How often performance reviews are scheduled.",
+          description: "Weekly, monthly, quarterly & annual review rhythms.",
           Icon: Sparkles, color: C.pink,
           fields: [{ label: "Frequency", value: set.reviewFrequency ?? "Quarterly" }],
         },
         {
-          href: "/settings",
+          href: "/settings/scoring",
           title: "Score weights",
           description: "Weight each metric for composite performance scoring.",
           Icon: BarChart3, color: C.purple,
@@ -167,7 +167,7 @@ export default function SettingsPage() {
             : [{ label: "Weights", value: "Default" }],
         },
         {
-          href: "/settings",
+          href: "/settings/scoring",
           title: "Performance bands",
           description: "Ranges that map composite scores to labels (e.g. 'Strong').",
           Icon: Award, color: C.indigo,

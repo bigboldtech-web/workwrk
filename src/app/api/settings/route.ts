@@ -4,6 +4,12 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeEnabledModules } from "@/lib/module-keys";
 import { logAuditEvent } from "@/lib/activity";
+import {
+  getReviewCadences,
+  getBehavioralAnchors,
+  validateScoreWeights,
+  validateScoringBands,
+} from "@/lib/review-cadence";
 
 export async function GET() {
   try {
@@ -73,6 +79,8 @@ export async function GET() {
           { label: "Needs Improvement", min: 40, max: 59, color: "orange" },
           { label: "Underperforming", min: 0, max: 39, color: "red" },
         ],
+        reviewCadences: getReviewCadences(settings),
+        behavioralAnchors: getBehavioralAnchors(settings),
         notifications: settings.notifications || {
           kraAssigned: true,
           kpiUpdate: true,
@@ -163,6 +171,36 @@ export async function PATCH(req: Request) {
         await prisma.organization.update({
           where: { id: orgId },
           data: updateData,
+        });
+        break;
+      }
+
+      case "scoring": {
+        // Editable Scoring & reviews config (weights, bands, cadences,
+        // behavioral anchors). Validate the numeric invariants so a bad
+        // payload can't silently corrupt the composite-score engine.
+        const scoring: any = {};
+        if (data.reviewFrequency !== undefined) scoring.reviewFrequency = data.reviewFrequency;
+        if (data.scoreWeights !== undefined) {
+          const v = validateScoreWeights(data.scoreWeights);
+          if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
+          scoring.scoreWeights = data.scoreWeights;
+        }
+        if (data.scoringBands !== undefined) {
+          const v = validateScoringBands(data.scoringBands);
+          if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
+          scoring.scoringBands = data.scoringBands;
+        }
+        if (data.reviewCadences !== undefined) scoring.reviewCadences = data.reviewCadences;
+        if (data.behavioralAnchors !== undefined) {
+          if (!Array.isArray(data.behavioralAnchors) || data.behavioralAnchors.length !== 5) {
+            return NextResponse.json({ error: "behavioralAnchors must be 5 labels" }, { status: 400 });
+          }
+          scoring.behavioralAnchors = data.behavioralAnchors;
+        }
+        await prisma.organization.update({
+          where: { id: orgId },
+          data: { settings: { ...currentSettings, ...scoring } },
         });
         break;
       }

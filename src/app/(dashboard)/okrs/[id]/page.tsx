@@ -18,7 +18,12 @@ import {
   ChevronRight, Building2, Users, User as UserIcon, Activity,
 } from "lucide-react";
 import { OkrCheckInForm } from "./okr-checkin-form";
+import { OkrLinkedWork } from "./okr-linked-work";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+
+const MANAGER_LEVELS = new Set([
+  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR",
+]);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -71,7 +76,8 @@ export default async function OkrDetailPage(
   const { id } = await params;
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
-  const orgId = (session.user as { organizationId: string }).organizationId;
+  const sessionUser = session.user as { id: string; organizationId: string; accessLevel?: string };
+  const orgId = sessionUser.organizationId;
 
   const okr = await prisma.oKR.findFirst({
     where: { id, organizationId: orgId },
@@ -128,6 +134,8 @@ export default async function OkrDetailPage(
     ? Math.floor((Date.now() - lastCheckIn.getTime()) / DAY_MS)
     : null;
 
+  const canEditLinks =
+    okr.ownerId === sessionUser.id || MANAGER_LEVELS.has(sessionUser.accessLevel ?? "");
   const ownerName = owner ? `${owner.firstName} ${owner.lastName}`.trim() : "Unassigned";
   const statusColor = STATUS_COLOR[okr.status] ?? "var(--os-c-indigo)";
   const statusLabel = STATUS_LABEL[okr.status] ?? okr.status;
@@ -255,6 +263,13 @@ export default async function OkrDetailPage(
                 })}
               </ol>
             )}
+          </section>
+
+          <section className="okrd-card">
+            <header><h2>Linked work</h2></header>
+            <div className="okrd-card__cf">
+              <OkrLinkedWork okrId={okr.id} canEdit={canEditLinks} />
+            </div>
           </section>
 
           <section className="okrd-card">

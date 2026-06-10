@@ -19,6 +19,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { NewReviewCycleDialog } from "./new-review-dialog";
 
 type CycleStatus = "DRAFT" | "ACTIVE" | "IN_CALIBRATION" | "COMPLETED" | "CANCELLED";
 
@@ -75,6 +76,8 @@ export default function ReviewsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<CycleStatus>>(new Set());
+  const [newOpen, setNewOpen] = useState(false);
+  const [now] = useState(() => new Date());
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -108,26 +111,6 @@ export default function ReviewsPage() {
       void load();
       return true;
     } catch { return false; }
-  }
-
-  async function newCycle() {
-    const name = (typeof window !== "undefined" ? window.prompt("Review cycle name?") : "")?.trim();
-    if (!name) return;
-    const now = new Date();
-    const end = new Date(now.getTime() + 30 * 86_400_000);
-    try {
-      const res = await fetch("/api/reviews", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, type: "QUARTERLY", startDate: now.toISOString(), endDate: end.toISOString() }),
-      });
-      if (!res.ok) {
-        if (res.status === 403) toast("Only HR can create review cycles");
-        else toast("Couldn't create");
-        return;
-      }
-      toast("Cycle created");
-      void load();
-    } catch { toast("Couldn't create"); }
   }
 
   // ─── Featured cycle (hero) ──────────────────────────────
@@ -181,7 +164,7 @@ export default function ReviewsPage() {
           <div className="rvw__head-actions">
             <Link href="/kra-kpi" className="rvw__nav-link"><Target /> KRA/KPI</Link>
             <Link href="/talent" className="rvw__nav-link"><Users /> Talent</Link>
-            <button type="button" className="rvw__btn-primary" onClick={newCycle}>
+            <button type="button" className="rvw__btn-primary" onClick={() => setNewOpen(true)}>
               <Plus /> New cycle
             </button>
           </div>
@@ -190,7 +173,7 @@ export default function ReviewsPage() {
 
       <div className="rvw">
         {loadError ? (
-          <OsEmptyView Icon={Award} iconGradient={GRAD.redPink} title="Couldn't load cycles" subtitle={loadError} cta="Retry" />
+          <OsEmptyView Icon={Award} iconGradient={GRAD.redPink} title="Couldn't load cycles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : cycles === null ? (
           <div className="rvw__loading">Loading cycles…</div>
         ) : !featured ? (
@@ -201,6 +184,7 @@ export default function ReviewsPage() {
             subtitle="Plan your first review cycle. Pick monthly pulse, quarterly, annual, probation, or PIP."
             chips={["Monthly pulse", "Quarterly", "Annual", "Probation", "PIP"]}
             cta="New cycle"
+            onCta={() => setNewOpen(true)}
           />
         ) : (
           <>
@@ -242,6 +226,13 @@ export default function ReviewsPage() {
           </>
         )}
       </div>
+
+      <NewReviewCycleDialog
+        open={newOpen}
+        onOpenChange={setNewOpen}
+        now={now}
+        onCreated={(msg) => { toast(msg); void load(); }}
+      />
     </>
   );
 }
