@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { Switch } from "@/components/ui/switch";
 import {
   Activity,
   AlignLeft,
@@ -4584,19 +4585,7 @@ function GroupMenu({
 
         <div className="mt-2 flex items-center justify-between border-t border-zinc-100 pt-2">
           <span className="text-[13px] text-zinc-700">Also group by List</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={alsoGroupByList}
-            onClick={() => onAlsoGroupByListChange(!alsoGroupByList)}
-            style={{
-              backgroundColor: alsoGroupByList ? "var(--os-brand)" : "#e4e4e7",
-              border: alsoGroupByList ? "1px solid var(--os-brand)" : "1px solid #d4d4d8",
-            }}
-            className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-          >
-            <span className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform ${alsoGroupByList ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-          </button>
+          <Switch checked={alsoGroupByList} onChange={onAlsoGroupByListChange} aria-label="Also group by List" />
         </div>
       </div>
     </>
@@ -5118,7 +5107,7 @@ function FieldToggle({ column, checked, onToggle }: { column: ColumnDef; checked
       <column.Icon className="h-3 w-3 text-zinc-500" />
       <span className="min-w-0 flex-1 truncate">{column.label}</span>
       {column.key === "taskType" ? <span className="rounded bg-fuchsia-100 !px-1 text-[10px] font-medium text-fuchsia-700">New</span> : null}
-      <Switch checked={checked} disabled={column.key === "name"} />
+      <SwitchDisplay checked={checked} disabled={column.key === "name"} />
     </button>
   );
 }
@@ -5185,12 +5174,15 @@ function SettingToggle({ label, checked, onToggle }: { label: string; checked: b
       onClick={onToggle}
     >
       <span>{label}</span>
-      <Switch checked={checked} />
+      <SwitchDisplay checked={checked} />
     </button>
   );
 }
 
-function Switch({ checked, disabled }: { checked: boolean; disabled?: boolean }) {
+// Display-only toggle (a non-interactive <span>) for rows whose parent
+// <button> already handles the click — using the interactive <Switch>
+// here would nest buttons. Mirrors the shared Switch's look.
+function SwitchDisplay({ checked, disabled }: { checked: boolean; disabled?: boolean }) {
   return (
     <span
       style={{

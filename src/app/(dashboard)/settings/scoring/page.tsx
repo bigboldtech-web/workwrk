@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Switch } from "@/components/ui/switch";
 import {
   ChevronLeft, Sparkles, BarChart3, Award, MessageSquareText,
   Check, AlertCircle, RotateCcw,
@@ -216,18 +217,7 @@ function CadencesSection({
           return (
             <div key={key} className={`rounded-lg border p-3 ${c.enabled ? "border-zinc-200" : "border-zinc-100 bg-zinc-50/60"}`}>
               <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={c.enabled}
-                  onClick={() => patch(key, { enabled: !c.enabled })}
-                  style={{
-                    backgroundColor: c.enabled ? "var(--os-brand)" : "#e4e4e7",
-                    border: c.enabled ? "1px solid var(--os-brand)" : "1px solid #d4d4d8",
-                  }}
-                  className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors" >
-                  <span className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform ${c.enabled ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-                </button>
+                <Switch checked={c.enabled} onChange={() => patch(key, { enabled: !c.enabled })} />
                 <span className="text-[13px] font-medium text-zinc-800 flex-1">{CADENCE_LABELS[key]}</span>
               </div>
               {c.enabled ? (

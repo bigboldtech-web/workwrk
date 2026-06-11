@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X, Trophy, Rocket, Timer, ChevronDown } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { useOsShell } from "./shell-context";
 import { useRouter } from "next/navigation";
 import { taupeButton } from "@/components/ui/accent";
@@ -107,19 +108,7 @@ export function CreateListModal() {
               <span className="text-[14px] font-medium text-zinc-800">Make private</span>
               <span className="text-[13px] text-zinc-500">Only you and invited members have access</span>
             </div>
-            <button 
-              type="button"
-              role="switch"
-              aria-checked={isPrivate}
-              onClick={() => setIsPrivate(!isPrivate)}
-              style={{
-                backgroundColor: isPrivate ? "var(--os-brand)" : "#e4e4e7",
-                border: isPrivate ? "1px solid var(--os-brand)" : "1px solid #d4d4d8",
-              }}
-              className="relative inline-flex h-5 w-9 shrink-0 items-center cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--os-brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-            >
-              <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-in-out ${isPrivate ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-            </button>
+            <Switch checked={isPrivate} onChange={setIsPrivate} aria-label="Make list private" />
           </div>
         </div>
 
