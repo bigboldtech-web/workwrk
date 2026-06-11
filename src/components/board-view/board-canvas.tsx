@@ -186,7 +186,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardGanttView
           initialItems={filteredItems}
           initialFields={fields}
+          canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
+          onItemChanged={handleItemChanged}
         />
       ) : (
         <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center bg-white">
