@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, Plus, X } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
+import { DEFAULT_STATUS_OPTIONS, STATUS_LOOKUP, type BoardItemRow } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { PriorityFlag } from "./priority-picker";
@@ -34,9 +34,6 @@ interface BoardKanbanViewProps {
 }
 
 const STATUS_ORDER = DEFAULT_STATUS_OPTIONS.map((o) => o.value);
-const STATUS_LOOKUP: Record<string, { label: string; color: string }> = Object.fromEntries(
-  DEFAULT_STATUS_OPTIONS.map((o) => [o.value, { label: o.label, color: o.color }]),
-);
 
 export function BoardKanbanView({ boardId, initialItems, initialFields, canEdit, onOpenItem }: BoardKanbanViewProps) {
   // Card chips show at most the first two choice-type custom fields —

@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Trash2, X } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
+import { DEFAULT_STATUS_OPTIONS, STATUS_LOOKUP, type BoardItemRow } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker } from "./assignee-picker";
 import { FieldValue } from "./field-value";
@@ -38,10 +38,6 @@ interface BoardItemDrawerProps {
   onItemChanged?: (item: BoardItemRow) => void;
   onItemArchived?: (itemId: string) => void;
 }
-
-const STATUS_LOOKUP: Record<string, { label: string; color: string }> = Object.fromEntries(
-  DEFAULT_STATUS_OPTIONS.map((o) => [o.value, { label: o.label, color: o.color }]),
-);
 
 export function BoardItemDrawer({
   itemId,

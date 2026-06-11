@@ -25,6 +25,13 @@ export const PRIORITY_OPTIONS = [
 
 export type PriorityValue = (typeof PRIORITY_OPTIONS)[number]["value"];
 
+// Pre-built value→option lookups so consumers stop re-running
+// Object.fromEntries(DEFAULT_STATUS_OPTIONS.map(...)) in every view.
+export const STATUS_LOOKUP: Record<string, { value: string; label: string; color: string }> =
+  Object.fromEntries(DEFAULT_STATUS_OPTIONS.map((o) => [o.value, o]));
+export const PRIORITY_LOOKUP: Record<string, { value: string; label: string; color: string }> =
+  Object.fromEntries(PRIORITY_OPTIONS.map((o) => [o.value, o]));
+
 export interface ItemTag {
   id: string;
   name: string;

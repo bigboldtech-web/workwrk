@@ -17,12 +17,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
+import { STATUS_LOOKUP, type BoardItemRow } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
-
-const STATUS_LOOKUP: Record<string, { label: string; color: string }> = Object.fromEntries(
-  DEFAULT_STATUS_OPTIONS.map((o) => [o.value, { label: o.label, color: o.color }]),
-);
 
 const WEEK_COUNT = 12;
 const MS_PER_DAY = 86_400_000;
