@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  LineChart, Plus, Users, Coins, TrendingUp, ChevronRight, Hash,
+  LineChart, Plus, Users, Coins, ChevronRight,
   CalendarRange, Activity, Building, Layers,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
@@ -138,9 +138,7 @@ export default function WorkforcePlanningPage() {
         description={rows === null ? "Loading plans…" : `${stats.total} plan${stats.total === 1 ? "" : "s"} · ${stats.totalHeadcount} planned headcount · ${fmtMoney(stats.totalBudget, stats.cur)} budget`}
         actions={
           <div className="wfp__head-actions">
-            <Link href="/planning" className="wfp__nav-link"><Hash /> Planning</Link>
             <Link href="/people" className="wfp__nav-link"><Users /> People</Link>
-            <Link href="/planning/variance" className="wfp__nav-link"><TrendingUp /> Variance</Link>
             <button type="button" className="wfp__btn-primary" onClick={quickAdd}>
               <Plus /> New plan
             </button>

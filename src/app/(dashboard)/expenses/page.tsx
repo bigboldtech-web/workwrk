@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Receipt, Plus, Search, Hash, ChevronRight, Clock, CheckCircle2, XCircle, Banknote,
-  FileText, Coins, Briefcase, Activity, Layers, Calendar as CalendarIcon, AlertTriangle,
+  FileText, Activity, Layers, Calendar as CalendarIcon, AlertTriangle,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -180,8 +180,6 @@ export default function ExpensesPage() {
         description={exps === null ? "Loading expenses…" : `${stats.total} expense${stats.total === 1 ? "" : "s"} · ${stats.submitted.length} pending · ${fmtCurrency(stats.reimbursedValue, stats.cur)} reimbursed`}
         actions={
           <div className="exp__head-actions">
-            <Link href="/financials" className="exp__nav-link"><Coins /> Finance</Link>
-            <Link href="/procurement" className="exp__nav-link"><Briefcase /> Procurement</Link>
             <button type="button" className="exp__btn-primary" onClick={quickAdd}>
               <Plus /> New expense
             </button>

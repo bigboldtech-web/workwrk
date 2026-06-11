@@ -152,84 +152,14 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     pathPrefix: "/learning",
     seededAgents: ["leo-learning"],
   },
-  {
-    slug: "workwrk-pay",
-    name: "WorkwrK Pay",
-    tagline: "Payroll runs, payslips, codes",
-    description:
-      "Pay groups, pay runs, payslip viewer (employee + manager), earning + deduction codes, YTD totals. Partner-powered processing (Gusto/ADP) for actual disbursement.",
-    iconKey: "Banknote",
-    hue: "green",
-    suite: "PEOPLE",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 140,
-    legacyModuleKey: "payroll",
-    pathPrefix: "/payroll",
-    seededAgents: ["devi-payroll"],
-    seededIntegrations: ["gusto", "adp", "rippling"],
-  },
-  {
-    slug: "workwrk-benefits",
-    name: "WorkwrK Benefits",
-    tagline: "Plans, enrollments, open enrollment",
-    description:
-      "Plan catalog + comparison, open enrollment wizard (life event + plan selection + dependents + beneficiary), enrollment history, contribution breakdown.",
-    iconKey: "Heart",
-    hue: "pink",
-    suite: "PEOPLE",
-    tier: "SUITE",
-    status: "COMING_SOON",
-    defaultEnabled: false,
-    displayOrder: 150,
-    legacyModuleKey: "benefits",
-    pathPrefix: "/benefits",
-    seededAgents: ["bea-benefits"],
-    seededIntegrations: ["justworks", "gusto"],
-  },
 
   // ─────────────────────────────────────────────
   // SALES SUITE (NEW)
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-crm",
-    name: "WorkwrK CRM",
-    tagline: "Leads, deals, pipeline",
-    description:
-      "Leads, accounts, opportunities, deal pipeline (kanban by stage), 6-stage default workflow you can customize. The Salesforce-for-SMB tier. Ships with Ria the SDR agent and pre-built pipeline templates.",
-    iconKey: "TrendingUp",
-    hue: "green",
-    suite: "SALES",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 200,
-    pathPrefix: "/crm",
-    seededAgents: ["ria-sdr", "dex-deal-coach"],
-    seededTemplates: ["b2b-saas-pipeline", "renewal-tracker"],
-    seededIntegrations: ["gmail", "outlook", "salesforce-migrate"],
-  },
 
   // ─────────────────────────────────────────────
   // OPERATIONS SUITE
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-procurement",
-    name: "WorkwrK Procurement",
-    tagline: "POs, vendors, approvals, contracts",
-    description:
-      "Purchase orders, vendor directory, procurement request forms, multi-level approval workflows, spend analytics. Coupa-lite for SMB.",
-    iconKey: "ShoppingCart",
-    hue: "sky",
-    suite: "OPERATIONS",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 300,
-    pathPrefix: "/procurement",
-    seededAgents: ["nathan-sourcer", "pari-approval-router"],
-  },
   {
     slug: "workwrk-assets",
     name: "WorkwrK Assets",
@@ -250,23 +180,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // ─────────────────────────────────────────────
   // IT SUITE (NEW)
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-itsm",
-    name: "WorkwrK ITSM",
-    tagline: "Tickets, incidents, SLAs, KB",
-    description:
-      "Internal IT service management for the IT team. Ticket queue (8 statuses, 5 priority tiers), incident timeline with severity (SEV1-SEV5) + lifecycle (Detected → Acknowledged → Investigating → Mitigating → Resolved → Postmortem), and an integrated knowledge base. Jira Service Management for SMB IT teams.",
-    iconKey: "Headphones",
-    hue: "blue",
-    suite: "IT",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 400,
-    pathPrefix: "/itsm",
-    seededAgents: ["aman-it-tech", "indu-incident-lead"],
-    seededIntegrations: ["pagerduty", "jira", "slack"],
-  },
 
   // ─────────────────────────────────────────────
   // MARKETING SUITE (NEW)
@@ -291,61 +204,10 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // ─────────────────────────────────────────────
   // ENGINEERING SUITE (NEW)
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-dev",
-    name: "WorkwrK Dev",
-    tagline: "Sprints · Releases · Roadmap",
-    description:
-      "Engineering team workspace: sprint planning + capacity vs committed vs completed points + retro, release management with public changelog, roadmap with themes/priority/quarter/impact-score. Jira + Linear + Productboard combined.",
-    iconKey: "Code",
-    hue: "violet",
-    suite: "ENGINEERING",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 600,
-    pathPrefix: "/dev",
-    seededAgents: ["dev-sprint-coach", "rhea-roadmap-strategist"],
-    seededTemplates: ["scrum-sprint", "kanban-flow", "bug-triage"],
-    seededIntegrations: ["github", "gitlab", "linear"],
-  },
 
   // ─────────────────────────────────────────────
   // FINANCE SUITE
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-books",
-    name: "WorkwrK Books",
-    tagline: "GL, AP/AR, close, reports",
-    description:
-      "Chart of accounts, journal entries, AP/AR, period close, financial statements. QuickBooks-online-style for SMB.",
-    iconKey: "BookText",
-    hue: "blue",
-    suite: "FINANCE",
-    tier: "SUITE",
-    status: "PREVIEW",
-    defaultEnabled: false,
-    displayOrder: 700,
-    pathPrefix: "/financials",
-    seededAgents: ["booker-bookkeeper"],
-    seededIntegrations: ["quickbooks", "xero", "stripe"],
-  },
-  {
-    slug: "workwrk-fpa",
-    name: "WorkwrK FP&A",
-    tagline: "Budgets, plans, scenarios",
-    description:
-      "Driver-based modeling, rolling forecasts, scenario comparison (base/aggressive/conservative), variance analysis, workforce planning.",
-    iconKey: "TrendingUp",
-    hue: "violet",
-    suite: "FINANCE",
-    tier: "SUITE",
-    status: "PREVIEW",
-    defaultEnabled: false,
-    displayOrder: 710,
-    pathPrefix: "/planning",
-    seededAgents: ["fina-fpa-analyst"],
-  },
   {
     slug: "workwrk-expense",
     name: "WorkwrK Expense",
@@ -367,44 +229,10 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // ─────────────────────────────────────────────
   // LEGAL SUITE (NEW)
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-contracts",
-    name: "WorkwrK Legal",
-    tagline: "Contracts · Privacy · IP",
-    description:
-      "Legal & compliance: contract lifecycle management with renewal alerts + auto-renew tracking, GDPR/CCPA privacy requests (DSARs) with auto-computed SLA timers per jurisdiction, IP portfolio (trademarks/patents/copyrights) with renewal alerts + outside counsel attribution. The General Counsel's command center.",
-    iconKey: "Scale",
-    hue: "violet",
-    suite: "LEGAL",
-    tier: "SUITE",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 800,
-    pathPrefix: "/legal",
-    seededAgents: ["leila-contract-reviewer", "priva-privacy-officer", "ivan-ip-tracker"],
-    seededIntegrations: ["docusign", "dropbox-sign"],
-  },
 
   // ─────────────────────────────────────────────
   // SUPPORT SUITE (NEW)
   // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-help",
-    name: "WorkwrK Helpdesk",
-    tagline: "Customer tickets · CSAT · canned responses",
-    description:
-      "External customer support distinct from internal ITSM. Tickets across 6 channels (Email, Chat, Phone, Portal, Social, In-app), 7-state lifecycle (NEW → OPEN → PENDING → RESOLVED → CLOSED), tier-driven SLA timers (Free 48h / Standard 24h / Premium 8h / Enterprise 4h), CSAT scores per ticket, reusable macros (canned responses) with auto-resolve flag. Zendesk-for-SMB.",
-    iconKey: "Headphones",
-    hue: "teal",
-    suite: "SUPPORT",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 900,
-    pathPrefix: "/helpdesk",
-    seededAgents: ["maya-support-lead", "kai-kb-curator"],
-    seededIntegrations: ["gmail", "intercom-migrate", "zendesk-migrate"],
-  },
 ];
 
 // Quick lookups used by the sidebar + API.
