@@ -180,6 +180,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           onItemCreated={(item) => setItems((prev) => [...prev, item])}
+          onItemChanged={handleItemChanged}
         />
       ) : viewType === "GANTT" ? (
         <BoardGanttView

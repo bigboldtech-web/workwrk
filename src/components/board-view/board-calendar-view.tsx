@@ -5,7 +5,8 @@
 // metadata for legacy rows (same dual-path rule as the Space-level
 // calendar this was adapted from). Month nav is local state — items
 // are already client-side, so no URL round-trip is needed. Day-cell
-// "+" creates an item due that day; clicking an item opens the drawer.
+// "+" creates an item due that day; clicking an item opens the drawer;
+// dragging a chip onto another day reschedules its dueAt.
 
 import { useCallback, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
@@ -25,17 +26,23 @@ interface BoardCalendarViewProps {
   /** Called after a day-cell "+" creates an item, so the parent canvas
    *  can append it to shared state. */
   onItemCreated?: (item: BoardItemRow) => void;
+  /** Called after a drag-reschedule PATCH succeeds so the parent canvas
+   *  syncs shared item state (same contract as the drawer). */
+  onItemChanged?: (item: BoardItemRow) => void;
 }
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function BoardCalendarView({ boardId, initialItems, initialFields, canEdit, onOpenItem, onItemCreated }: BoardCalendarViewProps) {
+export function BoardCalendarView({ boardId, initialItems, initialFields, canEdit, onOpenItem, onItemCreated, onItemChanged }: BoardCalendarViewProps) {
   const now = new Date();
   const [month, setMonth] = useState<{ y: number; m: number }>({ y: now.getFullYear(), m: now.getMonth() });
   const [error, setError] = useState<string | null>(null);
   const [busyDay, setBusyDay] = useState<string | null>(null);
+  // Drag-to-reschedule state — id of the chip in flight + hovered cell.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverDay, setDragOverDay] = useState<string | null>(null);
 
   // First DATE/DATETIME field key — metadata fallback for legacy rows.
   const dateFieldKey = useMemo(
@@ -100,6 +107,34 @@ export function BoardCalendarView({ boardId, initialItems, initialFields, canEdi
       setBusyDay(null);
     }
   }, [boardId, canEdit, busyDay, onItemCreated, onOpenItem]);
+
+  // Drop handler — PATCH dueAt to the target day, then sync the parent
+  // canvas with the server's row (calendar re-buckets from props).
+  const rescheduleTo = useCallback(async (itemId: string, dayKey: string) => {
+    setDragId(null);
+    setDragOverDay(null);
+    if (!canEdit) return;
+    const current = initialItems.find((it) => it.id === itemId);
+    if (!current) return;
+    const nextDue = `${dayKey}T00:00:00.000Z`;
+    if (current.dueAt && new Date(current.dueAt).toISOString() === nextDue) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/items/${itemId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dueAt: nextDue }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error ?? "Failed to reschedule");
+        return;
+      }
+      onItemChanged?.(data.item as BoardItemRow);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to reschedule");
+    }
+  }, [canEdit, initialItems, onItemChanged]);
 
   // 6-week grid starting Sunday.
   const { cells, monthLabel, isCurrentMonth } = useMemo(() => {
@@ -178,12 +213,26 @@ export function BoardCalendarView({ boardId, initialItems, initialFields, canEdi
           {cells.map((cell) => {
             const dayItems = cell.day !== null ? buckets.get(cell.key) ?? [] : [];
             const isToday = cell.key === todayKey;
+            const isDropTarget = dragOverDay === cell.key && cell.inMonth;
             return (
               <div
                 key={cell.key}
                 className={`group min-h-[96px] border-r border-b border-zinc-100 p-1.5 ${
                   cell.inMonth ? "bg-white" : "bg-zinc-50/40"
-                } last:border-r-0`}
+                } last:border-r-0 ${isDropTarget ? "outline-2 outline-dashed outline-[var(--os-brand)] -outline-offset-2" : ""}`}
+                onDragOver={(e) => {
+                  if (!canEdit || !dragId || !cell.inMonth) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverDay(cell.key);
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget === e.target) setDragOverDay(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragId && cell.inMonth) void rescheduleTo(dragId, cell.key);
+                }}
               >
                 {cell.day !== null ? (
                   <div className="flex items-center justify-between mb-1">
@@ -221,8 +270,18 @@ export function BoardCalendarView({ boardId, initialItems, initialFields, canEdi
                       <li key={it.id}>
                         <button
                           type="button"
+                          draggable={canEdit}
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = "move";
+                            try { e.dataTransfer.setData("text/plain", it.id); } catch {}
+                            setDragId(it.id);
+                          }}
+                          onDragEnd={() => { setDragId(null); setDragOverDay(null); }}
                           onClick={() => onOpenItem?.(it.id)}
-                          className="w-full flex items-center gap-1.5 px-1 py-0.5 rounded text-[10.5px] text-zinc-700 hover:bg-zinc-50 truncate text-left"
+                          className={`w-full flex items-center gap-1.5 px-1 py-0.5 rounded text-[10.5px] text-zinc-700 hover:bg-zinc-50 truncate text-left ${
+                            canEdit ? "cursor-grab active:cursor-grabbing" : ""
+                          } ${dragId === it.id ? "opacity-40" : ""}`}
+                          title={canEdit ? "Drag to another day to reschedule" : undefined}
                         >
                           <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: dot }} aria-hidden />
                           <span className="truncate">{it.title}</span>
