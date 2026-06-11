@@ -6,7 +6,7 @@
 // SSR while all interactivity (drawer state, field shelf, row clicks)
 // lives here.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
@@ -17,6 +17,7 @@ import { BoardKanbanView } from "./board-kanban-view";
 import { BoardCalendarView } from "./board-calendar-view";
 import { BoardGanttView } from "./board-gantt-view";
 import { BoardItemDrawer } from "./board-item-drawer";
+import { BoardFilterBar, applyFilters, filtersActive, parseFilters, type BoardFilters } from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
 
 interface BoardCanvasProps {
@@ -94,6 +95,35 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     [fields, hiddenFields],
   );
 
+  // Per-view filters (View.config.filters). Applied to every renderer;
+  // search persistence is debounced so typing doesn't spam PATCHes.
+  const [filters, setFilters] = useState<BoardFilters>(() => parseFilters(viewConfig?.filters));
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleFiltersChange = useCallback((next: BoardFilters) => {
+    setFilters((prev) => {
+      if (viewId) {
+        const searchOnly =
+          prev.search !== next.search &&
+          prev.statuses === next.statuses && prev.owners === next.owners &&
+          prev.priorities === next.priorities && prev.tagIds === next.tagIds &&
+          prev.hideDone === next.hideDone;
+        const persist = () => {
+          void fetch(`/api/boards/${boardId}/views/${viewId}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ config: { ...(viewConfig ?? {}), hiddenFields, filters: next } }),
+          }).catch(() => {});
+        };
+        if (persistTimer.current) clearTimeout(persistTimer.current);
+        if (searchOnly) persistTimer.current = setTimeout(persist, 800);
+        else persist();
+      }
+      return next;
+    });
+  }, [boardId, viewId, viewConfig, hiddenFields]);
+
+  const filteredItems = useMemo(() => applyFilters(items, filters), [items, filters]);
+
   const handleItemChanged = useCallback((updated: BoardItemRow) => {
     setItems((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
   }, []);
@@ -106,7 +136,14 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
 
   return (
     <>
-      <div className="flex items-center justify-end gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <BoardFilterBar items={items} filters={filters} onChange={handleFiltersChange} />
+        {filtersActive(filters) ? (
+          <span className="text-[11px] text-zinc-400 tabular-nums">
+            {filteredItems.length} of {items.length}
+          </span>
+        ) : null}
+        <div className="flex-1" />
         <button
           type="button"
           onClick={() => setShelfOpen(true)}
@@ -122,7 +159,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           boardId={boardId}
           viewId={viewId}
           viewConfig={viewConfig}
-          initialItems={items}
+          initialItems={filteredItems}
           initialFields={visibleFields}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
@@ -130,7 +167,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       ) : viewType === "KANBAN" ? (
         <BoardKanbanView
           boardId={boardId}
-          initialItems={items}
+          initialItems={filteredItems}
           initialFields={visibleFields}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
@@ -138,7 +175,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       ) : viewType === "CALENDAR" ? (
         <BoardCalendarView
           boardId={boardId}
-          initialItems={items}
+          initialItems={filteredItems}
           initialFields={fields}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
@@ -146,7 +183,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "GANTT" ? (
         <BoardGanttView
-          initialItems={items}
+          initialItems={filteredItems}
           initialFields={fields}
           onOpenItem={(id) => setOpenItemId(id)}
         />
