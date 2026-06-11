@@ -23,10 +23,11 @@ import {
   type ItemTag,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
-import { AssigneePicker } from "./assignee-picker";
+import { AssigneePicker, PersonAvatar } from "./assignee-picker";
 import { FieldValue } from "./field-value";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
+import type { FieldChoice } from "@/lib/field-catalog";
 
 interface BoardTableViewProps {
   boardId: string;
@@ -598,7 +599,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                 return (
                   <React.Fragment key={b.key}>
                     <tr className="bg-zinc-50/80 border-y border-zinc-200">
-                      <td colSpan={colCount} className="px-3 py-1.5">
+                      <td colSpan={colCount} className="px-3 py-1.5" style={b.color ? { boxShadow: `inset 3px 0 0 ${b.color}` } : undefined}>
                         <div className="inline-flex items-center gap-2">
                           <button
                             type="button"
@@ -622,11 +623,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                     {!collapsed
                       ? b.rows.flatMap((row) => renderRowAndSubtasks(row, 0))
                       : null}
+                    {/* Monday-style per-group summary footer — aggregates
+                        every column (stacked bars, people, sums…). */}
+                    <GroupSummaryRow rows={b.rows} customFields={customFields} railColor={b.color} />
                   </React.Fragment>
                 );
               })
             ) : (
-              topLevel.flatMap((row) => renderRowAndSubtasks(row, 0))
+              <>
+                {topLevel.flatMap((row) => renderRowAndSubtasks(row, 0))}
+                {items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} railColor={null} /> : null}
+              </>
             )}
             {canEdit && !buckets ? (
               <tr className="hover:bg-zinc-50">
@@ -1009,6 +1016,219 @@ function AddSubtaskRow({
           Add subtask
         </button>
       </td>
+    </tr>
+  );
+}
+
+// ── Monday-style summary footer ────────────────────────────────────
+//
+// One <tr> aligned to the column set, each cell aggregating its column:
+//   Name      → "N items"
+//   Status    → proportional stacked color bar
+//   Owner     → overlapping avatar stack of distinct people
+//   Priority  → proportional stacked color bar
+//   Tags      → distinct tag chips (+overflow)
+//   custom    → sum (number/money) · average (percent/rating) ·
+//               checked-count (checkbox) · choice-distribution bar
+//               (dropdown/labels) · range (date)
+//   Created   → blank
+// Mirrors Monday.com's group summary row.
+
+interface BarSeg { color: string; count: number; label: string }
+
+function StackedBar({ segments }: { segments: BarSeg[] }) {
+  const total = segments.reduce((n, s) => n + s.count, 0);
+  if (total === 0) return <span className="text-[11px] text-zinc-300">—</span>;
+  return (
+    <div
+      className="flex h-3.5 w-full max-w-[160px] rounded-sm overflow-hidden ring-1 ring-black/5"
+      title={segments.map((s) => `${s.label}: ${s.count}`).join("  ·  ")}
+    >
+      {segments.map((s, i) => (
+        <span key={i} style={{ width: `${(s.count / total) * 100}%`, background: s.color }} aria-hidden />
+      ))}
+    </div>
+  );
+}
+
+// Count rows by a key, resolve color/label, return ordered segments.
+function choiceSegments(
+  rows: BoardItemRow[],
+  key: string,
+  choices: FieldChoice[],
+  multi: boolean,
+): BarSeg[] {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const raw = r.metadata?.[key];
+    if (multi) {
+      const arr = Array.isArray(raw) ? (raw as string[]) : [];
+      for (const v of arr) counts.set(v, (counts.get(v) ?? 0) + 1);
+    } else if (raw != null && raw !== "") {
+      const v = String(raw);
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+  }
+  const byValue = new Map(choices.map((c) => [c.value, c] as const));
+  // Choice order first, then any unmatched values.
+  const segs: BarSeg[] = [];
+  for (const c of choices) {
+    const n = counts.get(c.value);
+    if (n) { segs.push({ color: c.color ?? "#d4d4d8", count: n, label: c.label }); counts.delete(c.value); }
+  }
+  for (const [v, n] of counts) {
+    const c = byValue.get(v);
+    segs.push({ color: c?.color ?? "#d4d4d8", count: n, label: c?.label ?? v });
+  }
+  return segs;
+}
+
+function fmtNumber(field: FieldDef, value: number): string {
+  const decimals = field.options?.decimals ?? (field.type === "MONEY" ? 2 : 0);
+  if (field.type === "MONEY") {
+    const cur = field.options?.currency ?? "USD";
+    try {
+      return new Intl.NumberFormat(undefined, { style: "currency", currency: cur, minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(value);
+    } catch {
+      return `${cur} ${value.toFixed(decimals)}`;
+    }
+  }
+  if (field.type === "PERCENT") return `${value.toFixed(decimals)}%`;
+  return value.toFixed(decimals);
+}
+
+function CustomFieldSummary({ field, rows }: { field: FieldDef; rows: BoardItemRow[] }) {
+  const dash = <span className="text-[11px] text-zinc-300">—</span>;
+  const nums = rows.map((r) => r.metadata?.[field.key]).filter((v): v is number => typeof v === "number");
+  switch (field.type) {
+    case "NUMBER":
+    case "MONEY": {
+      if (!nums.length) return dash;
+      const sum = nums.reduce((a, b) => a + b, 0);
+      return <span className="text-[12px] font-medium tabular-nums text-zinc-700" title="Sum">{fmtNumber(field, sum)}</span>;
+    }
+    case "PERCENT": {
+      if (!nums.length) return dash;
+      const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+      return <span className="text-[12px] font-medium tabular-nums text-zinc-700" title="Average">{fmtNumber(field, avg)}</span>;
+    }
+    case "RATING": {
+      if (!nums.length) return dash;
+      const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+      return <span className="text-[12px] font-medium tabular-nums text-zinc-700" title="Average">{avg.toFixed(1)}★</span>;
+    }
+    case "CHECKBOX": {
+      const checked = rows.filter((r) => !!r.metadata?.[field.key]).length;
+      return <span className="text-[12px] tabular-nums text-zinc-700" title="Checked">{checked}/{rows.length}</span>;
+    }
+    case "DROPDOWN":
+    case "TSHIRT_SIZE":
+      return <StackedBar segments={choiceSegments(rows, field.key, field.options?.choices ?? [], false)} />;
+    case "MULTI_SELECT":
+    case "LABELS":
+      return <StackedBar segments={choiceSegments(rows, field.key, field.options?.choices ?? [], true)} />;
+    default:
+      return dash;
+  }
+}
+
+function GroupSummaryRow({
+  rows,
+  customFields,
+  railColor,
+}: {
+  rows: BoardItemRow[];
+  customFields: FieldDef[];
+  railColor: string | null;
+}) {
+  // Status + priority stacked bars.
+  const statusSegs = useMemo<BarSeg[]>(() => {
+    const counts = new Map<string, number>();
+    for (const r of rows) counts.set(r.status ?? "__none__", (counts.get(r.status ?? "__none__") ?? 0) + 1);
+    const segs: BarSeg[] = [];
+    for (const o of DEFAULT_STATUS_OPTIONS) {
+      const n = counts.get(o.value);
+      if (n) { segs.push({ color: o.color, count: n, label: o.label }); counts.delete(o.value); }
+    }
+    for (const [v, n] of counts) segs.push({ color: "#d4d4d8", count: n, label: v === "__none__" ? "No status" : v });
+    return segs;
+  }, [rows]);
+
+  const prioritySegs = useMemo<BarSeg[]>(() => {
+    const counts = new Map<string, number>();
+    for (const r of rows) if (r.priority) counts.set(r.priority, (counts.get(r.priority) ?? 0) + 1);
+    const segs: BarSeg[] = [];
+    for (const p of PRIORITY_OPTIONS) {
+      const n = counts.get(p.value);
+      if (n) segs.push({ color: p.color, count: n, label: p.label });
+    }
+    return segs;
+  }, [rows]);
+
+  // Distinct owners (avatar stack) + distinct tags.
+  const owners = useMemo(() => {
+    const map = new Map<string, NonNullable<BoardItemRow["owner"]>>();
+    for (const r of rows) if (r.owner) map.set(r.owner.id, r.owner);
+    return Array.from(map.values());
+  }, [rows]);
+  const tags = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; color: string | null }>();
+    for (const r of rows) for (const t of r.tags ?? []) map.set(t.id, t);
+    return Array.from(map.values());
+  }, [rows]);
+
+  return (
+    <tr className="bg-zinc-50/60 border-b border-zinc-200 text-[11px]">
+      {/* checkbox spacer — carries the group color rail */}
+      <td className="px-2 py-1.5" style={railColor ? { boxShadow: `inset 3px 0 0 ${railColor}` } : undefined} />
+      {/* Name → count */}
+      <td className="px-4 py-1.5 text-zinc-400">{rows.length} item{rows.length === 1 ? "" : "s"}</td>
+      {/* Status */}
+      <td className="px-4 py-1.5"><StackedBar segments={statusSegs} /></td>
+      {/* Owner */}
+      <td className="px-4 py-1.5">
+        {owners.length === 0 ? (
+          <span className="text-[11px] text-zinc-300">—</span>
+        ) : (
+          <span className="inline-flex items-center -space-x-1.5" title={owners.map((o) => `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim()).join(", ")}>
+            {owners.slice(0, 5).map((o) => (
+              <span key={o.id} className="rounded-full ring-2 ring-white">
+                <PersonAvatar person={{ ...o, email: null }} size={20} />
+              </span>
+            ))}
+            {owners.length > 5 ? <span className="pl-2.5 text-[10.5px] text-zinc-500">+{owners.length - 5}</span> : null}
+          </span>
+        )}
+      </td>
+      {/* Priority */}
+      <td className="px-4 py-1.5">
+        {prioritySegs.length ? <StackedBar segments={prioritySegs} /> : <span className="text-[11px] text-zinc-300">—</span>}
+      </td>
+      {/* Tags */}
+      <td className="px-4 py-1.5">
+        {tags.length === 0 ? (
+          <span className="text-[11px] text-zinc-300">—</span>
+        ) : (
+          <span className="inline-flex items-center gap-1 flex-wrap">
+            {tags.slice(0, 3).map((t) => {
+              const c = t.color || "#94a3b8";
+              return (
+                <span key={t.id} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: `${c}22`, color: c }}>
+                  {t.name}
+                </span>
+              );
+            })}
+            {tags.length > 3 ? <span className="text-[10px] text-zinc-500">+{tags.length - 3}</span> : null}
+          </span>
+        )}
+      </td>
+      {/* Custom fields */}
+      {customFields.map((f) => (
+        <td key={f.key} className="px-4 py-1.5"><CustomFieldSummary field={f} rows={rows} /></td>
+      ))}
+      {/* Created + actions spacers */}
+      <td className="px-4 py-1.5" />
+      <td className="px-2 py-1.5" />
     </tr>
   );
 }
