@@ -42,7 +42,7 @@ import type {
 const HOME_CARDS: Array<{ key: string; label: string; Icon: React.ComponentType<{ className?: string }>; alwaysOn?: boolean }> = [
   { key: "inbox",             label: "Inbox",             Icon: Inbox, alwaysOn: true },
   { key: "assigned-comments", label: "Assigned Comments", Icon: MessageSquare },
-  { key: "my-tasks",          label: "My Tasks",          Icon: CheckSquare },
+  { key: "my-tasks",          label: "My Wrk",          Icon: CheckSquare },
   { key: "drafts-sent",       label: "Drafts & Sent",     Icon: Send },
   { key: "all-spaces",        label: "All Spaces",        Icon: Globe },
   { key: "all-tasks",         label: "All Tasks",         Icon: ListTodo },

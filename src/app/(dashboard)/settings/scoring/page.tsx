@@ -221,9 +221,10 @@ function CadencesSection({
                   role="switch"
                   aria-checked={c.enabled}
                   onClick={() => patch(key, { enabled: !c.enabled })}
-                  className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${c.enabled ? "bg-emerald-500" : "bg-zinc-300"}`}
-                >
-                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${c.enabled ? "translate-x-4" : ""}`} />
+                  className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${
+                    c.enabled ? "bg-[var(--os-brand-rail)]" : "bg-zinc-300"
+                  }`} >
+                  <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${c.enabled ? "translate-x-3.5" : "translate-x-0.5"}`} />
                 </button>
                 <span className="text-[13px] font-medium text-zinc-800 flex-1">{CADENCE_LABELS[key]}</span>
               </div>

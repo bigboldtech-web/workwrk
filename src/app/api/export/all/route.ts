@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
       id: t.id,
       title: t.title,
       status: t.status,
-      date: t.date.toISOString().split("T")[0],
+      date: t.date ? t.date.toISOString().split("T")[0] : "",
       assignee: t.assignee ? `${t.assignee.firstName} ${t.assignee.lastName}` : "",
       kra: t.kra?.name || "",
       createdAt: t.createdAt.toISOString(),

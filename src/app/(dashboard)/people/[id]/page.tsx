@@ -12,7 +12,7 @@ import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Users,
   Target, CheckSquare, TrendingUp, Clock, Star, Smile, Zap, Heart,
   Edit3, Save, Package, Laptop, Monitor, Smartphone,
-  ChevronDown, ChevronUp, CalendarClock, ArrowDownRight, ArrowUpRight, Info,
+  ChevronDown, ChevronUp, CalendarClock, ArrowDownRight, ArrowUpRight, Info, Settings2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KudosReactions } from "@/components/kudos/kudos-reactions";
 import { TagPicker } from "@/components/tags/tag-picker";
+import { ManageAlignmentDialog } from "./manage-alignment-dialog";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
@@ -202,10 +203,12 @@ interface AssetRow {
   assignedAt?: string | null;
 }
 
-function KraAssignmentsTab({ userId }: { userId: string }) {
+function KraAssignmentsTab({ userId, userName }: { userId: string; userName: string }) {
+  const { isManager } = useRole();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [manageOpen, setManageOpen] = useState(false);
   const [expandedKras, setExpandedKras] = useState<Set<string>>(new Set());
   const [selectedPeriod, setSelectedPeriod] = useState(() => {
     const now = new Date();
@@ -220,7 +223,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
     return { value: val, label: label + (i === 0 ? " (Current)" : "") };
   });
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch(`/api/kra-assignments?userId=${userId}`)
       .then((r) => r.json())
       .then((data) => {
@@ -232,6 +235,25 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
       })
       .catch(() => setLoading(false));
   }, [userId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const manageBar = isManager ? (
+    <div className="flex justify-end">
+      <Button size="sm" variant="outline" onClick={() => setManageOpen(true)}>
+        <Settings2 className="w-3.5 h-3.5 mr-1" /> Manage alignment
+      </Button>
+    </div>
+  ) : null;
+  const manageDialog = (
+    <ManageAlignmentDialog
+      open={manageOpen}
+      onOpenChange={setManageOpen}
+      userId={userId}
+      userName={userName}
+      onChanged={load}
+    />
+  );
 
   const toggleKra = (id: string) => {
     setExpandedKras((prev) => {
@@ -247,19 +269,28 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
   if (loading) {
     return (
       <div className="space-y-3">
+        {manageBar}
         {[1,2,3].map((i) => (
           <div key={i} className="h-24 bg-white rounded-lg border border-zinc-200 animate-pulse" />
         ))}
+        {manageDialog}
       </div>
     );
   }
 
   if (assignments.length === 0) {
-    return <p className="text-zinc-500 text-sm py-8 text-center">No KRA assignments yet</p>;
+    return (
+      <div className="space-y-3">
+        {manageBar}
+        <p className="text-zinc-500 text-sm py-8 text-center">No KRA assignments yet</p>
+        {manageDialog}
+      </div>
+    );
   }
 
   return (
     <div className="space-y-3">
+      {manageBar}
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs text-zinc-500">
           Total weightage: <span className={totalWeightage === 100 ? "text-green-400 font-medium" : "text-orange-400 font-medium"}>{totalWeightage}%</span>
@@ -445,6 +476,7 @@ function KraAssignmentsTab({ userId }: { userId: string }) {
           </div>
         );
       })}
+      {manageDialog}
     </div>
   );
 }
@@ -973,7 +1005,7 @@ export default function UserProfilePage() {
         </TabsContent>
 
         <TabsContent value="kras" className="mt-4">
-          <KraAssignmentsTab userId={id as string} />
+          <KraAssignmentsTab userId={id as string} userName={`${user.firstName} ${user.lastName}`.trim()} />
         </TabsContent>
 
         <TabsContent value="kpis" className="mt-4 space-y-2">

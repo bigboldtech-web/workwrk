@@ -30,6 +30,8 @@ import { ClickTopbar } from "./click-topbar";
 import { AppsMorePopover } from "./apps-more-popover";
 import { OsSidekickPanel } from "./sidekick-panel";
 import { SetStatusModal } from "./set-status-modal";
+import { CreateTaskModal } from "./create-task-modal";
+import { CreateListModal } from "./create-list-modal";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -59,6 +61,8 @@ export function OsShell({ children }: { children: React.ReactNode }) {
           <CustomizeMount />
           <SetStatusModal />
           <QuickCaptureHandler />
+          <CreateTaskModal />
+          <CreateListModal />
         </div>
       </OsToastProvider>
     </OsShellProvider>

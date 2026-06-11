@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
       mgrMap.get(mId)!.items.push({
         type: "Task", title: t.title,
         personName: `${t.assignee.firstName} ${t.assignee.lastName}`,
-        daysOverdue: Math.floor((now.getTime() - new Date(t.date).getTime()) / 86400000),
+        daysOverdue: t.date ? Math.floor((now.getTime() - new Date(t.date).getTime()) / 86400000) : 0,
       });
     }
     await Promise.all(

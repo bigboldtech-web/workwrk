@@ -50,6 +50,7 @@ function dueChip(a: ApiAssignment): { label: string; tone: "danger" | "warn" | "
 export default function MySopsPage() {
   const [items, setItems] = useState<ApiAssignment[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [showAllDone, setShowAllDone] = useState(false);
   const { rowVersion } = useOsShell();
 
   const load = useCallback(async () => {
@@ -141,7 +142,16 @@ export default function MySopsPage() {
 
             {done.length > 0 && (
               <Section title="Completed" Icon={CheckCircle2} count={done.length} hue="var(--os-c-green)">
-                {done.slice(0, 10).map((a) => <SopRow key={a.id} a={a} />)}
+                {(showAllDone ? done : done.slice(0, 10)).map((a) => <SopRow key={a.id} a={a} />)}
+                {done.length > 10 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllDone((v) => !v)}
+                    className="mt-1.5 text-[12px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
+                  >
+                    {showAllDone ? "Show less" : `View all ${done.length}`}
+                  </button>
+                )}
               </Section>
             )}
           </>

@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   });
 
   const toEscalate = candidates.filter((t) => {
-    if (!t.slaHours) return false;
+    if (!t.slaHours || !t.date) return false;
     const deadline = new Date(t.date.getTime() + t.slaHours * HOUR);
     return deadline < now;
   });
@@ -153,7 +153,7 @@ export async function GET(_req: NextRequest) {
     take: 100,
   });
   const overdue = candidates.filter((t) => {
-    if (!t.slaHours) return false;
+    if (!t.slaHours || !t.date) return false;
     return new Date(t.date.getTime() + t.slaHours * HOUR) < now;
   });
   return Response.json({

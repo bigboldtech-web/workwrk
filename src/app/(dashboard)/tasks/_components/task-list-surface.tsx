@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type Re
 import {
   Activity,
   AlignLeft,
+  ArrowRightLeft,
   BarChart3,
   Bot,
   Box,
@@ -17,7 +18,12 @@ import {
   Circle,
   CircleDashed,
   Columns3,
+  Layers,
+  Download,
+  Trash2,
+  Info,
   ClipboardList,
+  Copy,
   DollarSign,
   FileImage,
   FileSpreadsheet,
@@ -43,7 +49,6 @@ import {
   Plus,
   Search,
   Settings,
-  SlidersHorizontal,
   Star,
   Table2,
   Tag,
@@ -83,6 +88,19 @@ type TaskCellMenu = "status" | "assignee" | "date" | "priority" | "tags" | "type
 type TaskSortKey = "none" | "name" | "dueDate" | "dateCreated" | "priority";
 type TaskSidePanel = "activity" | "related" | "links" | "fields" | "checklist" | null;
 
+// Rule-based filtering (Filters popover). Each rule targets one field with
+// an operator; rules combine with a single AND/OR connector.
+type FilterField = "status" | "priority" | "dueDate" | "tags" | "assignee" | "taskType" | "dateCreated";
+type FilterOperator = "is" | "isNot" | "contains" | "isSet" | "isNotSet" | "overdue";
+type FilterConnector = "AND" | "OR";
+interface FilterRule {
+  id: string;
+  field: FilterField;
+  operator: FilterOperator;
+  value: string;
+}
+type GroupDir = "asc" | "desc";
+
 interface ViewOptions {
   stackFields: boolean;
   showEmptyFields: boolean;
@@ -91,6 +109,10 @@ interface ViewOptions {
   privateView: boolean;
   protectView: boolean;
   defaultView: boolean;
+  showEmptyStatuses: boolean;
+  wrapText: boolean;
+  showTaskLocations: boolean;
+  showSubtaskParentNames: boolean;
 }
 
 interface ViewDef {
@@ -326,6 +348,73 @@ const SORT_OPTIONS: { key: TaskSortKey; label: string; Icon: LucideIcon }[] = [
   { key: "priority", label: "Priority", Icon: Flag },
 ];
 
+// Filter field catalog for the Filters rule-builder. `valueKind` drives
+// which value editor renders; `operators` limits the operator dropdown.
+const FILTER_FIELDS: {
+  key: FilterField;
+  label: string;
+  Icon: LucideIcon;
+  operators: FilterOperator[];
+  valueKind: "status" | "priority" | "text" | "none";
+}[] = [
+  { key: "status", label: "Status", Icon: CheckCircle2, operators: ["is", "isNot"], valueKind: "status" },
+  { key: "priority", label: "Priority", Icon: Flag, operators: ["is", "isNot"], valueKind: "priority" },
+  { key: "dueDate", label: "Due date", Icon: CalendarDays, operators: ["overdue", "isSet", "isNotSet"], valueKind: "none" },
+  { key: "tags", label: "Tags", Icon: Tag, operators: ["contains"], valueKind: "text" },
+  { key: "assignee", label: "Assignee", Icon: UserRound, operators: ["contains", "isSet", "isNotSet"], valueKind: "text" },
+  { key: "taskType", label: "Task Type", Icon: Box, operators: ["contains"], valueKind: "text" },
+  { key: "dateCreated", label: "Date created", Icon: CalendarDays, operators: ["contains"], valueKind: "text" },
+];
+
+const FILTER_OPERATOR_LABELS: Record<FilterOperator, string> = {
+  is: "is",
+  isNot: "is not",
+  contains: "contains",
+  isSet: "is set",
+  isNotSet: "is not set",
+  overdue: "is overdue",
+};
+
+/** Operators that don't need a value (the rule is complete without one). */
+const VALUELESS_OPERATORS: FilterOperator[] = ["isSet", "isNotSet", "overdue"];
+
+function filterFieldMeta(field: FilterField) {
+  return FILTER_FIELDS.find((f) => f.key === field) ?? FILTER_FIELDS[0];
+}
+
+/** Does a single rule match a task? Incomplete rules (need a value, none set) match everything. */
+function matchesFilterRule(task: TaskItem, rule: FilterRule): boolean {
+  const needsValue = !VALUELESS_OPERATORS.includes(rule.operator);
+  if (needsValue && !rule.value.trim()) return true; // ignore half-built rules
+  const v = rule.value.trim().toLowerCase();
+  switch (rule.field) {
+    case "status":
+      return rule.operator === "isNot" ? task.status !== rule.value : task.status === rule.value;
+    case "priority":
+      return rule.operator === "isNot" ? task.priority !== rule.value : task.priority === rule.value;
+    case "tags":
+      return task.tags.some((t) => t.toLowerCase().includes(v));
+    case "assignee":
+      if (rule.operator === "isSet") return Boolean(task.assignee);
+      if (rule.operator === "isNotSet") return !task.assignee;
+      return task.assignee.toLowerCase().includes(v);
+    case "taskType":
+      return task.taskType.toLowerCase().includes(v);
+    case "dateCreated":
+      return task.dateCreated.toLowerCase().includes(v);
+    case "dueDate": {
+      const hasDue = Boolean(task.dueDateISO || task.dueDate);
+      if (rule.operator === "isSet") return hasDue;
+      if (rule.operator === "isNotSet") return !hasDue;
+      // overdue
+      const due = task.dueDateISO ? new Date(task.dueDateISO) : null;
+      return Boolean(due) && due!.getTime() < Date.now() && task.status !== "complete";
+    }
+    default:
+      return true;
+  }
+}
+
 const DEFAULT_VIEW_OPTIONS: ViewOptions = {
   stackFields: false,
   showEmptyFields: true,
@@ -334,6 +423,10 @@ const DEFAULT_VIEW_OPTIONS: ViewOptions = {
   privateView: false,
   protectView: false,
   defaultView: false,
+  showEmptyStatuses: false,
+  wrapText: false,
+  showTaskLocations: false,
+  showSubtaskParentNames: false,
 };
 
 const STATUS_COLUMNS = [
@@ -377,8 +470,12 @@ export function TaskListSurface({
   const [taskQuery, setTaskQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [showClosed, setShowClosed] = useState(true);
-  const [assignedOnly, setAssignedOnly] = useState(initialAssignedOnly);
+  const [assignedOnly] = useState(initialAssignedOnly);
   const [sortKey, setSortKey] = useState<TaskSortKey>(initialSortKey);
+  const [filters, setFilters] = useState<FilterRule[]>([]);
+  const [filterConnector, setFilterConnector] = useState<FilterConnector>("AND");
+  const [groupDir, setGroupDir] = useState<GroupDir>("asc");
+  const [alsoGroupByList, setAlsoGroupByList] = useState(false);
   const [viewOptions, setViewOptions] = useState<ViewOptions>(DEFAULT_VIEW_OPTIONS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [assignees, setAssignees] = useState<AssigneeOption[]>([]);
@@ -492,19 +589,28 @@ export function TaskListSurface({
     const next = tasks.filter((task) => {
       if (!showClosed && task.status === "complete") return false;
       if (assignedOnly && !task.assignee) return false;
-      if (!query) return true;
-      return [
-        task.name,
-        task.assignee,
-        task.dueDate,
-        task.priority,
-        task.taskType,
-        task.tags.join(" "),
-      ].some((value) => value.toLowerCase().includes(query));
+      if (query) {
+        const matchesQuery = [
+          task.name,
+          task.assignee,
+          task.dueDate,
+          task.priority,
+          task.taskType,
+          task.tags.join(" "),
+        ].some((value) => value.toLowerCase().includes(query));
+        if (!matchesQuery) return false;
+      }
+      // Rule-based filters combine with the chosen AND/OR connector.
+      if (filters.length > 0) {
+        const results = filters.map((rule) => matchesFilterRule(task, rule));
+        const pass = filterConnector === "OR" ? results.some(Boolean) : results.every(Boolean);
+        if (!pass) return false;
+      }
+      return true;
     });
 
     return sortTasks(next, sortKey);
-  }, [assignedOnly, showClosed, sortKey, taskQuery, tasks]);
+  }, [assignedOnly, showClosed, sortKey, taskQuery, tasks, filters, filterConnector]);
 
   const displayTasks = useMemo(
     () => filteredTasks.filter((task) => !subtasksCollapsed || !task.parentId),
@@ -524,10 +630,22 @@ export function TaskListSurface({
       const label = getGroupLabel(task, groupBy);
       groups.set(label, [...(groups.get(label) ?? []), task]);
     });
-    return Array.from(groups.entries())
+    let result = Array.from(groups.entries())
       .filter(([, items]) => groupBy !== "dueDate" || items.length > 0)
       .map(([label, items]) => ({ label, items }));
-  }, [displayTasks, groupBy]);
+    // Group sort direction (the Group-by popover's Ascending/Descending).
+    if (groupDir === "desc") result = result.reverse();
+    // "Also group by List" — without a list/board field on tasks we can't
+    // build true nested sub-groups, so we cluster items by task type within
+    // each group as the closest available secondary key.
+    if (alsoGroupByList) {
+      result = result.map((g) => ({
+        ...g,
+        items: [...g.items].sort((a, b) => a.taskType.localeCompare(b.taskType)),
+      }));
+    }
+    return result;
+  }, [displayTasks, groupBy, groupDir, alsoGroupByList]);
 
   const ensureLabelIds = async (tagNames: string[]) => {
     const uniqueTags = Array.from(new Set(tagNames.map((tag) => tag.trim()).filter(Boolean)));
@@ -703,11 +821,6 @@ export function TaskListSurface({
     setViewMenuOpen(false);
   };
 
-  const renameView = (viewId: string, label: string) => {
-    const nextLabel = label.slice(0, 48) || "Untitled";
-    setViews((current) => current.map((view) => (view.id === viewId ? { ...view, label: nextLabel } : view)));
-  };
-
   const toggleViewPin = (viewId: string) => {
     setViews((current) => current.map((view) => (view.id === viewId ? { ...view, pinned: !view.pinned } : view)));
   };
@@ -815,6 +928,7 @@ export function TaskListSurface({
                 pinView={pinNewView}
                 onPrivateChange={setPrivateNewView}
                 onPinChange={setPinNewView}
+                onClose={() => setViewMenuOpen(false)}
               />
             ) : null}
           </div>
@@ -823,21 +937,39 @@ export function TaskListSurface({
         <div className="flex h-8 shrink-0 items-center justify-between border-b border-zinc-100 !px-4">
           <div className="flex items-center gap-1.5 text-zinc-500">
             <div className="relative">
-              <ToolbarIconButton
-                Icon={Columns3}
-                label={groupBy === "none" ? "Group: None" : `Group: ${getGroupName(groupBy)}`}
-                active={groupMenuOpen || groupBy !== "none"}
+              <button
+                type="button"
+                className={`inline-flex h-6 items-center gap-1.5 rounded-full !px-2.5 text-[11px] font-medium ${
+                  groupMenuOpen || groupBy !== "none"
+                    ? "border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] text-[var(--os-brand-rail)]"
+                    : "text-zinc-600 hover:bg-zinc-100"
+                }`}
                 onClick={() => setGroupMenuOpen((open) => !open)}
-              />
+              >
+                <Layers className="h-3 w-3" />
+                {groupBy === "none" ? "Group" : getGroupName(groupBy)}
+              </button>
               {groupMenuOpen ? (
-                <GroupMenu
-                  value={groupBy}
-                  onChange={(nextGroup) => {
-                    setGroupBy(nextGroup);
-                    setCollapsedGroups(new Set());
-                    setGroupMenuOpen(false);
-                  }}
-                />
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setGroupMenuOpen(false)} />
+                  <GroupMenu
+                    value={groupBy}
+                    direction={groupDir}
+                    alsoGroupByList={alsoGroupByList}
+                    onChange={(nextGroup) => {
+                      setGroupBy(nextGroup);
+                      setCollapsedGroups(new Set());
+                    }}
+                    onDirectionChange={setGroupDir}
+                    onAlsoGroupByListChange={setAlsoGroupByList}
+                    onClear={() => {
+                      setGroupBy("none");
+                      setCollapsedGroups(new Set());
+                      setGroupMenuOpen(false);
+                    }}
+                    onClose={() => setGroupMenuOpen(false)}
+                  />
+                </>
               ) : null}
             </div>
             <ToolbarIconButton
@@ -846,44 +978,23 @@ export function TaskListSurface({
               active={!subtasksCollapsed}
               onClick={() => setSubtasksCollapsed((collapsed) => !collapsed)}
             />
-            <ToolbarIconButton
-              Icon={Columns3}
-              label="Fields"
-              active={panel === "fields"}
-              onClick={() => {
-                setPanel(panel === "fields" ? null : "fields");
-                setFieldMode("existing");
-              }}
-            />
-            {groupBy !== "none" ? (
-              <button
-                type="button"
-                className="ml-1 inline-flex h-6 items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] !px-2 text-[11px] font-medium text-[var(--os-brand-rail)]"
-                onClick={() => setGroupMenuOpen(true)}
-              >
-                <Columns3 className="h-3 w-3" />
-                {getGroupName(groupBy)}
-              </button>
-            ) : null}
           </div>
 
           <div className="flex items-center gap-1.5 text-zinc-500">
             <div className="relative">
               <ToolbarIconButton
                 Icon={ListFilter}
-                label="Filter and sort"
-                active={filterMenuOpen || taskQuery !== "" || assignedOnly || !showClosed || sortKey !== "none"}
+                label="Filter"
+                active={filterMenuOpen || filters.length > 0}
                 onClick={() => setFilterMenuOpen((open) => !open)}
               />
               {filterMenuOpen ? (
                 <FilterMenu
-                  query={taskQuery}
-                  showClosed={showClosed}
-                  assignedOnly={assignedOnly}
+                  filters={filters}
+                  connector={filterConnector}
                   sortKey={sortKey}
-                  onQueryChange={setTaskQuery}
-                  onShowClosedChange={setShowClosed}
-                  onAssignedOnlyChange={setAssignedOnly}
+                  onFiltersChange={setFilters}
+                  onConnectorChange={setFilterConnector}
                   onSortChange={setSortKey}
                   onClose={() => setFilterMenuOpen(false)}
                 />
@@ -895,17 +1006,6 @@ export function TaskListSurface({
               active={showClosed}
               onClick={() => setShowClosed((shown) => !shown)}
             />
-            <ToolbarIconButton
-              Icon={Users}
-              label={assignedOnly ? "Show all tasks" : "Assigned tasks only"}
-              active={assignedOnly}
-              onClick={() => setAssignedOnly((onlyAssigned) => !onlyAssigned)}
-            />
-            <span className="flex -space-x-2">
-              <span className="h-6 w-6 rounded-full border-2 border-white bg-[var(--os-brand-rail)] text-[10px] font-semibold text-white inline-flex items-center justify-center">
-                I
-              </span>
-            </span>
             {searchOpen ? (
               <div className="flex h-6 items-center gap-1 rounded-md border border-zinc-200 bg-white !px-1.5">
                 <Search className="h-3.5 w-3.5 text-zinc-400" />
@@ -937,23 +1037,12 @@ export function TaskListSurface({
             ) : (
               <ToolbarIconButton Icon={Search} label="Search" active={taskQuery !== ""} onClick={() => setSearchOpen(true)} />
             )}
-            <span className="h-4 w-px bg-zinc-200" aria-hidden />
             <ToolbarIconButton
               Icon={Settings}
               label="Customize view"
-              framed
               active={panel === "customize"}
               onClick={() => setPanel(panel === "customize" ? null : "customize")}
             />
-            <button
-              type="button"
-              className="inline-flex h-[26px] items-center gap-1 rounded-md bg-[var(--os-brand-rail)] !px-2.5 text-[12px] font-medium text-white hover:opacity-95"
-              onClick={() => startDraftTask()}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Task
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
           </div>
         </div>
 
@@ -961,6 +1050,7 @@ export function TaskListSurface({
           {activeView.kind === "list" || activeView.kind === "table" ? (
             <ListMode
               tasks={displayTasks}
+              allTasks={filteredTasks}
               groupedTasks={groupedTasks}
               groupBy={groupBy}
               tableColumns={tableColumns}
@@ -972,6 +1062,7 @@ export function TaskListSurface({
               draftTask={draftTask}
               openDraftMenu={openDraftMenu}
               collapsedGroups={collapsedGroups}
+              subtasksCollapsed={subtasksCollapsed}
               onToggleGroup={toggleGroup}
               onStartTask={startDraftTask}
               onDraftChange={updateDraftTask}
@@ -983,10 +1074,13 @@ export function TaskListSurface({
               }}
               onTaskChange={updateTask}
               onOpenTask={(task) => setSelectedTaskId(task.id)}
-              onOpenFields={() => {
-                setPanel("fields");
-                setFieldMode("existing");
+              onToggleColumn={toggleColumn}
+              onHideColumns={() => {
+                setColumns((current) => current.map((column) => (
+                  column.key === "name" ? column : { ...column, visible: false }
+                )));
               }}
+              onCreateColumn={createColumn}
             />
           ) : activeView.kind === "board" ? (
             <BoardMode
@@ -1068,9 +1162,7 @@ export function TaskListSurface({
           groupBy={groupBy}
           subtasksCollapsed={subtasksCollapsed}
           shownCount={visibleColumns.length}
-          sortName={getSortName(sortKey)}
           options={viewOptions}
-          onRenameView={(label) => renameView(activeView.id, label)}
           onToggleOption={(key) => setViewOptions((current) => ({ ...current, [key]: !current[key] }))}
           onTogglePin={() => toggleViewPin(activeView.id)}
           onOpenFilter={() => setFilterMenuOpen(true)}
@@ -1080,6 +1172,24 @@ export function TaskListSurface({
           }}
           onOpenGroup={() => setGroupMenuOpen(true)}
           onToggleSubtasks={() => setSubtasksCollapsed((collapsed) => !collapsed)}
+          showClosed={showClosed}
+          onToggleClosed={() => setShowClosed((shown) => !shown)}
+          onExport={() => {
+            const header = ["Name", "Status", "Priority", "Due date", "Assignee"];
+            const rows = filteredTasks.map((t) => [
+              t.name, statusLabel(t.status), t.priority ?? "", t.dueDate ?? "", t.assignee ?? "",
+            ]);
+            const csv = [header, ...rows]
+              .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+              .join("\n");
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${activeView.label || "view"}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
           onClose={() => setPanel(null)}
         />
       ) : null}
@@ -1121,20 +1231,24 @@ function ViewCreatePanel({
   pinView,
   onPrivateChange,
   onPinChange,
+  onClose,
 }: {
   onCreate: (view: ViewDef) => void;
   privateView: boolean;
   pinView: boolean;
   onPrivateChange: (value: boolean) => void;
   onPinChange: (value: boolean) => void;
+  onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
   const filteredViews = filterViews(VIEW_CATALOG, query);
   const filteredEmbeds = filterViews(EMBED_VIEWS, query);
 
   return (
-    <div className="absolute left-0 top-8 z-[80] w-[360px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl">
-      <div className="border-b border-zinc-100 !p-2">
+    <>
+      <div className="fixed inset-0 z-[75]" onClick={onClose} aria-hidden />
+      <div className="absolute left-0 top-8 z-[80] w-[360px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl">
+        <div className="border-b border-zinc-100 !p-2">
         <div className="relative">
           <input
             type="text"
@@ -1177,7 +1291,8 @@ function ViewCreatePanel({
         <Checkbox checked={privateView} label="Private view" onChange={onPrivateChange} />
         <Checkbox checked={pinView} label="Pin view" onChange={onPinChange} />
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -1199,6 +1314,7 @@ function ViewCatalogItem({ view, onClick }: { view: ViewDef; onClick: () => void
 
 function ListMode({
   tasks,
+  allTasks,
   groupedTasks,
   groupBy,
   tableColumns,
@@ -1210,6 +1326,7 @@ function ListMode({
   draftTask,
   openDraftMenu,
   collapsedGroups,
+  subtasksCollapsed,
   onToggleGroup,
   onStartTask,
   onDraftChange,
@@ -1218,9 +1335,12 @@ function ListMode({
   onCancelDraft,
   onTaskChange,
   onOpenTask,
-  onOpenFields,
+  onToggleColumn,
+  onHideColumns,
+  onCreateColumn,
 }: {
   tasks: TaskItem[];
+  allTasks: TaskItem[];
   groupedTasks: { label: string; items: TaskItem[] }[];
   groupBy: GroupKey;
   tableColumns: ColumnDef[];
@@ -1232,6 +1352,7 @@ function ListMode({
   draftTask: DraftTask | null;
   openDraftMenu: TaskOptionMenu;
   collapsedGroups: Set<string>;
+  subtasksCollapsed: boolean;
   onToggleGroup: (label: string) => void;
   onStartTask: (status?: TaskItem["status"], parentId?: string) => void;
   onDraftChange: (patch: Partial<DraftTask>) => void;
@@ -1240,14 +1361,31 @@ function ListMode({
   onCancelDraft: () => void;
   onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
   onOpenTask: (task: TaskItem) => void;
-  onOpenFields: () => void;
+  onToggleColumn: (key: string) => void;
+  onHideColumns: () => void;
+  onCreateColumn: (label: string) => void;
 }) {
   const [openGroupMenu, setOpenGroupMenu] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
+  const [openColumnMenu, setOpenColumnMenu] = useState(false);
+  const [columnMenuMode, setColumnMenuMode] = useState<FieldMode>("create");
+  
   const rootTasks = tasks.filter((task) => !task.parentId);
   const parentIds = new Set(rootTasks.map((task) => task.id));
   const orphanSubtasks = tasks.filter((task) => task.parentId && !parentIds.has(task.parentId));
   const draftRendersUnderParent = Boolean(draftTask?.parentId && parentIds.has(draftTask.parentId));
+
+  const toggleTaskExpanded = (taskId: string) => {
+    setExpandedTaskIds((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+
+  const isTaskExpanded = (taskId: string) => !subtasksCollapsed || expandedTaskIds.has(taskId);
 
   const setTaskSelected = (taskId: string, selected: boolean) => {
     setSelectedTaskIds((current) => {
@@ -1303,21 +1441,35 @@ function ListMode({
         {tableColumns.map((column) => (
           <span key={column.key} className="truncate">{column.label}</span>
         ))}
-        <button
-          type="button"
-          className="inline-flex h-6 w-6 items-center justify-center justify-self-end rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
-          title="Add a Column"
-          aria-label="Add a Column"
-          onClick={onOpenFields}
-        >
-          <Plus className="h-4 w-4" />
-        </button>
+        <span className="relative flex items-center justify-end">
+          <button
+            type="button"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+            title="Add a Column"
+            aria-label="Add a Column"
+            onClick={() => setOpenColumnMenu(true)}
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          {openColumnMenu ? (
+            <ColumnMenuPopover
+              columns={tableColumns}
+              fieldMode={columnMenuMode}
+              onFieldModeChange={setColumnMenuMode}
+              onToggleColumn={onToggleColumn}
+              onHideColumns={onHideColumns}
+              onCreateColumn={onCreateColumn}
+              onClose={() => setOpenColumnMenu(false)}
+            />
+          ) : null}
+        </span>
       </div>
 
       {groupBy === "none" ? (
         <>
           {[...rootTasks, ...orphanSubtasks].map((task) => {
-            const childTasks = tasks.filter((candidate) => candidate.parentId === task.id);
+            const childTasks = allTasks.filter((candidate) => candidate.parentId === task.id);
+            const expanded = isTaskExpanded(task.id);
             return (
               <Fragment key={task.id}>
                 <TaskRow
@@ -1326,12 +1478,17 @@ function ListMode({
                   tableTemplate={tableTemplate}
                   assigneeOptions={assigneeOptions}
                   selected={selectedTaskIds.has(task.id)}
+                  expanded={expanded}
+                  onToggleExpand={() => toggleTaskExpanded(task.id)}
                   onSelectedChange={(selected) => setTaskSelected(task.id, selected)}
-                  onAddSubtask={() => onStartTask(task.status, task.id)}
+                  onAddSubtask={() => {
+                    if (!expanded) toggleTaskExpanded(task.id);
+                    onStartTask(task.status, task.id);
+                  }}
                   onTaskChange={onTaskChange}
                   onOpenTask={() => onOpenTask(task)}
                 />
-                {childTasks.map((childTask) => (
+                {expanded && childTasks.map((childTask) => (
                   <TaskRow
                     key={childTask.id}
                     task={childTask}
@@ -1339,13 +1496,15 @@ function ListMode({
                     tableTemplate={tableTemplate}
                     assigneeOptions={assigneeOptions}
                     selected={selectedTaskIds.has(childTask.id)}
+                    expanded={false}
+                    onToggleExpand={() => toggleTaskExpanded(childTask.id)}
                     onSelectedChange={(selected) => setTaskSelected(childTask.id, selected)}
                     onAddSubtask={() => onStartTask(childTask.status, childTask.id)}
                     onTaskChange={onTaskChange}
                     onOpenTask={() => onOpenTask(childTask)}
                   />
                 ))}
-                {draftTask?.parentId === task.id ? renderCreateRow(draftTask) : null}
+                {expanded && draftTask?.parentId === task.id ? renderCreateRow(draftTask) : null}
               </Fragment>
             );
           })}
@@ -1420,21 +1579,48 @@ function ListMode({
                       ))}
                       <span />
                     </div>
-                    {group.items.map((task) => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        tableColumns={tableColumns}
-                        tableTemplate={tableTemplate}
-                        assigneeOptions={assigneeOptions}
-                        selected={selectedTaskIds.has(task.id)}
-                        onSelectedChange={(selected) => setTaskSelected(task.id, selected)}
-                        onAddSubtask={() => onStartTask(task.status, task.id)}
-                        onTaskChange={onTaskChange}
-                        onOpenTask={() => onOpenTask(task)}
-                      />
-                    ))}
-                    {draftTask && shouldShowDraftInGroup(draftTask, groupBy, group.label) ? (
+                    {group.items.map((task) => {
+                      const childTasks = allTasks.filter((candidate) => candidate.parentId === task.id);
+                      const expanded = isTaskExpanded(task.id);
+                      return (
+                        <Fragment key={task.id}>
+                          <TaskRow
+                            task={task}
+                            tableColumns={tableColumns}
+                            tableTemplate={tableTemplate}
+                            assigneeOptions={assigneeOptions}
+                            selected={selectedTaskIds.has(task.id)}
+                            expanded={expanded}
+                            onToggleExpand={() => toggleTaskExpanded(task.id)}
+                            onSelectedChange={(selected) => setTaskSelected(task.id, selected)}
+                            onAddSubtask={() => {
+                              if (!expanded) toggleTaskExpanded(task.id);
+                              onStartTask(task.status, task.id);
+                            }}
+                            onTaskChange={onTaskChange}
+                            onOpenTask={() => onOpenTask(task)}
+                          />
+                          {expanded && childTasks.map((childTask) => (
+                            <TaskRow
+                              key={childTask.id}
+                              task={childTask}
+                              tableColumns={tableColumns}
+                              tableTemplate={tableTemplate}
+                              assigneeOptions={assigneeOptions}
+                              selected={selectedTaskIds.has(childTask.id)}
+                              expanded={false}
+                              onToggleExpand={() => toggleTaskExpanded(childTask.id)}
+                              onSelectedChange={(selected) => setTaskSelected(childTask.id, selected)}
+                              onAddSubtask={() => onStartTask(childTask.status, childTask.id)}
+                              onTaskChange={onTaskChange}
+                              onOpenTask={() => onOpenTask(childTask)}
+                            />
+                          ))}
+                          {expanded && draftTask?.parentId === task.id ? renderCreateRow(draftTask) : null}
+                        </Fragment>
+                      );
+                    })}
+                    {draftTask && !draftTask.parentId && shouldShowDraftInGroup(draftTask, groupBy, group.label) ? (
                       <CreateTaskRow
                         draftTask={draftTask}
                         openMenu={openDraftMenu}
@@ -1473,6 +1659,9 @@ function ListMode({
           ) : null}
         </div>
       )}
+      {selectedTaskIds.size > 0 ? (
+        <MultiSelectActionBar count={selectedTaskIds.size} onClear={() => setSelectedTaskIds(new Set())} />
+      ) : null}
     </div>
   );
 }
@@ -1575,6 +1764,7 @@ function CreateTaskRow({
                 onDraftChange({ taskType });
                 onOpenMenuChange(null);
               }}
+              onClose={() => onOpenMenuChange(null)}
             />
           ) : null}
           {openMenu === "assignee" ? (
@@ -1584,6 +1774,7 @@ function CreateTaskRow({
                 onDraftChange({ assignee: assignee.name, assigneeId: assignee.id });
                 onOpenMenuChange(null);
               }}
+              onClose={() => onOpenMenuChange(null)}
             />
           ) : null}
           {openMenu === "date" ? (
@@ -1592,6 +1783,7 @@ function CreateTaskRow({
                 onDraftChange({ dueDate, dueDateISO });
                 onOpenMenuChange(null);
               }}
+              onClose={() => onOpenMenuChange(null)}
             />
           ) : null}
           {openMenu === "priority" ? (
@@ -1600,6 +1792,7 @@ function CreateTaskRow({
                 onDraftChange({ priority });
                 onOpenMenuChange(null);
               }}
+              onClose={() => onOpenMenuChange(null)}
             />
           ) : null}
           {openMenu === "tags" ? (
@@ -1613,6 +1806,7 @@ function CreateTaskRow({
                 setTagQuery("");
                 onOpenMenuChange(null);
               }}
+              onClose={() => onOpenMenuChange(null)}
             />
           ) : null}
         </div>
@@ -1627,6 +1821,8 @@ function TaskRow({
   tableTemplate,
   assigneeOptions,
   selected,
+  expanded,
+  onToggleExpand,
   onSelectedChange,
   onAddSubtask,
   onTaskChange,
@@ -1637,6 +1833,8 @@ function TaskRow({
   tableTemplate: string;
   assigneeOptions: AssigneeOption[];
   selected: boolean;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
   onSelectedChange: (selected: boolean) => void;
   onAddSubtask: () => void;
   onTaskChange: (taskId: string, patch: Partial<TaskItem>) => void | Promise<void>;
@@ -1693,7 +1891,17 @@ function TaskRow({
         >
           {selected ? <Check className="h-3 w-3" /> : null}
         </button>
-        {!task.parentId && task.subtaskCount > 0 ? <ChevronRight className="h-3.5 w-3.5 text-zinc-400" /> : null}
+        {!task.parentId && task.subtaskCount > 0 ? (
+          <button 
+            type="button" 
+            className={`inline-flex h-4 w-4 items-center justify-center rounded-sm hover:bg-zinc-200 transition-transform ${expanded ? "rotate-90" : ""}`}
+            onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
+          >
+            <ChevronRight className="h-3.5 w-3.5 text-zinc-400" />
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
         <button
           type="button"
           className={`h-3.5 w-3.5 shrink-0 rounded-full ${
@@ -1722,13 +1930,15 @@ function TaskRow({
             autoFocus
           />
         ) : (
-          <button
-            type="button"
-            className="truncate text-left font-medium text-zinc-900"
-            onClick={onOpenTask}
+          <span 
+            className="truncate text-left font-medium text-zinc-900 cursor-text hover:bg-zinc-100 rounded-sm px-1 -ml-1 transition-colors"
+            onClick={() => {
+              setDraftName(task.name);
+              setEditing(true);
+            }}
           >
             {task.name}
-          </button>
+          </span>
         )}
         {task.subtaskCount > 0 ? (
           <span className="inline-flex items-center gap-1 text-zinc-400">
@@ -1737,14 +1947,19 @@ function TaskRow({
           </span>
         ) : null}
         {task.attachments > 0 ? (
-          <span className="inline-flex items-center gap-1 text-zinc-400">
-            <Paperclip className="h-3.5 w-3.5" />
-            {task.attachments}
+          <span className="inline-flex items-center gap-1 text-zinc-400 px-1 rounded-sm bg-zinc-100" title="Attachments">
+            <Paperclip className="h-3 w-3" />
+            <span className="h-3 w-3 rounded-sm bg-zinc-300 inline-block overflow-hidden relative">
+              <FileImage className="h-4 w-4 text-zinc-500 absolute -top-0.5 -left-0.5 opacity-50" />
+            </span>
           </span>
         ) : null}
         {!task.parentId ? (
           <span className="ml-2 hidden items-center gap-1 group-hover:inline-flex">
+            <RowHoverButton Icon={MoreHorizontal} label="Open task" onClick={onOpenTask} />
             <RowHoverButton Icon={Plus} label="Add subtask" onClick={onAddSubtask} />
+            <RowHoverButton Icon={FileText} label="Notes" onClick={onOpenTask} />
+            <RowHoverButton Icon={MessageSquare} label="Comments" onClick={onOpenTask} />
             <span className="relative">
               <RowHoverButton Icon={Tag} label="Edit tags" onClick={() => setTagMenuOpen((open) => !open)} />
               {tagMenuOpen ? (
@@ -1754,19 +1969,16 @@ function TaskRow({
                   onQueryChange={setTagQuery}
                   onCreate={addTag}
                   onRemove={(tag) => void onTaskChange(task.id, { tags: task.tags.filter((item) => item !== tag) })}
+                  onClose={() => setTagMenuOpen(false)}
                 />
               ) : null}
             </span>
-            <RowHoverButton
-              Icon={Pencil}
-              label="Rename"
-              onClick={() => {
-                setDraftName(task.name);
-                setEditing(true);
-              }}
-            />
           </span>
-        ) : null}
+        ) : (
+          <span className="ml-2 hidden items-center gap-1 group-hover:inline-flex">
+            <RowHoverButton Icon={MoreHorizontal} label="Open task" onClick={onOpenTask} />
+          </span>
+        )}
       </span>
       {tableColumns.map((column) => (
         <TaskFieldCell
@@ -1876,6 +2088,7 @@ function TaskFieldCell({
                 void onTaskChange(task.id, { status });
                 setOpenMenu(null);
               }}
+              onClose={() => setOpenMenu(null)}
             />
           ) : null}
         </span>
@@ -1899,6 +2112,7 @@ function TaskFieldCell({
                 void onTaskChange(task.id, { assignee: assignee.name, assigneeId: assignee.id });
                 setOpenMenu(null);
               }}
+              onClose={() => setOpenMenu(null)}
             />
           ) : null}
         </span>
@@ -1920,6 +2134,7 @@ function TaskFieldCell({
                 void onTaskChange(task.id, { dueDate, dueDateISO });
                 setOpenMenu(null);
               }}
+              onClose={() => setOpenMenu(null)}
             />
           ) : null}
         </span>
@@ -1947,6 +2162,7 @@ function TaskFieldCell({
                 void onTaskChange(task.id, { priority });
                 setOpenMenu(null);
               }}
+              onClose={() => setOpenMenu(null)}
             />
           ) : null}
         </span>
@@ -1969,6 +2185,7 @@ function TaskFieldCell({
               onQueryChange={setTagQuery}
               onCreate={addTag}
               onRemove={(tag) => void onTaskChange(task.id, { tags: task.tags.filter((item) => item !== tag) })}
+              onClose={() => setOpenMenu(null)}
             />
           ) : null}
         </span>
@@ -1991,6 +2208,7 @@ function TaskFieldCell({
                 void onTaskChange(task.id, { taskType });
                 setOpenMenu(null);
               }}
+              onClose={() => setOpenMenu(null)}
             />
           ) : null}
         </span>
@@ -2072,31 +2290,36 @@ function RowHoverButton({
   );
 }
 
-function StatusMenu({ onSelect }: { onSelect: (value: TaskItem["status"]) => void }) {
+function StatusMenu({ onSelect, onClose }: { onSelect: (value: TaskItem["status"]) => void; onClose: () => void }) {
   return (
-    <DropdownPanel className="left-0 top-7 w-[170px] overflow-hidden !p-1.5">
-      <PanelLabel>Status</PanelLabel>
-      {STATUS_COLUMNS.map((status) => (
-        <button
-          key={status.key}
-          type="button"
-          className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
-          onClick={() => onSelect(status.key)}
-        >
-          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
-          {status.label}
-        </button>
-      ))}
-    </DropdownPanel>
+    <>
+      <div className="fixed inset-0 z-[84]" onClick={onClose} aria-hidden />
+      <DropdownPanel className="left-0 top-7 w-[170px] overflow-hidden !p-1.5">
+        <PanelLabel>Status</PanelLabel>
+        {STATUS_COLUMNS.map((status) => (
+          <button
+            key={status.key}
+            type="button"
+            className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+            onClick={() => onSelect(status.key)}
+          >
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
+            {status.label}
+          </button>
+        ))}
+      </DropdownPanel>
+    </>
   );
 }
 
 function TaskTypeMenu({
   value,
   onSelect,
+  onClose,
 }: {
   value: string;
   onSelect: (value: string) => void;
+  onClose: () => void;
 }) {
   const options = [
     { label: "Task", Icon: Circle },
@@ -2106,34 +2329,39 @@ function TaskTypeMenu({
   ];
 
   return (
-    <DropdownPanel className="left-0 top-7 w-[230px] !p-1.5">
-      <PanelLabel>Create</PanelLabel>
-      <div className="space-y-1">
-        {options.map((option) => (
-          <button
-            key={option.label}
-            type="button"
-            className={`flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] ${
-              value === option.label ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
-            }`}
-            onClick={() => onSelect(option.label)}
-          >
-            <option.Icon className="h-3.5 w-3.5 text-zinc-500" />
-            <span className="flex-1">{option.label}</span>
-            {value === option.label ? <Check className="h-4 w-4 text-[var(--os-brand-rail)]" /> : null}
-          </button>
-        ))}
-      </div>
-    </DropdownPanel>
+    <>
+      <div className="fixed inset-0 z-[84]" onClick={onClose} aria-hidden />
+      <DropdownPanel className="left-0 top-7 w-[230px] !p-1.5">
+        <PanelLabel>Create</PanelLabel>
+        <div className="space-y-1">
+          {options.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              className={`flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] ${
+                value === option.label ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+              }`}
+              onClick={() => onSelect(option.label)}
+            >
+              <option.Icon className="h-3.5 w-3.5 text-zinc-500" />
+              <span className="flex-1">{option.label}</span>
+              {value === option.label ? <Check className="h-4 w-4 text-[var(--os-brand-rail)]" /> : null}
+            </button>
+          ))}
+        </div>
+      </DropdownPanel>
+    </>
   );
 }
 
 function AssigneeMenu({
   options,
   onSelect,
+  onClose,
 }: {
   options: AssigneeOption[];
   onSelect: (value: AssigneeOption) => void;
+  onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
@@ -2144,68 +2372,71 @@ function AssigneeMenu({
   ));
 
   return (
-    <DropdownPanel className="left-0 top-7 w-[320px] overflow-hidden">
-      <div className="flex h-9 items-center gap-2 border-b border-zinc-100 !px-2.5">
-        <Search className="h-4 w-4 text-zinc-500" />
-        <input
-          type="text"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search or enter email..."
-          className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-500"
-          autoFocus
-        />
-      </div>
-      <div className="!p-2.5">
-        <PanelLabel>People</PanelLabel>
-        <div className="max-h-44 overflow-y-auto">
-          {filteredOptions.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className="mb-1 flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-100"
-              onClick={() => onSelect(option)}
-            >
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--os-brand-rail)] text-[10px] font-semibold text-white">
-                {option.initials}
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate">{option.name}</span>
-                {option.email ? <span className="block truncate text-[10px] text-zinc-400">{option.email}</span> : null}
-              </span>
-            </button>
-          ))}
-          {filteredOptions.length === 0 ? (
-            <div className="rounded-md bg-zinc-50 !px-2 py-2 text-[12px] text-zinc-500">
-              No workspace people found.
-            </div>
-          ) : null}
+    <>
+      <div className="fixed inset-0 z-[84]" onClick={onClose} aria-hidden />
+      <DropdownPanel className="left-0 top-7 w-[320px] overflow-hidden">
+        <div className="flex h-9 items-center gap-2 border-b border-zinc-100 !px-2.5">
+          <Search className="h-4 w-4 text-zinc-500" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search or enter email..."
+            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-500"
+            autoFocus
+          />
         </div>
-        <PanelLabel>Agents</PanelLabel>
-        <button
-          type="button"
-          className="flex h-8 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-400"
-          disabled
-        >
-          <span className="h-6 w-6 rounded-full bg-gradient-to-br from-orange-200 to-pink-300" />
-          Project Kickoff Scope Manager
-        </button>
-        <button
-          type="button"
-          className="flex h-7 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] font-medium text-zinc-400"
-          disabled
-        >
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--os-brand-rail)_12%,white)] text-[var(--os-brand-rail)]">
-            <Plus className="h-3.5 w-3.5" />
-          </span>
-          Create Agent
-        </button>
-      </div>
-    </DropdownPanel>
+        <div className="!p-2.5">
+          <PanelLabel>People</PanelLabel>
+          <div className="max-h-44 overflow-y-auto">
+            {filteredOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className="mb-1 flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-100"
+                onClick={() => onSelect(option)}
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--os-brand-rail)] text-[10px] font-semibold text-white">
+                  {option.initials}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate">{option.name}</span>
+                  {option.email ? <span className="block truncate text-[10px] text-zinc-400">{option.email}</span> : null}
+                </span>
+              </button>
+            ))}
+            {filteredOptions.length === 0 ? (
+              <div className="rounded-md bg-zinc-50 !px-2 py-2 text-[12px] text-zinc-500">
+                No workspace people found.
+              </div>
+            ) : null}
+          </div>
+          <PanelLabel>Agents</PanelLabel>
+          <button
+            type="button"
+            className="flex h-8 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-400"
+            disabled
+          >
+            <span className="h-6 w-6 rounded-full bg-gradient-to-br from-orange-200 to-pink-300" />
+            Project Kickoff Scope Manager
+          </button>
+          <button
+            type="button"
+            className="flex h-7 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] font-medium text-zinc-400"
+            disabled
+          >
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--os-brand-rail)_12%,white)] text-[var(--os-brand-rail)]">
+              <Plus className="h-3.5 w-3.5" />
+            </span>
+            Create Agent
+          </button>
+        </div>
+      </DropdownPanel>
+    </>
   );
 }
 
-function DateMenu({ onSelect }: { onSelect: (label: string, isoDate: string) => void }) {
+function DateMenu({ onSelect, onClose }: { onSelect: (label: string, isoDate: string) => void; onClose: () => void }) {
   const today = new Date();
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   const calendarStart = addDays(monthStart, -monthStart.getDay());
@@ -2224,80 +2455,83 @@ function DateMenu({ onSelect }: { onSelect: (label: string, isoDate: string) => 
   ];
 
   return (
-    <DropdownPanel className="right-0 top-7 w-[500px] max-w-[calc(100vw-420px)] overflow-hidden">
-      <div className="grid grid-cols-2 border-b border-zinc-100 !p-1.5">
-        <button type="button" className="flex h-7 items-center gap-2 rounded-md bg-zinc-100 !px-2.5 text-[12px] text-zinc-500">
-          <CalendarDays className="h-3.5 w-3.5" />
-          Start date
-        </button>
-        <button type="button" className="ml-1.5 flex h-7 items-center gap-2 rounded-md border border-[var(--os-brand-rail)] bg-white !px-2.5 text-[12px] text-zinc-700">
-          <CalendarDays className="h-3.5 w-3.5 text-[var(--os-brand-rail)]" />
-          Due date
-        </button>
-      </div>
-      <div className="grid grid-cols-[1fr_1.1fr]">
-        <div className="border-r border-zinc-100 py-1.5">
-          {quick.map((option) => (
-            <button
-              key={option.label}
-              type="button"
-              className="flex h-7 w-full items-center justify-between !px-3 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
-              onClick={() => onSelect(option.label, formatDateInput(option.date))}
-            >
-              <span>{option.label}</span>
-              <span className="text-zinc-400">{option.hint}</span>
-            </button>
-          ))}
-          <button type="button" className="mt-1.5 flex h-8 w-full items-center justify-between border-t border-zinc-100 !px-3 text-[12px] text-zinc-800">
-            Set Recurring
-            <ChevronRight className="h-4 w-4 text-zinc-500" />
+    <>
+      <div className="fixed inset-0 z-[84]" onClick={onClose} aria-hidden />
+      <DropdownPanel className="right-0 top-7 w-[500px] max-w-[calc(100vw-420px)] overflow-hidden">
+        <div className="grid grid-cols-2 border-b border-zinc-100 !p-1.5">
+          <button type="button" className="flex h-7 items-center gap-2 rounded-md bg-zinc-100 !px-2.5 text-[12px] text-zinc-500">
+            <CalendarDays className="h-3.5 w-3.5" />
+            Start date
+          </button>
+          <button type="button" className="ml-1.5 flex h-7 items-center gap-2 rounded-md border border-[var(--os-brand-rail)] bg-white !px-2.5 text-[12px] text-zinc-700">
+            <CalendarDays className="h-3.5 w-3.5 text-[var(--os-brand-rail)]" />
+            Due date
           </button>
         </div>
-        <div className="!p-3">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-[13px] font-medium text-zinc-900">{monthLabel}</span>
-            <span className="inline-flex items-center gap-3 text-[12px] text-zinc-600">
-              Today
-              <ChevronDown className="h-4 w-4 rotate-180" />
-              <ChevronDown className="h-4 w-4" />
-            </span>
-          </div>
-          <div className="grid grid-cols-7 gap-y-1.5 text-center text-[12px]">
-            {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
-              <span key={day} className="text-zinc-400">{day}</span>
+        <div className="grid grid-cols-[1fr_1.1fr]">
+          <div className="border-r border-zinc-100 py-1.5">
+            {quick.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                className="flex h-7 w-full items-center justify-between !px-3 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+                onClick={() => onSelect(option.label, formatDateInput(option.date))}
+              >
+                <span>{option.label}</span>
+                <span className="text-zinc-400">{option.hint}</span>
+              </button>
             ))}
-            {calendarDays.map((calendarDate) => {
-              const isToday = formatDateInput(calendarDate) === formatDateInput(today);
-              const isOutsideMonth = calendarDate.getMonth() !== today.getMonth();
-              return (
-                <button
-                  key={formatDateInput(calendarDate)}
-                  type="button"
-                  className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full ${
-                    isToday ? "bg-red-500 text-white" : isOutsideMonth ? "text-zinc-300" : "text-zinc-900 hover:bg-zinc-100"
-                  }`}
-                  onClick={() => onSelect(formatCalendarLabel(calendarDate), formatDateInput(calendarDate))}
-                >
-                  {calendarDate.getDate()}
-                </button>
-              );
-            })}
+            <button type="button" className="mt-1.5 flex h-8 w-full items-center justify-between border-t border-zinc-100 !px-3 text-[12px] text-zinc-800">
+              Set Recurring
+              <ChevronRight className="h-4 w-4 text-zinc-500" />
+            </button>
+          </div>
+          <div className="!p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-[13px] font-medium text-zinc-900">{monthLabel}</span>
+              <span className="inline-flex items-center gap-3 text-[12px] text-zinc-600">
+                Today
+                <ChevronDown className="h-4 w-4 rotate-180" />
+                <ChevronDown className="h-4 w-4" />
+              </span>
+            </div>
+            <div className="grid grid-cols-7 gap-y-1.5 text-center text-[12px]">
+              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
+                <span key={day} className="text-zinc-400">{day}</span>
+              ))}
+              {calendarDays.map((calendarDate) => {
+                const isToday = formatDateInput(calendarDate) === formatDateInput(today);
+                const isOutsideMonth = calendarDate.getMonth() !== today.getMonth();
+                return (
+                  <button
+                    key={formatDateInput(calendarDate)}
+                    type="button"
+                    className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full ${
+                      isToday ? "bg-red-500 text-white" : isOutsideMonth ? "text-zinc-300" : "text-zinc-900 hover:bg-zinc-100"
+                    }`}
+                    onClick={() => onSelect(formatCalendarLabel(calendarDate), formatDateInput(calendarDate))}
+                  >
+                    {calendarDate.getDate()}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
-      <div className="flex items-center gap-2.5 border-t border-zinc-100 bg-zinc-50 !px-3 py-2">
-        <span className="text-xl">🏖️</span>
-        <div>
-          <p className="text-[12px] font-semibold text-zinc-900">Set up your work schedule</p>
-          <p className="text-[11px] text-zinc-500">Set working days/hours and holidays for your workspace.</p>
+        <div className="flex items-center gap-2.5 border-t border-zinc-100 bg-zinc-50 !px-3 py-2">
+          <span className="text-xl">🏖️</span>
+          <div>
+            <p className="text-[12px] font-semibold text-zinc-900">Set up your work schedule</p>
+            <p className="text-[11px] text-zinc-500">Set working days/hours and holidays for your workspace.</p>
+          </div>
+          <X className="ml-auto h-5 w-5 text-zinc-400" />
         </div>
-        <X className="ml-auto h-5 w-5 text-zinc-400" />
-      </div>
-    </DropdownPanel>
+      </DropdownPanel>
+    </>
   );
 }
 
-function PriorityMenu({ onSelect }: { onSelect: (value: TaskPriority) => void }) {
+function PriorityMenu({ onSelect, onClose }: { onSelect: (value: TaskPriority) => void; onClose: () => void }) {
   const options: { label: TaskPriority; color: string }[] = [
     { label: "Urgent", color: "#DC2626" },
     { label: "High", color: "#F59E0B" },
@@ -2305,30 +2539,33 @@ function PriorityMenu({ onSelect }: { onSelect: (value: TaskPriority) => void })
     { label: "Low", color: "#A1A1AA" },
   ];
   return (
-    <DropdownPanel className="right-0 top-7 w-[200px] overflow-hidden">
-      <div className="!p-2">
-        <PanelLabel>Priority</PanelLabel>
-        {options.map((option) => (
-          <button
-            key={option.label}
-            type="button"
-            className="flex h-7 w-full items-center gap-2.5 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
-            onClick={() => onSelect(option.label)}
-          >
-            <Flag className="h-4 w-4 fill-current" style={{ color: option.color }} />
-            {option.label}
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        className="flex h-8 w-full items-center gap-2.5 border-t border-zinc-100 !px-4 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
-        onClick={() => onSelect("")}
-      >
-        <CircleDashed className="h-4 w-4 text-zinc-500" />
-        Clear
-      </button>
-    </DropdownPanel>
+    <>
+      <div className="fixed inset-0 z-[84]" onClick={onClose} aria-hidden />
+      <DropdownPanel className="right-0 top-7 w-[200px] overflow-hidden">
+        <div className="!p-2">
+          <PanelLabel>Priority</PanelLabel>
+          {options.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              className="flex h-7 w-full items-center gap-2.5 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+              onClick={() => onSelect(option.label)}
+            >
+              <Flag className="h-4 w-4 fill-current" style={{ color: option.color }} />
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="flex h-8 w-full items-center gap-2.5 border-t border-zinc-100 !px-4 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+          onClick={() => onSelect("")}
+        >
+          <CircleDashed className="h-4 w-4 text-zinc-500" />
+          Clear
+        </button>
+      </DropdownPanel>
+    </>
   );
 }
 
@@ -2336,13 +2573,17 @@ function TagsMenu({
   query,
   onQueryChange,
   onCreate,
+  onClose,
 }: {
   query: string;
   onQueryChange: (value: string) => void;
   onCreate: () => void;
+  onClose: () => void;
 }) {
   return (
-    <DropdownPanel className="right-0 top-7 w-[300px] overflow-hidden">
+    <>
+      <div className="fixed inset-0 z-[84]" onClick={onClose} aria-hidden />
+      <DropdownPanel className="right-0 top-7 w-[300px] overflow-hidden">
       <input
         value={query}
         onChange={(event) => onQueryChange(event.target.value)}
@@ -2368,6 +2609,7 @@ function TagsMenu({
         </button>
       </div>
     </DropdownPanel>
+    </>
   );
 }
 
@@ -2600,6 +2842,7 @@ function BoardTaskCard({
                 onMove(status);
                 setQuickMenu(null);
               }}
+              onClose={() => setQuickMenu(null)}
             />
           ) : null}
         </span>
@@ -2615,6 +2858,7 @@ function BoardTaskCard({
                 void onTaskChange({ dueDate, dueDateISO });
                 setQuickMenu(null);
               }}
+              onClose={() => setQuickMenu(null)}
             />
           ) : null}
         </span>
@@ -2630,6 +2874,7 @@ function BoardTaskCard({
                 void onTaskChange({ priority });
                 setQuickMenu(null);
               }}
+              onClose={() => setQuickMenu(null)}
             />
           ) : null}
         </span>
@@ -2676,7 +2921,7 @@ function CardActionButton({
       }`}
       onClick={(event) => {
         event.stopPropagation();
-        onClick();
+        onClick?.();
       }}
     >
       <Icon className={`h-3.5 w-3.5 ${rotate ? "rotate-180" : ""}`} />
@@ -2977,6 +3222,7 @@ function FormMode({
                     setAssigneeId(value.id);
                     setOpenMenu(null);
                   }}
+                  onClose={() => setOpenMenu(null)}
                 />
               ) : null}
             </div>
@@ -2999,6 +3245,7 @@ function FormMode({
                     setDueDateISO(isoDate);
                     setOpenMenu(null);
                   }}
+                  onClose={() => setOpenMenu(null)}
                 />
               ) : null}
             </div>
@@ -3020,6 +3267,7 @@ function FormMode({
                     setPriority(value);
                     setOpenMenu(null);
                   }}
+                  onClose={() => setOpenMenu(null)}
                 />
               ) : null}
             </div>
@@ -3042,6 +3290,7 @@ function FormMode({
                     setTaskType(value);
                     setOpenMenu(null);
                   }}
+                  onClose={() => setOpenMenu(null)}
                 />
               ) : null}
             </div>
@@ -3150,7 +3399,7 @@ function TaskDetailModal({
   const addTag = () => {
     const nextTag = tagQuery.trim();
     if (!nextTag) return;
-    const existing = new Set(task.tags.map((tag) => tag.toLowerCase()));
+    const existing = new Set(task.tags.map((t) => t.toLowerCase()));
     if (!existing.has(nextTag.toLowerCase())) {
       void onTaskChange(task.id, { tags: [...task.tags, nextTag] });
     }
@@ -3174,7 +3423,7 @@ function TaskDetailModal({
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-10 shrink-0 items-center justify-between border-b border-zinc-200 !px-3 text-[12px] text-zinc-500">
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate">My Tasks</span>
+              <span className="truncate">My Wrk</span>
               <span>/</span>
               <span className="truncate font-medium text-zinc-900">{task.name}</span>
             </div>
@@ -3206,6 +3455,7 @@ function TaskDetailModal({
                       setTypeOpen(false);
                       void onTaskChange(task.id, { taskType });
                     }}
+                    onClose={() => setTypeOpen(false)}
                   />
                 ) : null}
               </span>
@@ -3238,22 +3488,25 @@ function TaskDetailModal({
                     <Check className="h-3.5 w-3.5" />
                   </button>
                   {statusOpen ? (
-                    <div className="absolute left-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
-                      {STATUS_COLUMNS.map((status) => (
-                        <button
-                          key={status.key}
-                          type="button"
-                          className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
-                          onClick={() => {
-                            setStatusOpen(false);
-                            void onTaskChange(task.id, { status: status.key });
-                          }}
-                        >
-                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
-                          {status.label}
-                        </button>
-                      ))}
-                    </div>
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setStatusOpen(false)} aria-hidden />
+                      <div className="absolute left-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
+                        {STATUS_COLUMNS.map((status) => (
+                          <button
+                            key={status.key}
+                            type="button"
+                            className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                            onClick={() => {
+                              setStatusOpen(false);
+                              void onTaskChange(task.id, { status: status.key });
+                            }}
+                          >
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
+                            {status.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   ) : null}
                 </div>
               </TaskDetailField>
@@ -3275,6 +3528,7 @@ function TaskDetailModal({
                         setAssigneeOpen(false);
                         void onTaskChange(task.id, { assignee: assignee.name, assigneeId: assignee.id });
                       }}
+                      onClose={() => setAssigneeOpen(false)}
                     />
                   ) : null}
                 </div>
@@ -3296,6 +3550,7 @@ function TaskDetailModal({
                         setDateOpen(false);
                         void onTaskChange(task.id, { dueDate, dueDateISO });
                       }}
+                      onClose={() => setDateOpen(false)}
                     />
                   ) : null}
                 </div>
@@ -3313,22 +3568,25 @@ function TaskDetailModal({
                     <ChevronDown className="h-3 w-3 text-zinc-400" />
                   </button>
                   {priorityOpen ? (
-                    <div className="absolute left-0 top-full z-20 mt-1 w-36 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
-                      {(["Urgent", "High", "Normal", "Low", ""] as TaskPriority[]).map((priority) => (
-                        <button
-                          key={priority || "clear"}
-                          type="button"
-                          className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
-                          onClick={() => {
-                            setPriorityOpen(false);
-                            void onTaskChange(task.id, { priority });
-                          }}
-                        >
-                          {priority ? <Flag className={`h-3.5 w-3.5 ${priorityColorClass(priority)}`} /> : <CircleDashed className="h-3.5 w-3.5 text-zinc-400" />}
-                          {priority || "Clear"}
-                        </button>
-                      ))}
-                    </div>
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setPriorityOpen(false)} aria-hidden />
+                      <div className="absolute left-0 top-full z-20 mt-1 w-36 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
+                        {(["Urgent", "High", "Normal", "Low", ""] as TaskPriority[]).map((priority) => (
+                          <button
+                            key={priority || "clear"}
+                            type="button"
+                            className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                            onClick={() => {
+                              setPriorityOpen(false);
+                              void onTaskChange(task.id, { priority });
+                            }}
+                          >
+                            {priority ? <Flag className={`h-3.5 w-3.5 ${priorityColorClass(priority)}`} /> : <CircleDashed className="h-3.5 w-3.5 text-zinc-400" />}
+                            {priority || "Clear"}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   ) : null}
                 </div>
               </TaskDetailField>
@@ -3360,6 +3618,7 @@ function TaskDetailModal({
                       onQueryChange={setTagQuery}
                       onCreate={addTag}
                       onRemove={(tag) => void onTaskChange(task.id, { tags: task.tags.filter((item) => item !== tag) })}
+                      onClose={() => setTagsOpen(false)}
                     />
                   ) : null}
                 </div>
@@ -4071,105 +4330,272 @@ function FieldsPanel({
   );
 }
 
+function ColumnMenuPopover({
+  columns,
+  fieldMode,
+  onFieldModeChange,
+  onToggleColumn,
+  onHideColumns,
+  onCreateColumn,
+  onClose,
+}: {
+  columns: ColumnDef[];
+  fieldMode: FieldMode;
+  onFieldModeChange: (mode: FieldMode) => void;
+  onToggleColumn: (key: string) => void;
+  onHideColumns: () => void;
+  onCreateColumn: (label: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (label: string) => !normalizedQuery || label.toLowerCase().includes(normalizedQuery);
+  const shown = columns.filter((column) => column.visible && matchesQuery(column.label));
+  const hidden = columns.filter((column) => !column.visible && matchesQuery(column.label));
+  const fieldTypes = CREATE_FIELD_TYPES.filter((field) => matchesQuery(field.label));
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[75]" onClick={onClose} aria-hidden />
+      <div className="absolute right-0 top-7 z-[80] flex w-[300px] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl">
+        <div className="border-b border-zinc-100 !p-2">
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search for new or existing fields"
+            className="h-8 w-full rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_35%,#e4e4e7)] bg-white !px-2 text-[12px] outline-none focus:border-[var(--os-brand-rail)]"
+            autoFocus
+          />
+          <div className="mt-1.5 flex gap-4 text-[12px]">
+            <button
+              type="button"
+              className={`border-b-2 pb-1 ${fieldMode === "create" ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-500"}`}
+              onClick={() => onFieldModeChange("create")}
+            >
+              Create new
+            </button>
+            <button
+              type="button"
+              className={`border-b-2 pb-1 ${fieldMode === "existing" ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-500"}`}
+              onClick={() => onFieldModeChange("existing")}
+            >
+              Add existing
+            </button>
+          </div>
+        </div>
+        <div className="max-h-[360px] overflow-y-auto">
+          {fieldMode === "existing" ? (
+            <>
+              <FieldSection title="Shown" trailing="Hide all" onTrailingClick={onHideColumns}>
+                {shown.map((column) => (
+                  <FieldToggle key={column.key} column={column} checked onToggle={() => onToggleColumn(column.key)} />
+                ))}
+              </FieldSection>
+              <FieldSection title="Hidden">
+                {hidden.map((column) => (
+                  <FieldToggle key={column.key} column={column} checked={false} onToggle={() => onToggleColumn(column.key)} />
+                ))}
+              </FieldSection>
+            </>
+          ) : (
+            <>
+              <FieldSection title="Create new">
+                {fieldTypes.slice(0, 3).map((field) => (
+                  <CreateFieldRow key={field.label} field={field} onCreate={() => onCreateColumn(field.label)} />
+                ))}
+              </FieldSection>
+              <FieldSection title="AI fields">
+                {fieldTypes.slice(3, 6).map((field) => (
+                  <CreateFieldRow key={field.label} field={field} onCreate={() => onCreateColumn(field.label)} />
+                ))}
+              </FieldSection>
+              <FieldSection title="All">
+                {fieldTypes.slice(6).map((field) => (
+                  <CreateFieldRow key={field.label} field={field} onCreate={() => onCreateColumn(field.label)} />
+                ))}
+              </FieldSection>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function CustomizePanel({
   activeView,
   groupBy,
   subtasksCollapsed,
   shownCount,
-  sortName,
   options,
-  onRenameView,
   onToggleOption,
   onTogglePin,
   onOpenFilter,
   onOpenFields,
   onOpenGroup,
   onToggleSubtasks,
+  showClosed,
+  onToggleClosed,
+  onExport,
   onClose,
 }: {
   activeView: ViewDef;
   groupBy: GroupKey;
   subtasksCollapsed: boolean;
   shownCount: number;
-  sortName: string;
   options: ViewOptions;
-  onRenameView: (label: string) => void;
   onToggleOption: (key: keyof ViewOptions) => void;
   onTogglePin: () => void;
   onOpenFilter: () => void;
   onOpenFields: () => void;
   onOpenGroup: () => void;
   onToggleSubtasks: () => void;
+  showClosed: boolean;
+  onToggleClosed: () => void;
+  onExport: () => void;
   onClose: () => void;
 }) {
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-zinc-200 bg-white">
       <PanelHeader title="Customize view" onClose={onClose} />
-      <div className="border-b border-zinc-100 !p-2">
-        <div className="flex h-8 items-center gap-2 rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_35%,#e4e4e7)] !px-2">
-          <activeView.Icon className="h-3.5 w-3.5" style={{ color: activeView.swatch }} />
-          <input
-            type="text"
-            value={activeView.label}
-            onChange={(event) => onRenameView(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-[12px] font-medium text-zinc-900 outline-none"
-          />
-        </div>
-      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="space-y-2 border-b border-zinc-100 !p-2">
-          <SettingRow label="Card size" value="Medium" />
-          <SettingRow label="Card cover" value="Image" />
-          <SettingToggle label="Stack fields" checked={options.stackFields} onToggle={() => onToggleOption("stackFields")} />
-          <SettingToggle label="Show empty fields" checked={options.showEmptyFields} onToggle={() => onToggleOption("showEmptyFields")} />
-          <SettingToggle label="Collapse empty columns" checked={options.collapseEmptyColumns} onToggle={() => onToggleOption("collapseEmptyColumns")} />
+        <div className="space-y-1 border-b border-zinc-100 !p-2">
+          <SettingToggle label="Show empty statuses" checked={options.showEmptyStatuses} onToggle={() => onToggleOption("showEmptyStatuses")} />
+          <SettingToggle label="Wrap text" checked={options.wrapText} onToggle={() => onToggleOption("wrapText")} />
+          <SettingToggle label="Show task locations" checked={options.showTaskLocations} onToggle={() => onToggleOption("showTaskLocations")} />
+          <SettingToggle label="Show subtask parent names" checked={options.showSubtaskParentNames} onToggle={() => onToggleOption("showSubtaskParentNames")} />
+          <SettingToggle label="Show closed tasks" checked={showClosed} onToggle={onToggleClosed} />
           <SettingRow label="More options" />
         </div>
         <div className="border-b border-zinc-100 !p-2">
           <PanelAction Icon={Columns3} label="Fields" value={`${shownCount} shown`} onClick={onOpenFields} />
-          <PanelAction Icon={ListFilter} label="Filter" value="Edit" onClick={onOpenFilter} />
-          <PanelAction Icon={Columns3} label="Group" value={getGroupName(groupBy)} onClick={onOpenGroup} />
-          <PanelAction Icon={AlignLeft} label="Sort" value={sortName} onClick={onOpenFilter} />
+          <PanelAction Icon={ListFilter} label="Filter" value="None" onClick={onOpenFilter} />
+          <PanelAction Icon={Layers} label="Group" value={getGroupName(groupBy)} onClick={onOpenGroup} />
           <PanelAction Icon={GitBranch} label="Subtasks" value={subtasksCollapsed ? "Collapsed" : "Expanded"} onClick={onToggleSubtasks} />
-          <PanelAction Icon={SlidersHorizontal} label="Templates" />
-        </div>
-        <div className="space-y-1 border-b border-zinc-100 !p-2">
-          <SettingToggle label="Autosave for me" checked={options.autosave} onToggle={() => onToggleOption("autosave")} />
-          <SettingToggle label="Pin view" checked={Boolean(activeView.pinned)} onToggle={onTogglePin} />
-          <SettingToggle label="Private view" checked={options.privateView} onToggle={() => onToggleOption("privateView")} />
-          <SettingToggle label="Protect view" checked={options.protectView} onToggle={() => onToggleOption("protectView")} />
-          <SettingToggle label="Set as default view" checked={options.defaultView} onToggle={() => onToggleOption("defaultView")} />
         </div>
         <div className="!p-2">
-          <PanelAction Icon={Link2} label="Copy link to view" />
-          <PanelAction Icon={Star} label="Favorite" />
+          <PanelAction Icon={Star} label="Favorite" value={activeView.pinned ? "On" : undefined} onClick={onTogglePin} />
+          <PanelAction Icon={Download} label="Export view" onClick={onExport} />
         </div>
       </div>
     </aside>
   );
 }
 
-function GroupMenu({ value, onChange }: { value: GroupKey; onChange: (value: GroupKey) => void }) {
+function GroupMenu({
+  value,
+  direction,
+  alsoGroupByList,
+  onChange,
+  onDirectionChange,
+  onAlsoGroupByListChange,
+  onClear,
+  onClose,
+}: {
+  value: GroupKey;
+  direction: GroupDir;
+  alsoGroupByList: boolean;
+  onChange: (value: GroupKey) => void;
+  onDirectionChange: (value: GroupDir) => void;
+  onAlsoGroupByListChange: (value: boolean) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const [fieldOpen, setFieldOpen] = useState(false);
+  const [dirOpen, setDirOpen] = useState(false);
+  const fieldLabel = GROUP_OPTIONS.find((o) => o.key === value)?.label ?? "None";
+
   return (
-    <div className="absolute left-0 top-7 z-[70] w-[240px] rounded-xl border border-zinc-200 bg-white !p-2 shadow-2xl">
-      <PanelLabel>Group by</PanelLabel>
-      <div className="space-y-1">
-        {GROUP_OPTIONS.map((option) => (
+    <>
+      <div className="fixed inset-0 z-[65]" onClick={onClose} aria-hidden />
+      <div className="absolute left-0 top-7 z-[70] w-[300px] rounded-xl border border-zinc-200 bg-white !p-3 shadow-2xl">
+        <PanelLabel>Group by</PanelLabel>
+        <div className="mt-1 flex items-center gap-2">
+          {/* Field dropdown */}
+          <div className="relative flex-1">
+            <button
+              type="button"
+              className="flex h-8 w-full items-center gap-2 rounded-md border border-zinc-200 !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
+              onClick={() => { setFieldOpen((o) => !o); setDirOpen(false); }}
+            >
+              <CalendarDays className="h-3.5 w-3.5 text-zinc-500" />
+              <span className="flex-1 truncate">{fieldLabel}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+            </button>
+            {fieldOpen ? (
+              <div className="absolute left-0 top-9 z-[72] w-full overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-xl">
+                {GROUP_OPTIONS.filter((o) => o.key !== "none").map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={`flex h-8 w-full items-center gap-2 !px-2 text-left text-[13px] ${
+                      value === option.key ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+                    }`}
+                    onClick={() => { onChange(option.key); setFieldOpen(false); }}
+                  >
+                    <option.Icon className="h-3.5 w-3.5 text-zinc-500" />
+                    <span className="flex-1">{option.label}</span>
+                    {value === option.key ? <Check className="h-4 w-4 text-zinc-600" /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Direction dropdown */}
+          <div className="relative w-[120px]">
+            <button
+              type="button"
+              className="flex h-8 w-full items-center gap-1 rounded-md border border-zinc-200 !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
+              onClick={() => { setDirOpen((o) => !o); setFieldOpen(false); }}
+            >
+              <span className="flex-1 truncate">{direction === "asc" ? "Ascending" : "Descending"}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+            </button>
+            {dirOpen ? (
+              <div className="absolute right-0 top-9 z-[72] w-full overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-xl">
+                {(["asc", "desc"] as GroupDir[]).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    className={`flex h-8 w-full items-center gap-2 !px-2 text-left text-[13px] ${
+                      direction === d ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+                    }`}
+                    onClick={() => { onDirectionChange(d); setDirOpen(false); }}
+                  >
+                    <span className="flex-1">{d === "asc" ? "Ascending" : "Descending"}</span>
+                    {direction === d ? <Check className="h-4 w-4 text-zinc-600" /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           <button
-            key={option.key}
             type="button"
-            className={`flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] ${
-              value === option.key ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
-            }`}
-            onClick={() => onChange(option.key)}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-red-500"
+            aria-label="Remove grouping"
+            onClick={onClear}
           >
-            <option.Icon className="h-3.5 w-3.5 text-zinc-500" />
-            {option.label}
-            {value === option.key ? <Check className="ml-auto h-4 w-4 text-zinc-600" /> : null}
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
-        ))}
+        </div>
+
+        <div className="mt-2 flex items-center justify-between border-t border-zinc-100 pt-2">
+          <span className="text-[13px] text-zinc-700">Also group by List</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={alsoGroupByList}
+            onClick={() => onAlsoGroupByListChange(!alsoGroupByList)}
+            className={`relative inline-flex h-4 w-7 rounded-full transition-colors ${alsoGroupByList ? "bg-[var(--os-brand-rail)]" : "bg-zinc-300"}`}
+          >
+            <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${alsoGroupByList ? "translate-x-3.5" : "translate-x-0.5"}`} />
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -4229,86 +4655,255 @@ function GroupOptionsItem({
   );
 }
 
+interface SavedFilter {
+  name: string;
+  filters: FilterRule[];
+  connector: FilterConnector;
+}
+const SAVED_FILTERS_KEY = "workwrk:task-saved-filters";
+function loadSavedFilters(): SavedFilter[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SAVED_FILTERS_KEY);
+    return raw ? (JSON.parse(raw) as SavedFilter[]) : [];
+  } catch { return []; }
+}
+function writeSavedFilters(list: SavedFilter[]) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+}
+
 function FilterMenu({
-  query,
-  showClosed,
-  assignedOnly,
+  filters,
+  connector,
   sortKey,
-  onQueryChange,
-  onShowClosedChange,
-  onAssignedOnlyChange,
+  onFiltersChange,
+  onConnectorChange,
   onSortChange,
   onClose,
 }: {
-  query: string;
-  showClosed: boolean;
-  assignedOnly: boolean;
+  filters: FilterRule[];
+  connector: FilterConnector;
   sortKey: TaskSortKey;
-  onQueryChange: (value: string) => void;
-  onShowClosedChange: (value: boolean) => void;
-  onAssignedOnlyChange: (value: boolean) => void;
+  onFiltersChange: (next: FilterRule[]) => void;
+  onConnectorChange: (next: FilterConnector) => void;
   onSortChange: (value: TaskSortKey) => void;
   onClose: () => void;
 }) {
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [saved, setSaved] = useState<SavedFilter[]>([]);
+  const [saveName, setSaveName] = useState("");
+  useEffect(() => { setSaved(loadSavedFilters()); }, []);
+
+  const addFilter = () => {
+    const field: FilterField = "status";
+    const meta = filterFieldMeta(field);
+    onFiltersChange([...filters, { id: createClientId(), field, operator: meta.operators[0], value: "" }]);
+  };
+  const updateFilter = (id: string, patch: Partial<FilterRule>) =>
+    onFiltersChange(filters.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  const removeFilter = (id: string) => onFiltersChange(filters.filter((f) => f.id !== id));
+
+  const saveCurrent = () => {
+    const name = saveName.trim();
+    if (!name || filters.length === 0) return;
+    const next = [...saved.filter((s) => s.name !== name), { name, filters, connector }];
+    setSaved(next);
+    writeSavedFilters(next);
+    setSaveName("");
+  };
+  const applySaved = (s: SavedFilter) => {
+    onFiltersChange(s.filters.map((f) => ({ ...f, id: createClientId() })));
+    onConnectorChange(s.connector);
+    setSavedOpen(false);
+  };
+  const deleteSaved = (name: string) => {
+    const next = saved.filter((s) => s.name !== name);
+    setSaved(next);
+    writeSavedFilters(next);
+  };
+
   return (
-    <div className="absolute right-0 top-7 z-[80] w-[260px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl">
-      <div className="flex h-9 items-center gap-2 border-b border-zinc-100 !px-2.5">
-        <Search className="h-3.5 w-3.5 text-zinc-400" />
-        <input
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Filter tasks"
-          className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
-          autoFocus
-        />
-        <button type="button" className="text-zinc-400 hover:text-zinc-700" aria-label="Close filters" onClick={onClose}>
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <div className="border-b border-zinc-100 !p-2">
-        <PanelLabel>Display</PanelLabel>
-        <FilterToggle label="Show closed tasks" checked={showClosed} onChange={onShowClosedChange} />
-        <FilterToggle label="Assigned tasks only" checked={assignedOnly} onChange={onAssignedOnlyChange} />
-      </div>
-      <div className="!p-2">
-        <PanelLabel>Sort by</PanelLabel>
-        {SORT_OPTIONS.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            className={`flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] ${
-              sortKey === option.key ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
-            }`}
-            onClick={() => onSortChange(option.key)}
-          >
-            <option.Icon className="h-3.5 w-3.5 text-zinc-500" />
-            <span className="flex-1">{option.label}</span>
-            {sortKey === option.key ? <Check className="h-3.5 w-3.5 text-zinc-600" /> : null}
+    <>
+      <div className="fixed inset-0 z-[75]" onClick={onClose} aria-hidden />
+      <div className="absolute right-0 top-7 z-[80] w-[480px] rounded-xl border border-zinc-200 bg-white !p-3 shadow-2xl">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-zinc-800">
+            Filters <Info className="h-3.5 w-3.5 text-zinc-400" />
+          </span>
+          <div className="relative">
+            <button
+              type="button"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 !px-2 text-[12px] text-zinc-600 hover:bg-zinc-50"
+              onClick={() => setSavedOpen((o) => !o)}
+            >
+              Saved filters <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+            {savedOpen ? (
+              <div className="absolute right-0 top-9 z-[82] w-[260px] rounded-lg border border-zinc-200 bg-white !p-2 shadow-xl">
+                {saved.length === 0 ? (
+                  <p className="!px-1 py-1 text-[12px] text-zinc-400">No saved filters yet.</p>
+                ) : (
+                  <ul className="mb-2 space-y-0.5">
+                    {saved.map((s) => (
+                      <li key={s.name} className="group flex items-center gap-2 rounded-md !px-2 py-1 hover:bg-zinc-50">
+                        <button type="button" className="flex-1 truncate text-left text-[12.5px] text-zinc-700" onClick={() => applySaved(s)}>
+                          {s.name}
+                        </button>
+                        <button type="button" className="text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-red-500" aria-label="Delete saved filter" onClick={() => deleteSaved(s.name)}>
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex items-center gap-1.5 border-t border-zinc-100 pt-2">
+                  <input
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveCurrent(); }}
+                    placeholder="Save current as…"
+                    className="h-7 flex-1 rounded-md border border-zinc-200 !px-2 text-[12px] outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveCurrent}
+                    disabled={!saveName.trim() || filters.length === 0}
+                    className="h-7 rounded-md bg-zinc-900 !px-2 text-[12px] font-medium text-white disabled:opacity-40"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {filters.length === 0 ? (
+          <p className="!px-1 py-2 text-[12px] text-zinc-400">No filters yet. Add one to narrow this view.</p>
+        ) : (
+          <div className="space-y-2">
+            {filters.map((rule, idx) => (
+              <FilterRuleRow
+                key={rule.id}
+                rule={rule}
+                index={idx}
+                connector={connector}
+                onConnectorChange={onConnectorChange}
+                onChange={(patch) => updateFilter(rule.id, patch)}
+                onRemove={() => removeFilter(rule.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="mt-2 flex items-center justify-between">
+          <button type="button" className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--os-brand-rail)] hover:opacity-80" onClick={addFilter}>
+            <Plus className="h-3.5 w-3.5" /> Add filter
           </button>
-        ))}
+          {filters.length > 0 ? (
+            <button type="button" className="text-[12px] font-medium text-red-500 hover:text-red-600" onClick={() => onFiltersChange([])}>
+              Clear all
+            </button>
+          ) : null}
+        </div>
+
+        {/* Sort — kept so ordering stays reachable (not part of the rule list). */}
+        <div className="mt-3 border-t border-zinc-100 pt-2">
+          <PanelLabel>Sort by</PanelLabel>
+          <div className="flex flex-wrap gap-1">
+            {SORT_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                className={`inline-flex h-7 items-center gap-1 rounded-md !px-2 text-[12px] ${
+                  sortKey === option.key ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                }`}
+                onClick={() => onSortChange(option.key)}
+              >
+                <option.Icon className="h-3 w-3" />
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
-function FilterToggle({
-  label,
-  checked,
+function FilterRuleRow({
+  rule,
+  index,
+  connector,
+  onConnectorChange,
   onChange,
+  onRemove,
 }: {
-  label: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
+  rule: FilterRule;
+  index: number;
+  connector: FilterConnector;
+  onConnectorChange: (next: FilterConnector) => void;
+  onChange: (patch: Partial<FilterRule>) => void;
+  onRemove: () => void;
 }) {
+  const meta = filterFieldMeta(rule.field);
+  const needsValue = !VALUELESS_OPERATORS.includes(rule.operator);
   return (
-    <button
-      type="button"
-      className="flex h-7 w-full items-center justify-between rounded-md !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
-      onClick={() => onChange(!checked)}
-    >
-      {label}
-      <Switch checked={checked} />
-    </button>
+    <div className="flex items-center gap-2">
+      <div className="w-16 shrink-0 text-[12px] text-zinc-500">
+        {index === 0 ? (
+          <span className="!pl-1">Where</span>
+        ) : (
+          <select
+            value={connector}
+            onChange={(e) => onConnectorChange(e.target.value as FilterConnector)}
+            className="h-7 w-full rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-700"
+          >
+            <option value="AND">AND</option>
+            <option value="OR">OR</option>
+          </select>
+        )}
+      </div>
+      <select
+        value={rule.field}
+        onChange={(e) => {
+          const field = e.target.value as FilterField;
+          const m = filterFieldMeta(field);
+          onChange({ field, operator: m.operators[0], value: "" });
+        }}
+        className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[12px] text-zinc-800"
+      >
+        {FILTER_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+      </select>
+      <select
+        value={rule.operator}
+        onChange={(e) => onChange({ operator: e.target.value as FilterOperator })}
+        className="h-7 w-24 shrink-0 rounded-md border border-zinc-200 bg-white !px-1.5 text-[12px] text-zinc-800"
+      >
+        {meta.operators.map((op) => <option key={op} value={op}>{FILTER_OPERATOR_LABELS[op]}</option>)}
+      </select>
+      {needsValue ? (
+        meta.valueKind === "status" ? (
+          <select value={rule.value} onChange={(e) => onChange({ value: e.target.value })} className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[12px]">
+            <option value="">Select…</option>
+            {STATUS_COLUMNS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        ) : meta.valueKind === "priority" ? (
+          <select value={rule.value} onChange={(e) => onChange({ value: e.target.value })} className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[12px]">
+            <option value="">Select…</option>
+            {["Urgent", "High", "Normal", "Low"].map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        ) : (
+          <input value={rule.value} onChange={(e) => onChange({ value: e.target.value })} placeholder="Value" className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-2 text-[12px] outline-none" />
+        )
+      ) : (
+        <span className="flex-1" />
+      )}
+      <button type="button" onClick={onRemove} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-red-500" aria-label="Remove filter">
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }
 
@@ -4349,18 +4944,22 @@ function TagEditorPopover({
   onQueryChange,
   onCreate,
   onRemove,
+  onClose,
 }: {
   tags: string[];
   query: string;
   onQueryChange: (value: string) => void;
   onCreate: () => void;
   onRemove: (tag: string) => void;
+  onClose: () => void;
 }) {
   return (
-    <div
-      className="absolute left-0 top-7 z-[90] w-[220px] overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg"
-      onClick={(event) => event.stopPropagation()}
-    >
+    <>
+      <div className="fixed inset-0 z-[84]" onClick={onClose} aria-hidden />
+      <div
+        className="absolute left-0 top-7 z-[90] w-[220px] overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg"
+        onClick={(event) => event.stopPropagation()}
+      >
       <input
         value={query}
         onChange={(event) => onQueryChange(event.target.value)}
@@ -4398,6 +4997,7 @@ function TagEditorPopover({
         </button>
       </div>
     </div>
+    </>
   );
 }
 
@@ -4617,16 +5217,33 @@ function PanelLabel({ children }: { children: ReactNode }) {
   return <div className="mb-1 text-[11px] font-medium text-zinc-500">{children}</div>;
 }
 
+// Date-bucket group headers render as colored text (ClickUp style),
+// e.g. "Overdue" in red. Status groups keep the solid colored pill.
+const DATE_GROUP_COLORS: Record<string, string> = {
+  Overdue: "#EF4444",
+  Today: "#16A34A",
+  Tomorrow: "#2563EB",
+  Upcoming: "#71717A",
+  "No due date": "#A1A1AA",
+};
+
 function GroupBadge({ label }: { label: string }) {
   const status = STATUS_COLUMNS.find((item) => item.label === label);
-  return (
-    <span
-      className="inline-flex h-6 items-center rounded-md !px-2 text-[12px] font-semibold text-white"
-      style={{ backgroundColor: status?.color ?? "#A855F7" }}
-    >
-      {label}
-    </span>
-  );
+  if (status) {
+    return (
+      <span
+        className="inline-flex h-6 items-center rounded-md !px-2 text-[12px] font-semibold text-white"
+        style={{ backgroundColor: status.color }}
+      >
+        {label}
+      </span>
+    );
+  }
+  const color = DATE_GROUP_COLORS[label];
+  if (color) {
+    return <span className="text-[13px] font-semibold" style={{ color }}>{label}</span>;
+  }
+  return <span className="text-[13px] font-semibold text-zinc-700">{label}</span>;
 }
 
 function renderTaskValue(task: TaskItem, column: ColumnDef) {
@@ -4730,10 +5347,6 @@ function shouldShowDraftInGroup(draftTask: DraftTask, key: GroupKey, label: stri
 
 function getGroupName(key: GroupKey) {
   return GROUP_OPTIONS.find((option) => option.key === key)?.label ?? "None";
-}
-
-function getSortName(key: TaskSortKey) {
-  return SORT_OPTIONS.find((option) => option.key === key)?.label ?? "None";
 }
 
 function sortTasks(tasks: TaskItem[], sortKey: TaskSortKey) {
@@ -5090,4 +5703,46 @@ function startOfDay(date: Date) {
 function getNextSaturday(date: Date) {
   const daysUntilSaturday = (6 - date.getDay() + 7) % 7 || 7;
   return addDays(date, daysUntilSaturday);
+}
+
+function MultiSelectActionBar({
+  count,
+  onClear,
+}: {
+  count: number;
+  onClear: () => void;
+}) {
+  return (
+    <div className="fixed bottom-8 left-1/2 z-[100] flex h-12 -translate-x-1/2 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 !px-2.5 text-white shadow-2xl">
+      <div className="flex h-8 items-center rounded-md bg-zinc-800 !px-3 text-[13px] font-medium text-white shadow-inner">
+        {count} Task{count === 1 ? "" : "s"} selected
+        <button type="button" onClick={onClear} className="ml-2 text-zinc-400 hover:text-white">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="mx-1.5 h-6 w-px bg-zinc-700" />
+      <ActionPill Icon={CircleDashed} label="Status" />
+      <ActionPill Icon={UserRound} label="Assignees" />
+      <ActionPill Icon={CalendarIcon} label="Dates" />
+      <ActionPill Icon={Columns3} label="Custom Fields" />
+      <ActionPill Icon={Tag} label="Tags" />
+      <ActionPill Icon={ArrowRightLeft} label="Move/Add" />
+      <ActionPill Icon={GitBranch} label="Convert to Subtasks" />
+      <ActionPill Icon={Copy} label="Copy" />
+      <ActionPill Icon={MoreHorizontal} label="More" />
+    </div>
+  );
+}
+
+function ActionPill({ Icon, label, onClick }: { Icon: LucideIcon; label: string; onClick?: () => void }) {
+  return (
+    <button
+      type="button"
+      className="flex h-8 items-center gap-1.5 rounded-md !px-2 text-[12px] font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white"
+      onClick={onClick}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
 }

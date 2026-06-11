@@ -45,6 +45,9 @@ function initials(name: string) { const [a = "", b = ""] = name.split(/\s+/); re
 export default function SopComplianceDashboard() {
   const [data, setData] = useState<ApiData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [showAllBottom, setShowAllBottom] = useState(false);
+  const [showAllTop, setShowAllTop] = useState(false);
+  const [showAllOverdue, setShowAllOverdue] = useState(false);
   const { rowVersion } = useOsShell();
 
   const load = useCallback(async () => {
@@ -63,8 +66,12 @@ export default function SopComplianceDashboard() {
   const v = rowVersion("sops");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const bottomSops = (data?.sopCompliance ?? []).filter((s) => s.total > 0).slice(0, 6);
-  const topPeople = (data?.personScores ?? []).filter((p) => p.total > 0).slice(0, 8);
+  const bottomSopsAll = (data?.sopCompliance ?? []).filter((s) => s.total > 0);
+  const topPeopleAll = (data?.personScores ?? []).filter((p) => p.total > 0);
+  const overdueAll = data?.overdueList ?? [];
+  const bottomSops = showAllBottom ? bottomSopsAll : bottomSopsAll.slice(0, 6);
+  const topPeople = showAllTop ? topPeopleAll : topPeopleAll.slice(0, 8);
+  const overdue = showAllOverdue ? overdueAll : overdueAll.slice(0, 10);
 
   return (
     <>
@@ -139,6 +146,9 @@ export default function SopComplianceDashboard() {
                         <span className="cmpl__sop-rate" style={{ color: rateHue(s.rate) }}>{s.rate}% <em>· {s.completed}/{s.total}</em></span>
                       </div>
                     ))}
+                    {bottomSopsAll.length > 6 && (
+                      <MoreToggle open={showAllBottom} total={bottomSopsAll.length} onClick={() => setShowAllBottom((v) => !v)} />
+                    )}
                   </div>
                 )}
               </section>
@@ -162,6 +172,9 @@ export default function SopComplianceDashboard() {
                         <span className="cmpl__person-rate" style={{ color: rateHue(p.rate) }}>{p.rate}%</span>
                       </div>
                     ))}
+                    {topPeopleAll.length > 8 && (
+                      <MoreToggle open={showAllTop} total={topPeopleAll.length} onClick={() => setShowAllTop((v) => !v)} />
+                    )}
                   </div>
                 )}
               </section>
@@ -177,7 +190,7 @@ export default function SopComplianceDashboard() {
                   </div>
                 ) : (
                   <div className="cmpl__list">
-                    {data.overdueList.slice(0, 10).map((o) => {
+                    {overdue.map((o) => {
                       const days = Math.floor((Date.now() - new Date(o.dueDate).getTime()) / MS_DAY);
                       return (
                         <div key={o.id} className="cmpl__over">
@@ -189,6 +202,9 @@ export default function SopComplianceDashboard() {
                         </div>
                       );
                     })}
+                    {overdueAll.length > 10 && (
+                      <MoreToggle open={showAllOverdue} total={overdueAll.length} onClick={() => setShowAllOverdue((v) => !v)} />
+                    )}
                   </div>
                 )}
               </section>
@@ -197,6 +213,18 @@ export default function SopComplianceDashboard() {
         )}
       </div>
     </>
+  );
+}
+
+function MoreToggle({ open, total, onClick }: { open: boolean; total: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-1 text-[12px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
+    >
+      {open ? "Show less" : `View all ${total}`}
+    </button>
   );
 }
 

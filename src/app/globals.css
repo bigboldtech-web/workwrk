@@ -296,13 +296,18 @@ body {
   font-size: 13px;
 }
 
-/* Compact global defaults for the dashboard.
- * Wrapped in :where() so specificity is 0 — any class-based size wins.
- * Without this, the global !important was crushing clamp() headlines on
- * marketing pages to 20px/18px/15px. */
-:where(h1) { font-size: 1.25rem; }
-:where(h2) { font-size: 1.1rem; }
-:where(h3) { font-size: 0.95rem; }
+/* Compact default sizes for bare headings (no text-size utility).
+ * MUST live in @layer base: Tailwind v4 registers theme/base/components/
+ * utilities layers, and *unlayered* rules win over every layered utility
+ * regardless of specificity. Left unlayered (the old bug), these crushed
+ * even explicit `text-[13px]` headings. In @layer base they sit below
+ * utilities, so any class-based size — including clamp() headlines —
+ * correctly overrides them. */
+@layer base {
+  :where(h1) { font-size: 1.25rem; }
+  :where(h2) { font-size: 1.1rem; }
+  :where(h3) { font-size: 0.95rem; }
+}
 
 /* Compact cards */
 [class*="CardContent"] { padding: 12px !important; }
@@ -358,19 +363,12 @@ body {
   user-select: none;
 }
 
-/* Focus ring — soft violet so it matches the brand accent instead of lime. */
-:root:not(.dark) input:focus-visible,
-:root:not(.dark) textarea:focus-visible,
-:root:not(.dark) button:focus-visible,
-:root:not(.dark) [role="combobox"]:focus,
-:root:not(.dark) select:focus {
-  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.18) !important;
-}
+
 
 /* Drop the inline lime focus-ring classes that render radioactive on white */
 :root:not(.dark) .focus-visible\:ring-\[rgba\(212\,255\,46\,0\.15\)\]:focus-visible,
 :root:not(.dark) .focus\:ring-\[rgba\(212\,255\,46\,0\.15\)\]:focus {
-  --tw-ring-color: rgba(124, 58, 237, 0.18) !important;
+  --tw-ring-color: rgba(0, 0, 0, 0.08) !important;
 }
 
 /* ================================================================
@@ -632,4 +630,47 @@ body {
 [data-card-variant="interactive"]:active {
   transform: translateY(0);
   transition-duration: 60ms;
+}
+
+/* Make react-grid-layout resize handles thicker and easier to grab */
+.mytasks-grid .react-resizable-handle {
+  width: 20px;
+  height: 20px;
+  bottom: 0;
+  right: 0;
+  z-index: 20;
+}
+.mytasks-grid .react-resizable-handle-s {
+  width: 100%;
+  height: 16px;
+  left: 0;
+  bottom: -8px;
+  cursor: ns-resize;
+}
+.mytasks-grid .react-resizable-handle-e {
+  width: 16px;
+  height: 100%;
+  right: -8px;
+  top: 0;
+  cursor: ew-resize;
+}
+
+/* ── Taupe primary button ────────────────────────────────────────────
+ * The warm accent CTA for the ClickUp-style task-creation surfaces
+ * (create-task / create-list modals). Defined as real CSS — not a
+ * Tailwind arbitrary class — so the fill is guaranteed to render even
+ * though the token lives in a .ts file the content scanner skips. */
+.btn-taupe {
+  background-color: #9d7d70;
+  color: #ffffff;
+}
+.btn-taupe:hover {
+  background-color: #8e7165;
+}
+.btn-taupe:active {
+  background-color: #836558;
+}
+.btn-taupe:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

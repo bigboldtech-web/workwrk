@@ -15,7 +15,7 @@ import {
   Inbox as InboxIcon, Heart, AtSign, CheckSquare, Clock, MessageCircle,
   ClipboardCheck, BookOpen, ShieldAlert, Bell, ChevronRight, Check,
   ArrowDownWideNarrow, Eye, Keyboard, Layers, ListFilter, MailOpen,
-  Maximize2, Settings, SlidersHorizontal, UserRound, X, type LucideIcon,
+  Maximize2, Settings, Settings2, UserRound, X, type LucideIcon,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -59,10 +59,27 @@ function relTime(iso: string): string {
 }
 
 type Tab = "primary" | "other" | "later" | "cleared";
+type FilterType = "Mentions" | "Assigned to me" | "Unread" | "Reminders" | null;
+
+interface InboxPrefs {
+  showAll: boolean;
+  groupByDate: boolean;
+  sortNewest: boolean;
+  mode: "fullscreen" | "inline";
+}
+
+const DEFAULT_PREFS: InboxPrefs = {
+  showAll: false,
+  groupByDate: true,
+  sortNewest: true,
+  mode: "fullscreen",
+};
 
 export default function InboxPage() {
   const [rows, setRows] = useState<ApiNotification[] | null>(null);
   const [tab, setTab] = useState<Tab>("primary");
+  const [filterType, setFilterType] = useState<FilterType>(null);
+  const [prefs, setPrefs] = useState<InboxPrefs>(DEFAULT_PREFS);
   const [filterOpen, setFilterOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { toast } = useOsToast();
@@ -77,20 +94,63 @@ export default function InboxPage() {
       setRows([]);
     }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  
+  const loadPrefs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/preferences");
+      if (!res.ok) return;
+      const data = await res.json();
+      const p = data?.effective?.inbox;
+      if (p) {
+        setPrefs({ ...DEFAULT_PREFS, ...p });
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => { void load(); void loadPrefs(); }, [load, loadPrefs]);
+
+  const savePref = useCallback((partial: Partial<InboxPrefs>) => {
+    setPrefs((prev) => {
+      const next = { ...prev, ...partial };
+      void fetch("/api/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inbox: next }),
+      });
+      return next;
+    });
+  }, []);
 
   const filteredRows = useMemo(() => {
     if (rows === null) return null;
     const now = Date.now();
-    return rows.filter((n) => {
+    let result = rows.filter((n) => {
       const isSnoozed = n.snoozedUntil && new Date(n.snoozedUntil).getTime() > now;
       if (tab === "cleared") return n.read;
       if (tab === "later") return !n.read && isSnoozed;
       const v = visualFor(n.type);
       if (tab === "primary") return !n.read && !isSnoozed && v.bucket === "primary";
-      return !n.read && !isSnoozed && v.bucket === "other";
+      return !n.read && !isSnoozed && (prefs.showAll || v.bucket === "other");
     });
-  }, [rows, tab]);
+    
+    if (filterType) {
+      result = result.filter(n => {
+        if (filterType === "Unread") return !n.read;
+        if (filterType === "Mentions") return n.type === "mention";
+        if (filterType === "Assigned to me") return n.type === "task_assigned";
+        if (filterType === "Reminders") return n.type === "reminder"; // assuming type reminder
+        return true;
+      });
+    }
+
+    result.sort((a, b) => {
+      const ta = new Date(a.createdAt).getTime();
+      const tb = new Date(b.createdAt).getTime();
+      return prefs.sortNewest ? tb - ta : ta - tb;
+    });
+
+    return result;
+  }, [rows, tab, filterType, prefs]);
 
   async function markRead(id: string) {
     setRows((prev) => prev?.map((n) => n.id === id ? { ...n, read: true } : n) ?? prev);
@@ -113,6 +173,7 @@ export default function InboxPage() {
     } catch { toast("Couldn't clear"); void load(); }
   }
 
+
   return (
     <div className="flex h-full bg-white">
       <div className="flex min-w-0 flex-1 flex-col bg-white">
@@ -133,15 +194,32 @@ export default function InboxPage() {
               onClick={() => setFilterOpen((v) => !v)}
               aria-expanded={filterOpen}
               aria-haspopup="menu"
-              className={`inline-flex items-center gap-1.5 h-7 !px-3 rounded-full text-[13px] text-zinc-600 border border-zinc-200 hover:bg-zinc-50 ${
-                filterOpen ? "bg-zinc-100" : "bg-white"
+              className={`inline-flex items-center gap-1.5 h-7 !px-3 rounded-full text-[13px] border hover:bg-zinc-50 transition-colors ${
+                filterOpen || filterType
+                  ? "bg-zinc-100 border-[var(--os-brand-rail)] text-[var(--os-brand-rail)] font-medium"
+                  : "bg-white border-zinc-200 text-zinc-600"
               }`}
             >
               <ListFilter className="w-3.5 h-3.5" />
-              Filter
+              {filterType ? filterType : "Filter"}
             </button>
-            {filterOpen ? <InboxFilterMenu onClose={() => setFilterOpen(false)} /> : null}
+            {filterOpen ? (
+              <InboxFilterMenu
+                onClose={() => setFilterOpen(false)}
+                filterType={filterType}
+                setFilterType={setFilterType}
+              />
+            ) : null}
           </div>
+          {filterType ? (
+            <button
+              type="button"
+              onClick={() => setFilterType(null)}
+              className="text-[12px] text-zinc-500 hover:text-zinc-700 ml-2 hover:underline"
+            >
+              Clear filter
+            </button>
+          ) : null}
           <div className="flex-1" />
           <button
             type="button"
@@ -169,21 +247,76 @@ export default function InboxPage() {
           ) : filteredRows.length === 0 ? (
             <InboxEmpty tab={tab} />
           ) : (
-            <ul className="divide-y divide-zinc-100 max-w-[860px] mx-auto">
-              {filteredRows.map((n) => (
-                <NotifEntry key={n.id} n={n} onMarkRead={markRead} cleared={tab === "cleared"} />
-              ))}
-            </ul>
+            <div className="max-w-[860px] mx-auto">
+              {prefs.groupByDate ? (
+                // Group by date logic
+                (() => {
+                  const today = new Date();
+                  const yesterday = new Date(today);
+                  yesterday.setDate(yesterday.getDate() - 1);
+                  
+                  const todayStr = today.toDateString();
+                  const yesterdayStr = yesterday.toDateString();
+
+                  const groups = {
+                    "Today": [] as ApiNotification[],
+                    "Yesterday": [] as ApiNotification[],
+                    "Older": [] as ApiNotification[],
+                  };
+
+                  filteredRows.forEach(n => {
+                    const d = new Date(n.createdAt).toDateString();
+                    if (d === todayStr) groups["Today"].push(n);
+                    else if (d === yesterdayStr) groups["Yesterday"].push(n);
+                    else groups["Older"].push(n);
+                  });
+
+                  return Object.entries(groups).map(([label, items]) => {
+                    if (items.length === 0) return null;
+                    return (
+                      <div key={label} className="mb-6">
+                        <h3 className="text-[13px] font-semibold text-zinc-900 mb-2 px-1 sticky top-0 bg-white z-10 py-1">{label}</h3>
+                        <ul className="divide-y divide-zinc-100">
+                          {items.map(n => (
+                            <NotifEntry key={n.id} n={n} onMarkRead={markRead} cleared={tab === "cleared"} mode={prefs.mode} />
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  });
+                })()
+              ) : (
+                <ul className="divide-y divide-zinc-100">
+                  {filteredRows.map((n) => (
+                    <NotifEntry key={n.id} n={n} onMarkRead={markRead} cleared={tab === "cleared"} mode={prefs.mode} />
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
       </div>
-      {settingsOpen ? <InboxSettingsPanel onClose={() => setSettingsOpen(false)} /> : null}
+      {settingsOpen ? (
+        <InboxSettingsPanel
+          onClose={() => setSettingsOpen(false)}
+          prefs={prefs}
+          savePref={savePref}
+        />
+      ) : null}
     </div>
   );
 }
 
-function InboxFilterMenu({ onClose }: { onClose: () => void }) {
-  const items = [
+function InboxFilterMenu({
+  onClose,
+  filterType,
+  setFilterType,
+}: {
+  onClose: () => void;
+  filterType: FilterType;
+  setFilterType: (v: FilterType) => void;
+}) {
+  const items: Array<{ label: FilterType; Icon: LucideIcon; shortcut: string }> = [
     { label: "Mentions", Icon: AtSign, shortcut: "1" },
     { label: "Assigned to me", Icon: UserRound, shortcut: "2" },
     { label: "Unread", Icon: MailOpen, shortcut: "3" },
@@ -201,9 +334,15 @@ function InboxFilterMenu({ onClose }: { onClose: () => void }) {
             key={label}
             type="button"
             role="menuitem"
-            className="flex w-full items-center gap-3 !px-4 py-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
+            onClick={() => {
+              setFilterType(label === filterType ? null : label);
+              onClose();
+            }}
+            className={`flex w-full items-center gap-3 !px-4 py-2 text-left text-[13px] hover:bg-zinc-50 ${
+              label === filterType ? "text-[var(--os-brand-rail)] font-medium bg-zinc-50" : "text-zinc-800"
+            }`}
           >
-            <Icon className="h-4 w-4 text-zinc-500" />
+            <Icon className={`h-4 w-4 ${label === filterType ? "text-[var(--os-brand-rail)]" : "text-zinc-500"}`} />
             <span className="flex-1">{label}</span>
             <span className="text-[11px] text-zinc-400">⇧{shortcut}</span>
           </button>
@@ -213,14 +352,17 @@ function InboxFilterMenu({ onClose }: { onClose: () => void }) {
   );
 }
 
-function InboxSettingsPanel({ onClose }: { onClose: () => void }) {
-  const [showAll, setShowAll] = useState(false);
-  const [groupByDate, setGroupByDate] = useState(true);
-  const [sortNewest, setSortNewest] = useState(true);
-  const [mode, setMode] = useState<"fullscreen" | "inline">("fullscreen");
-
+function InboxSettingsPanel({
+  onClose,
+  prefs,
+  savePref,
+}: {
+  onClose: () => void;
+  prefs: InboxPrefs;
+  savePref: (partial: Partial<InboxPrefs>) => void;
+}) {
   return (
-    <aside className="w-[370px] shrink-0 border-l border-zinc-200 bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.03)]">
+    <aside className="w-[370px] shrink-0 border-l border-zinc-200 bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.03)] z-20">
       <div className="flex h-12 items-center gap-3 border-b border-zinc-100 !px-5">
         <h2 className="flex-1 text-[15px] font-semibold text-zinc-900">Customize Inbox</h2>
         <button
@@ -234,9 +376,9 @@ function InboxSettingsPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="border-b border-zinc-100 py-2">
-        <SettingsRow Icon={Eye} label="Show All tab" control={<Switch checked={showAll} onChange={setShowAll} />} />
-        <SettingsRow Icon={Layers} label="Group by date" active control={<Switch checked={groupByDate} onChange={setGroupByDate} />} />
-        <SettingsRow Icon={ArrowDownWideNarrow} label="Sort by newest first" control={<Switch checked={sortNewest} onChange={setSortNewest} />} />
+        <SettingsRow Icon={Eye} label="Show All tab" control={<Switch checked={prefs.showAll} onChange={(v) => savePref({ showAll: v })} />} />
+        <SettingsRow Icon={Layers} label="Group by date" active control={<Switch checked={prefs.groupByDate} onChange={(v) => savePref({ groupByDate: v })} />} />
+        <SettingsRow Icon={ArrowDownWideNarrow} label="Sort by newest first" control={<Switch checked={prefs.sortNewest} onChange={(v) => savePref({ sortNewest: v })} />} />
       </div>
 
       <div className="border-b border-zinc-100 py-4">
@@ -245,7 +387,7 @@ function InboxSettingsPanel({ onClose }: { onClose: () => void }) {
           type="button"
           className="mt-3 flex w-full items-center gap-3 !px-5 py-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
         >
-          <SlidersHorizontal className="h-4 w-4 text-zinc-500" />
+          <Settings2 className="h-4 w-4 text-zinc-500" />
           <span className="flex-1">Customize importance</span>
           <span className="text-[12px] text-zinc-400">11/42</span>
           <ChevronRight className="h-4 w-4 text-zinc-400" />
@@ -256,16 +398,16 @@ function InboxSettingsPanel({ onClose }: { onClose: () => void }) {
         <p className="!px-5 text-[12px] font-medium text-zinc-500">Display mode</p>
         <div className="mt-4 grid grid-cols-2 gap-4 !px-5">
           <DisplayModeCard
-            active={mode === "fullscreen"}
+            active={prefs.mode === "fullscreen"}
             label="Fullscreen"
-            Icon={Maximize2}
-            onClick={() => setMode("fullscreen")}
+            Icon={FullscreenSvg}
+            onClick={() => savePref({ mode: "fullscreen" })}
           />
           <DisplayModeCard
-            active={mode === "inline"}
+            active={prefs.mode === "inline"}
             label="Inline"
-            Icon={ListFilter}
-            onClick={() => setMode("inline")}
+            Icon={InlineSvg}
+            onClick={() => savePref({ mode: "inline" })}
           />
         </div>
       </div>
@@ -305,20 +447,44 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean
       role="switch"
       aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full border transition-colors ${
-        checked
-          ? "border-[var(--os-brand-rail)] bg-[var(--os-brand-rail)]"
-          : "border-zinc-200 bg-zinc-100"
+      className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${
+        checked ? "bg-[var(--os-brand-rail)]" : "bg-zinc-300"
       }`}
     >
       <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform ${
-          checked ? "translate-x-[18px]" : "translate-x-0.5"
+        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${
+          checked ? "translate-x-3.5" : "translate-x-0.5"
         }`}
       />
     </button>
   );
 }
+
+const FullscreenSvg = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <rect x="9" y="11" width="30" height="26" rx="4" stroke="currentColor" strokeWidth="2.5" />
+    <path d="M15 18h8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    <rect x="30" y="16.5" width="4" height="4" rx="1" fill="currentColor" />
+    <path d="M15 25h18" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    <path d="M15 31h12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+  </svg>
+);
+
+const InlineSvg = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <rect x="9" y="10" width="30" height="7" rx="3" stroke="currentColor" strokeWidth="2.5" />
+    <rect x="13" y="12.5" width="2" height="2" rx="1" fill="currentColor" />
+    <path d="M18 13.5h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+
+    <rect x="9" y="20.5" width="30" height="7" rx="3" stroke="currentColor" strokeWidth="2.5" />
+    <rect x="13" y="23" width="2" height="2" rx="1" fill="currentColor" />
+    <path d="M18 24h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+
+    <rect x="9" y="31" width="30" height="7" rx="3" stroke="currentColor" strokeWidth="2.5" />
+    <rect x="13" y="33.5" width="2" height="2" rx="1" fill="currentColor" />
+    <path d="M18 34.5h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
 
 function DisplayModeCard({
   active,
@@ -328,7 +494,7 @@ function DisplayModeCard({
 }: {
   active: boolean;
   label: string;
-  Icon: LucideIcon;
+  Icon: React.ComponentType<{ className?: string }>;
   onClick: () => void;
 }) {
   return (
@@ -340,13 +506,19 @@ function DisplayModeCard({
       <span
         className={`relative flex h-[112px] items-center justify-center rounded-lg border ${
           active
-            ? "border-[var(--os-brand-rail)] bg-[color-mix(in_srgb,var(--os-brand-rail)_8%,white)]"
-            : "border-zinc-200 bg-white"
+            ? "border-[var(--os-brand-rail)] bg-[color-mix(in_srgb,var(--os-brand-rail)_6%,white)]"
+            : "border-zinc-200 bg-white hover:border-zinc-300"
         }`}
       >
-        <Icon className={`h-10 w-10 ${active ? "text-[var(--os-brand-rail)]" : "text-zinc-300"}`} />
-        <span className="absolute right-3 top-3 flex h-4 w-4 items-center justify-center rounded-full border border-zinc-300 bg-white">
-          {active ? <Check className="h-3 w-3 text-[var(--os-brand-rail)]" /> : null}
+        <Icon className={`h-12 w-12 ${active ? "text-[var(--os-brand-rail)]" : "text-zinc-300"}`} />
+        <span
+          className={`absolute right-3 top-3 flex h-4 w-4 items-center justify-center rounded-full border ${
+            active
+              ? "border-[var(--os-brand-rail)] bg-[var(--os-brand-rail)]"
+              : "border-zinc-300 bg-white"
+          }`}
+        >
+          {active ? <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} /> : null}
         </span>
       </span>
       <span className="mt-3 block text-[13px] font-medium">{label}</span>
@@ -452,13 +624,25 @@ function NotifEntry({
   n,
   onMarkRead,
   cleared,
+  mode = "fullscreen",
 }: {
   n: ApiNotification;
   onMarkRead: (id: string) => void;
   cleared: boolean;
+  mode?: "fullscreen" | "inline";
 }) {
   const v = visualFor(n.type);
-  const Body = (
+
+  const IconCircle = (
+    <span
+      className="inline-flex items-center justify-center w-8 h-8 rounded-full shrink-0"
+      style={{ background: `color-mix(in srgb, ${v.color} 12%, transparent)`, color: v.color }}
+    >
+      <v.Icon className="w-4 h-4" />
+    </span>
+  );
+
+  const FullscreenBody = (
     <div className="flex-1 min-w-0">
       <div className="flex items-center gap-2">
         <span className="text-[13px] text-zinc-900 truncate font-medium">{n.title}</span>
@@ -483,30 +667,43 @@ function NotifEntry({
     </div>
   );
 
+  const InlineBody = (
+    <div className="flex-1 min-w-0 flex items-center justify-between gap-4">
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        <span className="text-[13px] text-zinc-900 truncate font-medium max-w-[200px] shrink-0">{n.title}</span>
+        {n.message ? (
+          <p className="text-[13px] text-zinc-500 truncate min-w-0">
+            {n.message}
+          </p>
+        ) : (
+          <span className="flex-1" />
+        )}
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        {!n.read ? <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden /> : null}
+        <time className="text-[12px] text-zinc-400 w-16 text-right" dateTime={n.createdAt}>{relTime(n.createdAt)}</time>
+      </div>
+    </div>
+  );
+
+
   const className = `flex items-start gap-3 py-3 px-2 -mx-2 rounded hover:bg-zinc-50 transition-colors ${
     n.read ? "opacity-60" : ""
   }`;
 
-  const IconCircle = (
-    <span
-      className="inline-flex items-center justify-center w-8 h-8 rounded-full shrink-0"
-      style={{ background: `color-mix(in srgb, ${v.color} 12%, transparent)`, color: v.color }}
-    >
-      <v.Icon className="w-4 h-4" />
-    </span>
-  );
+
 
   return (
     <li>
       {n.link ? (
         <Link href={n.link} className={className} onClick={() => { if (!n.read) onMarkRead(n.id); }}>
           {IconCircle}
-          {Body}
+          {mode === "inline" ? InlineBody : FullscreenBody}
         </Link>
       ) : (
         <div className={className}>
           {IconCircle}
-          {Body}
+          {mode === "inline" ? InlineBody : FullscreenBody}
           {!cleared && !n.read ? (
             <button
               type="button"

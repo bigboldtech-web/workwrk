@@ -812,6 +812,22 @@ enum BoardTemplateVisibility {
   PUBLIC
 }
 
+// Reusable "create task" presets. A snapshot of the create-task modal's
+// configuration (type, status, priority, tags, checklist, subtasks, …)
+// stored as a JSON blob so applying one just re-hydrates the modal.
+// Org-shared; created by any member.
+model ItemTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  createdById    String
+  name           String
+  config         Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
 model PasswordResetToken {
   id        String   @id @default(cuid())
   token     String   @unique
@@ -1045,7 +1061,9 @@ model Task {
   // `startAt` / `endAt` are the full timestamps for hour-precise or
   // multi-day tasks. `allDay` mirrors Google Calendar semantics —
   // when true, time-of-day is ignored and the task renders as a pill.
-  date             DateTime
+  // Nullable so a task can be "Unscheduled" (no due date) — surfaced in
+  // the My Work / Today & Overdue "Unscheduled" bucket.
+  date             DateTime?
   startAt          DateTime?
   endAt            DateTime?
   allDay           Boolean    @default(true)
@@ -1090,6 +1108,10 @@ model Task {
   assignee       User         @relation("TaskAssignee", fields: [assigneeId], references: [id])
   kraId          String?
   kra            KRA?         @relation(fields: [kraId], references: [id])
+  // Who created/delegated this task (null on legacy rows). Lets "Delegated
+  // by me" surface tasks the creator assigned to someone else. Scalar-only
+  // (no relation) to avoid a User back-relation.
+  createdById    String?
 
   comments    TaskComment[]
   labels      TaskLabelOnTask[]
@@ -1107,6 +1129,7 @@ model Task {
 
   @@index([organizationId])
   @@index([assigneeId])
+  @@index([createdById])
   @@index([date])
   @@index([escalatedToId])
   @@index([organizationId, status, date])

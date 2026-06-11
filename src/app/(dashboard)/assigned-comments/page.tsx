@@ -42,19 +42,24 @@ export default function AssignedCommentsPage() {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      <div className="!px-4 pt-4">
-        <h1 className="mb-3 text-[15px] font-semibold text-zinc-900">Assigned Comments</h1>
-        <div className="flex items-center gap-5 border-b border-zinc-200">
-          <TabButton active={tab === "assigned"} onClick={() => setTab("assigned")}>
-            Assigned to me
-          </TabButton>
-          <TabButton active={tab === "delegated"} onClick={() => setTab("delegated")}>
-            Delegated by me
-          </TabButton>
+      {/* Top bar */}
+      <header className="flex h-10 shrink-0 items-center justify-between border-b border-zinc-200 bg-white !px-4 z-10">
+        <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[12px] font-normal leading-5 text-zinc-500">
+          <h1 className="truncate font-semibold text-zinc-900" style={{ fontSize: "13px" }}>Assigned Comments</h1>
         </div>
-      </div>
+      </header>
 
-      <div className="flex items-center gap-1 border-b border-zinc-100 !px-4 py-2">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 border-b border-zinc-100 !px-4 py-2">
+        <TabButton active={tab === "assigned"} onClick={() => setTab("assigned")}>
+          Assigned to me
+        </TabButton>
+        <TabButton active={tab === "delegated"} onClick={() => setTab("delegated")}>
+          Delegated by me
+        </TabButton>
+
+        <span aria-hidden className="w-px h-5 bg-zinc-200 mx-1" />
+
         <button
           type="button"
           className="inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 bg-white !px-3 text-[13px] text-zinc-600 hover:bg-zinc-50"
@@ -70,7 +75,7 @@ export default function AssignedCommentsPage() {
           className={`inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 !px-3 text-[13px] transition-colors ${
             resolved
               ? "font-medium"
-              : "text-zinc-600 hover:bg-zinc-50"
+              : "text-zinc-600 hover:bg-zinc-50 bg-white"
           }`}
           style={resolved ? brandTintStyle(0.14, "soft") : undefined}
         >
@@ -134,11 +139,12 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`border-b-2 py-2 text-[13px] transition-colors ${
+      className={`inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 !px-3 text-[13px] transition-colors ${
         active
-          ? "border-zinc-900 text-zinc-900 font-medium"
-          : "border-transparent text-zinc-500 hover:text-zinc-900"
+          ? "font-medium"
+          : "text-zinc-600 hover:bg-zinc-50 bg-white"
       }`}
+      style={active ? brandTintStyle(0.14, "soft") : undefined}
     >
       {children}
     </button>

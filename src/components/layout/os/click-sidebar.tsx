@@ -99,7 +99,7 @@ export function ClickSidebar() {
 }
 
 function ClickSidebarBody() {
-  const { activeAppKey, toggleSidebar, openCustomize } = useOsShell();
+  const { activeAppKey, toggleSidebar, openCustomize, openCreateTask, openCreateList } = useOsShell();
   const pathname = usePathname() || "";
   const router = useRouter();
   const { query, setQuery } = useSidebarSearch();
@@ -262,18 +262,6 @@ function ClickSidebarBody() {
                 <Search className="w-3.5 h-3.5" />
               </button>
               <button
-                ref={createButtonRef}
-                type="button"
-                onClick={() => setCreateOpen((v) => !v)}
-                className="h-[26px] shrink-0 inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 text-zinc-900 shadow-sm hover:bg-zinc-50"
-                aria-label="Create"
-                aria-haspopup="menu"
-                aria-expanded={createOpen}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <ChevronDown className="w-3 h-3 text-zinc-500" />
-              </button>
-              <button
                 type="button"
                 onClick={toggleSidebar}
                 className="h-6 w-0 shrink-0 overflow-hidden inline-flex items-center justify-center rounded-md text-zinc-700 opacity-0 pointer-events-none transition-[width,opacity] hover:bg-zinc-100 group-hover/sidebar:w-6 group-hover/sidebar:opacity-100 group-hover/sidebar:pointer-events-auto focus-visible:w-6 focus-visible:opacity-100 focus-visible:pointer-events-auto"
@@ -281,6 +269,18 @@ function ClickSidebarBody() {
                 title="Close sidebar"
               >
                 <ChevronsLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                ref={createButtonRef}
+                type="button"
+                onClick={() => setCreateOpen((v) => !v)}
+                className="h-[28px] shrink-0 inline-flex items-center gap-1 rounded-[10px] border border-zinc-200 bg-white px-2 text-zinc-900 shadow-[0_2px_4px_rgba(0,0,0,0.04)] hover:bg-zinc-50 hover:shadow-[0_2px_6px_rgba(0,0,0,0.06)] transition-all"
+                aria-label="Create"
+                aria-haspopup="menu"
+                aria-expanded={createOpen}
+              >
+                <Plus className="w-[18px] h-[18px] text-zinc-800" strokeWidth={2.5} />
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-500" strokeWidth={2.5} />
               </button>
             </div>
           )}
@@ -313,7 +313,7 @@ function ClickSidebarBody() {
                   className="h-8 w-full rounded-lg border border-[#b78d80] bg-white px-2.5 text-[13px] outline-none"
                   placeholder="Describe anything to create"
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") runCreateAction(() => router.push("/tasks?new=1"));
+                    if (event.key === "Enter") runCreateAction(openCreateTask);
                     if (event.key === "Escape") closeCreateMenu();
                   }}
                   autoFocus
@@ -326,13 +326,13 @@ function ClickSidebarBody() {
                   label="Task"
                   shortcut="⌥T"
                   active
-                  onClick={() => runCreateAction(() => router.push("/tasks?new=1"))}
+                  onClick={() => runCreateAction(openCreateTask)}
                 />
                 <CreateMenuItem
                   Icon={ListChecks}
                   label="List"
                   description="Track tasks, projects, people & more"
-                  onClick={() => runCreateAction(() => router.push("/tasks/personal-list"))}
+                  onClick={() => runCreateAction(openCreateList)}
                 />
                 <CreateMenuItem
                   Icon={Sparkles}

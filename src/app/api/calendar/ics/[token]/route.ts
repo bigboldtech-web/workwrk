@@ -80,6 +80,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   for (const t of tasks) {
     const start = t.startAt ?? t.date;
     const end = t.endAt ?? (t.startAt ? new Date(t.startAt.getTime() + 30 * 60 * 1000) : t.date);
+    if (!start || !end) continue; // unscheduled task — nothing to put on a calendar
     events.push({
       kind: "task",
       id: t.id,

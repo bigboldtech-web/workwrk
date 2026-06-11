@@ -248,7 +248,7 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500" aria-hidden>
             <CheckSquare className="h-4 w-4 transition-opacity group-hover/taskrow:opacity-0" />
           </span>
-          <span className="min-w-0 flex-1 truncate">My Tasks</span>
+          <span className="min-w-0 flex-1 truncate">My Wrk</span>
         </Link>
         <button
           type="button"
@@ -257,7 +257,7 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
             e.stopPropagation();
             setExpanded((v) => !v);
           }}
-          aria-label={expanded ? "Collapse My Tasks" : "Expand My Tasks"}
+          aria-label={expanded ? "Collapse My Wrk" : "Expand My Wrk"}
           className="absolute left-2 top-1/2 z-10 flex h-5 w-4 -translate-y-1/2 items-center justify-center rounded-md bg-zinc-200/80 text-zinc-600 opacity-0 transition-opacity hover:text-zinc-900 group-hover/taskrow:opacity-100 focus-visible:opacity-100"
         >
           {expanded ? (
@@ -345,7 +345,7 @@ function EmptyState({ title, body }: { title: string; body?: string }) {
   );
 }
 
-/* ───────────────────────── Home sidebar (Inbox / My Tasks / Favorites / Spaces) ───────────────────────── */
+/* ───────────────────────── Home sidebar (Inbox / My Wrk / Favorites / Spaces) ───────────────────────── */
 
 interface SpaceRow {
   id: string;

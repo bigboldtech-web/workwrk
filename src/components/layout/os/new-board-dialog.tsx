@@ -279,13 +279,13 @@ export function NewBoardDialog({
                 setIsPrivate((v) => !v);
               }
             }}
-            className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer shrink-0 ${
-              isPrivate ? "bg-zinc-900" : "bg-zinc-200"
+            className={`relative inline-flex w-7 h-4 rounded-full transition-colors cursor-pointer shrink-0 ${
+              isPrivate ? "bg-zinc-900" : "bg-zinc-300"
             }`}
           >
             <span
-              className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                isPrivate ? "translate-x-5" : "translate-x-0"
+              className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${
+                isPrivate ? "translate-x-3.5" : "translate-x-0.5"
               }`}
             />
           </span>

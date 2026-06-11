@@ -224,7 +224,7 @@ export async function GET(req: NextRequest) {
       type: "task" as const,
       id: t.id,
       title: t.title,
-      subtitle: `${t.status.replace(/_/g, " ")} · ${t.date.toISOString().split("T")[0]}`,
+      subtitle: `${t.status.replace(/_/g, " ")}${t.date ? ` · ${t.date.toISOString().split("T")[0]}` : ""}`,
       href: `/tasks#${t.id}`,
     })),
     ...sops.map((s) => ({

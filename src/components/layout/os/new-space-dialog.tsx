@@ -389,12 +389,12 @@ function Toggle({
           onChange(!value);
         }
       }}
-      className="relative w-10 h-5 rounded-full transition-colors cursor-pointer"
-      style={{ backgroundColor: value ? accent : "var(--b-line-2, #e4e4e7)" }}
+      className="relative inline-flex w-7 h-4 rounded-full transition-colors cursor-pointer"
+      style={{ backgroundColor: value ? accent : "#d4d4d8" }}
     >
       <span
-        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-          value ? "translate-x-5" : "translate-x-0"
+        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${
+          value ? "translate-x-3.5" : "translate-x-0.5"
         }`}
       />
     </span>

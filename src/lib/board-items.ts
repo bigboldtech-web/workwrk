@@ -129,6 +129,9 @@ export interface CreateBoardItemInput {
   ownerId?: string;
   groupKey?: string;
   metadata?: Record<string, unknown>;
+  /** Phase 58 dates — ISO strings or Date; coerced before Prisma. */
+  startAt?: string | Date | null;
+  dueAt?: string | Date | null;
   /** Phase 72 — null = top-level item; set to a parent id to create a subtask. */
   parentItemId?: string | null;
   /** Logged on the activity feed for this item. Pass the session
@@ -172,6 +175,8 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
       ownerId: input.ownerId ?? null,
       groupKey: input.groupKey ?? null,
       position,
+      startAt: input.startAt == null ? null : new Date(input.startAt),
+      dueAt: input.dueAt == null ? null : new Date(input.dueAt),
       metadata: (input.metadata ?? {}) as object,
       parentItemId: input.parentItemId ?? null,
     },

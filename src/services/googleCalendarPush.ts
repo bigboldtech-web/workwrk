@@ -35,13 +35,15 @@ export async function pushTaskToGoogle(taskId: string): Promise<void> {
     },
   });
   if (!task) return;
+  // Unscheduled tasks (no date) have nothing to place on a calendar.
+  if (!task.date) return;
   // Don't echo GCAL-sourced tasks back to Google.
   if (task.externalSource === GOOGLE_CAL_SOURCE) return;
 
   const { target, token } = await resolveWriteTarget(task.assigneeId) ?? {};
   if (!target || !token) return;
 
-  const payload = buildEventPayload(task);
+  const payload = buildEventPayload({ ...task, date: task.date });
 
   try {
     if (task.externalId) {

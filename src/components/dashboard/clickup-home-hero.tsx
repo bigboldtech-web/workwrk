@@ -214,7 +214,7 @@ export async function ClickupHomeHero() {
       id: `task-${t.id}`,
       icon: CheckSquare,
       title: t.title,
-      meta: `due ${due.toLocaleDateString()}`,
+      meta: due ? `due ${due.toLocaleDateString()}` : "no due date",
       href: `/tasks?taskId=${t.id}`,
       accent: "text-blue-600 bg-blue-50",
     });

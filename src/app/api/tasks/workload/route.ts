@@ -91,6 +91,7 @@ export async function GET(req: NextRequest) {
   for (const t of tasks) {
     const spanStart = t.startAt ?? t.date;
     const spanEnd = t.endAt ?? t.startAt ?? t.date;
+    if (!spanStart || !spanEnd) continue; // unscheduled — no span to load-balance
     const dayStart = new Date(spanStart);
     dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(spanEnd);

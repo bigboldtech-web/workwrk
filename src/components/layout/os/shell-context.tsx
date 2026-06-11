@@ -85,6 +85,14 @@ type ShellState = {
   closeCustomize: () => void;
   setCustomizeOpen: (v: boolean) => void;
 
+  createTaskOpen: boolean;
+  openCreateTask: () => void;
+  closeCreateTask: () => void;
+
+  createListOpen: boolean;
+  openCreateList: () => void;
+  closeCreateList: () => void;
+
   // 🆕 2026-06-03 — App-switcher state (ClickUp-style two-column nav).
   // activeAppKey drives which "app" (Home/Planner/Teams/…) the
   // secondary sidebar renders. sidebarCollapsed hides that whole
@@ -169,6 +177,8 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [sidekickOpen, setSidekickOpen] = useState(false);
   const [sidekickInitialPrompt, setSidekickInitialPrompt] = useState<string | null>(null);
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [createTaskOpen, setCreateTaskOpen] = useState(false);
+  const [createListOpen, setCreateListOpen] = useState(false);
   const [lens, setLensState] = useState<Lens>("me");
   const [openItem, setOpenItem] = useState<OpenItem | null>(null);
   const [rowVersions, setRowVersions] = useState<Record<string, number>>({});
@@ -369,6 +379,10 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   }, [sidekickInitialPrompt]);
   const openCustomize = useCallback(() => setCustomizeOpen(true), []);
   const closeCustomize = useCallback(() => setCustomizeOpen(false), []);
+  const openCreateTask = useCallback(() => setCreateTaskOpen(true), []);
+  const closeCreateTask = useCallback(() => setCreateTaskOpen(false), []);
+  const openCreateList = useCallback(() => setCreateListOpen(true), []);
+  const closeCreateList = useCallback(() => setCreateListOpen(false), []);
   const openItemDrawer = useCallback((it: OpenItem) => setOpenItem(it), []);
   const closeItemDrawer = useCallback(() => setOpenItem(null), []);
   const bumpRowVersion = useCallback((moduleId: string) => {
@@ -445,6 +459,8 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       sidekickOpen, openSidekick, closeSidekick, toggleSidekick,
       sidekickInitialPrompt, consumeSidekickInitialPrompt,
       customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
+      createTaskOpen, openCreateTask, closeCreateTask,
+      createListOpen, openCreateList, closeCreateList,
       lens, setLens,
       openItem, openItemDrawer, closeItemDrawer,
       bumpRowVersion, rowVersion,
@@ -458,7 +474,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedNotifications, setMutedNotifications,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createListOpen, openCreateList, closeCreateList, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

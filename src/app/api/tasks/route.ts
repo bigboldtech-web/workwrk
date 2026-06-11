@@ -103,6 +103,11 @@ export async function GET(req: NextRequest) {
   } else if (view === "team" && isManagerLevel) {
     const teamIds = await getTeamUserIds(orgId, currentUserId);
     where.assigneeId = { in: teamIds };
+  } else if (view === "delegated") {
+    // "Delegated by me" — tasks the caller created and handed to someone
+    // else (assignee is not the caller).
+    where.createdById = currentUserId;
+    where.assigneeId = { not: currentUserId };
   } else if (userId) {
     where.assigneeId = userId;
   } else {
@@ -189,8 +194,8 @@ export async function POST(req: NextRequest) {
     parentTaskId, labelIds, status, priority,
   } = body;
 
-  if (!title?.trim() || !date) {
-    return jsonError("Title and date are required");
+  if (!title?.trim()) {
+    return jsonError("Title is required");
   }
 
   // Enforce the 1-level sub-task rule: a sub-task can't itself have children.
@@ -212,7 +217,8 @@ export async function POST(req: NextRequest) {
       data: {
         title: title.trim(),
         description: description?.trim() || null,
-        date: new Date(date),
+        date: date ? new Date(date) : null,
+        createdById: currentUserId,
         startAt: startAt ? new Date(startAt) : null,
         endAt: endAt ? new Date(endAt) : null,
         allDay: allDay === false ? false : true,
@@ -266,7 +272,7 @@ export async function POST(req: NextRequest) {
 
   // Notify assignee if task was delegated to someone else
   if (task.assigneeId !== currentUserId) try {
-    const dateStr = new Date(task.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const dateStr = task.date ? new Date(task.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "no due date";
     await prisma.notification.create({
       data: {
         userId: task.assigneeId,
@@ -433,7 +439,7 @@ export async function PATCH(req: NextRequest) {
 
   // Notify on reassignment
   if (updates.assigneeId && updates.assigneeId !== task.assigneeId && updates.assigneeId !== getUserId(session)) {
-    const dateStr = new Date(updated.date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const dateStr = updated.date ? new Date(updated.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "no due date";
     await prisma.notification.create({
       data: {
         userId: updates.assigneeId,

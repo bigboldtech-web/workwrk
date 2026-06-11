@@ -5,6 +5,7 @@ import {
   CADENCE_LABELS, CADENCE_REVIEW_TYPE,
   type CadenceKey,
 } from "@/lib/review-cadence";
+import type { AccessLevel } from "@/generated/prisma";
 
 /**
  * Cron — auto-opens performance review cycles from each org's configured
@@ -38,12 +39,29 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   // Cadences that map to a ReviewCycle (weekly is per-user, handled elsewhere).
   const CYCLE_CADENCES: Exclude<CadenceKey, "weekly">[] = ["monthly", "quarterly", "annual"];
+  // Who hears about a newly-opened cycle.
+  const NOTIFY_LEVELS: AccessLevel[] = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR"];
 
   const orgs = await prisma.organization.findMany({ select: { id: true, settings: true } });
 
   let orgsScanned = 0;
   let cyclesCreated = 0;
+  let notificationsCreated = 0;
   const created: Array<{ organizationId: string; type: string; name: string }> = [];
+
+  // Lazily fetched per org (only when we actually open a cycle there).
+  const managersByOrg = new Map<string, string[]>();
+  async function managersFor(orgId: string): Promise<string[]> {
+    const cached = managersByOrg.get(orgId);
+    if (cached) return cached;
+    const rows = await prisma.user.findMany({
+      where: { organizationId: orgId, deletedAt: null, accessLevel: { in: NOTIFY_LEVELS } },
+      select: { id: true },
+    });
+    const ids = rows.map((r) => r.id);
+    managersByOrg.set(orgId, ids);
+    return ids;
+  }
 
   for (const org of orgs) {
     orgsScanned++;
@@ -65,7 +83,7 @@ export async function POST(req: NextRequest) {
       if (existing) continue;
 
       const name = `${key} · ${CADENCE_LABELS[cadence]}`;
-      await prisma.reviewCycle.create({
+      const cycle = await prisma.reviewCycle.create({
         data: {
           organizationId: org.id,
           name,
@@ -77,6 +95,21 @@ export async function POST(req: NextRequest) {
       });
       cyclesCreated++;
       created.push({ organizationId: org.id, type, name });
+
+      // Notify managers/admins that a new cycle opened and is ready to launch.
+      const managerIds = await managersFor(org.id);
+      if (managerIds.length > 0) {
+        const res = await prisma.notification.createMany({
+          data: managerIds.map((uid) => ({
+            userId: uid,
+            type: "review_cycle_opened",
+            title: "Review cycle opened",
+            message: `"${name}" is ready. Launch it to start ${CADENCE_LABELS[cadence].toLowerCase()} reviews.`,
+            link: `/reviews/${cycle.id}`,
+          })),
+        });
+        notificationsCreated += res.count;
+      }
     }
   }
 
@@ -85,6 +118,7 @@ export async function POST(req: NextRequest) {
     at: now.toISOString(),
     orgsScanned,
     cyclesCreated,
+    notificationsCreated,
     created,
   });
 }
