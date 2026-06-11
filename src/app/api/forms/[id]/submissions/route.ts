@@ -13,13 +13,14 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import type { Prisma } from "@/generated/prisma";
+import { createBoardItem } from "@/lib/board-items";
+import { parseBoardSchema } from "@/lib/field-catalog";
 import {
   getSessionOrFail, getOrgId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 
 type FormField = { id: string; type: string; label: string };
-type BoardField = { key: string; label: string; type: string };
 type FieldMappings = { board?: Record<string, string>; table?: Record<string, string> };
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -148,22 +149,26 @@ async function pushToTable(tableId: string, form: { fields: unknown; organizatio
   });
 }
 
+// Push a form submission onto a canonical Board as an Item (was
+// StudioBoard/StudioItem; re-pointed to the Board/Item PPMS). Maps form
+// answers to Board.schema.fields keys by label, then stores them in
+// Item.metadata.
 async function pushToBoard(boardId: string, form: { fields: unknown; organizationId: string }, data: Record<string, unknown>, explicit?: Record<string, string>) {
-  const board = await prisma.studioBoard.findFirst({
+  const board = await prisma.board.findFirst({
     where: { id: boardId, organizationId: form.organizationId },
-    select: { id: true, fields: true },
+    select: { id: true, schema: true },
   });
   if (!board) return;
 
   const formFields = Array.isArray(form.fields) ? (form.fields as FormField[]) : [];
-  const boardFields = Array.isArray(board.fields) ? (board.fields as BoardField[]) : [];
+  const boardFields = parseBoardSchema(board.schema).fields;
 
   const byLabel = new Map<string, string>();
   for (const bf of boardFields) {
     if (bf?.label && bf?.key) byLabel.set(bf.label.trim().toLowerCase(), bf.key);
   }
 
-  const values: Record<string, unknown> = {};
+  const metadata: Record<string, unknown> = {};
   let title = "";
   for (const ff of formFields) {
     const answer = data[ff.id];
@@ -173,24 +178,16 @@ async function pushToBoard(boardId: string, form: { fields: unknown; organizatio
     }
     // Explicit mapping wins over label match.
     const key = explicit?.[ff.id] ?? byLabel.get(ff.label.trim().toLowerCase());
-    if (key) values[key] = answer;
+    if (key) metadata[key] = answer;
   }
   if (!title) {
     title = `Form submission · ${new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
   }
 
-  const max = await prisma.studioItem.findFirst({
-    where: { boardId: board.id },
-    orderBy: { position: "desc" },
-    select: { position: true },
-  });
-
-  await prisma.studioItem.create({
-    data: {
-      boardId: board.id,
-      title,
-      values: values as unknown as Prisma.InputJsonValue,
-      position: (max?.position ?? 0) + 1,
-    },
+  await createBoardItem({
+    organizationId: form.organizationId,
+    boardId: board.id,
+    title,
+    metadata,
   });
 }

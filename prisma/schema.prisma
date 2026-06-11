@@ -97,8 +97,6 @@ model Organization {
   planDrivers           PlanDriver[]
   workflows             Workflow[]
   workflowRuns          WorkflowRun[]
-  customFields          CustomFieldDefinition[]
-  customFieldValues     CustomFieldValue[]
   overtimePolicies      OvertimePolicy[]
   memberships           OrganizationMembership[] @relation("OrgMembershipOrg")
 
@@ -151,9 +149,7 @@ model Organization {
   // "teams build their own town" vision pillar.
   workspaces           Workspace[]
   // 🆕 Studio boards — user-built tables/kanbans scoped to a workspace.
-  studioBoards         StudioBoard[]
   // 🆕 Templates this org has published to the marketplace.
-  boardTemplates       BoardTemplate[]
   // 🆕 Files primitive — generic drive surface where users compose
   // their own structure (folders + uploaded files). Used by /files
   // and embeddable in any block-based doc / page.
@@ -671,7 +667,6 @@ model Workspace {
   updatedAt      DateTime     @updatedAt
 
   members      WorkspaceMember[]
-  studioBoards StudioBoard[]
 
   @@unique([organizationId, productSlug, slug])
   @@index([organizationId, productSlug])
@@ -715,102 +710,6 @@ enum WorkspaceMemberRole {
 // - `productSlug` is the host app the board appears under (used to
 //   color the workspace nav consistently with the surrounding app).
 //   Null = a free-standing Studio board not nested under any product.
-model StudioBoard {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String?
-  workspace      Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
-  productSlug    String? // workwrk-crm, workwrk-dev, … (or null)
-  name           String
-  slug           String
-  description    String?
-  layout         StudioLayout @default(TABLE)
-  // Column definitions. Shape per element:
-  //   { key: string, label: string, type: BoardFieldType,
-  //     options?: { choices?: { value, label?, color? }[] } }
-  fields         Json         @default("[]")
-  color          String?
-  createdById    String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  items     StudioItem[]
-  templates BoardTemplate[]
-
-  @@unique([organizationId, slug])
-  @@index([organizationId, workspaceId])
-  @@index([organizationId, productSlug])
-}
-
-// StudioItem — one row inside a StudioBoard. `values` is a JSON map
-// keyed by the field `key` defined on the board. `title` is hoisted
-// to a top-level column so Kanban / detail rendering doesn't have to
-// guess which field is the title.
-model StudioItem {
-  id          String      @id @default(cuid())
-  boardId     String
-  board       StudioBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  title       String
-  values      Json        @default("{}")
-  position    Int         @default(0)
-  // The status / kanban group this row lives in. Resolved at runtime
-  // against the board's `status` field options.
-  status      String?
-  createdById String?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-
-  @@index([boardId, position])
-  @@index([boardId, status])
-}
-
-enum StudioLayout {
-  TABLE
-  KANBAN
-}
-
-// BoardTemplate — a publishable snapshot of a StudioBoard's column
-// config + layout, available for other teams (and other orgs, when
-// `visibility = PUBLIC`) to install as a starting point.
-//
-// `visibility`:
-//   - ORG: visible only inside the publishing org's marketplace.
-//   - PUBLIC: visible to every org's marketplace (this is the
-//     "marketplace" pillar — share what you built across orgs).
-//
-// We store fields + layout, NOT data. Installing creates a fresh
-// empty StudioBoard with the same shape — your team fills it in.
-model BoardTemplate {
-  id             String                  @id @default(cuid())
-  organizationId String // org that published it
-  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  // Optional pointer back to the source board (lets the publisher
-  // re-sync changes later). Nullable because the source board can be
-  // deleted while the template lives on.
-  sourceBoardId  String?
-  sourceBoard    StudioBoard?            @relation(fields: [sourceBoardId], references: [id], onDelete: SetNull)
-  name           String
-  description    String?
-  category       String? // freeform tag e.g. "Sales", "PM", "HR"
-  productSlug    String? // suggested host app
-  layout         StudioLayout            @default(TABLE)
-  fields         Json                    @default("[]")
-  color          String?
-  visibility     BoardTemplateVisibility @default(ORG)
-  installCount   Int                     @default(0)
-  publishedById  String?
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-
-  @@index([organizationId])
-  @@index([visibility, installCount])
-}
-
-enum BoardTemplateVisibility {
-  ORG
-  PUBLIC
-}
 
 // Reusable "create task" presets. A snapshot of the create-task modal's
 // configuration (type, status, priority, tags, checklist, subtasks, …)
@@ -4338,64 +4237,6 @@ enum WorkflowRunStatus {
   FAILED
 }
 
-model CustomFieldDefinition {
-  id             String          @id @default(cuid())
-  organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  // Same polymorphic targetType pattern as Workflow.
-  targetType     String
-  key            String // machine name, e.g. "cost_center_alt"
-  label          String // display label
-  fieldType      CustomFieldType @default(TEXT)
-  required       Boolean         @default(false)
-  // Type-specific options stored as JSON: SELECT options, NUMBER
-  // min/max, DATE format, etc.
-  options        Json            @default("{}")
-  position       Int             @default(0)
-  active         Boolean         @default(true)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-
-  values CustomFieldValue[]
-
-  @@unique([organizationId, targetType, key])
-  @@index([organizationId, targetType])
-}
-
-enum CustomFieldType {
-  TEXT
-  TEXTAREA
-  NUMBER
-  DATE
-  CHECKBOX
-  SELECT
-  MULTI_SELECT
-  URL
-  EMAIL
-}
-
-model CustomFieldValue {
-  id             String                @id @default(cuid())
-  organizationId String
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  definitionId   String
-  definition     CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
-  entityType     String
-  entityId       String
-  // Value stored as text — adapter on read converts back to the
-  // declared CustomFieldType. Null for "not set".
-  valueText      String?
-  // Numeric / date variants kept separate for indexable filtering.
-  valueNumber    Decimal?              @db.Decimal(20, 6)
-  valueDate      DateTime?
-  // For MULTI_SELECT.
-  valueJson      Json?
-  updatedAt      DateTime              @updatedAt
-  createdAt      DateTime              @default(now())
-
-  @@unique([definitionId, entityType, entityId])
-  @@index([entityType, entityId])
-}
 
 // ==========================================
 // Overtime engine (Phase 4 v3 / Mobile Clock-in)

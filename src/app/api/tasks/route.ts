@@ -33,48 +33,6 @@ function toPrismaError(error: unknown): PrismaErrorLike {
   return typeof error === "object" && error !== null ? (error as PrismaErrorLike) : {};
 }
 
-async function attachCustomFieldsToTasks<T extends { id: string }>(
-  organizationId: string,
-  tasks: T[],
-) {
-  if (tasks.length === 0) return tasks;
-
-  const customValues = await prisma.customFieldValue.findMany({
-    where: {
-      organizationId,
-      entityType: "TASK",
-      entityId: { in: tasks.map((task) => task.id) },
-    },
-    include: {
-      definition: { select: { key: true, fieldType: true } },
-    },
-  });
-
-  const valuesByTask = new Map<string, Record<string, string>>();
-  for (const value of customValues) {
-    let serializedValue: string | null = value.valueText;
-    if (value.definition.fieldType === "NUMBER") serializedValue = value.valueNumber?.toString() ?? null;
-    if (value.definition.fieldType === "DATE") serializedValue = value.valueDate ? value.valueDate.toISOString().slice(0, 10) : null;
-    if (value.definition.fieldType === "MULTI_SELECT") {
-      serializedValue = Array.isArray(value.valueJson)
-        ? value.valueJson.map(String).join(", ")
-        : value.valueJson == null
-          ? null
-          : JSON.stringify(value.valueJson);
-    }
-    if (!serializedValue) continue;
-
-    const taskValues = valuesByTask.get(value.entityId) ?? {};
-    taskValues[value.definition.key] = serializedValue;
-    valuesByTask.set(value.entityId, taskValues);
-  }
-
-  return tasks.map((task) => ({
-    ...task,
-    customFields: valuesByTask.get(task.id) ?? {},
-  }));
-}
-
 // GET: List tasks (calendar view)
 // Query params: userId, startDate, endDate, kraId
 export async function GET(req: NextRequest) {
@@ -176,7 +134,7 @@ export async function GET(req: NextRequest) {
     orderBy: [{ startAt: "asc" }, { date: "asc" }],
   });
 
-  return jsonSuccess(await attachCustomFieldsToTasks(orgId, tasks));
+  return jsonSuccess(tasks);
 }
 
 // POST: Create a task

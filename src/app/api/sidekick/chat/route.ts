@@ -79,40 +79,10 @@ async function ctxAndSession(sessionId: string) {
 async function buildContextPrefix(
   productContext: string | null,
   boardContext: string | null,
-  organizationId: string,
+  _organizationId: string,
 ): Promise<string | null> {
   if (!productContext) return null;
 
-  // Studio board context arrives as productContext = "studio" and
-  // boardContext = the StudioBoard.slug. Pull the board's column
-  // definitions so the model can write correct row data.
-  if (productContext === "studio" && boardContext) {
-    const board = await prisma.studioBoard.findFirst({
-      where: { organizationId, slug: boardContext },
-      select: {
-        name: true, description: true, layout: true, fields: true,
-      },
-    });
-    if (!board) return null;
-    const fields = (board.fields as Array<{ key: string; label: string; type: string; options?: { choices?: { value: string; label?: string }[] } }>) ?? [];
-    const fieldList = fields.length === 0
-      ? "(no columns defined yet)"
-      : fields
-          .map((f) => {
-            const choices = f.options?.choices?.map((c) => c.value).join(" | ");
-            const choicesNote = choices ? ` (choices: ${choices})` : "";
-            return `- \`${f.key}\` · ${f.label} · ${f.type}${choicesNote}`;
-          })
-          .join("\n");
-    return (
-      `## Current context\n` +
-      `The user is on **${board.name}**, a user-built Studio board (${board.layout.toLowerCase()} layout).` +
-      (board.description ? ` Board purpose: ${board.description}` : "") +
-      `\n\nColumns on this board (use these \`key\`s as the keys of \`values\` when calling \`create_studio_item\` or \`update_studio_item\`):\n` +
-      `${fieldList}\n\n` +
-      `Use \`boardSlug: "${boardContext}"\` for any \`*_studio_*\` tool call — that's this board. Default the user's questions to this surface.\n`
-    );
-  }
 
   const [{ PRODUCT_CATALOG }, { getBoard }] = await Promise.all([
     import("@/lib/products/catalog"),
