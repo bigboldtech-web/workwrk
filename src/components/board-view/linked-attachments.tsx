@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  FileText, Frame, Paperclip, Plus, X, ExternalLink, Loader2, Upload,
+  BookOpen, FileText, Frame, Paperclip, Plus, X, ExternalLink, Loader2, Upload,
   Image as ImageIcon, FileVideo, FileAudio, FileType, Database, Link2,
 } from "lucide-react";
 import { LinkExistingPicker } from "./link-existing-picker";
@@ -18,8 +18,10 @@ interface PickerCandidate { id: string; title: string; subtitle?: string | null 
 interface LinkExistingConfig {
   kindLabel: string;
   loadCandidates: () => Promise<PickerCandidate[]>;
-  /** Returns the target entity type (NOTE / WHITEBOARD / FILE / TABLE) for the POST */
-  targetType: "NOTE" | "WHITEBOARD" | "FILE" | "TABLE";
+  /** Returns the target entity type (NOTE / WHITEBOARD / FILE / TABLE / SOP) for the POST */
+  targetType: "NOTE" | "WHITEBOARD" | "FILE" | "TABLE" | "SOP";
+  /** Link semantics — defaults to LINKED; SOPs use REQUIRED_READING. */
+  relationKind?: "LINKED" | "EMBEDDED" | "REQUIRED_READING" | "REFERENCES";
 }
 
 type EntityType = "BOARD_ITEM" | "TASK" | "BOARD" | "SPACE" | "KRA" | "KPI" | "SOP";
@@ -47,6 +49,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit }: Pr
   const [boards, setBoards] = useState<HydratedLink[] | null>(null);
   const [files, setFiles] = useState<HydratedLink[] | null>(null);
   const [tables, setTables] = useState<HydratedLink[] | null>(null);
+  const [sops, setSops] = useState<HydratedLink[] | null>(null);
 
   const load = useCallback(() => {
     Promise.all([
@@ -55,11 +58,13 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit }: Pr
       fetch(`/api/entity-links?sourceType=${sourceType}&sourceId=${sourceId}&filterTargetType=WHITEBOARD`).then((r) => r.json()).catch(() => ({ links: [] })),
       fetch(`/api/entity-links?sourceType=${sourceType}&sourceId=${sourceId}&filterTargetType=FILE`).then((r) => r.json()).catch(() => ({ links: [] })),
       fetch(`/api/entity-links?sourceType=${sourceType}&sourceId=${sourceId}&filterTargetType=TABLE`).then((r) => r.json()).catch(() => ({ links: [] })),
-    ]).then(([noteRes, docRes, wbRes, fileRes, tableRes]) => {
+      fetch(`/api/entity-links?sourceType=${sourceType}&sourceId=${sourceId}&filterTargetType=SOP`).then((r) => r.json()).catch(() => ({ links: [] })),
+    ]).then(([noteRes, docRes, wbRes, fileRes, tableRes, sopRes]) => {
       setNotes([...(noteRes.links ?? []), ...(docRes.links ?? [])]);
       setBoards(wbRes.links ?? []);
       setFiles(fileRes.links ?? []);
       setTables(tableRes.links ?? []);
+      setSops(sopRes.links ?? []);
     });
   }, [sourceType, sourceId]);
 
@@ -220,6 +225,34 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit }: Pr
         }}
         defaultHref={(targetId) => `/tables/${targetId}`}
       />
+
+      <LinkSection
+        title="SOPs"
+        Icon={BookOpen}
+        items={sops}
+        canEdit={canEdit}
+        emptyHint="Link the SOP that governs this work — it shows up as required reading."
+        sourceType={sourceType}
+        sourceId={sourceId}
+        onReload={load}
+        linkExisting={{
+          kindLabel: "SOP",
+          targetType: "SOP",
+          relationKind: "REQUIRED_READING",
+          loadCandidates: async () => {
+            const res = await fetch("/api/sops?limit=100");
+            const data = await res.json().catch(() => ({}));
+            const list: Array<{ id: string; title: string; category?: string | null; status?: string | null }> =
+              Array.isArray(data) ? data : (data?.data ?? []);
+            return list.map((s) => ({ id: s.id, title: s.title, subtitle: s.category ?? s.status }));
+          },
+        }}
+        onRemove={async (id) => {
+          await fetch(`/api/entity-links/${id}`, { method: "DELETE" });
+          await load();
+        }}
+        defaultHref={(targetId) => `/sops/${targetId}`}
+      />
     </div>
   );
 }
@@ -243,7 +276,8 @@ function LinkSection({
   items: HydratedLink[] | null;
   canEdit: boolean;
   emptyHint: string;
-  onAdd: (title: string) => Promise<void>;
+  /** Create-new handler. Omit for link-only sections (e.g. SOPs). */
+  onAdd?: (title: string) => Promise<void>;
   onRemove: (linkId: string) => Promise<void>;
   /** Fallback URL builder used when the API didn't return target.href. */
   defaultHref: (targetId: string) => string;
@@ -269,6 +303,7 @@ function LinkSection({
       body: JSON.stringify({
         source: { type: sourceType, id: sourceId },
         target: { type: linkExisting.targetType, id: candidate.id },
+        ...(linkExisting.relationKind ? { relationKind: linkExisting.relationKind } : {}),
       }),
     });
     onReload?.();
@@ -281,7 +316,7 @@ function LinkSection({
 
   const commit = async () => {
     const v = draft.trim();
-    if (!v) {
+    if (!v || !onAdd) {
       setAdding(false);
       return;
     }
@@ -318,14 +353,16 @@ function LinkSection({
                 Link
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
-            >
-              <Plus className="h-3 w-3" />
-              Add
-            </button>
+            {onAdd ? (
+              <button
+                type="button"
+                onClick={() => setAdding(true)}
+                className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+              </button>
+            ) : null}
             {linkExisting ? (
               <LinkExistingPicker
                 open={pickerOpen}

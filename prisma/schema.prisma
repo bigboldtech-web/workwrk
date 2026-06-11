@@ -2883,6 +2883,7 @@ enum TagEntityType {
   INVOICE
   CANDIDATE
   JOB
+  BOARD_ITEM
 }
 
 // ==========================================
@@ -4927,6 +4928,11 @@ model Item {
   // beginning of a duration; dueAt is the deadline / single-day date.
   startAt        DateTime?
   dueAt          DateTime?
+  // 🆕 Task-system — hoisted priority so cross-board queries can
+  // filter/order without JSON-path gymnastics (same rationale as the
+  // Phase 58 date hoist). Values: URGENT | HIGH | NORMAL | LOW;
+  // null = no priority (ClickUp default). Plain string like `status`.
+  priority       String?
   metadata       Json         @default("{}")
   // 🆕 Phase 72 — subtask self-relation. Top-level items have parentItemId
   // = null; subtasks point to their parent. Cascade delete so removing
@@ -4941,6 +4947,7 @@ model Item {
   @@index([organizationId, boardId])
   @@index([boardId, position])
   @@index([boardId, dueAt])
+  @@index([boardId, priority])
   @@index([boardId, parentItemId])
   @@index([itemType])
   @@index([ownerId])

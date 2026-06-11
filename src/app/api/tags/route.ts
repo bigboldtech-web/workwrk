@@ -68,11 +68,16 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
 
   const body = await req.json();
   const rawName = typeof body.name === "string" ? body.name.trim() : "";
   const type = typeof body.type === "string" ? body.type : "CUSTOM";
+
+  // CUSTOM tags are the workspace-level task labels (ClickUp tags) —
+  // any member may mint one from the tag picker. Dimensional types
+  // (cost center, region…) drive Finance/HR reporting and stay
+  // admin-only.
+  if (type !== "CUSTOM" && !isOrgAdmin(session)) return jsonError("Forbidden", 403);
   const color = typeof body.color === "string" ? body.color.trim() || null : null;
   const description = typeof body.description === "string" ? body.description.trim() || null : null;
 

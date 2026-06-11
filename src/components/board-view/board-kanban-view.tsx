@@ -16,12 +16,19 @@
 //   - Drop target highlight = 2px dashed brand outline on hover.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { CalendarDays, Plus, X } from "lucide-react";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
+import type { FieldDef } from "@/lib/field-catalog";
+import { FieldValue } from "./field-value";
+import { PriorityFlag } from "./priority-picker";
+import { TagChip } from "./tag-picker";
 
 interface BoardKanbanViewProps {
   boardId: string;
   initialItems: BoardItemRow[];
+  /** Custom fields from Board.schema.fields — the first two choice-type
+   *  fields render as chips on each card. */
+  initialFields?: FieldDef[];
   canEdit: boolean;
   onOpenItem?: (itemId: string) => void;
 }
@@ -31,7 +38,13 @@ const STATUS_LOOKUP: Record<string, { label: string; color: string }> = Object.f
   DEFAULT_STATUS_OPTIONS.map((o) => [o.value, { label: o.label, color: o.color }]),
 );
 
-export function BoardKanbanView({ boardId, initialItems, canEdit, onOpenItem }: BoardKanbanViewProps) {
+export function BoardKanbanView({ boardId, initialItems, initialFields, canEdit, onOpenItem }: BoardKanbanViewProps) {
+  // Card chips show at most the first two choice-type custom fields —
+  // keeps cards compact while surfacing the most pill-like data.
+  const chipFields = useMemo(
+    () => (initialFields ?? []).filter((f) => f.type === "DROPDOWN" || f.type === "LABELS" || f.type === "MULTI_SELECT").slice(0, 2),
+    [initialFields],
+  );
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
   const [error, setError] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -162,6 +175,7 @@ export function BoardKanbanView({ boardId, initialItems, canEdit, onOpenItem }: 
                   <KanbanCard
                     key={card.id}
                     card={card}
+                    chipFields={chipFields}
                     canEdit={canEdit}
                     onDragStart={() => setDragId(card.id)}
                     onDragEnd={() => { setDragId(null); setHoverColumn(null); }}
@@ -189,6 +203,7 @@ export function BoardKanbanView({ boardId, initialItems, canEdit, onOpenItem }: 
 
 function KanbanCard({
   card,
+  chipFields,
   canEdit,
   onDragStart,
   onDragEnd,
@@ -196,12 +211,21 @@ function KanbanCard({
   onOpen,
 }: {
   card: BoardItemRow;
+  chipFields: FieldDef[];
   canEdit: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
   isDragging: boolean;
   onOpen?: () => void;
 }) {
+  const due = card.dueAt ? new Date(card.dueAt) : null;
+  const overdue = !!due && due < new Date() && card.status !== "DONE";
+  const tags = card.tags ?? [];
+  const fieldChips = chipFields.filter((f) => {
+    const v = card.metadata?.[f.key];
+    return v != null && v !== "" && (!Array.isArray(v) || v.length > 0);
+  });
+
   return (
     <div
       draggable={canEdit}
@@ -213,6 +237,30 @@ function KanbanCard({
       } ${isDragging ? "opacity-40" : ""} hover:shadow-sm transition-shadow`}
     >
       <div className="break-words">{card.title}</div>
+
+      {/* Pills row — due date / priority / tags / choice-field chips.
+          Only renders when at least one is present so empty cards stay slim. */}
+      {due || card.priority || tags.length > 0 || fieldChips.length > 0 ? (
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+          {due ? (
+            <span
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-medium ${
+                overdue ? "bg-red-50 text-red-600" : "bg-zinc-100 text-zinc-600"
+              }`}
+            >
+              <CalendarDays className="w-3 h-3" />
+              {due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            </span>
+          ) : null}
+          {card.priority ? <PriorityFlag value={card.priority} /> : null}
+          {tags.slice(0, 3).map((t) => <TagChip key={t.id} tag={t} />)}
+          {tags.length > 3 ? <span className="text-[10.5px] text-zinc-500">+{tags.length - 3}</span> : null}
+          {fieldChips.map((f) => (
+            <FieldValue key={f.key} field={f} value={card.metadata?.[f.key]} mode="display" />
+          ))}
+        </div>
+      ) : null}
+
       <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-500">
         {card.owner ? (
           <span className="inline-flex items-center gap-1.5">

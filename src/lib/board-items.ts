@@ -20,13 +20,13 @@
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/item-thread";
-import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
+import { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS, type BoardItemRow, type ItemTag } from "@/lib/board-items-shared";
 
 // Re-export the client-safe pieces so existing server code (API routes,
 // page server components) keeps working with `from "@/lib/board-items"`.
 // Client components must import from `@/lib/board-items-shared` directly
 // to avoid pulling Prisma + pg into the browser bundle.
-export { DEFAULT_STATUS_OPTIONS, type BoardItemRow };
+export { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS, type BoardItemRow, type ItemTag };
 
 function rowFrom(it: {
   id: string;
@@ -38,11 +38,12 @@ function rowFrom(it: {
   metadata: unknown;
   startAt?: Date | null;
   dueAt?: Date | null;
+  priority?: string | null;
   parentItemId?: string | null;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-}, owner?: { id: string; firstName: string; lastName: string; avatar: string | null } | null): BoardItemRow {
+}, owner?: { id: string; firstName: string; lastName: string; avatar: string | null } | null, tags?: ItemTag[]): BoardItemRow {
   return {
     id: it.id,
     title: it.title,
@@ -53,12 +54,89 @@ function rowFrom(it: {
     metadata: (it.metadata as Record<string, unknown>) ?? {},
     startAt: it.startAt ?? null,
     dueAt: it.dueAt ?? null,
+    priority: it.priority ?? null,
     parentItemId: it.parentItemId ?? null,
     archivedAt: it.archivedAt,
     createdAt: it.createdAt,
     updatedAt: it.updatedAt,
     owner: owner ?? null,
+    tags: tags ?? [],
   };
+}
+
+const VALID_PRIORITIES = new Set<string>(PRIORITY_OPTIONS.map((p) => p.value));
+
+function normalizePriority(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const up = value.toUpperCase();
+  if (!VALID_PRIORITIES.has(up)) throw new Error(`Invalid priority: ${value}`);
+  return up;
+}
+
+/** Batched tag fetch for a set of items → Map(itemId → ItemTag[]). */
+async function tagsForItems(itemIds: string[]): Promise<Map<string, ItemTag[]>> {
+  const map = new Map<string, ItemTag[]>();
+  if (!itemIds.length) return map;
+  const assignments = await prisma.tagAssignment.findMany({
+    where: { entityType: "BOARD_ITEM", entityId: { in: itemIds } },
+    include: { tag: { select: { id: true, name: true, color: true, archived: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const a of assignments) {
+    if (a.tag.archived) continue;
+    const list = map.get(a.entityId) ?? [];
+    list.push({ id: a.tag.id, name: a.tag.name, color: a.tag.color });
+    map.set(a.entityId, list);
+  }
+  return map;
+}
+
+/** Diff-sync an item's BOARD_ITEM TagAssignments to exactly `tagIds`. */
+async function syncItemTags(
+  organizationId: string,
+  itemId: string,
+  tagIds: string[],
+  actorId: string | null,
+): Promise<ItemTag[]> {
+  // Only org-owned, non-archived tags are assignable.
+  const valid = tagIds.length
+    ? await prisma.tag.findMany({
+        where: { organizationId, id: { in: tagIds }, archived: false },
+        select: { id: true, name: true, color: true },
+      })
+    : [];
+  const validIds = new Set(valid.map((t) => t.id));
+
+  const existing = await prisma.tagAssignment.findMany({
+    where: { entityType: "BOARD_ITEM", entityId: itemId },
+    select: { id: true, tagId: true },
+  });
+  const existingByTag = new Map(existing.map((e) => [e.tagId, e.id] as const));
+
+  const toAdd = [...validIds].filter((id) => !existingByTag.has(id));
+  const toRemove = existing.filter((e) => !validIds.has(e.tagId));
+
+  await Promise.all([
+    toAdd.length
+      ? prisma.tagAssignment.createMany({
+          data: toAdd.map((tagId) => ({
+            tagId,
+            entityType: "BOARD_ITEM" as const,
+            entityId: itemId,
+            organizationId,
+            assignedById: actorId,
+          })),
+          skipDuplicates: true,
+        })
+      : Promise.resolve(null),
+    toRemove.length
+      ? prisma.tagAssignment.deleteMany({ where: { id: { in: toRemove.map((e) => e.id) } } })
+      : Promise.resolve(null),
+  ]);
+
+  // Keep the caller's requested order where possible.
+  const byId = new Map(valid.map((t) => [t.id, t] as const));
+  return tagIds.filter((id) => byId.has(id)).map((id) => byId.get(id)!);
 }
 
 export async function listBoardItems(boardId: string, opts: { includeArchived?: boolean } = {}): Promise<BoardItemRow[]> {
@@ -73,10 +151,10 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
   const itemIds = rows.map((r) => r.id);
   const ownerIds = Array.from(new Set(rows.map((r) => r.ownerId).filter((x): x is string => !!x)));
 
-  // Parallel batches — owners + comment counts + attachment counts.
+  // Parallel batches — owners + comment counts + attachment counts + tags.
   // Comments + attachments are polymorphic (entityType + entityId /
   // sourceType + sourceId) so we groupBy the matching column.
-  const [owners, commentGroups, attachmentGroups] = await Promise.all([
+  const [owners, commentGroups, attachmentGroups, tagsById] = await Promise.all([
     ownerIds.length
       ? prisma.user.findMany({
           where: { id: { in: ownerIds } },
@@ -97,6 +175,7 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
           _count: { _all: true },
         })
       : Promise.resolve([] as { sourceId: string; _count: { _all: number } }[]),
+    tagsForItems(itemIds),
   ]);
 
   const ownerById = new Map(owners.map((o) => [o.id, o] as const));
@@ -113,7 +192,7 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
   }
 
   return rows.map((r) => {
-    const base = rowFrom(r, r.ownerId ? ownerById.get(r.ownerId) ?? null : null);
+    const base = rowFrom(r, r.ownerId ? ownerById.get(r.ownerId) ?? null : null, tagsById.get(r.id) ?? []);
     base.commentCount = commentCountById.get(r.id) ?? 0;
     base.attachmentCount = attachmentCountById.get(r.id) ?? 0;
     base.subtaskCount = subtaskCountByParent.get(r.id) ?? 0;
@@ -132,6 +211,10 @@ export interface CreateBoardItemInput {
   /** Phase 58 dates — ISO strings or Date; coerced before Prisma. */
   startAt?: string | Date | null;
   dueAt?: string | Date | null;
+  /** Task-system phase 2 — URGENT|HIGH|NORMAL|LOW (case-insensitive). */
+  priority?: string | null;
+  /** Task-system phase 2 — workspace Tag ids to assign at create. */
+  tagIds?: string[];
   /** Phase 72 — null = top-level item; set to a parent id to create a subtask. */
   parentItemId?: string | null;
   /** Logged on the activity feed for this item. Pass the session
@@ -177,10 +260,14 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
       position,
       startAt: input.startAt == null ? null : new Date(input.startAt),
       dueAt: input.dueAt == null ? null : new Date(input.dueAt),
+      priority: normalizePriority(input.priority),
       metadata: (input.metadata ?? {}) as object,
       parentItemId: input.parentItemId ?? null,
     },
   });
+  const tags = input.tagIds?.length
+    ? await syncItemTags(input.organizationId, created.id, input.tagIds, input.actorId ?? null)
+    : [];
   const owner = input.ownerId
     ? await prisma.user.findUnique({
         where: { id: input.ownerId },
@@ -196,7 +283,7 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
     meta: { title: trimmed, status: created.status },
   });
 
-  return rowFrom(created, owner);
+  return rowFrom(created, owner, tags);
 }
 
 export interface UpdateBoardItemInput {
@@ -210,6 +297,10 @@ export interface UpdateBoardItemInput {
   // before reaching Prisma so the schema's DateTime type is happy.
   startAt?: string | Date | null;
   dueAt?: string | Date | null;
+  /** Task-system phase 2 — URGENT|HIGH|NORMAL|LOW or null to clear. */
+  priority?: string | null;
+  /** Task-system phase 2 — full replacement set of workspace Tag ids. */
+  tagIds?: string[];
 }
 
 export async function updateBoardItem(
@@ -220,7 +311,7 @@ export async function updateBoardItem(
   // Capture the pre-edit values so we can diff for the activity log.
   const before = await prisma.item.findUnique({
     where: { id: itemId },
-    select: { organizationId: true, title: true, status: true, ownerId: true },
+    select: { organizationId: true, title: true, status: true, ownerId: true, priority: true },
   });
 
   const data: Record<string, unknown> = {};
@@ -236,6 +327,7 @@ export async function updateBoardItem(
   if (patch.metadata !== undefined) data.metadata = patch.metadata as object;
   if (patch.startAt !== undefined) data.startAt = patch.startAt === null ? null : new Date(patch.startAt);
   if (patch.dueAt !== undefined) data.dueAt = patch.dueAt === null ? null : new Date(patch.dueAt);
+  if (patch.priority !== undefined) data.priority = normalizePriority(patch.priority);
 
   const updated = await prisma.item.update({ where: { id: itemId }, data });
   const owner = updated.ownerId
@@ -244,6 +336,10 @@ export async function updateBoardItem(
         select: { id: true, firstName: true, lastName: true, avatar: true },
       })
     : null;
+
+  const tags = patch.tagIds !== undefined
+    ? await syncItemTags(updated.organizationId, itemId, patch.tagIds, actorId)
+    : (await tagsForItems([itemId])).get(itemId) ?? [];
 
   if (before) {
     if (patch.title !== undefined && before.title !== updated.title) {
@@ -273,6 +369,15 @@ export async function updateBoardItem(
         meta: { from: before.ownerId, to: updated.ownerId },
       });
     }
+    if (patch.priority !== undefined && before.priority !== updated.priority) {
+      await logActivity({
+        organizationId: before.organizationId,
+        itemId,
+        actorId,
+        action: "PRIORITY_CHANGED",
+        meta: { from: before.priority, to: updated.priority },
+      });
+    }
     if (patch.metadata !== undefined) {
       await logActivity({
         organizationId: before.organizationId,
@@ -284,7 +389,7 @@ export async function updateBoardItem(
     }
   }
 
-  return rowFrom(updated, owner);
+  return rowFrom(updated, owner, tags);
 }
 
 export async function archiveBoardItem(itemId: string, actorId: string | null = null): Promise<BoardItemRow> {

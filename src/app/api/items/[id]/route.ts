@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveBoardItem, deleteBoardItem, updateBoardItem } from "@/lib/board-items";
+import { archiveBoardItem, deleteBoardItem, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board-items";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { prisma } from "@/lib/prisma";
 
@@ -29,12 +29,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const gate = await loadAndGateRead(id, c);
   if ("error" in gate) return gate.error;
-  const owner = gate.item.ownerId
-    ? await prisma.user.findUnique({
-        where: { id: gate.item.ownerId },
-        select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
-      })
-    : null;
+  const [owner, tagAssignments] = await Promise.all([
+    gate.item.ownerId
+      ? prisma.user.findUnique({
+          where: { id: gate.item.ownerId },
+          select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+        })
+      : Promise.resolve(null),
+    prisma.tagAssignment.findMany({
+      where: { entityType: "BOARD_ITEM", entityId: gate.item.id },
+      include: { tag: { select: { id: true, name: true, color: true, archived: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
   return NextResponse.json({
     item: {
       id: gate.item.id,
@@ -46,6 +53,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       groupKey: gate.item.groupKey,
       position: gate.item.position,
       metadata: gate.item.metadata,
+      startAt: gate.item.startAt,
+      dueAt: gate.item.dueAt,
+      priority: gate.item.priority,
+      tags: tagAssignments.filter((a) => !a.tag.archived).map((a) => ({ id: a.tag.id, name: a.tag.name, color: a.tag.color })),
       archivedAt: gate.item.archivedAt,
       createdAt: gate.item.createdAt,
       updatedAt: gate.item.updatedAt,
@@ -91,6 +102,9 @@ const patchSchema = z.object({
   // Phase 58 — first-class date columns; ISO strings or null.
   startAt: z.string().datetime().nullable().optional(),
   dueAt: z.string().datetime().nullable().optional(),
+  // Task-system phase 2 — first-class priority + workspace tags.
+  priority: z.enum(PRIORITY_OPTIONS.map((p) => p.value) as [string, ...string[]]).nullable().optional(),
+  tagIds: z.array(z.string().min(1)).max(20).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

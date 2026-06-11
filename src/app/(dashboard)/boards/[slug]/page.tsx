@@ -14,13 +14,14 @@ import {
   List as ListIcon, LayoutGrid, Calendar as CalIcon, GanttChart, Table2,
   ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
   Filter, CheckCircle2, Users as UsersIcon, Search, Settings,
-  ListFilter, Glasses, Zap, Plus, Folder as FolderIcon,
+  ListFilter, Glasses, Zap, Folder as FolderIcon,
 } from "lucide-react";
 import { createElement } from "react";
 import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
 import type { ViewType } from "@/generated/prisma";
 import { listBoardItems } from "@/lib/board-items";
 import { canEditSpace } from "@/lib/space";
+import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
 import { NewViewTrigger } from "@/components/board-view/view-create-popover";
 import { ViewTabMenu } from "@/components/board-view/view-tab-menu";
@@ -255,15 +256,12 @@ export default async function BoardPage(props: {
         <button type="button" className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500" aria-label="Settings">
           <Settings className="w-3.5 h-3.5" />
         </button>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[12px] text-white"
-          style={{ background: "var(--os-brand)" }}
-          title="Add task"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Task
-        </button>
+        <BoardAddTaskButton
+          boardId={board.id}
+          boardSlug={board.slug}
+          boardName={board.name}
+          spaceId={board.space.id}
+        />
       </div>
 
       {/* Renderer */}

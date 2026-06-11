@@ -17,7 +17,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Trash2, X } from "lucide-react";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
+import { AssigneePicker } from "./assignee-picker";
 import { FieldValue } from "./field-value";
+import { PriorityPicker } from "./priority-picker";
+import { TagPicker } from "./tag-picker";
 import { ItemThread } from "./item-thread";
 import { LinkedAttachments } from "./linked-attachments";
 import { TimeTracker } from "./time-tracker";
@@ -94,10 +97,13 @@ export function BoardItemDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [itemId, onClose]);
 
-  const patch = useCallback(async (body: Partial<Pick<BoardItemRow, "title" | "status"> & { metadata: Record<string, unknown>; startAt: string | null; dueAt: string | null }>) => {
+  const patch = useCallback(async (
+    body: Partial<Pick<BoardItemRow, "title" | "status"> & { metadata: Record<string, unknown>; startAt: string | null; dueAt: string | null; ownerId: string | null; priority: string | null; tagIds: string[] }>,
+    optimistic?: Partial<BoardItemRow>,
+  ) => {
     if (!item) return;
     // Optimistic
-    setItem((prev) => (prev ? { ...prev, ...body } : prev));
+    setItem((prev) => (prev ? { ...prev, ...body, ...optimistic } : prev));
     try {
       const res = await fetch(`/api/items/${item.id}`, {
         method: "PATCH",
@@ -207,16 +213,39 @@ export function BoardItemDrawer({
                     />
                   </Row>
                   <Row label="Owner">
-                    {item.owner ? (
-                      <span className="inline-flex items-center gap-2">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-zinc-100 text-xs font-medium">
-                          {`${item.owner.firstName?.[0] ?? ""}${item.owner.lastName?.[0] ?? ""}`.toUpperCase() || "?"}
-                        </span>
-                        <span className="text-sm">{item.owner.firstName} {item.owner.lastName}</span>
-                      </span>
-                    ) : (
-                      <span className="text-xs text-zinc-500">Unassigned</span>
-                    )}
+                    <AssigneePicker
+                      value={item.owner ? { ...item.owner, email: null } : null}
+                      canEdit={canEdit}
+                      onChange={(person) =>
+                        patch(
+                          { ownerId: person?.id ?? null },
+                          {
+                            owner: person
+                              ? {
+                                  id: person.id,
+                                  firstName: person.firstName ?? "",
+                                  lastName: person.lastName ?? "",
+                                  avatar: person.avatar,
+                                }
+                              : null,
+                          },
+                        )
+                      }
+                    />
+                  </Row>
+                  <Row label="Priority">
+                    <PriorityPicker
+                      value={item.priority ?? null}
+                      canEdit={canEdit}
+                      onChange={(priority) => patch({ priority })}
+                    />
+                  </Row>
+                  <Row label="Tags">
+                    <TagPicker
+                      value={item.tags ?? []}
+                      canEdit={canEdit}
+                      onChange={(tags) => patch({ tagIds: tags.map((t) => t.id) }, { tags })}
+                    />
                   </Row>
                   <Row label="Start date">
                     <DateField
@@ -239,6 +268,7 @@ export function BoardItemDrawer({
                         value={item.metadata?.[f.key]}
                         mode="edit"
                         disabled={!canEdit}
+                        currentUserId={currentUserId}
                         onChange={(next) => patch({ metadata: { ...item.metadata, [f.key]: next } })}
                       />
                     </Row>

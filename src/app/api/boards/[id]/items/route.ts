@@ -6,7 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { canEditBoard, canReadBoard, getBoardForReader } from "@/lib/board";
-import { createBoardItem, listBoardItems } from "@/lib/board-items";
+import { createBoardItem, listBoardItems, PRIORITY_OPTIONS } from "@/lib/board-items";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -41,6 +41,9 @@ const createSchema = z.object({
   // Phase 58 — optional scheduling on create.
   startAt: z.string().datetime().nullable().optional(),
   dueAt: z.string().datetime().nullable().optional(),
+  // Task-system phase 2 — first-class priority + workspace tags on create.
+  priority: z.enum(PRIORITY_OPTIONS.map((p) => p.value) as [string, ...string[]]).nullable().optional(),
+  tagIds: z.array(z.string().min(1)).max(20).optional(),
   // Phase 72 — pass to create a subtask under the given parent.
   parentItemId: z.string().min(1).nullable().optional(),
 });
@@ -74,6 +77,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       metadata: parsed.data.metadata,
       startAt: parsed.data.startAt ?? null,
       dueAt: parsed.data.dueAt ?? null,
+      priority: parsed.data.priority ?? null,
+      tagIds: parsed.data.tagIds,
       parentItemId: parsed.data.parentItemId ?? null,
       actorId: c.userId,
     });

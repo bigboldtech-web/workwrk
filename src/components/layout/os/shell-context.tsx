@@ -26,6 +26,15 @@ function ensureAlwaysPinned(keys: string[]): string[] {
 
 export type Lens = "me" | "we";
 
+/** Board the create-task modal should preselect as its destination
+ *  list (mirrors the modal's SelectedList shape). */
+export type CreateTaskPreselect = {
+  id: string;
+  slug: string;
+  name: string;
+  spaceId: string | null;
+};
+
 export type PresenceStatus = {
   emoji: string | null;
   label: string;
@@ -86,8 +95,12 @@ type ShellState = {
   setCustomizeOpen: (v: boolean) => void;
 
   createTaskOpen: boolean;
-  openCreateTask: () => void;
+  /** Optionally pass the board (list) the modal should preselect —
+   *  used by the board page's "+ Task" button. */
+  openCreateTask: (preselect?: CreateTaskPreselect | null) => void;
   closeCreateTask: () => void;
+  /** Board to preselect in the create-task modal; null = none. */
+  createTaskPreselect: CreateTaskPreselect | null;
 
   createListOpen: boolean;
   openCreateList: () => void;
@@ -178,6 +191,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [sidekickInitialPrompt, setSidekickInitialPrompt] = useState<string | null>(null);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
+  const [createTaskPreselect, setCreateTaskPreselect] = useState<CreateTaskPreselect | null>(null);
   const [createListOpen, setCreateListOpen] = useState(false);
   const [lens, setLensState] = useState<Lens>("me");
   const [openItem, setOpenItem] = useState<OpenItem | null>(null);
@@ -379,8 +393,14 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   }, [sidekickInitialPrompt]);
   const openCustomize = useCallback(() => setCustomizeOpen(true), []);
   const closeCustomize = useCallback(() => setCustomizeOpen(false), []);
-  const openCreateTask = useCallback(() => setCreateTaskOpen(true), []);
-  const closeCreateTask = useCallback(() => setCreateTaskOpen(false), []);
+  const openCreateTask = useCallback((preselect?: CreateTaskPreselect | null) => {
+    setCreateTaskPreselect(preselect ?? null);
+    setCreateTaskOpen(true);
+  }, []);
+  const closeCreateTask = useCallback(() => {
+    setCreateTaskOpen(false);
+    setCreateTaskPreselect(null);
+  }, []);
   const openCreateList = useCallback(() => setCreateListOpen(true), []);
   const closeCreateList = useCallback(() => setCreateListOpen(false), []);
   const openItemDrawer = useCallback((it: OpenItem) => setOpenItem(it), []);
@@ -459,7 +479,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       sidekickOpen, openSidekick, closeSidekick, toggleSidekick,
       sidekickInitialPrompt, consumeSidekickInitialPrompt,
       customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
-      createTaskOpen, openCreateTask, closeCreateTask,
+      createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect,
       createListOpen, openCreateList, closeCreateList,
       lens, setLens,
       openItem, openItemDrawer, closeItemDrawer,
@@ -474,7 +494,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedNotifications, setMutedNotifications,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createListOpen, openCreateList, closeCreateList, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

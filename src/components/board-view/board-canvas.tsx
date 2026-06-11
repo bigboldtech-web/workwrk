@@ -6,7 +6,7 @@
 // SSR while all interactivity (drawer state, field shelf, row clicks)
 // lives here.
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
@@ -14,6 +14,8 @@ import type { BoardItemRow } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { BoardTableView } from "./board-table-view";
 import { BoardKanbanView } from "./board-kanban-view";
+import { BoardCalendarView } from "./board-calendar-view";
+import { BoardGanttView } from "./board-gantt-view";
 import { BoardItemDrawer } from "./board-item-drawer";
 import { FieldShelf } from "./field-shelf";
 
@@ -66,6 +68,32 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
   const [fields, setFields] = useState<FieldDef[]>(initialFields);
 
+  // Per-view column visibility (View.config.hiddenFields). The table
+  // gets only visible fields; the drawer always shows all (ClickUp
+  // behavior). Persisted with the same PATCH the table uses for
+  // groupBy — merging into the view's config blob.
+  const [hiddenFields, setHiddenFields] = useState<string[]>(() => {
+    const raw = viewConfig?.hiddenFields;
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  });
+  const toggleHiddenField = useCallback((key: string) => {
+    setHiddenFields((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      if (viewId) {
+        void fetch(`/api/boards/${boardId}/views/${viewId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ config: { ...(viewConfig ?? {}), hiddenFields: next } }),
+        }).catch(() => {});
+      }
+      return next;
+    });
+  }, [boardId, viewId, viewConfig]);
+  const visibleFields = useMemo(
+    () => fields.filter((f) => !hiddenFields.includes(f.key)),
+    [fields, hiddenFields],
+  );
+
   const handleItemChanged = useCallback((updated: BoardItemRow) => {
     setItems((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
   }, []);
@@ -95,7 +123,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           viewId={viewId}
           viewConfig={viewConfig}
           initialItems={items}
-          initialFields={fields}
+          initialFields={visibleFields}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
         />
@@ -103,7 +131,23 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardKanbanView
           boardId={boardId}
           initialItems={items}
+          initialFields={visibleFields}
           canEdit={canEdit}
+          onOpenItem={(id) => setOpenItemId(id)}
+        />
+      ) : viewType === "CALENDAR" ? (
+        <BoardCalendarView
+          boardId={boardId}
+          initialItems={items}
+          initialFields={fields}
+          canEdit={canEdit}
+          onOpenItem={(id) => setOpenItemId(id)}
+          onItemCreated={(item) => setItems((prev) => [...prev, item])}
+        />
+      ) : viewType === "GANTT" ? (
+        <BoardGanttView
+          initialItems={items}
+          initialFields={fields}
           onOpenItem={(id) => setOpenItemId(id)}
         />
       ) : (
@@ -112,8 +156,8 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
             {viewType} renderer coming next
           </div>
           <p className="text-sm text-zinc-500 max-w-[460px] mx-auto">
-            TABLE and KANBAN are live; CALENDAR / GANTT / FORM / TIMELINE / WORKLOAD / MAP / DOC / DASHBOARD follow.
-            Add a List or Board view via the "+ View" tab to use the rendered surface today.
+            TABLE, KANBAN, CALENDAR, and GANTT are live; FORM / TIMELINE / WORKLOAD / MAP / DOC / DASHBOARD follow.
+            Add a List, Board, Calendar, or Gantt view via the "+ View" tab to use a rendered surface today.
           </p>
         </div>
       )}
@@ -133,6 +177,8 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         open={shelfOpen}
         canEdit={canEdit}
         fields={fields}
+        hiddenFields={hiddenFields}
+        onToggleHidden={viewId ? toggleHiddenField : undefined}
         onClose={() => setShelfOpen(false)}
         onFieldsChanged={setFields}
       />

@@ -14,6 +14,23 @@ export const DEFAULT_STATUS_OPTIONS = [
   { value: "DONE",        label: "Done",         color: "#10b981" },
 ] as const;
 
+// Task-system phase 2 — first-class priority. Order matters: it's the
+// URGENT→LOW display + group-by bucket order (ClickUp flag palette).
+export const PRIORITY_OPTIONS = [
+  { value: "URGENT", label: "Urgent", color: "#ef4444" },
+  { value: "HIGH",   label: "High",   color: "#f59e0b" },
+  { value: "NORMAL", label: "Normal", color: "#3b82f6" },
+  { value: "LOW",    label: "Low",    color: "#9ca3af" },
+] as const;
+
+export type PriorityValue = (typeof PRIORITY_OPTIONS)[number]["value"];
+
+export interface ItemTag {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 export interface BoardItemRow {
   id: string;
   title: string;
@@ -25,6 +42,12 @@ export interface BoardItemRow {
   /** Phase 58 — first-class date columns. Either may be null. */
   startAt?: Date | string | null;
   dueAt?: Date | string | null;
+  /** Task-system phase 2 — first-class priority (URGENT|HIGH|NORMAL|LOW),
+   *  null = none. */
+  priority?: string | null;
+  /** Task-system phase 2 — workspace Tags applied to this item via
+   *  TagAssignment(BOARD_ITEM). Optional: cheaper fetch paths skip it. */
+  tags?: ItemTag[];
   /** Phase 67 — counts surfaced by listBoardItems for inline badges
    *  on the Name cell. Optional because cheaper item-fetch paths may
    *  skip the groupBy queries. */

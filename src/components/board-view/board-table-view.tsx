@@ -18,10 +18,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, Plus, Trash2, X, ChevronDown, ChevronRight, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy } from "lucide-react";
 import {
   DEFAULT_STATUS_OPTIONS,
+  PRIORITY_OPTIONS,
   type BoardItemRow,
+  type ItemTag,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
+import { AssigneePicker } from "./assignee-picker";
 import { FieldValue } from "./field-value";
+import { PriorityPicker } from "./priority-picker";
+import { TagPicker } from "./tag-picker";
 
 interface BoardTableViewProps {
   boardId: string;
@@ -37,6 +42,11 @@ interface BoardTableViewProps {
    *  parent owns drawer state; we just emit the id. */
   onOpenItem?: (itemId: string) => void;
 }
+
+/** Patch shape rows can emit. `owner`/`tags` only update the local
+ *  optimistic row — the API's zod schema strips unknown keys; `tagIds`
+ *  is what the server persists. */
+type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags">> & { tagIds?: string[] };
 
 type StatusOption = { value: string; label: string; color: string };
 const STATUS_BY_VALUE: Map<string, StatusOption> = new Map(
@@ -181,6 +191,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       { key: "__none__", label: "No grouping" },
       { key: "status", label: "Status" },
       { key: "owner", label: "Owner" },
+      { key: "priority", label: "Priority" },
     ];
     for (const f of customFields) {
       if (f.type === "DROPDOWN" || f.type === "MULTI_SELECT" || f.type === "LABELS") {
@@ -199,6 +210,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     const groupKeyFor = (it: BoardItemRow): string => {
       if (groupBy === "status") return it.status ?? "__unset__";
       if (groupBy === "owner") return it.ownerId ?? "__unset__";
+      if (groupBy === "priority") return it.priority ?? "__unset__";
       const raw = it.metadata?.[groupBy];
       return raw == null || raw === "" ? "__unset__" : String(raw);
     };
@@ -213,6 +225,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (groupBy === "status") {
       // Honor DEFAULT_STATUS_OPTIONS order; append Unset last if needed.
       for (const opt of DEFAULT_STATUS_OPTIONS) {
+        const rows = map.get(opt.value) ?? [];
+        if (rows.length > 0) {
+          resolved.push({ key: opt.value, label: opt.label, color: opt.color, rows });
+          map.delete(opt.value);
+        }
+      }
+    } else if (groupBy === "priority") {
+      // Honor URGENT→LOW severity order; Unset (no priority) appends last.
+      for (const opt of PRIORITY_OPTIONS) {
         const rows = map.get(opt.value) ?? [];
         if (rows.length > 0) {
           resolved.push({ key: opt.value, label: opt.label, color: opt.color, rows });
@@ -420,9 +441,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit]);
 
-  const handleUpdate = useCallback(async (id: string, patch: Partial<Pick<BoardItemRow, "title" | "status">>) => {
+  const handleUpdate = useCallback(async (id: string, patch: RowPatch) => {
     if (!canEdit) return;
-    // Optimistic
+    // Optimistic (zod on the API strips unknown keys like `owner`,
+    // which only exists for the local optimistic row).
     setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     try {
       const res = await fetch(`/api/items/${id}`, {
@@ -458,7 +480,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit]);
 
-  const colCount = 6 + customFields.length; // +1 for the new select/handle column
+  const colCount = 8 + customFields.length; // select/handle + name + status + owner + priority + tags + created + actions
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -560,6 +582,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               <th className="px-4 py-2 font-medium w-[36%]">Name</th>
               <th className="px-4 py-2 font-medium w-[140px]">Status</th>
               <th className="px-4 py-2 font-medium w-[180px]">Owner</th>
+              <th className="px-4 py-2 font-medium w-[110px]">Priority</th>
+              <th className="px-4 py-2 font-medium w-[160px]">Tags</th>
               {customFields.map((f) => (
                 <th key={f.key} className="px-4 py-2 font-medium">{f.label}</th>
               ))}
@@ -754,9 +778,9 @@ function BulkOwner({ onSet, busy }: { onSet: (ownerId: string | null) => void; b
   useEffect(() => {
     if (!open || users !== null) return;
     let active = true;
-    fetch("/api/users", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { users: [] }))
-      .then((d) => { if (active) setUsers(Array.isArray(d?.users) ? d.users : []); })
+    fetch("/api/users?scope=all&limit=100", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((d) => { if (active) setUsers(Array.isArray(d?.data) ? d.data : []); })
       .catch(() => { if (active) setUsers([]); });
     return () => { active = false; };
   }, [open, users]);
@@ -833,7 +857,7 @@ function Row({
   canEdit: boolean;
   selected: boolean;
   onToggleSelect: (id: string) => void;
-  onUpdate: (id: string, patch: Partial<Pick<BoardItemRow, "title" | "status">>) => void;
+  onUpdate: (id: string, patch: RowPatch) => void;
   onArchive: (id: string) => void;
   onOpen?: () => void;
   onDuplicate?: (row: BoardItemRow) => void;
@@ -921,7 +945,23 @@ function Row({
         <StatusCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
       </td>
       <td className="px-4 py-2">
-        <OwnerCell row={row} />
+        <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
+      </td>
+      <td className="px-4 py-2">
+        <PriorityPicker
+          value={row.priority ?? null}
+          canEdit={canEdit}
+          compact
+          onChange={(priority) => onUpdate(row.id, { priority })}
+        />
+      </td>
+      <td className="px-4 py-2">
+        <TagPicker
+          value={row.tags ?? []}
+          canEdit={canEdit}
+          compact
+          onChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })}
+        />
       </td>
       {customFields.map((f) => (
         <td key={f.key} className="px-4 py-2">
@@ -1125,7 +1165,13 @@ function TitleCell({
   const [draft, setDraft] = useState(row.title);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setDraft(row.title); }, [row.title]);
+  // Derived-state-during-render (guarded setState) — avoids the
+  // cascading-renders lint that fires on useEffect(setDraft).
+  const [syncedTitle, setSyncedTitle] = useState(row.title);
+  if (syncedTitle !== row.title) {
+    setSyncedTitle(row.title);
+    setDraft(row.title);
+  }
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
   const commit = () => {
@@ -1277,18 +1323,33 @@ function StatusCell({
   );
 }
 
-function OwnerCell({ row }: { row: BoardItemRow }) {
-  if (!row.owner) {
-    return <span className="text-xs text-zinc-500">Unassigned</span>;
-  }
-  const initials = `${row.owner.firstName?.[0] ?? ""}${row.owner.lastName?.[0] ?? ""}`.toUpperCase();
+function OwnerCell({
+  row,
+  canEdit,
+  onUpdate,
+}: {
+  row: BoardItemRow;
+  canEdit: boolean;
+  onUpdate: (id: string, patch: RowPatch) => void;
+}) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-zinc-100 text-xs font-medium">
-        {initials || "?"}
-      </span>
-      <span className="text-sm">{row.owner.firstName} {row.owner.lastName}</span>
-    </span>
+    <AssigneePicker
+      value={row.owner ? { ...row.owner, email: null } : null}
+      canEdit={canEdit}
+      onChange={(person) =>
+        onUpdate(row.id, {
+          ownerId: person?.id ?? null,
+          owner: person
+            ? {
+                id: person.id,
+                firstName: person.firstName ?? "",
+                lastName: person.lastName ?? "",
+                avatar: person.avatar,
+              }
+            : null,
+        })
+      }
+    />
   );
 }
 

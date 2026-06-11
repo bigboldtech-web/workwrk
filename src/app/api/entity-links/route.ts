@@ -96,6 +96,18 @@ async function hydrate(
           titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description, href: `/whiteboards/${w.id}` });
           if (w.spaceId) targetSpaceId.set(`${type}:${w.id}`, w.spaceId);
         }
+      } else if (type === "SOP") {
+        const sops = await prisma.sOP.findMany({
+          where: { organizationId: orgId, id: { in: ids } },
+          select: { id: true, title: true, category: true, status: true },
+        });
+        for (const s of sops) {
+          titleByKey.set(`${type}:${s.id}`, {
+            title: s.title,
+            subtitle: s.category ?? s.status,
+            href: `/sops/${s.id}`,
+          });
+        }
       } else if (type === "KRA") {
         const kras = await prisma.kRA.findMany({
           where: { organizationId: orgId, id: { in: ids } },

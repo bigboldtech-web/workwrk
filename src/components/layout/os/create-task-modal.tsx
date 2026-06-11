@@ -73,6 +73,7 @@ const PRIORITIES: { key: PriorityKey; label: string; color: string }[] = [
   { key: "LOW", label: "Low", color: "#94a3b8" },
 ];
 
+type WorkspaceTag = { id: string; name: string; color: string | null };
 type SpaceRow = { id: string; name: string; icon: string | null; color: string | null };
 type BoardRow = { id: string; slug: string; name: string; spaceId: string | null };
 type SelectedList = { id: string; slug: string; name: string; spaceId: string | null };
@@ -180,7 +181,7 @@ function PeoplePicker({
 }
 
 export function CreateTaskModal() {
-  const { createTaskOpen, closeCreateTask } = useOsShell();
+  const { createTaskOpen, closeCreateTask, createTaskPreselect } = useOsShell();
   const router = useRouter();
   const { data: session } = useSession();
   const me: Person | null = useMemo(() => {
@@ -200,7 +201,11 @@ export function CreateTaskModal() {
   const [startAt, setStartAt] = useState<Date | null>(null);
   const [dueAt, setDueAt] = useState<Date | null>(null);
   const [priority, setPriority] = useState<PriorityKey | null>(null);
-  const [tags, setTags] = useState<string[]>([]);
+  // Workspace tags (Tag model, type CUSTOM) — selected set + org catalog
+  // (lazy-loaded the first time the Tags menu opens).
+  const [tags, setTags] = useState<WorkspaceTag[]>([]);
+  const [orgTags, setOrgTags] = useState<WorkspaceTag[] | null>(null);
+  const [creatingTag, setCreatingTag] = useState(false);
   const [followers, setFollowers] = useState<string[]>([]);
   const [timeEstimate, setTimeEstimate] = useState<{ h: string; m: string }>({ h: "", m: "" });
   const [subtasks, setSubtasks] = useState<string[]>([]);
@@ -253,6 +258,19 @@ export function CreateTaskModal() {
     if (me && me.id === assigneeId) return me;
     return people.find((p) => p.id === assigneeId) ?? null;
   }, [assigneeId, me, people]);
+
+  // Preselect the destination list when the opener passed one (board
+  // page "+ Task"). Runs on every open so re-opening from a different
+  // board re-targets correctly.
+  useEffect(() => {
+    if (!createTaskOpen || !createTaskPreselect) return;
+    setSelectedList({
+      id: createTaskPreselect.id,
+      slug: createTaskPreselect.slug,
+      name: createTaskPreselect.name,
+      spaceId: createTaskPreselect.spaceId,
+    });
+  }, [createTaskOpen, createTaskPreselect]);
 
   // ── Load lists + people once on first open ──
   useEffect(() => {
@@ -367,11 +385,44 @@ export function CreateTaskModal() {
     else setDueAt(d);
   };
 
+  // Lazy-load the org's CUSTOM tag catalog when the Tags menu first opens.
+  useEffect(() => {
+    if (openMenu !== "tags" || orgTags !== null) return;
+    let active = true;
+    fetch("/api/tags?type=CUSTOM", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        if (!active) return;
+        setOrgTags(Array.isArray(d) ? d.map((t: WorkspaceTag) => ({ id: t.id, name: t.name, color: t.color })) : []);
+      })
+      .catch(() => { if (active) setOrgTags([]); });
+    return () => { active = false; };
+  }, [openMenu, orgTags]);
+
+  const createWorkspaceTag = async (name: string) => {
+    if (creatingTag || !name.trim()) return;
+    setCreatingTag(true);
+    try {
+      const res = await fetch("/api/tags", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), type: "CUSTOM", color: hueFor(name.trim().toLowerCase()) }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.id) {
+        const tag: WorkspaceTag = { id: data.id, name: data.name, color: data.color };
+        setOrgTags((prev) => (prev ? [...prev, tag] : [tag]));
+        setTags((prev) => [...prev, tag]);
+        setTagDraft("");
+      }
+    } finally {
+      setCreatingTag(false);
+    }
+  };
+
   function buildMetadata(): Record<string, unknown> {
     const md: Record<string, unknown> = { taskType };
     if (description.trim()) md.description = description.trim();
-    if (priority) md.priority = priority;
-    if (tags.length) md.tags = tags;
     if (followers.length) md.followers = followers;
     const mins = (parseInt(timeEstimate.h || "0", 10) || 0) * 60 + (parseInt(timeEstimate.m || "0", 10) || 0);
     if (mins > 0) md.timeEstimate = mins;
@@ -432,7 +483,9 @@ export function CreateTaskModal() {
     if (typeof cfg.status === "string") setSelectedStatus(cfg.status as string);
     setDescription(typeof cfg.description === "string" ? cfg.description : "");
     setPriority((cfg.priority as PriorityKey) ?? null);
-    setTags(Array.isArray(cfg.tags) ? (cfg.tags as string[]) : []);
+    // Tags stored as WorkspaceTag objects; legacy string entries (pre
+    // Tag-model templates) are dropped — they have no Tag row to link.
+    setTags(Array.isArray(cfg.tags) ? (cfg.tags as unknown[]).filter((t): t is WorkspaceTag => !!t && typeof t === "object" && "id" in (t as object)) : []);
     const te = (cfg.timeEstimate as { h?: string; m?: string } | undefined) ?? {};
     setTimeEstimate({ h: te.h ?? "", m: te.m ?? "" });
     const cl = Array.isArray(cfg.checklist) ? (cfg.checklist as ChecklistItem[]) : [];
@@ -484,15 +537,23 @@ export function CreateTaskModal() {
   function payloadFromConfig(cfg: Record<string, unknown>, title: string) {
     const md: Record<string, unknown> = { taskType: (cfg.taskType as string) ?? "TASK" };
     if (cfg.description) md.description = cfg.description;
-    if (cfg.priority) md.priority = cfg.priority;
-    if (Array.isArray(cfg.tags) && cfg.tags.length) md.tags = cfg.tags;
     const te = (cfg.timeEstimate as { h?: string; m?: string } | undefined) ?? {};
     const mins = (parseInt(te.h || "0", 10) || 0) * 60 + (parseInt(te.m || "0", 10) || 0);
     if (mins > 0) md.timeEstimate = mins;
     if (Array.isArray(cfg.checklist) && cfg.checklist.length) md.checklist = cfg.checklist;
     if (me) md.followers = [me.id];
     const status = (cfg.status as string) ?? selectedStatus;
-    return { title, status, groupKey: status, metadata: md };
+    const tagIds = Array.isArray(cfg.tags)
+      ? (cfg.tags as unknown[]).filter((t): t is WorkspaceTag => !!t && typeof t === "object" && "id" in (t as object)).map((t) => t.id)
+      : [];
+    return {
+      title,
+      status,
+      groupKey: status,
+      priority: typeof cfg.priority === "string" ? cfg.priority : null,
+      tagIds,
+      metadata: md,
+    };
   }
 
   const createInstant = async (tpl: TemplateRow) => {
@@ -547,6 +608,8 @@ export function CreateTaskModal() {
           ownerId: assigneeId ?? undefined,
           startAt: startAt ? startAt.toISOString() : null,
           dueAt: dueAt ? dueAt.toISOString() : null,
+          priority: priority ?? null,
+          tagIds: tags.map((t) => t.id),
           metadata: buildMetadata(),
         }),
       });
@@ -595,6 +658,9 @@ export function CreateTaskModal() {
     setOpenMenu(null);
     const created = await doCreate();
     if (!created) return;
+    // Re-fetch server components so a board page that's currently
+    // showing the destination list picks up the new row.
+    router.refresh();
     if (variant === "open") {
       const slug = created.slug;
       resetAndClose();
@@ -973,21 +1039,65 @@ export function CreateTaskModal() {
                 <div className="absolute bottom-full left-0 mb-1 w-[260px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] p-2">
                   <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
                     <Search className="w-3.5 h-3.5 text-zinc-400" />
-                    <input autoFocus value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { const t = tagDraft.trim(); if (t && !tags.includes(t)) setTags((p) => [...p, t]); setTagDraft(""); } }} placeholder="Search or add a tag…" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
+                    <input
+                      autoFocus
+                      value={tagDraft}
+                      onChange={(e) => setTagDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        const q = tagDraft.trim();
+                        if (!q) return;
+                        const existing = (orgTags ?? []).find((t) => t.name.toLowerCase() === q.toLowerCase());
+                        if (existing) {
+                          if (!tags.some((t) => t.id === existing.id)) setTags((p) => [...p, existing]);
+                          setTagDraft("");
+                        } else {
+                          void createWorkspaceTag(q);
+                        }
+                      }}
+                      placeholder="Search or add a tag…"
+                      className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400"
+                    />
                   </div>
-                  {tagDraft.trim() && !tags.includes(tagDraft.trim()) && (
-                    <button type="button" onClick={() => { setTags((p) => [...p, tagDraft.trim()]); setTagDraft(""); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50 rounded">
+                  <div className="max-h-[180px] overflow-y-auto">
+                    {orgTags === null ? (
+                      <div className="px-2 py-2 text-[12px] text-zinc-400">Loading tags…</div>
+                    ) : (
+                      (orgTags ?? [])
+                        .filter((t) => !tagDraft.trim() || t.name.toLowerCase().includes(tagDraft.trim().toLowerCase()))
+                        .map((t) => {
+                          const active = tags.some((x) => x.id === t.id);
+                          const color = t.color || "#94a3b8";
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => setTags((p) => (active ? p.filter((x) => x.id !== t.id) : [...p, t]))}
+                              className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded"
+                            >
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-medium" style={{ background: `${color}22`, color }}>{t.name}</span>
+                              {active && <Check className="w-3.5 h-3.5 ml-auto text-[#a78b80]" />}
+                            </button>
+                          );
+                        })
+                    )}
+                  </div>
+                  {tagDraft.trim() && !(orgTags ?? []).some((t) => t.name.toLowerCase() === tagDraft.trim().toLowerCase()) && (
+                    <button type="button" disabled={creatingTag} onClick={() => void createWorkspaceTag(tagDraft.trim())} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50 rounded border-t border-zinc-100 mt-1 pt-1.5 disabled:opacity-50">
                       <Plus className="w-3.5 h-3.5 text-zinc-400" /> Create “{tagDraft.trim()}”
                     </button>
                   )}
                   {tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {tags.map((t) => (
-                        <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-100 text-[12px] text-zinc-700">
-                          {t}
-                          <button type="button" onClick={() => setTags((p) => p.filter((x) => x !== t))} className="text-zinc-400 hover:text-red-500"><X className="w-3 h-3" /></button>
-                        </span>
-                      ))}
+                    <div className="flex flex-wrap gap-1.5 pt-1 border-t border-zinc-100 mt-1">
+                      {tags.map((t) => {
+                        const color = t.color || "#94a3b8";
+                        return (
+                          <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-medium" style={{ background: `${color}22`, color }}>
+                            {t.name}
+                            <button type="button" onClick={() => setTags((p) => p.filter((x) => x.id !== t.id))} className="opacity-60 hover:opacity-100"><X className="w-3 h-3" /></button>
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

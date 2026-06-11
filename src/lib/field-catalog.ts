@@ -72,6 +72,7 @@ export const FIELD_CATALOG: FieldCatalogEntry[] = [
   { type: "PERCENT",     label: "Percent",       Icon: Percent,     group: "Common", tier1: true },
   { type: "RATING",      label: "Rating",        Icon: Star,        group: "Common", tier1: true },
   { type: "USER",        label: "Person",        Icon: UserIcon,    group: "Common", tier1: true },
+  { type: "PEOPLE",      label: "People",        Icon: UserIcon,    group: "Common", tier1: true, description: "Multiple people on one row" },
   { type: "FILES",       label: "Files",         Icon: Paperclip,   group: "Common", tier1: true },
 
   // ── AI ──────────────────────────────────────────────────────
@@ -89,14 +90,14 @@ export const FIELD_CATALOG: FieldCatalogEntry[] = [
   { type: "FORMULA",          label: "Formula",         Icon: Sigma,         group: "Advanced", tier1: false },
   { type: "ROLLUP",           label: "Rollup",          Icon: ListFilter,    group: "Advanced", tier1: false },
   { type: "RELATIONSHIP",     label: "Relationship",    Icon: ArrowRightLeft,group: "Advanced", tier1: false },
-  { type: "LOCATION",         label: "Location",        Icon: MapPin,        group: "Advanced", tier1: false },
+  { type: "LOCATION",         label: "Location",        Icon: MapPin,        group: "Advanced", tier1: true },
   { type: "PROGRESS_AUTO",    label: "Progress (auto)", Icon: GaugeCircle,   group: "Advanced", tier1: false },
-  { type: "PROGRESS_MANUAL",  label: "Progress (manual)", Icon: GaugeCircle, group: "Advanced", tier1: false },
+  { type: "PROGRESS_MANUAL",  label: "Progress (manual)", Icon: GaugeCircle, group: "Advanced", tier1: true },
   { type: "BUTTON",           label: "Button",          Icon: ToggleLeft,    group: "Advanced", tier1: false },
   { type: "SIGNATURE",        label: "Signature",       Icon: PenLine,       group: "Advanced", tier1: false },
-  { type: "VOTING",           label: "Voting",          Icon: ThumbsUp,      group: "Advanced", tier1: false },
+  { type: "VOTING",           label: "Voting",          Icon: ThumbsUp,      group: "Advanced", tier1: true },
   { type: "ACTION_ITEMS",     label: "Action items",    Icon: CheckCheck,    group: "Advanced", tier1: false },
-  { type: "TSHIRT_SIZE",      label: "T-shirt size",    Icon: Shirt,         group: "Advanced", tier1: false },
+  { type: "TSHIRT_SIZE",      label: "T-shirt size",    Icon: Shirt,         group: "Advanced", tier1: true },
 ];
 
 export const FIELD_TYPE_BY_KEY: Record<FieldType, FieldCatalogEntry> = Object.fromEntries(
