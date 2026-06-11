@@ -274,12 +274,24 @@ function ClickSidebarBody() {
                 ref={createButtonRef}
                 type="button"
                 onClick={() => setCreateOpen((v) => !v)}
-                className="h-[28px] shrink-0 inline-flex items-center gap-1 rounded-[10px] border border-zinc-200 bg-white px-2 text-zinc-900 shadow-[0_2px_4px_rgba(0,0,0,0.04)] hover:bg-zinc-50 hover:shadow-[0_2px_6px_rgba(0,0,0,0.06)] transition-all"
+                // Inline bg/border/padding — the OS shell's global
+                // `.workwrk-os button { background:none; border:none; padding:0 }`
+                // outranks Tailwind utilities, which is why the card, border,
+                // and side padding were all missing. Squarer radius + a visible
+                // border + side padding so the icons don't hug the edges.
+                style={{
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #d1d1d6",
+                  borderRadius: "8px",
+                  padding: "0 9px",
+                  marginLeft: "2px",
+                }}
+                className="h-[30px] shrink-0 inline-flex items-center gap-1.5 text-zinc-900 shadow-sm hover:shadow transition-shadow"
                 aria-label="Create"
                 aria-haspopup="menu"
                 aria-expanded={createOpen}
               >
-                <Plus className="w-[18px] h-[18px] text-zinc-800" strokeWidth={2.5} />
+                <Plus className="w-[17px] h-[17px] text-zinc-800" strokeWidth={2.5} />
                 <ChevronDown className="w-3.5 h-3.5 text-zinc-500" strokeWidth={2.5} />
               </button>
             </div>
