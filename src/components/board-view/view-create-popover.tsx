@@ -29,6 +29,9 @@ interface ViewTile {
   tag?: string;
   Icon: typeof ListIcon;
   swatch: string;
+  /** Seed config saved on the view at creation (e.g. the Monday-style
+   *  grid flag that distinguishes Table from List — both TABLE type). */
+  config?: Record<string, unknown>;
 }
 
 const POPULAR: ViewTile[] = [
@@ -42,7 +45,7 @@ const POPULAR: ViewTile[] = [
 ];
 
 const SECONDARY: ViewTile[] = [
-  { type: "FILE_GALLERY", label: "Table",         tag: undefined, Icon: Table2,       swatch: "#10B981" },
+  { type: "TABLE",        label: "Table",         tag: undefined, Icon: Table2,       swatch: "#10B981", config: { grid: "monday" } },
   { type: "WHITEBOARD",   label: "Whiteboard",    tag: undefined, Icon: Brush,        swatch: "#FACC15" },
   { type: "TIMELINE",     label: "Timeline",      tag: undefined, Icon: AlignLeft,    swatch: "#F59E0B" },
   { type: "CHART",        label: "Activity",      tag: "Feed",    Icon: Activity,     swatch: "#0EA5E9" },
@@ -138,6 +141,7 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
         body: JSON.stringify({
           name: tile.label,
           type: tile.type,
+          ...(tile.config ? { config: tile.config } : {}),
           // ShareSpaceDialog-style semantics: isShared=true is public/shared.
           // The popover toggle is named "Private view" → invert.
           isShared: !isPrivate,

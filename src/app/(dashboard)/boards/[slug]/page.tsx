@@ -197,8 +197,11 @@ export default async function BoardPage(props: {
           Phase 65: tabs were previously inert (always rendered default). */}
       <div className="px-6 border-b border-zinc-200 flex items-center gap-1">
         {board.views.map((v) => {
-          const VIcon = VIEW_ICONS[v.type] ?? ListIcon;
-          const color = VIEW_COLORS[v.type] ?? "text-zinc-600";
+          // Monday-style Table views are TABLE type with config.grid; show
+          // the Table icon to distinguish them from the List tab.
+          const isMondayTable = v.type === "TABLE" && (v.config as { grid?: string } | null)?.grid === "monday";
+          const VIcon = isMondayTable ? Table2 : (VIEW_ICONS[v.type] ?? ListIcon);
+          const color = isMondayTable ? "text-emerald-500" : (VIEW_COLORS[v.type] ?? "text-zinc-600");
           const active = v.id === activeView?.id;
           const isDefault = v.id === defaultView?.id;
           const href = isDefault

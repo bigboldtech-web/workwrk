@@ -42,6 +42,9 @@ interface BoardTableViewProps {
   /** When set, clicking a row's title opens the row drawer. The
    *  parent owns drawer state; we just emit the id. */
   onOpenItem?: (itemId: string) => void;
+  /** "list" = ClickUp pills (default). "table" = Monday-style grid with
+   *  full-cell colored status fills + always-on group summary. */
+  gridStyle?: "list" | "table";
 }
 
 /** Patch shape rows can emit. `owner`/`tags` only update the local
@@ -54,7 +57,8 @@ const STATUS_BY_VALUE: Map<string, StatusOption> = new Map(
   DEFAULT_STATUS_OPTIONS.map((o) => [o.value as string, { ...o } as StatusOption]),
 );
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, canEdit, onOpenItem }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, canEdit, onOpenItem, gridStyle = "list" }: BoardTableViewProps) {
+  const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
   const [adding, setAdding] = useState(false);
@@ -497,6 +501,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         row={row}
         customFields={customFields}
         canEdit={canEdit}
+        monday={monday}
         selected={selected.has(row.id)}
         onToggleSelect={toggleRow}
         onUpdate={handleUpdate}
@@ -841,6 +846,7 @@ function Row({
   row,
   customFields,
   canEdit,
+  monday = false,
   selected,
   onToggleSelect,
   onUpdate,
@@ -862,6 +868,7 @@ function Row({
   row: BoardItemRow;
   customFields: FieldDef[];
   canEdit: boolean;
+  monday?: boolean;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   onUpdate: (id: string, patch: RowPatch) => void;
@@ -948,8 +955,8 @@ function Row({
           <RowHoverActions itemId={row.id} />
         </div>
       </td>
-      <td className="px-4 py-2">
-        <StatusCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
+      <td className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-2"}>
+        <StatusCell row={row} canEdit={canEdit} onUpdate={onUpdate} monday={monday} />
       </td>
       <td className="px-4 py-2">
         <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
@@ -1475,10 +1482,14 @@ function StatusCell({
   row,
   canEdit,
   onUpdate,
+  monday = false,
 }: {
   row: BoardItemRow;
   canEdit: boolean;
   onUpdate: (id: string, patch: Partial<Pick<BoardItemRow, "status">>) => void;
+  /** Monday-style Table variant: status fills the whole cell with the
+   *  status color + white label, instead of a soft pill. */
+  monday?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1492,6 +1503,48 @@ function StatusCell({
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [open]);
+
+  // Monday Table fill — the trigger is a full-cell colored block.
+  if (monday) {
+    const fill = current ? (
+      <span
+        className="flex items-center justify-center w-full h-full px-2 text-[12px] font-medium text-white"
+        style={{ background: current.color }}
+      >
+        {current.label}
+      </span>
+    ) : (
+      <span className="flex items-center justify-center w-full h-full bg-zinc-100 text-[11px] text-zinc-400">—</span>
+    );
+    if (!canEdit) return fill;
+    return (
+      <div className="relative w-full h-full" ref={ref}>
+        <button type="button" onClick={() => setOpen((v) => !v)} className="block w-full h-full min-h-[34px]">
+          {fill}
+        </button>
+        {open ? (
+          <div className="absolute z-10 mt-1 left-0 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+            {DEFAULT_STATUS_OPTIONS.map((opt) => {
+              const active = opt.value === row.status;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => { onUpdate(row.id, { status: opt.value }); setOpen(false); }}
+                  className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+                >
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white" style={{ background: opt.color }}>
+                    {opt.label}
+                  </span>
+                  {active ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   const pill = current ? (
     <span

@@ -163,6 +163,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={visibleFields}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
+          gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
         />
       ) : viewType === "KANBAN" ? (
         <BoardKanbanView
