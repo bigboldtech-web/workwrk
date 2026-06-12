@@ -14,13 +14,13 @@ import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
   LayoutGrid, Columns, ChevronLeft, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Sigma,
+  Globe, Lock, Sigma, DollarSign, Percent, Star,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { makeFormulaEngine, columnLetter } from "@/lib/sheet-formula";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
-type ColType = "short_text" | "long_text" | "number" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula";
+type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula";
 
 type Column = { id: string; type: ColType; label: string; options?: string[]; formula?: string };
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; rowCount: number; isPublic?: boolean };
@@ -28,12 +28,14 @@ type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
 const COL_LABEL: Record<ColType, string> = {
   short_text: "Short text", long_text: "Long text", number: "Number",
+  currency: "Currency", percent: "Percent", rating: "Rating",
   select: "Single choice", multi_select: "Multiple choice", date: "Date",
   checkbox: "Checkbox", url: "URL", email: "Email", formula: "Formula",
 };
 
 const COL_ICON: Record<ColType, React.ReactNode> = {
   short_text: <Type />, long_text: <AlignLeft />, number: <Hash />,
+  currency: <DollarSign />, percent: <Percent />, rating: <Star />,
   select: <List />, multi_select: <List />, date: <CalIcon />,
   checkbox: <CheckSquare />, url: <LinkIcon />, email: <AtSign />, formula: <Sigma />,
 };
@@ -623,6 +625,33 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
         onBlur={(e) => { const n = e.target.value === "" ? null : Number(e.target.value); if (n !== (value ?? null)) onChange(n); }}
         className="dtbl__input"
       />
+    );
+  }
+  if (t === "currency" || t === "percent") {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+        {t === "currency" ? <span style={{ opacity: 0.5 }}>$</span> : null}
+        <input
+          type="number"
+          step="any"
+          defaultValue={(value as number | "") ?? ""}
+          onBlur={(e) => { const n = e.target.value === "" ? null : Number(e.target.value); if (n !== (value ?? null)) onChange(n); }}
+          className="dtbl__input"
+        />
+        {t === "percent" ? <span style={{ opacity: 0.5 }}>%</span> : null}
+      </span>
+    );
+  }
+  if (t === "rating") {
+    const n = typeof value === "number" ? value : 0;
+    return (
+      <span style={{ display: "inline-flex", gap: 1 }}>
+        {[1, 2, 3, 4, 5].map((i) => (
+          <button key={i} type="button" onClick={() => onChange(i === n ? null : i)} style={{ background: "none", border: 0, cursor: "pointer", padding: 0, lineHeight: 0 }} aria-label={`Rate ${i}`}>
+            <Star style={{ width: 15, height: 15, fill: i <= n ? "#f59e0b" : "none", color: i <= n ? "#f59e0b" : "#d4d4d8" }} />
+          </button>
+        ))}
+      </span>
     );
   }
   if (t === "date") {
