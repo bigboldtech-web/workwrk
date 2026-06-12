@@ -14,15 +14,28 @@ import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
   LayoutGrid, Columns, ChevronLeft, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Sigma, DollarSign, Percent, Star,
+  Globe, Lock, Sigma, DollarSign, Percent, Star, Link2, Check,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { makeFormulaEngine, columnLetter } from "@/lib/sheet-formula";
+import { RelationConfigModal } from "@/components/tables/relation-config-modal";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
-type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula";
+type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula" | "link" | "lookup" | "rollup";
 
-type Column = { id: string; type: ColType; label: string; options?: string[]; formula?: string };
+type RollupFn = "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" | "CONCAT";
+
+type Column = {
+  id: string; type: ColType; label: string; options?: string[]; formula?: string;
+  // Relational (Stackby-style)
+  linkTableId?: string;   // link → target DataTable
+  linkColumnId?: string;  // lookup/rollup → which link column on THIS table to follow
+  lookupColumnId?: string;// lookup → which column in the target table to pull
+  rollupColumnId?: string;// rollup → which target column to aggregate
+  rollupFn?: RollupFn;    // rollup aggregate
+};
+
+type LinkedTable = { id: string; name: string; columns: Column[]; titleColId: string; rows: ApiRow[] };
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; rowCount: number; isPublic?: boolean };
 type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
@@ -31,6 +44,7 @@ const COL_LABEL: Record<ColType, string> = {
   currency: "Currency", percent: "Percent", rating: "Rating",
   select: "Single choice", multi_select: "Multiple choice", date: "Date",
   checkbox: "Checkbox", url: "URL", email: "Email", formula: "Formula",
+  link: "Link to table", lookup: "Lookup", rollup: "Rollup",
 };
 
 const COL_ICON: Record<ColType, React.ReactNode> = {
@@ -38,7 +52,20 @@ const COL_ICON: Record<ColType, React.ReactNode> = {
   currency: <DollarSign />, percent: <Percent />, rating: <Star />,
   select: <List />, multi_select: <List />, date: <CalIcon />,
   checkbox: <CheckSquare />, url: <LinkIcon />, email: <AtSign />, formula: <Sigma />,
+  link: <Link2 />, lookup: <Search />, rollup: <Sigma />,
 };
+
+/** The display/title column of a table — first short_text, else first column. */
+function titleColumnId(columns: Column[]): string {
+  return (columns.find((c) => c.type === "short_text") ?? columns[0])?.id ?? "";
+}
+
+/** Pull a single linked row's display title. */
+function rowTitle(row: ApiRow | undefined, titleColId: string): string {
+  if (!row) return "—";
+  const v = row.values[titleColId];
+  return v == null || v === "" ? "Untitled" : String(v);
+}
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
 
@@ -58,6 +85,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [filterCol, setFilterCol] = useState<string>("");
   const [filterValue, setFilterValue] = useState<string>("");
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
+  // Relational: rows of every table this one links to (for pickers + lookup/rollup).
+  const [linkedTables, setLinkedTables] = useState<Record<string, LinkedTable>>({});
+  // All org tables (for the link-target picker in the relation config modal).
+  const [allTables, setAllTables] = useState<{ id: string; name: string }[]>([]);
+  // Column currently being configured in the relation modal (link/lookup/rollup).
+  const [configColId, setConfigColId] = useState<string | null>(null);
 
   useEffect(() => { void params.then((p) => setTableId(p.id)); }, [params]);
 
@@ -81,6 +114,56 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }, [tableId]);
   useEffect(() => { void load(); }, [load]);
 
+  // Resolve which other tables this one references (link columns directly;
+  // lookup/rollup indirectly via their link column) and fetch their rows so
+  // pickers, lookups and rollups can render/compute client-side.
+  const referencedTableIds = useMemo(() => {
+    const cols = table?.columns ?? [];
+    const ids = new Set<string>();
+    const byId = new Map(cols.map((c) => [c.id, c]));
+    for (const c of cols) {
+      if (c.type === "link" && c.linkTableId) ids.add(c.linkTableId);
+      if ((c.type === "lookup" || c.type === "rollup") && c.linkColumnId) {
+        const link = byId.get(c.linkColumnId);
+        if (link?.type === "link" && link.linkTableId) ids.add(link.linkTableId);
+      }
+    }
+    return [...ids];
+  }, [table?.columns]);
+
+  useEffect(() => {
+    let active = true;
+    const missing = referencedTableIds.filter((id) => !linkedTables[id]);
+    if (missing.length === 0) return;
+    void Promise.all(missing.map(async (id) => {
+      try {
+        const [tRes, rRes] = await Promise.all([fetch(`/api/tables/${id}`), fetch(`/api/tables/${id}/rows`)]);
+        if (!tRes.ok) return null;
+        const td = await tRes.json();
+        const rd = await rRes.json();
+        const t = td.data ?? td;
+        const columns: Column[] = Array.isArray(t.columns) ? t.columns : [];
+        const rs: ApiRow[] = rd.data ?? (Array.isArray(rd) ? rd : []);
+        return { id, name: t.name as string, columns, titleColId: titleColumnId(columns), rows: rs } as LinkedTable;
+      } catch { return null; }
+    })).then((results) => {
+      if (!active) return;
+      const next: Record<string, LinkedTable> = {};
+      for (const r of results) if (r) next[r.id] = r;
+      if (Object.keys(next).length) setLinkedTables((prev) => ({ ...prev, ...next }));
+    });
+    return () => { active = false; };
+  }, [referencedTableIds, linkedTables]);
+
+  // Lazy-load the org table list the first time the relation config opens.
+  useEffect(() => {
+    if (!configColId || allTables.length > 0) return;
+    void fetch("/api/tables").then((r) => (r.ok ? r.json() : [])).then((d) => {
+      const list = Array.isArray(d) ? d : (d.data ?? []);
+      setAllTables(list.map((t: { id: string; name: string }) => ({ id: t.id, name: t.name })));
+    }).catch(() => {});
+  }, [configColId, allTables.length]);
+
   async function patchTable(patch: Partial<ApiTable>) {
     if (!tableId) return;
     await fetch(`/api/tables/${tableId}`, {
@@ -103,13 +186,24 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       if (f == null) return; // cancelled
       formula = f.trim();
     }
+    const id = newId();
     const cols = [...table.columns, {
-      id: newId(), type, label: COL_LABEL[type],
+      id, type, label: COL_LABEL[type],
       ...(type === "select" || type === "multi_select" ? { options: ["Option 1"] } : {}),
       ...(formula !== undefined ? { formula } : {}),
     }];
     setTable({ ...table, columns: cols });
     void persistColumns(cols);
+    // Relational columns need a target/config before they do anything.
+    if (type === "link" || type === "lookup" || type === "rollup") setConfigColId(id);
+  }
+
+  function saveColumnConfig(colId: string, patch: Partial<Column>) {
+    if (!table) return;
+    const cols = table.columns.map((c) => c.id === colId ? { ...c, ...patch } : c);
+    setTable({ ...table, columns: cols });
+    void persistColumns(cols);
+    setConfigColId(null);
   }
 
   function editFormula(colId: string) {
@@ -226,6 +320,44 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     (rows ?? []).forEach((r, i) => m.set(r.id, i));
     return m;
   }, [rows]);
+
+  // Lookup/rollup compute: follow the column's link → gather linked rows →
+  // pull a field (lookup) or aggregate it (rollup). Returns a display value.
+  const relationalValue = useCallback((col: Column, row: ApiRow): string | number => {
+    const cols = table?.columns ?? [];
+    const linkCol = cols.find((c) => c.id === col.linkColumnId);
+    if (!linkCol || linkCol.type !== "link" || !linkCol.linkTableId) return "";
+    const lt = linkedTables[linkCol.linkTableId];
+    if (!lt) return "…";
+    const ids = Array.isArray(row.values[linkCol.id]) ? (row.values[linkCol.id] as string[]) : [];
+    const linkedRows = ids.map((id) => lt.rows.find((r) => r.id === id)).filter((r): r is ApiRow => !!r);
+    const fmt = (v: unknown) => (v == null || v === "" ? "" : String(v));
+    if (col.type === "lookup") {
+      if (!col.lookupColumnId) return "";
+      return linkedRows.map((r) => fmt(r.values[col.lookupColumnId!])).filter(Boolean).join(", ");
+    }
+    // rollup
+    if (col.rollupFn === "COUNT") return linkedRows.length;
+    const targetVals = linkedRows.map((r) => r.values[col.rollupColumnId ?? ""]);
+    if (col.rollupFn === "CONCAT") return targetVals.map(fmt).filter(Boolean).join(", ");
+    const nums = targetVals.map((v) => (typeof v === "number" ? v : parseFloat(String(v)))).filter((n) => Number.isFinite(n));
+    switch (col.rollupFn) {
+      case "SUM": return nums.reduce((a, b) => a + b, 0);
+      case "AVG": return nums.length ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 1e6) / 1e6 : 0;
+      case "MIN": return nums.length ? Math.min(...nums) : 0;
+      case "MAX": return nums.length ? Math.max(...nums) : 0;
+      default: return linkedRows.length;
+    }
+  }, [table?.columns, linkedTables]);
+
+  // target-table-id → its columns (for the relation config modal's field pickers).
+  const columnsByTable = useMemo(() => {
+    const out: Record<string, { id: string; label: string; type: string }[]> = {};
+    for (const [id, lt] of Object.entries(linkedTables)) out[id] = lt.columns.map((c) => ({ id: c.id, label: c.label, type: c.type }));
+    return out;
+  }, [linkedTables]);
+
+  const configColumn = configColId ? (table?.columns ?? []).find((c) => c.id === configColId) ?? null : null;
 
   const kanbanColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "select"), [table?.columns]);
   const dateColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "date"), [table?.columns]);
@@ -427,6 +559,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                     {c.type === "formula" ? (
                       <button type="button" className="dtbl__col-del" onClick={() => editFormula(c.id)} title={`Edit formula (${c.formula || "none"})`}><Sigma /></button>
                     ) : null}
+                    {c.type === "link" || c.type === "lookup" || c.type === "rollup" ? (
+                      <button type="button" className="dtbl__col-del" onClick={() => setConfigColId(c.id)} title="Configure relation"><Link2 /></button>
+                    ) : null}
                     <button type="button" className="dtbl__col-del" onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
                   </div>
                 </th>
@@ -460,6 +595,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                   <td key={c.id} className="dtbl__cell">
                     {c.type === "formula" ? (
                       <FormulaCell value={formulaEngine.cellValue(colIndex, rowIndexById.get(r.id) ?? 0)} />
+                    ) : c.type === "link" ? (
+                      <LinkCell value={r.values[c.id]} linked={c.linkTableId ? linkedTables[c.linkTableId] : undefined} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+                    ) : c.type === "lookup" || c.type === "rollup" ? (
+                      <FormulaCell value={relationalValue(c, r)} />
                     ) : (
                       <CellEditor column={c} value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
                     )}
@@ -482,6 +621,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           onClose={() => setActiveRowId(null)}
           onChange={(values) => void patchRow(activeRow.id, values)}
           onDelete={() => { void deleteRow(activeRow.id); setActiveRowId(null); }}
+        />
+      )}
+
+      {configColumn && (
+        <RelationConfigModal
+          column={configColumn}
+          tableColumns={table.columns}
+          allTables={allTables.filter((t) => t.id !== tableId)}
+          columnsByTable={columnsByTable}
+          onSave={(patch) => saveColumnConfig(configColumn.id, patch as Partial<Column>)}
+          onClose={() => setConfigColId(null)}
         />
       )}
     </div>
@@ -583,6 +733,42 @@ function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove, onCardC
         </section>
       ))}
     </div>
+  );
+}
+
+function LinkCell({ value, linked, onChange }: { value: unknown; linked: LinkedTable | undefined; onChange: (v: string[]) => void }) {
+  const ids = Array.isArray(value) ? (value as string[]) : [];
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  if (!linked) {
+    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }}>{ids.length ? `${ids.length} linked` : "Set target →"}</span>;
+  }
+  const chosen = ids.map((id) => linked.rows.find((r) => r.id === id)).filter((r): r is ApiRow => !!r);
+  const candidates = q.trim()
+    ? linked.rows.filter((r) => rowTitle(r, linked.titleColId).toLowerCase().includes(q.trim().toLowerCase()))
+    : linked.rows;
+  const toggle = (id: string) => onChange(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
+  return (
+    <span style={{ position: "relative", display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+      {chosen.map((r) => (
+        <span key={r.id} style={{ display: "inline-flex", alignItems: "center", gap: 3, background: "#eef2ff", color: "#4f46e5", borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 500 }}>
+          {rowTitle(r, linked.titleColId)}
+          <button type="button" onClick={() => toggle(r.id)} style={{ background: "none", border: 0, cursor: "pointer", color: "#6366f1", lineHeight: 0, padding: 0 }}>×</button>
+        </span>
+      ))}
+      <button type="button" onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "1px dashed #c7d2fe", borderRadius: 4, color: "#6366f1", cursor: "pointer", fontSize: 11, padding: "1px 6px" }}>+ link</button>
+      {open ? (
+        <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 20, minWidth: 240, maxHeight: 280, overflowY: "auto", background: "white", border: "1px solid #e4e4e7", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 4 }} onMouseLeave={() => setOpen(false)}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${linked.name}…`} autoFocus style={{ width: "100%", height: 28, padding: "0 8px", border: "1px solid #e4e4e7", borderRadius: 6, fontSize: 12, marginBottom: 4 }} />
+          {candidates.length === 0 ? <div style={{ padding: 8, fontSize: 12, color: "#a1a1aa" }}>No records.</div> : candidates.slice(0, 100).map((r) => (
+            <button key={r.id} type="button" onClick={() => toggle(r.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 8px", border: 0, background: "none", cursor: "pointer", fontSize: 13, borderRadius: 6 }} onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")} onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+              <span style={{ flex: 1 }}>{rowTitle(r, linked.titleColId)}</span>
+              {ids.includes(r.id) ? <Check style={{ width: 14, height: 14, color: "#6366f1" }} /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </span>
   );
 }
 
@@ -697,8 +883,12 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
       </div>
     );
   }
-  if (t === "formula") {
-    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }} title={column.formula}>= computed (grid view)</span>;
+  if (t === "formula" || t === "lookup" || t === "rollup") {
+    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }} title={column.formula}>computed (grid view)</span>;
+  }
+  if (t === "link") {
+    const n = Array.isArray(value) ? value.length : 0;
+    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }}>{n ? `${n} linked (edit in grid)` : "edit in grid"}</span>;
   }
   return null;
 }
