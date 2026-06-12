@@ -72,20 +72,57 @@ Statuses are editable per list and **saveable as reusable templates** (Phase 2).
   statuses through to the boards created in that space. **Phase 2 (founder will detail):** the edit-statuses
   UI, status **templates** (save/store/apply), reordering, group assignment.
 
-## 4. Task modal fields (current — mostly built; polish in the "+menu" redesign)
+## 4. Task modal fields, extras, attachments, create-variants, Templates
 
-`create-task-modal.tsx` already has: List picker · Type picker (4 types) · Task Name · Description (+AI
-placeholder) · Status chip · Assignee · Due date · Priority · Tags · "…" more (time estimate, dependencies,
-subtasks, checklist, followers) · attachments (paperclip) · Templates · Create Task (+ dropdown for
-create-more/open). Item-backed (`POST /api/boards/[id]/items`). **Phase-1 task work = context-awareness +
-Task Types + per-list statuses;** the modal chrome polish belongs to `plus-create-menu-plan.md`.
+`create-task-modal.tsx` is Item-backed (`POST /api/boards/[id]/items`). Status today:
+
+| Control | Target (ClickUp) | Our status |
+|---|---|---|
+| List picker · Type picker · Task Name · Description (+AI) · Status · Assignee · Due date · Priority · Tags | core fields | ✅ Built |
+| **"…" more** | Time Estimate · Dependencies · Subtasks · Checklist | ✅ Built (`ExtraKey`) — Dependencies is UI-stub |
+| **Create button ▾** | Create and **open** · Create and **start another** · Create and **duplicate** | ✅ Built (`handleCreate` variants) |
+| **Attachments (📎)** | Upload file · **Dropbox · OneDrive/SharePoint · Box · Google Drive · New Google Doc** | ⚠️ **Local upload only** (`/api/upload`); external sources missing |
+| **Templates** | full Template Center (below) + save-as-template | ⚠️ Basic — `/api/item-templates` saves/applies a modal **config snapshot**; no gallery |
+
+**Attachments — build:** add external-source picker rows (Dropbox/OneDrive/Box/Google Drive/New Google Doc)
+behind OAuth connectors; each returns a URL → stored as a `FileEntry` + linked via `EntityLink` (same path
+local uploads already use). Gate behind "connect account" if not linked. **[NEEDS FOUNDER: which sources for v1]**
+
+### Template Center (the big one)
+
+**ClickUp model (target):** a center with left nav **Featured · Workspace Templates · {Org} Templates (N)**;
+filters: **Template Types** (Space / Folder / List / **Task** / Doc / View / Whiteboard), **Complexity**
+(Beginner / Intermediate / Advanced), **Use Cases**, **Tags**, **Created by**; search; category sections
+(Marketing, Operations, …). Each template is a **pre-built artifact** — e.g. "Social Media Content Plan"
+applies a full task with description (Getting-Started guide), subtasks, and **custom fields**
+(Designer/Editor=People, Copywriter=People, Month=Dropdown, Platform=Label, Content Progress=Progress-Auto).
+Users can **save any task/list/space as a custom template** and reuse.
+
+**Our status vs target:**
+- Today: `/api/item-templates` stores a **task modal config snapshot** (status/priority/tags/checklist/
+  subtasks/description) per org; the modal's Templates button lists + applies them. No gallery, no template
+  *types* beyond task, no complexity/use-case/category metadata, no pre-built library.
+- **Build (target, its own phase):** a `Template` model `{ id, organizationId, kind: SPACE|FOLDER|LIST|TASK|
+  DOC|VIEW|WHITEBOARD, name, description, complexity?, useCases[], tags[], category?, payload JSON, builtIn,
+  createdById }`; a **Template Center** modal (left nav + filters + grid); seed a built-in library;
+  "save as template" from task/list/space; **apply** materializes the payload (for TASK → fill the modal;
+  for LIST → create a board with fields+statuses+views+seed items).
+  **⚠️ Custom-fields nuance:** ClickUp task templates carry custom fields, but in our model fields live on the
+  **Board** (`Board.schema.fields`), not the task. So a task template that "includes custom fields" really
+  implies a **List template** that sets up the board's fields. Map template fields → board schema on apply.
+
+> **Future phase (founder):** the **task detail view** — how a fully-created task looks (all info, activity,
+> comments, subtasks, custom fields, relationships). Separate spec.
 
 ## 5. Build order (tasks)
 
 1. **Context-aware list/space preselect** from the current route (small, high-value).
 2. **Per-List statuses** — read a board's status set in views/kanban/picker instead of the 3 defaults; pipe Space-wizard statuses through. (Sets up Phase 2.)
 3. **Task Types system** — `ItemType` model + seed defaults + manage page + recommended library + picker/column/filter. (Pending the architecture decision in §2.)
-4. **Phase 2 (next founder input):** edit-statuses UI + status templates + more.
+4. **Attachments external sources** — Dropbox/OneDrive/Box/Google Drive/New Google Doc via connectors.
+5. **Template Center** — `Template` model + center UI + built-in library + save/apply (own phase; biggest).
+6. **Phase 2 (next founder input):** edit-statuses UI + status templates.
+7. **Future phase (founder):** task **detail view** (post-creation full task page).
 
 ## Open questions for founder
 - §2 flag: Item-type re-skin vs route-to-dedicated-model for Objective/Key Result/Goal/Person.
