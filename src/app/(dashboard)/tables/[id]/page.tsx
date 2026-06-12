@@ -8,20 +8,20 @@
  * no views, no filtering for v1 — just rows + cells + types.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
   LayoutGrid, Columns, ChevronLeft, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Sigma, DollarSign, Percent, Star, Link2, Check,
+  Globe, Lock, Sigma, DollarSign, Percent, Star, Link2, Check, Paperclip, Users,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { makeFormulaEngine, columnLetter } from "@/lib/sheet-formula";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
-type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula" | "link" | "lookup" | "rollup";
+type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula" | "link" | "lookup" | "rollup" | "attachment" | "person";
 
 type RollupFn = "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" | "CONCAT";
 
@@ -45,6 +45,7 @@ const COL_LABEL: Record<ColType, string> = {
   select: "Single choice", multi_select: "Multiple choice", date: "Date",
   checkbox: "Checkbox", url: "URL", email: "Email", formula: "Formula",
   link: "Link to table", lookup: "Lookup", rollup: "Rollup",
+  attachment: "Attachment", person: "Person",
 };
 
 const COL_ICON: Record<ColType, React.ReactNode> = {
@@ -53,7 +54,18 @@ const COL_ICON: Record<ColType, React.ReactNode> = {
   select: <List />, multi_select: <List />, date: <CalIcon />,
   checkbox: <CheckSquare />, url: <LinkIcon />, email: <AtSign />, formula: <Sigma />,
   link: <Link2 />, lookup: <Search />, rollup: <Sigma />,
+  attachment: <Paperclip />, person: <Users />,
 };
+
+type OrgUser = { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null };
+function userName(u: OrgUser | undefined): string {
+  if (!u) return "—";
+  return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Unnamed";
+}
+function userInitials(u: OrgUser | undefined): string {
+  if (!u) return "?";
+  return `${(u.firstName ?? "")[0] ?? ""}${(u.lastName ?? "")[0] ?? ""}`.toUpperCase() || "?";
+}
 
 /** The display/title column of a table — first short_text, else first column. */
 function titleColumnId(columns: Column[]): string {
@@ -91,6 +103,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [allTables, setAllTables] = useState<{ id: string; name: string }[]>([]);
   // Column currently being configured in the relation modal (link/lookup/rollup).
   const [configColId, setConfigColId] = useState<string | null>(null);
+  // Org users (for Person columns), lazy-loaded when one exists.
+  const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
 
   useEffect(() => { void params.then((p) => setTableId(p.id)); }, [params]);
 
@@ -154,6 +168,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     });
     return () => { active = false; };
   }, [referencedTableIds, linkedTables]);
+
+  // Lazy-load org users once a Person column exists.
+  const hasPersonCol = (table?.columns ?? []).some((c) => c.type === "person");
+  useEffect(() => {
+    if (!hasPersonCol || orgUsers.length > 0) return;
+    void fetch("/api/users?scope=all&limit=200").then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((d) => setOrgUsers(Array.isArray(d?.data) ? d.data : []))
+      .catch(() => {});
+  }, [hasPersonCol, orgUsers.length]);
 
   // Lazy-load the org table list the first time the relation config opens.
   useEffect(() => {
@@ -599,6 +622,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                       <LinkCell value={r.values[c.id]} linked={c.linkTableId ? linkedTables[c.linkTableId] : undefined} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
                     ) : c.type === "lookup" || c.type === "rollup" ? (
                       <FormulaCell value={relationalValue(c, r)} />
+                    ) : c.type === "attachment" ? (
+                      <AttachmentCell value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+                    ) : c.type === "person" ? (
+                      <PersonCell value={r.values[c.id]} users={orgUsers} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
                     ) : (
                       <CellEditor column={c} value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
                     )}
@@ -772,6 +799,74 @@ function LinkCell({ value, linked, onChange }: { value: unknown; linked: LinkedT
   );
 }
 
+type Attachment = { name: string; url: string; mimeType?: string };
+function AttachmentCell({ value, onChange }: { value: unknown; onChange: (v: Attachment[]) => void }) {
+  const files: Attachment[] = Array.isArray(value) ? (value as Attachment[]).filter((f) => f && typeof f.url === "string") : [];
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const upload = async (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    setBusy(true);
+    const added: Attachment[] = [];
+    await Promise.all(Array.from(list).map(async (file) => {
+      try {
+        const fd = new FormData(); fd.append("file", file);
+        const up = await fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json());
+        if (up?.url) added.push({ name: up.name ?? file.name, url: up.url, mimeType: file.type || "application/octet-stream" });
+      } catch { /* skip */ }
+    }));
+    if (added.length) onChange([...files, ...added]);
+    setBusy(false);
+  };
+  return (
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+      <input ref={inputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { void upload(e.target.files); e.target.value = ""; }} />
+      {files.map((f, i) => (
+        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 3, background: "#f4f4f5", borderRadius: 4, padding: "1px 6px", fontSize: 11 }}>
+          <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ color: "#3f3f46", textDecoration: "none", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</a>
+          <button type="button" onClick={() => onChange(files.filter((_, n) => n !== i))} style={{ background: "none", border: 0, cursor: "pointer", color: "#a1a1aa", lineHeight: 0, padding: 0 }}>×</button>
+        </span>
+      ))}
+      <button type="button" onClick={() => inputRef.current?.click()} disabled={busy} style={{ background: "none", border: "1px dashed #d4d4d8", borderRadius: 4, color: "#71717a", cursor: "pointer", fontSize: 11, padding: "1px 6px" }}>{busy ? "…" : "+ file"}</button>
+    </span>
+  );
+}
+
+function PersonCell({ value, users, onChange }: { value: unknown; users: OrgUser[]; onChange: (v: string[]) => void }) {
+  const ids = Array.isArray(value) ? (value as string[]) : [];
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const chosen = ids.map((id) => users.find((u) => u.id === id)).filter((u): u is OrgUser => !!u);
+  const candidates = q.trim() ? users.filter((u) => userName(u).toLowerCase().includes(q.trim().toLowerCase())) : users;
+  const toggle = (id: string) => onChange(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
+  return (
+    <span style={{ position: "relative", display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+      {chosen.map((u) => (
+        <span key={u.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#f4f4f5", borderRadius: 999, padding: "1px 8px 1px 2px", fontSize: 11 }}>
+          <span style={{ width: 16, height: 16, borderRadius: 999, background: "#e4e4e7", color: "#52525b", fontSize: 8, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {u.avatar ? <img src={u.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : userInitials(u)}
+          </span>
+          {userName(u)}
+          <button type="button" onClick={() => toggle(u.id)} style={{ background: "none", border: 0, cursor: "pointer", color: "#a1a1aa", lineHeight: 0, padding: 0 }}>×</button>
+        </span>
+      ))}
+      <button type="button" onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "1px dashed #d4d4d8", borderRadius: 999, color: "#71717a", cursor: "pointer", fontSize: 11, padding: "1px 8px" }}>+ person</button>
+      {open ? (
+        <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 20, minWidth: 220, maxHeight: 260, overflowY: "auto", background: "white", border: "1px solid #e4e4e7", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 4 }} onMouseLeave={() => setOpen(false)}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people…" autoFocus style={{ width: "100%", height: 28, padding: "0 8px", border: "1px solid #e4e4e7", borderRadius: 6, fontSize: 12, marginBottom: 4 }} />
+          {candidates.length === 0 ? <div style={{ padding: 8, fontSize: 12, color: "#a1a1aa" }}>No people.</div> : candidates.slice(0, 100).map((u) => (
+            <button key={u.id} type="button" onClick={() => toggle(u.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 8px", border: 0, background: "none", cursor: "pointer", fontSize: 13, borderRadius: 6 }}>
+              <span style={{ flex: 1 }}>{userName(u)}</span>
+              {ids.includes(u.id) ? <Check style={{ width: 14, height: 14, color: "#6366f1" }} /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
 function FormulaCell({ value }: { value: number | string }) {
   const isErr = typeof value === "string" && value.startsWith("#");
   return (
@@ -886,9 +981,9 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
   if (t === "formula" || t === "lookup" || t === "rollup") {
     return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }} title={column.formula}>computed (grid view)</span>;
   }
-  if (t === "link") {
+  if (t === "link" || t === "attachment" || t === "person") {
     const n = Array.isArray(value) ? value.length : 0;
-    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }}>{n ? `${n} linked (edit in grid)` : "edit in grid"}</span>;
+    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }}>{n ? `${n} item${n === 1 ? "" : "s"} (edit in grid)` : "edit in grid"}</span>;
   }
   return null;
 }
