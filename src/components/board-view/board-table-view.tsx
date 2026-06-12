@@ -45,6 +45,9 @@ interface BoardTableViewProps {
   /** When set, clicking a row's title opens the row drawer. The
    *  parent owns drawer state; we just emit the id. */
   onOpenItem?: (itemId: string) => void;
+  /** Opens the board's status editor — wired to the group-header "…"
+   *  menu (Rename / New status / Edit statuses / Hide status). */
+  onEditStatuses?: () => void;
   /** "list" = ClickUp pills (default). "table" = Monday-style grid with
    *  full-cell colored status fills + always-on group summary. */
   gridStyle?: "list" | "table";
@@ -55,7 +58,7 @@ interface BoardTableViewProps {
  *  is what the server persists. */
 type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags">> & { tagIds?: string[] };
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, gridStyle = "list" }: BoardTableViewProps) {
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
   const { byId: itemTypeMap } = useItemTypes();
@@ -634,6 +637,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                             <span className="text-[10.5px] text-zinc-500 tabular-nums">{b.rows.length}</span>
                           </button>
                           <GroupStatusBreakdown rows={b.rows} statuses={statuses} />
+                          {canEdit ? (
+                            <GroupHeaderMenu
+                              canEditStatuses={!!onEditStatuses}
+                              onEditStatuses={onEditStatuses}
+                              onCollapseGroup={() => toggleGroup(b.key)}
+                              onCollapseAll={() => setCollapsedGroups(new Set(buckets.map((x) => x.key)))}
+                              onSelectAll={() => setSelected((prev) => { const n = new Set(prev); for (const r of b.rows) n.add(r.id); return n; })}
+                            />
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -1498,6 +1510,62 @@ function TitleCell({
       }}
       className="w-full bg-transparent outline-none border-b border-[var(--os-brand)]"
     />
+  );
+}
+
+// Per-group "…" menu in a List view group header. Status-editing rows
+// (Rename / New status / Edit statuses / Hide status) open the board's
+// status editor; collapse/select are local. Automate is deferred.
+function GroupHeaderMenu({
+  canEditStatuses,
+  onEditStatuses,
+  onCollapseGroup,
+  onCollapseAll,
+  onSelectAll,
+}: {
+  canEditStatuses: boolean;
+  onEditStatuses?: () => void;
+  onCollapseGroup: () => void;
+  onCollapseAll: () => void;
+  onSelectAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+  const act = (fn?: () => void) => () => { fn?.(); setOpen(false); };
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700" aria-label="Group options">
+        <MoreHorizontal className="w-3.5 h-3.5" />
+      </button>
+      {open ? (
+        <div className="absolute z-20 mt-1 left-0 min-w-[190px] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-[13px]">
+          <GHItem label="Rename" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
+          <GHItem label="New status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
+          <GHItem label="Edit statuses" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
+          <div className="h-px bg-zinc-100 my-1" />
+          <GHItem label="Collapse group" onClick={act(onCollapseGroup)} />
+          <GHItem label="Collapse all groups" onClick={act(onCollapseAll)} />
+          <GHItem label="Select all" onClick={act(onSelectAll)} />
+          <GHItem label="Hide status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
+          <div className="h-px bg-zinc-100 my-1" />
+          <GHItem label="Automate status" disabled />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GHItem({ label, onClick, disabled }: { label: string; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} className="w-full text-left px-3 py-1.5 hover:bg-zinc-50 text-zinc-700 disabled:opacity-40 disabled:hover:bg-transparent">
+      {label}
+    </button>
   );
 }
 

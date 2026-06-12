@@ -210,6 +210,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
+          onEditStatuses={() => setStatusEditorOpen(true)}
           gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
         />
       ) : viewType === "KANBAN" ? (
