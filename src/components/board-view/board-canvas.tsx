@@ -25,6 +25,10 @@ import { BoardWorkloadView } from "./board-workload-view";
 import { BoardTimelineView } from "./board-timeline-view";
 import { BoardMapView } from "./board-map-view";
 import { BoardWhiteboardView } from "./board-whiteboard-view";
+import { BoardHierarchyView } from "./board-hierarchy-view";
+import { BoardPivotView } from "./board-pivot-view";
+import { BoardCardsView } from "./board-cards-view";
+import { BoardActivityView } from "./board-activity-view";
 import { BoardItemDrawer } from "./board-item-drawer";
 import { BoardFilterBar, applyFilters, filtersActive, parseFilters, type BoardFilters } from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
@@ -260,14 +264,40 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "WHITEBOARD" ? (
         <BoardWhiteboardView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
+      ) : viewType === "HIERARCHY" ? (
+        <BoardHierarchyView
+          initialItems={filteredItems}
+          statuses={statuses}
+          onOpenItem={(id) => setOpenItemId(id)}
+        />
+      ) : viewType === "PIVOT" ? (
+        <BoardPivotView
+          boardId={boardId}
+          viewId={viewId}
+          viewConfig={viewConfig}
+          initialItems={filteredItems}
+          initialFields={fields}
+          statuses={statuses}
+          canEdit={canEdit}
+        />
+      ) : viewType === "CARDS" ? (
+        <BoardCardsView
+          initialItems={filteredItems}
+          statuses={statuses}
+          onOpenItem={(id) => setOpenItemId(id)}
+        />
+      ) : viewType === "ACTIVITY" ? (
+        <BoardActivityView
+          boardId={boardId}
+          statuses={statuses}
+          onOpenItem={(id) => setOpenItemId(id)}
+        />
       ) : (
+        // Safety net for any future ViewType the client predates.
         <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center bg-white">
-          <div className="text-base font-medium mb-1">
-            {viewType} renderer coming next
-          </div>
+          <div className="text-base font-medium mb-1">{viewType} view</div>
           <p className="text-sm text-zinc-500 max-w-[460px] mx-auto">
-            TABLE, KANBAN, CALENDAR, and GANTT are live; FORM / TIMELINE / WORKLOAD / MAP / DOC / DASHBOARD follow.
-            Add a List, Board, Calendar, or Gantt view via the "+ View" tab to use a rendered surface today.
+            This view type isn&apos;t supported by this build yet — refresh, or pick another view tab.
           </p>
         </div>
       )}

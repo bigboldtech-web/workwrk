@@ -4751,6 +4751,12 @@ enum ViewType {
   WORKLOAD
   WHITEBOARD
   FILE_GALLERY
+  // Views-catalog additions — genuinely new renderers (the rest of the
+  // catalog rides on existing types via View.config).
+  CARDS
+  PIVOT
+  HIERARCHY
+  ACTIVITY
 }
 
 model Item {

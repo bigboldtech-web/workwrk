@@ -14,6 +14,7 @@ import {
   List as ListIcon, LayoutGrid, Calendar as CalIcon, GanttChart, Table2,
   ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
   ListFilter, Glasses, Zap, Folder as FolderIcon,
+  Activity as ActivityIcon, Grid3X3, ListTree, SquareStack,
 } from "lucide-react";
 import { createElement } from "react";
 import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
@@ -44,6 +45,10 @@ const VIEW_ICONS: Record<ViewType, React.ComponentType<{ className?: string }>> 
   WORKLOAD: GaugeCircle,
   WHITEBOARD: Brush,
   FILE_GALLERY: Table2,
+  CARDS: SquareStack,
+  PIVOT: Grid3X3,
+  HIERARCHY: ListTree,
+  ACTIVITY: ActivityIcon,
 };
 
 const VIEW_COLORS: Record<ViewType, string> = {
@@ -60,6 +65,10 @@ const VIEW_COLORS: Record<ViewType, string> = {
   WORKLOAD: "text-cyan-500",
   WHITEBOARD: "text-cyan-500",
   FILE_GALLERY: "text-zinc-500",
+  CARDS: "text-indigo-500",
+  PIVOT: "text-emerald-600",
+  HIERARCHY: "text-teal-600",
+  ACTIVITY: "text-sky-500",
 };
 
 export default async function BoardPage(props: {

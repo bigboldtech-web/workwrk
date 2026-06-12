@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 const VIEW_TYPES = [
   "TABLE", "KANBAN", "GANTT", "CALENDAR", "TIMELINE", "CHART", "DOC", "FORM",
   "DASHBOARD", "MAP", "WORKLOAD", "WHITEBOARD", "FILE_GALLERY",
+  "CARDS", "PIVOT", "HIERARCHY", "ACTIVITY",
 ] as const;
 
 async function ctx() {
