@@ -153,6 +153,14 @@ graph we already use; the detail view is just another surface onto it.
   (Status, Start date, Time tracked, Dependencies, Task Type, Lists, Linked Docs…) — today show/hide only
   covers *custom* fields, not the built-in columns. **Verify end-to-end + close these gaps.**
 
+**Connection-as-field (Docs / SOPs / KRAs as "nodes" — founder):** beyond the drawer's "Linked X" sections,
+a **Doc / SOP / KRA can be attached to a task as a field** (a board column whose value links the entity, shown
+in the table cell *and* the task detail). Today: **KRA field** exists (✅); **Docs/SOPs link only via the
+drawer** LinkedAttachments (EntityLink), not as columns; **RELATIONSHIP** field is a stub. **Build:** add
+**Linked-Doc** and **Linked-SOP** field types (mirror the KRA field, backed by EntityLink) + finish
+**RELATIONSHIP** (link any Item/Doc/SOP/KRA/Form). This makes the "fields can have nodes" vision concrete:
+the same EntityLink graph surfaces as either a drawer section or a first-class column.
+
 **Build (task detail phase):** (a) add a **full-page task route** that reuses the drawer's sections;
 (b) inline **subtask mini-table** + **checklist** + **relate/dependencies** in the detail; (c) "hide empty
 fields" + field search in the detail; (d) extend FieldShelf "Add existing" to toggle **built-in** field
