@@ -48,6 +48,9 @@ interface BoardTableViewProps {
   /** Opens the board's status editor — wired to the group-header "…"
    *  menu (Rename / New status / Edit statuses / Hide status). */
   onEditStatuses?: () => void;
+  /** Per-view hidden keys incl. __builtin_* — hides Owner/Priority/Type/
+   *  Tags columns from the FieldShelf "Built-in fields" toggles. */
+  hiddenBuiltins?: string[];
   /** "list" = ClickUp pills (default). "table" = Monday-style grid with
    *  full-cell colored status fills + always-on group summary. */
   gridStyle?: "list" | "table";
@@ -58,10 +61,16 @@ interface BoardTableViewProps {
  *  is what the server persists. */
 type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags">> & { tagIds?: string[] };
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
   const { byId: itemTypeMap } = useItemTypes();
+  // Built-in column visibility (FieldShelf "Built-in fields" toggles).
+  const hideBuiltin = useMemo(() => new Set(hiddenBuiltins ?? []), [hiddenBuiltins]);
+  const showOwner = !hideBuiltin.has("__builtin_owner");
+  const showPriority = !hideBuiltin.has("__builtin_priority");
+  const showType = !hideBuiltin.has("__builtin_type");
+  const showTags = !hideBuiltin.has("__builtin_tags");
   // New rows default to the board's first status (its "not started").
   const firstStatus = statuses[0]?.value ?? "TO_DO";
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -497,7 +506,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit]);
 
-  const colCount = 9 + customFields.length; // select/handle + name + status + owner + priority + type + tags + created + actions
+  // select + name + status + created + actions (5 fixed) + optional
+  // owner/priority/type/tags + custom fields.
+  const colCount = 5 + (showOwner ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + customFields.length;
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -514,6 +525,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         customFields={customFields}
         statuses={statuses}
         itemTypeMap={itemTypeMap}
+        showOwner={showOwner}
+        showPriority={showPriority}
+        showType={showType}
+        showTags={showTags}
         canEdit={canEdit}
         monday={monday}
         selected={selected.has(row.id)}
@@ -601,10 +616,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               </th>
               <th className="px-4 py-2 font-medium w-[36%]">Name</th>
               <th className="px-4 py-2 font-medium w-[140px]">Status</th>
-              <th className="px-4 py-2 font-medium w-[180px]">Owner</th>
-              <th className="px-4 py-2 font-medium w-[110px]">Priority</th>
-              <th className="px-4 py-2 font-medium w-[130px]">Type</th>
-              <th className="px-4 py-2 font-medium w-[160px]">Tags</th>
+              {showOwner ? <th className="px-4 py-2 font-medium w-[180px]">Owner</th> : null}
+              {showPriority ? <th className="px-4 py-2 font-medium w-[110px]">Priority</th> : null}
+              {showType ? <th className="px-4 py-2 font-medium w-[130px]">Type</th> : null}
+              {showTags ? <th className="px-4 py-2 font-medium w-[160px]">Tags</th> : null}
               {customFields.map((f) => (
                 <th key={f.key} className="px-4 py-2 font-medium">{f.label}</th>
               ))}
@@ -654,14 +669,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                       : null}
                     {/* Monday-style per-group summary footer — aggregates
                         every column (stacked bars, people, sums…). */}
-                    <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} />
+                    <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} />
                   </React.Fragment>
                 );
               })
             ) : (
               <>
                 {topLevel.flatMap((row) => renderRowAndSubtasks(row, 0))}
-                {items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} /> : null}
+                {items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} /> : null}
               </>
             )}
             {canEdit && !buckets ? (
@@ -874,6 +889,10 @@ function Row({
   customFields,
   statuses,
   itemTypeMap,
+  showOwner,
+  showPriority,
+  showType,
+  showTags,
   canEdit,
   monday = false,
   selected,
@@ -898,6 +917,10 @@ function Row({
   customFields: FieldDef[];
   statuses: StatusOption[];
   itemTypeMap: Map<string, ItemTypeLite>;
+  showOwner: boolean;
+  showPriority: boolean;
+  showType: boolean;
+  showTags: boolean;
   canEdit: boolean;
   monday?: boolean;
   selected: boolean;
@@ -989,28 +1012,26 @@ function Row({
       <td className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-2"}>
         <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} monday={monday} />
       </td>
-      <td className="px-4 py-2">
-        <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
-      </td>
-      <td className="px-4 py-2">
-        <PriorityPicker
-          value={row.priority ?? null}
-          canEdit={canEdit}
-          compact
-          onChange={(priority) => onUpdate(row.id, { priority })}
-        />
-      </td>
-      <td className="px-4 py-2">
-        <TypeCell itemTypeId={row.itemTypeId ?? null} itemTypeMap={itemTypeMap} />
-      </td>
-      <td className="px-4 py-2">
-        <TagPicker
-          value={row.tags ?? []}
-          canEdit={canEdit}
-          compact
-          onChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })}
-        />
-      </td>
+      {showOwner ? (
+        <td className="px-4 py-2">
+          <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
+        </td>
+      ) : null}
+      {showPriority ? (
+        <td className="px-4 py-2">
+          <PriorityPicker value={row.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onUpdate(row.id, { priority })} />
+        </td>
+      ) : null}
+      {showType ? (
+        <td className="px-4 py-2">
+          <TypeCell itemTypeId={row.itemTypeId ?? null} itemTypeMap={itemTypeMap} />
+        </td>
+      ) : null}
+      {showTags ? (
+        <td className="px-4 py-2">
+          <TagPicker value={row.tags ?? []} canEdit={canEdit} compact onChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })} />
+        </td>
+      ) : null}
       {customFields.map((f) => (
         <td key={f.key} className="px-4 py-2">
           <FieldValue field={f} value={row.metadata?.[f.key]} mode="display" />
@@ -1178,11 +1199,19 @@ function GroupSummaryRow({
   customFields,
   statuses,
   railColor,
+  showOwner = true,
+  showPriority = true,
+  showType = true,
+  showTags = true,
 }: {
   rows: BoardItemRow[];
   customFields: FieldDef[];
   statuses: StatusOption[];
   railColor: string | null;
+  showOwner?: boolean;
+  showPriority?: boolean;
+  showType?: boolean;
+  showTags?: boolean;
 }) {
   // Status + priority stacked bars.
   const statusSegs = useMemo<BarSeg[]>(() => {
@@ -1229,44 +1258,50 @@ function GroupSummaryRow({
       {/* Status */}
       <td className="px-4 py-1.5"><StackedBar segments={statusSegs} /></td>
       {/* Owner */}
-      <td className="px-4 py-1.5">
-        {owners.length === 0 ? (
-          <span className="text-[11px] text-zinc-300">—</span>
-        ) : (
-          <span className="inline-flex items-center -space-x-1.5" title={owners.map((o) => `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim()).join(", ")}>
-            {owners.slice(0, 5).map((o) => (
-              <span key={o.id} className="rounded-full ring-2 ring-white">
-                <PersonAvatar person={{ ...o, email: null }} size={20} />
-              </span>
-            ))}
-            {owners.length > 5 ? <span className="pl-2.5 text-[10.5px] text-zinc-500">+{owners.length - 5}</span> : null}
-          </span>
-        )}
-      </td>
-      {/* Priority */}
-      <td className="px-4 py-1.5">
-        {prioritySegs.length ? <StackedBar segments={prioritySegs} /> : <span className="text-[11px] text-zinc-300">—</span>}
-      </td>
-      {/* Type spacer */}
-      <td className="px-4 py-1.5" />
-      {/* Tags */}
-      <td className="px-4 py-1.5">
-        {tags.length === 0 ? (
-          <span className="text-[11px] text-zinc-300">—</span>
-        ) : (
-          <span className="inline-flex items-center gap-1 flex-wrap">
-            {tags.slice(0, 3).map((t) => {
-              const c = t.color || "#94a3b8";
-              return (
-                <span key={t.id} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: `${c}22`, color: c }}>
-                  {t.name}
+      {showOwner ? (
+        <td className="px-4 py-1.5">
+          {owners.length === 0 ? (
+            <span className="text-[11px] text-zinc-300">—</span>
+          ) : (
+            <span className="inline-flex items-center -space-x-1.5" title={owners.map((o) => `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim()).join(", ")}>
+              {owners.slice(0, 5).map((o) => (
+                <span key={o.id} className="rounded-full ring-2 ring-white">
+                  <PersonAvatar person={{ ...o, email: null }} size={20} />
                 </span>
-              );
-            })}
-            {tags.length > 3 ? <span className="text-[10px] text-zinc-500">+{tags.length - 3}</span> : null}
-          </span>
-        )}
-      </td>
+              ))}
+              {owners.length > 5 ? <span className="pl-2.5 text-[10.5px] text-zinc-500">+{owners.length - 5}</span> : null}
+            </span>
+          )}
+        </td>
+      ) : null}
+      {/* Priority */}
+      {showPriority ? (
+        <td className="px-4 py-1.5">
+          {prioritySegs.length ? <StackedBar segments={prioritySegs} /> : <span className="text-[11px] text-zinc-300">—</span>}
+        </td>
+      ) : null}
+      {/* Type spacer */}
+      {showType ? <td className="px-4 py-1.5" /> : null}
+      {/* Tags */}
+      {showTags ? (
+        <td className="px-4 py-1.5">
+          {tags.length === 0 ? (
+            <span className="text-[11px] text-zinc-300">—</span>
+          ) : (
+            <span className="inline-flex items-center gap-1 flex-wrap">
+              {tags.slice(0, 3).map((t) => {
+                const c = t.color || "#94a3b8";
+                return (
+                  <span key={t.id} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: `${c}22`, color: c }}>
+                    {t.name}
+                  </span>
+                );
+              })}
+              {tags.length > 3 ? <span className="text-[10px] text-zinc-500">+{tags.length - 3}</span> : null}
+            </span>
+          )}
+        </td>
+      ) : null}
       {/* Custom fields */}
       {customFields.map((f) => (
         <td key={f.key} className="px-4 py-1.5"><CustomFieldSummary field={f} rows={rows} /></td>

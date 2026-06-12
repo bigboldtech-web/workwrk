@@ -27,6 +27,23 @@ import {
 
 const CHOICE_TYPES: ReadonlySet<string> = new Set(["DROPDOWN", "MULTI_SELECT", "LABELS", "TSHIRT_SIZE", "CUSTOM_DROPDOWN"]);
 
+// "Suggested" quick-add — the field types teams reach for most. Rendered
+// as the first group in Create-new (context-agnostic v1).
+const SUGGESTED_TYPES: ReadonlySet<string> = new Set([
+  "DROPDOWN", "DATE", "PEOPLE", "MONEY", "PROGRESS_MANUAL", "RATING", "LINKED_DOC",
+]);
+
+// Built-in columns that can be shown/hidden per view. Status/Name stay
+// (always rendered). The key namespace (__builtin_*) lives in the same
+// View.config.hiddenFields set the custom-field toggles use, so the table
+// reads one source of truth.
+export const BUILTIN_FIELD_TOGGLES: { key: string; label: string }[] = [
+  { key: "__builtin_owner", label: "Owner" },
+  { key: "__builtin_priority", label: "Priority" },
+  { key: "__builtin_type", label: "Task Type" },
+  { key: "__builtin_tags", label: "Tags" },
+];
+
 /** ClickUp-ish 8-swatch palette for choice pills. */
 const SWATCHES = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#94a3b8"];
 
@@ -67,8 +84,11 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
   }, [query]);
 
   const grouped = useMemo(() => {
-    const out: Record<string, FieldCatalogEntry[]> = { Common: [], WorkwrK: [], AI: [], Advanced: [] };
-    for (const e of filtered) out[e.group].push(e);
+    const out: Record<string, FieldCatalogEntry[]> = { Suggested: [], Common: [], WorkwrK: [], AI: [], Advanced: [] };
+    for (const e of filtered) {
+      if (SUGGESTED_TYPES.has(e.type)) out.Suggested.push(e);
+      out[e.group].push(e);
+    }
     return out;
   }, [filtered]);
 
@@ -279,6 +299,31 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
                   ) : null}
                 </section>
               ) : null}
+
+              {/* Built-in fields — show/hide the fixed columns per view. */}
+              {onToggleHidden ? (
+                <section className="mt-6 px-2">
+                  <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Built-in fields</h3>
+                  <ul className="space-y-1">
+                    {BUILTIN_FIELD_TOGGLES.map((b) => {
+                      const isHidden = hidden.has(b.key);
+                      return (
+                        <li key={b.key} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50">
+                          <span className="text-sm flex-1 text-zinc-700">{b.label}</span>
+                          <button
+                            type="button"
+                            onClick={() => onToggleHidden(b.key)}
+                            className="inline-flex items-center justify-center w-6 h-6 rounded text-zinc-400 hover:text-zinc-700"
+                            title={isHidden ? "Show column" : "Hide column"}
+                          >
+                            {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -316,12 +361,12 @@ function CreateNewTab({
 }) {
   return (
     <div className="space-y-4">
-      {(["Common", "WorkwrK", "AI", "Advanced"] as const).map((group) => {
+      {(["Suggested", "Common", "WorkwrK", "AI", "Advanced"] as const).map((group) => {
         const items = grouped[group] ?? [];
         if (items.length === 0) return null;
         return (
           <section key={group}>
-            <h3 className="text-xs uppercase tracking-wide text-zinc-500 px-2 mb-1">{group}</h3>
+            <h3 className="text-xs uppercase tracking-wide text-zinc-500 px-2 mb-1">{group === "AI" ? "AI fields" : group}</h3>
             <ul className="space-y-0.5">
               {items.map((e) => (
                 <li key={e.type}>
