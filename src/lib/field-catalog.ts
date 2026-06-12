@@ -15,9 +15,9 @@ import {
   Type, AlignLeft, Hash, Calendar as CalIcon, CalendarClock,
   ChevronDown, ListChecks, CheckSquare, Link as LinkIcon, AtSign,
   Phone, DollarSign, Percent, Star, Tag, User as UserIcon,
-  Paperclip, Sigma, ArrowRightLeft, Network, ToggleLeft, PenLine,
-  MapPin, GaugeCircle, Activity, BarChart3, Languages, FileText,
-  CheckCheck, Shirt, ThumbsUp, Sparkles, ListFilter, Target,
+  Paperclip, Sigma, ArrowRightLeft, ToggleLeft, PenLine,
+  MapPin, GaugeCircle, Activity, Languages, FileText,
+  CheckCheck, Shirt, ThumbsUp, Sparkles, ListFilter, Target, BookOpen,
   type LucideIcon,
 } from "lucide-react";
 
@@ -42,7 +42,9 @@ export type FieldType =
   | "SUMMARY" | "SENTIMENT" | "CATEGORIZE" | "TRANSLATION"
   | "CUSTOM_TEXT" | "CUSTOM_DROPDOWN"
   // WorkwrK AI-OS gating fields (Phase 4)
-  | "KRA";
+  | "KRA"
+  // connection-as-field — link a Doc / SOP to the row (mirror KRA)
+  | "LINKED_DOC" | "LINKED_SOP";
 
 export interface FieldCatalogEntry {
   type: FieldType;
@@ -85,11 +87,13 @@ export const FIELD_CATALOG: FieldCatalogEntry[] = [
 
   // ── WorkwrK AI-OS ───────────────────────────────────────────
   { type: "KRA", label: "KRA tag", Icon: Target, group: "WorkwrK", tier1: true, description: "Tag this row with an organizational KRA" },
+  { type: "LINKED_DOC", label: "Linked Doc", Icon: FileText, group: "WorkwrK", tier1: true, description: "Link a Doc to this row" },
+  { type: "LINKED_SOP", label: "Linked SOP", Icon: BookOpen, group: "WorkwrK", tier1: true, description: "Link an SOP to this row" },
 
   // ── Advanced ────────────────────────────────────────────────
   { type: "FORMULA",          label: "Formula",         Icon: Sigma,         group: "Advanced", tier1: false },
   { type: "ROLLUP",           label: "Rollup",          Icon: ListFilter,    group: "Advanced", tier1: false },
-  { type: "RELATIONSHIP",     label: "Relationship",    Icon: ArrowRightLeft,group: "Advanced", tier1: false },
+  { type: "RELATIONSHIP",     label: "Relationship",    Icon: ArrowRightLeft,group: "Advanced", tier1: true, description: "Link any Doc, SOP, KRA or Form" },
   { type: "LOCATION",         label: "Location",        Icon: MapPin,        group: "Advanced", tier1: true },
   { type: "PROGRESS_AUTO",    label: "Progress (auto)", Icon: GaugeCircle,   group: "Advanced", tier1: false },
   { type: "PROGRESS_MANUAL",  label: "Progress (manual)", Icon: GaugeCircle, group: "Advanced", tier1: true },

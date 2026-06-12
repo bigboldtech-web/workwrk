@@ -10,7 +10,7 @@
 // AI types render as a muted "—" placeholder until Phase 4+.
 
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp } from "lucide-react";
+import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X } from "lucide-react";
 import type { FieldChoice, FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 
@@ -78,6 +78,58 @@ function useOrgUsers(): PersonRef[] {
   return users;
 }
 
+// ── Linked-entity loaders (Doc / SOP / KRA / Form) ─────────────────
+// Connection-as-field: a row links a Doc/SOP/etc. by id (stored in
+// Item.metadata, exactly like the KRA field). Each entity kind gets a
+// shared 60s cache so N cells on a page collapse to one fetch.
+
+type EntityLite = { id: string; label: string; sub?: string | null };
+
+function makeEntityLoader(fetcher: () => Promise<EntityLite[]>) {
+  let cache: { items: EntityLite[]; at: number } | null = null;
+  let promise: Promise<EntityLite[]> | null = null;
+  const load = async (): Promise<EntityLite[]> => {
+    if (cache && Date.now() - cache.at < 60_000) return cache.items;
+    if (promise) return promise;
+    promise = (async () => {
+      const items = await fetcher();
+      cache = { items, at: Date.now() };
+      return items;
+    })();
+    try { return await promise; } finally { promise = null; }
+  };
+  load.peek = (): EntityLite[] => cache?.items ?? [];
+  return load;
+}
+
+const loadDocEntities = makeEntityLoader(async () => {
+  const res = await fetch("/api/docs", { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.docs ?? []).map((d: { id: string; title: string | null }) => ({ id: d.id, label: d.title || "Untitled doc" }));
+});
+
+const loadSopEntities = makeEntityLoader(async () => {
+  const res = await fetch("/api/sops?limit=200", { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.data ?? []).map((s: { id: string; title: string | null; category: string | null }) => ({ id: s.id, label: s.title || "Untitled SOP", sub: s.category }));
+});
+
+const loadKraEntities = makeEntityLoader(async () => {
+  const res = await fetch("/api/kras?scope=all", { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.kras ?? []).map((k: { id: string; name: string; category: string | null }) => ({ id: k.id, label: k.name, sub: k.category }));
+});
+
+const loadFormEntities = makeEntityLoader(async () => {
+  const res = await fetch("/api/forms", { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (Array.isArray(data) ? data : []).map((f: { id: string; name: string | null }) => ({ id: f.id, label: f.name || "Untitled form" }));
+});
+
 interface FieldValueProps {
   field: FieldDef;
   value: unknown;
@@ -121,6 +173,12 @@ export function FieldValue(props: FieldValueProps) {
       return <RatingValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
     case "KRA":
       return <KraValue value={value} readOnly={readOnly} onChange={onChange} />;
+    case "LINKED_DOC":
+      return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadDocEntities} Icon={FileText} hrefFor={(id) => `/docs/${id}`} emptyHint="No docs in this org yet." />;
+    case "LINKED_SOP":
+      return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadSopEntities} Icon={BookOpen} hrefFor={(id) => `/sops/${id}`} emptyHint="No SOPs in this org yet." />;
+    case "RELATIONSHIP":
+      return <RelationshipValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "USER":
       return <UserValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "PEOPLE":
@@ -798,6 +856,220 @@ function KraValue({
               className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1"
             >
               Clear
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Linked entity (single Doc / SOP) — mirrors KraValue ───────────
+// Stores the linked entity id (a string) in Item.metadata[field.key].
+
+function LinkedEntityValue({
+  value,
+  readOnly,
+  onChange,
+  loader,
+  Icon,
+  hrefFor,
+  emptyHint,
+}: {
+  value: unknown;
+  readOnly: boolean;
+  onChange?: (v: string | null) => void;
+  loader: ReturnType<typeof makeEntityLoader>;
+  Icon: typeof FileText;
+  hrefFor?: (id: string) => string;
+  emptyHint: string;
+}) {
+  const v = typeof value === "string" ? value : "";
+  const [items, setItems] = useState<EntityLite[]>(loader.peek());
+  const [loading, setLoading] = useState(loader.peek().length === 0);
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void loader().then((rows) => { if (active) { setItems(rows); setLoading(false); } });
+    return () => { active = false; };
+  }, [loader]);
+
+  const current = v ? items.find((it) => it.id === v) : null;
+  const chip = current ? (
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)] text-[var(--os-brand)]">
+      <Icon className="w-3 h-3" />
+      <span className="truncate max-w-[160px]">{current.label}</span>
+    </span>
+  ) : v ? (
+    <span className="text-xs text-zinc-500">{loading ? "Loading…" : "Unknown"}</span>
+  ) : (
+    <span className="text-xs text-zinc-500">—</span>
+  );
+
+  if (readOnly) {
+    // In display mode link the chip if we can resolve a destination.
+    if (current && hrefFor) {
+      return <a href={hrefFor(current.id)} className="no-underline" onClick={(e) => e.stopPropagation()}>{chip}</a>;
+    }
+    return chip;
+  }
+
+  const filtered = q.trim() ? items.filter((it) => it.label.toLowerCase().includes(q.trim().toLowerCase())) : items;
+
+  return (
+    <div className="relative inline-block">
+      <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
+        {chip}
+        <ChevronDown className="w-3 h-3 text-zinc-500" />
+      </button>
+      {open ? (
+        <div className="absolute z-10 mt-1 left-0 min-w-[280px] max-h-[340px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
+          <div className="px-2 pb-1.5 pt-1">
+            <div className="flex items-center gap-1.5 h-7 px-2 rounded border border-zinc-200">
+              <Search className="w-3 h-3 text-zinc-400" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="flex-1 text-xs bg-transparent outline-none" autoFocus />
+            </div>
+          </div>
+          {loading ? (
+            <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? emptyHint : "No matches."}</div>
+          ) : (
+            filtered.map((it) => (
+              <button key={it.id} type="button" onClick={() => { onChange?.(it.id); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
+                <Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                <span className="flex-1 truncate">
+                  {it.label}
+                  {it.sub ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
+                </span>
+                {it.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
+              </button>
+            ))
+          )}
+          {v ? (
+            <button type="button" onClick={() => { onChange?.(null); setOpen(false); }} className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1">
+              Clear
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Relationship — link any Doc / SOP / KRA / Form ────────────────
+// Stores { kind, id } in metadata. A kind toggle switches which entity
+// list the picker shows.
+
+type RelationKind = "DOC" | "SOP" | "KRA" | "FORM";
+const RELATION_KINDS: { kind: RelationKind; label: string; loader: ReturnType<typeof makeEntityLoader>; Icon: typeof FileText; hrefFor?: (id: string) => string }[] = [
+  { kind: "DOC", label: "Docs", loader: loadDocEntities, Icon: FileText, hrefFor: (id) => `/docs/${id}` },
+  { kind: "SOP", label: "SOPs", loader: loadSopEntities, Icon: BookOpen, hrefFor: (id) => `/sops/${id}` },
+  { kind: "KRA", label: "KRAs", loader: loadKraEntities, Icon: Target },
+  { kind: "FORM", label: "Forms", loader: loadFormEntities, Icon: FileText, hrefFor: (id) => `/forms/${id}` },
+];
+
+function parseRelation(value: unknown): { kind: RelationKind; id: string } | null {
+  if (value && typeof value === "object" && "kind" in value && "id" in value) {
+    const k = (value as { kind: unknown }).kind;
+    const id = (value as { id: unknown }).id;
+    if (typeof k === "string" && typeof id === "string" && RELATION_KINDS.some((r) => r.kind === k)) {
+      return { kind: k as RelationKind, id };
+    }
+  }
+  return null;
+}
+
+function RelationshipValue({
+  value,
+  readOnly,
+  onChange,
+}: {
+  value: unknown;
+  readOnly: boolean;
+  onChange?: (v: { kind: RelationKind; id: string } | null) => void;
+}) {
+  const rel = parseRelation(value);
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<RelationKind>(rel?.kind ?? "DOC");
+  const [q, setQ] = useState("");
+  const active = RELATION_KINDS.find((r) => r.kind === kind) ?? RELATION_KINDS[0];
+  const [items, setItems] = useState<EntityLite[]>(active.loader.peek());
+  const [loading, setLoading] = useState(active.loader.peek().length === 0);
+
+  useEffect(() => {
+    let on = true;
+    void active.loader().then((rows) => { if (on) { setItems(rows); setLoading(false); } });
+    return () => { on = false; };
+  }, [active]);
+
+  const relCfg = rel ? RELATION_KINDS.find((r) => r.kind === rel.kind) : null;
+  const relItems = rel ? (relCfg?.loader.peek() ?? []) : [];
+  const current = rel ? relItems.find((it) => it.id === rel.id) : null;
+  const RelIcon = relCfg?.Icon ?? Link2;
+
+  const chip = rel ? (
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">
+      <RelIcon className="w-3 h-3" />
+      <span className="truncate max-w-[150px]">{current?.label ?? rel.id}</span>
+      <span className="text-[9px] uppercase tracking-wide text-zinc-400">{rel.kind}</span>
+    </span>
+  ) : (
+    <span className="text-xs text-zinc-500">—</span>
+  );
+
+  if (readOnly) {
+    if (rel && relCfg?.hrefFor) {
+      return <a href={relCfg.hrefFor(rel.id)} className="no-underline" onClick={(e) => e.stopPropagation()}>{chip}</a>;
+    }
+    return chip;
+  }
+
+  const filtered = q.trim() ? items.filter((it) => it.label.toLowerCase().includes(q.trim().toLowerCase())) : items;
+
+  return (
+    <div className="relative inline-block">
+      <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
+        {chip}
+        <ChevronDown className="w-3 h-3 text-zinc-500" />
+      </button>
+      {open ? (
+        <div className="absolute z-10 mt-1 left-0 min-w-[300px] max-h-[360px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
+          {/* Kind toggle */}
+          <div className="flex items-center gap-1 px-2 pb-1.5 pt-1 border-b border-zinc-100">
+            {RELATION_KINDS.map((r) => (
+              <button key={r.kind} type="button" onClick={() => { setKind(r.kind); setQ(""); }} className={`flex-1 inline-flex items-center justify-center gap-1 h-6 rounded text-[11px] font-medium ${kind === r.kind ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>
+                <r.Icon className="w-3 h-3" /> {r.label}
+              </button>
+            ))}
+          </div>
+          <div className="px-2 py-1.5">
+            <div className="flex items-center gap-1.5 h-7 px-2 rounded border border-zinc-200">
+              <Search className="w-3 h-3 text-zinc-400" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${active.label.toLowerCase()}…`} className="flex-1 text-xs bg-transparent outline-none" autoFocus />
+            </div>
+          </div>
+          {loading ? (
+            <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? `No ${active.label.toLowerCase()} yet.` : "No matches."}</div>
+          ) : (
+            filtered.map((it) => (
+              <button key={it.id} type="button" onClick={() => { onChange?.({ kind, id: it.id }); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
+                <active.Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                <span className="flex-1 truncate">
+                  {it.label}
+                  {it.sub ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
+                </span>
+                {rel && rel.kind === kind && rel.id === it.id ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
+              </button>
+            ))
+          )}
+          {rel ? (
+            <button type="button" onClick={() => { onChange?.(null); setOpen(false); }} className="flex items-center gap-1 w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1">
+              <X className="w-3 h-3" /> Clear
             </button>
           ) : null}
         </div>
