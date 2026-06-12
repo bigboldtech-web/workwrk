@@ -43,7 +43,20 @@ import { TAUPE, taupeButton } from "@/components/ui/accent";
 
 const MENU_WIDTH = 312;
 
-type BuildKind = "doc" | "form" | "dashboard" | "whiteboard";
+type BuildKind = "doc" | "form" | "dashboard" | "whiteboard" | "database";
+
+// Default Database columns — same id scheme as /api/tables' defaultId.
+// Gives a new database an immediately useful grid instead of a single
+// bare "Name" column.
+function defaultDatabaseColumns() {
+  const id = () => Math.random().toString(36).slice(2, 10);
+  return [
+    { id: id(), type: "short_text", label: "Name" },
+    { id: id(), type: "select", label: "Status", options: ["To do", "In progress", "Done"] },
+    { id: id(), type: "date", label: "Due date" },
+    { id: id(), type: "long_text", label: "Notes" },
+  ];
+}
 
 // Per-entity create config: which API to call, how to shape the body,
 // where the created id lives in the response, and where to land.
@@ -106,6 +119,22 @@ const BUILD_META: Record<BuildKind, {
     body: (name, spaceId) => ({ name, ...(spaceId ? { spaceId } : {}) }),
     idFrom: (data) => (data as { whiteboard?: { id?: string } })?.whiteboard?.id,
     href: (id) => `/whiteboards/${id}`,
+  },
+  database: {
+    label: "Database",
+    Icon: Database,
+    iconClassName: "text-emerald-600",
+    placeholder: "Database name",
+    hasLocation: true,
+    endpoint: "/api/tables",
+    body: (name, spaceId) => ({
+      name,
+      columns: defaultDatabaseColumns(),
+      ...(spaceId ? { spaceId } : {}),
+    }),
+    // /api/tables returns the table row directly (jsonSuccess).
+    idFrom: (data) => (data as { id?: string })?.id,
+    href: (id) => `/tables/${id}`,
   },
 };
 
@@ -407,7 +436,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   description="Spreadsheet-style rows & columns"
                   iconClassName="text-emerald-600"
                   chevron
-                  onClick={() => run(() => router.push("/tables"))}
+                  onClick={() => setBuildKind("database")}
                 />
               </div>
               <div className="border-t border-zinc-100 px-2 py-2">
