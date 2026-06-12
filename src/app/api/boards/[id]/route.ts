@@ -39,6 +39,24 @@ const patchSchema = z.object({
   color: z.string().max(20).nullable().optional(),
   visibility: z.enum(["PRIVATE", "WORKSPACE", "ORG"]).optional(),
   folderId: z.string().min(1).nullable().optional(),
+  // Per-List statuses (backbone #1). null resets to the default trio.
+  // Values must be unique — they're the stored Item.status keys.
+  statuses: z
+    .array(
+      z.object({
+        value: z.string().min(1).max(60),
+        label: z.string().min(1).max(60),
+        color: z.string().min(1).max(20),
+        group: z.enum(["ACTIVE", "DONE", "CLOSED"]),
+      }),
+    )
+    .min(1)
+    .max(30)
+    .refine((arr) => new Set(arr.map((s) => s.value)).size === arr.length, {
+      message: "status values must be unique",
+    })
+    .nullable()
+    .optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

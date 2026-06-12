@@ -8,7 +8,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Settings2 } from "lucide-react";
+import { CircleDot, Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -19,6 +19,7 @@ import { BoardGanttView } from "./board-gantt-view";
 import { BoardItemDrawer } from "./board-item-drawer";
 import { BoardFilterBar, applyFilters, filtersActive, parseFilters, type BoardFilters } from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
+import { BoardStatusEditor } from "./board-status-editor";
 
 interface BoardCanvasProps {
   boardId: string;
@@ -46,6 +47,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [trackedItemParam, setTrackedItemParam] = useState<string | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
+  const [statusEditorOpen, setStatusEditorOpen] = useState(false);
 
   // Cross-board deep link: any Space view (List/Recent/Team/etc.) can
   // route to /boards/[slug]?item=<id> to land here with the drawer open.
@@ -150,6 +152,15 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <div className="flex-1" />
         <button
           type="button"
+          onClick={() => setStatusEditorOpen(true)}
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50"
+          title="Edit this List's task statuses"
+        >
+          <CircleDot className="w-3.5 h-3.5" />
+          Statuses <span className="text-xs text-zinc-500">({statuses.length})</span>
+        </button>
+        <button
+          type="button"
           onClick={() => setShelfOpen(true)}
           className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50"
         >
@@ -220,6 +231,14 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         onClose={closeDrawer}
         onItemChanged={handleItemChanged}
         onItemArchived={handleItemArchived}
+      />
+
+      <BoardStatusEditor
+        boardId={boardId}
+        open={statusEditorOpen}
+        canEdit={canEdit}
+        statuses={statuses}
+        onClose={() => setStatusEditorOpen(false)}
       />
 
       <FieldShelf

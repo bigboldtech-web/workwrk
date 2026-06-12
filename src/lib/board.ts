@@ -14,8 +14,10 @@
 // the parent Space's membership + visibility decides.
 
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
 import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import type { StatusOption } from "@/lib/board-items-shared";
 
 const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
@@ -230,6 +232,8 @@ export interface UpdateBoardInput {
   color?: string | null;
   visibility?: Visibility;
   folderId?: string | null;
+  /** Per-List statuses (backbone #1). null = reset to the default trio. */
+  statuses?: StatusOption[] | null;
 }
 
 export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
@@ -244,6 +248,9 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
   if (patch.color !== undefined) data.color = patch.color;
   if (patch.visibility !== undefined) data.visibility = patch.visibility;
   if (patch.folderId !== undefined) data.folderId = patch.folderId;
+  // SQL NULL (DbNull) means "use the default set" — distinct from a
+  // stored JSON null, which parseBoardStatuses would also reject.
+  if (patch.statuses !== undefined) data.statuses = patch.statuses === null ? Prisma.DbNull : patch.statuses;
   return prisma.board.update({ where: { id: boardId }, data });
 }
 
