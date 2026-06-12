@@ -729,6 +729,50 @@ model ItemTemplate {
   @@index([organizationId])
 }
 
+// Template Center (ClickUp parity) — one reusable template store for any
+// kind of artifact. Mirrors ItemTemplate's no-relation FK style.
+//   payload shape by kind:
+//     TASK  → create-task modal config snapshot { status, priority, tags, checklist, subtasks, description, taskType }
+//     LIST  → { statuses[], fields[], views[], items[], defaultView }
+//     SPACE → { workflow{ statuses[], views[], modules[], defaultView }, lists[] }
+//   organizationId = null + builtIn = true → ships with the app (global library row).
+model Template {
+  id             String              @id @default(cuid())
+  organizationId String? // null = built-in/global library row
+  createdById    String?
+  kind           TemplateKind
+  name           String
+  description    String?
+  complexity     TemplateComplexity?
+  category       String?
+  useCases       String[]            @default([])
+  tags           String[]            @default([])
+  builtIn        Boolean             @default(false)
+  payload        Json                @default("{}")
+  usedCount      Int                 @default(0)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([organizationId, kind])
+  @@index([kind, builtIn])
+}
+
+enum TemplateKind {
+  TASK
+  LIST
+  SPACE
+  FOLDER
+  DOC
+  VIEW
+  WHITEBOARD
+}
+
+enum TemplateComplexity {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
 model PasswordResetToken {
   id        String   @id @default(cuid())
   token     String   @unique
