@@ -36,7 +36,9 @@ type Column = {
 };
 
 type LinkedTable = { id: string; name: string; columns: Column[]; titleColId: string; rows: ApiRow[] };
-type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; rowCount: number; isPublic?: boolean };
+type ViewType = "grid" | "kanban" | "calendar" | "gallery";
+type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string } };
+type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean };
 type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
 const COL_LABEL: Record<ColType, string> = {
@@ -89,9 +91,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [rows, setRows] = useState<ApiRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingCols, setSavingCols] = useState(false);
-  const [view, setView] = useState<"grid" | "kanban" | "calendar">("grid");
+  const [view, setView] = useState<ViewType>("grid");
   const [kanbanCol, setKanbanCol] = useState<string>("");
   const [calCol, setCalCol] = useState<string>("");
+  // Saved named views (Stackby-style). Persisted in DataTable.views.
+  const [views, setViews] = useState<SavedView[]>([]);
+  const [activeViewId, setActiveViewId] = useState<string>("");
   const [calMonth, setCalMonth] = useState<Date>(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [search, setSearch] = useState("");
   const [filterCol, setFilterCol] = useState<string>("");
@@ -122,6 +127,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       t.columns = Array.isArray(t.columns) ? t.columns : [];
       setTable(t);
       setRows(rd.data ?? (Array.isArray(rd) ? rd : []));
+      const savedViews: SavedView[] = Array.isArray(t.views) && t.views.length ? t.views : [{ id: "default", name: "Grid", type: "grid" }];
+      setViews(savedViews);
+      setActiveViewId((cur) => (savedViews.some((v) => v.id === cur) ? cur : savedViews[0].id));
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -200,6 +208,41 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     await patchTable({ columns: cols });
     setSavingCols(false);
   }
+
+  // ── Saved views ──
+  const persistViews = useCallback((next: SavedView[]) => { setViews(next); void patchTable({ views: next }); }, [tableId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const updateActiveView = useCallback((patch: Partial<SavedView>) => {
+    persistViews(views.map((v) => v.id === activeViewId ? { ...v, ...patch, config: { ...v.config, ...patch.config } } : v));
+  }, [views, activeViewId, persistViews]);
+  const addView = () => {
+    const name = window.prompt("View name:", "New view")?.trim();
+    if (!name) return;
+    const id = Math.random().toString(36).slice(2, 9);
+    persistViews([...views, { id, name, type: "grid" }]);
+    setActiveViewId(id);
+  };
+  const renameView = (id: string) => {
+    const cur = views.find((v) => v.id === id);
+    const name = window.prompt("Rename view:", cur?.name ?? "")?.trim();
+    if (!name) return;
+    persistViews(views.map((v) => v.id === id ? { ...v, name } : v));
+  };
+  const deleteView = (id: string) => {
+    if (views.length <= 1) { toast("A table needs at least one view"); return; }
+    if (!window.confirm("Delete this view?")) return;
+    const next = views.filter((v) => v.id !== id);
+    persistViews(next);
+    if (activeViewId === id) setActiveViewId(next[0].id);
+  };
+
+  // Sync the working view state from the active saved view on switch.
+  useEffect(() => {
+    const v = views.find((x) => x.id === activeViewId);
+    if (!v) return;
+    setView(v.type);
+    setKanbanCol(v.config?.kanbanCol ?? "");
+    setCalCol(v.config?.calCol ?? "");
+  }, [activeViewId, views]);
 
   function addColumn(type: ColType) {
     if (!table) return;
@@ -476,17 +519,39 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         </div>
       </header>
 
+      {/* Saved views — switch / add / rename / delete. */}
+      <nav className="dtbl__viewtabs" style={{ gap: 4, flexWrap: "wrap" }}>
+        {views.map((v) => (
+          <button
+            key={v.id}
+            type="button"
+            className={v.id === activeViewId ? "is-active" : ""}
+            onClick={() => setActiveViewId(v.id)}
+            onDoubleClick={() => renameView(v.id)}
+            title="Double-click to rename"
+            style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+          >
+            {v.type === "kanban" ? <Columns /> : v.type === "calendar" ? <CalIcon /> : v.type === "gallery" ? <LayoutGrid /> : <TableIcon />}
+            {v.name}
+            {views.length > 1 ? <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); deleteView(v.id); }} style={{ marginLeft: 2, opacity: 0.5, cursor: "pointer" }}>×</span> : null}
+          </button>
+        ))}
+        <button type="button" onClick={addView} title="Add view"><Plus /></button>
+      </nav>
+
+      {/* Active view's display type + grouping. */}
       <nav className="dtbl__viewtabs">
-        <button type="button" className={view === "grid" ? "is-active" : ""} onClick={() => setView("grid")}><LayoutGrid /> Grid</button>
-        <button type="button" className={view === "kanban" ? "is-active" : ""} onClick={() => setView("kanban")} disabled={kanbanColumns.length === 0} title={kanbanColumns.length === 0 ? "Add a Single-choice column to enable Kanban" : ""}><Columns /> Kanban</button>
-        <button type="button" className={view === "calendar" ? "is-active" : ""} onClick={() => setView("calendar")} disabled={dateColumns.length === 0} title={dateColumns.length === 0 ? "Add a Date column to enable Calendar" : ""}><CalIcon /> Calendar</button>
+        <button type="button" className={view === "grid" ? "is-active" : ""} onClick={() => updateActiveView({ type: "grid" })}><LayoutGrid /> Grid</button>
+        <button type="button" className={view === "kanban" ? "is-active" : ""} onClick={() => updateActiveView({ type: "kanban" })} disabled={kanbanColumns.length === 0} title={kanbanColumns.length === 0 ? "Add a Single-choice column to enable Kanban" : ""}><Columns /> Kanban</button>
+        <button type="button" className={view === "calendar" ? "is-active" : ""} onClick={() => updateActiveView({ type: "calendar" })} disabled={dateColumns.length === 0} title={dateColumns.length === 0 ? "Add a Date column to enable Calendar" : ""}><CalIcon /> Calendar</button>
+        <button type="button" className={view === "gallery" ? "is-active" : ""} onClick={() => updateActiveView({ type: "gallery" })}><LayoutGrid /> Gallery</button>
         {view === "kanban" && kanbanColumns.length > 1 && (
-          <select className="dtbl__viewgroup" value={kanbanCol} onChange={(e) => setKanbanCol(e.target.value)}>
+          <select className="dtbl__viewgroup" value={kanbanCol} onChange={(e) => updateActiveView({ config: { kanbanCol: e.target.value } })}>
             {kanbanColumns.map((c) => <option key={c.id} value={c.id}>Group by: {c.label}</option>)}
           </select>
         )}
         {view === "calendar" && dateColumns.length > 1 && (
-          <select className="dtbl__viewgroup" value={calCol} onChange={(e) => setCalCol(e.target.value)}>
+          <select className="dtbl__viewgroup" value={calCol} onChange={(e) => updateActiveView({ config: { calCol: e.target.value } })}>
             {dateColumns.map((c) => <option key={c.id} value={c.id}>By: {c.label}</option>)}
           </select>
         )}
@@ -561,6 +626,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             } catch { toast("Couldn't add card"); }
           }}
         />
+      ) : view === "gallery" ? (
+        <GalleryView rows={filteredRows} columns={table.columns} titleCol={titleCol} onCardClick={(rowId) => setActiveRowId(rowId)} />
       ) : (
       <>
       <div className="dtbl__scroll">
@@ -661,6 +728,35 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           onClose={() => setConfigColId(null)}
         />
       )}
+    </div>
+  );
+}
+
+function GalleryView({ rows, columns, titleCol, onCardClick }: {
+  rows: ApiRow[]; columns: Column[]; titleCol: Column | undefined; onCardClick: (rowId: string) => void;
+}) {
+  const fieldCols = columns.filter((c) => c.id !== titleCol?.id).slice(0, 5);
+  const fmt = (v: unknown): string => {
+    if (v == null || v === "") return "";
+    if (Array.isArray(v)) return `${v.length}`;
+    if (typeof v === "boolean") return v ? "Yes" : "No";
+    return String(v);
+  };
+  if (rows.length === 0) return <div className="dtbl__empty" style={{ padding: 24 }}>No rows yet.</div>;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, padding: 12 }}>
+      {rows.map((r) => (
+        <button key={r.id} type="button" onClick={() => onCardClick(r.id)} style={{ textAlign: "left", background: "white", border: "1px solid #e4e4e7", borderRadius: 10, padding: 12, cursor: "pointer" }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#18181b", marginBottom: 6 }}>{rowTitle(r, titleCol?.id ?? "")}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {fieldCols.map((c) => {
+              const s = fmt(r.values[c.id]);
+              if (!s) return null;
+              return <div key={c.id} style={{ fontSize: 11.5, color: "#71717a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><span style={{ color: "#a1a1aa" }}>{c.label}:</span> {s}</div>;
+            })}
+          </div>
+        </button>
+      ))}
     </div>
   );
 }

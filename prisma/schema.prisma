@@ -298,6 +298,10 @@ model DataTable {
   name           String
   description    String?
   columns        Json           @default("[]")
+  // 🆕 Saved named views (Stackby-style): array of
+  // { id, name, type: grid|kanban|calendar|gallery, config }. Empty =
+  // a single implicit Grid view.
+  views          Json           @default("[]")
   // Public tables are readable without auth via /embed/tables/[id] —
   // mirrors how Forms expose a public responder. Org members still see
   // the full editor; outside viewers get a read-only grid.

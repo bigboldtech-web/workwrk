@@ -60,6 +60,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (typeof body.name === "string") data.name = body.name.trim().slice(0, 200);
   if (typeof body.description === "string" || body.description === null) data.description = body.description?.slice?.(0, 2000) ?? null;
   if (Array.isArray(body.columns)) data.columns = body.columns;
+  if (Array.isArray(body.views)) data.views = body.views;
   if (typeof body.isPublic === "boolean") data.isPublic = body.isPublic;
 
   const updated = await prisma.dataTable.update({ where: { id }, data });
