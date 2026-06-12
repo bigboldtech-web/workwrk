@@ -111,8 +111,53 @@ Users can **save any task/list/space as a custom template** and reuse.
   **Board** (`Board.schema.fields`), not the task. So a task template that "includes custom fields" really
   implies a **List template** that sets up the board's fields. Map template fields → board schema on apply.
 
-> **Future phase (founder):** the **task detail view** — how a fully-created task looks (all info, activity,
-> comments, subtasks, custom fields, relationships). Separate spec.
+## 4b. Task Detail View + the connection principle ("Lego")
+
+**Core principle (founder, repeated):** a task is *connected to everything*. The custom fields defined on a
+**List/Board** automatically appear **inside every task** of that list, are editable there, and **carry across
+views** (table column ⇄ task field ⇄ board card ⇄ calendar/gantt). Fields can also link to **SOPs, forms, docs,
+sub-items** — "fields can have nodes." This is the same `Board.schema.fields` + `Item.metadata` + `EntityLink`
+graph we already use; the detail view is just another surface onto it.
+
+**ClickUp task detail layout (target):** full-page/overlay with —
+- Header: type picker · breadcrumbs · subtask/attachment counts · Created date · Ask AI · Share.
+- Top block: **Status · Assignees · Dates (start→due) · Priority · Time estimate · Track time · Tags**.
+- Description (+ "Ask Brain" AI: write description / summary / find similar).
+- **Fields** section — every list field inline (select/text/number/money/date/people/progress/location…),
+  with **search · expand · + add · "Hide N empty fields"**.
+- **Subtasks** — mini-table (Name · Assignee · Priority + add columns), Sort, AI Suggest, Show N closed.
+- **Relate items / add dependencies** · **Create checklist** · **Attachments** (drop-to-upload, grid/list).
+- Right rail: **Activity** feed (created/assigned/follower/field-change log) + **Comments** composer
+  (mentions, emoji, attach, slash, voice).
+
+**Our status vs target — most of it is built** (`BoardItemDrawer` + `FieldShelf`, Phases 1–8 + 5):
+
+| Detail element | Our status |
+|---|---|
+| Title · Status · Assignee · Start/Due · Priority · Tags | ✅ `BoardItemDrawer` |
+| Description (+AI placeholder) | ✅ (AI is a stub) |
+| **Fields grid** (list fields render inline, editable) | ✅ via `FieldValue` over `Board.schema.fields` |
+| Time tracking | ✅ `TimeTracker` |
+| Comments + Activity | ✅ `ItemThread` (comments + auto-logged activity) |
+| Linked **Notes / Whiteboards / Files / Tables / SOPs** ("nodes") | ✅ `LinkedAttachments` (EntityLink) |
+| Subtasks | ✅ data + table-view nesting; ⚠️ **no inline subtask mini-table in the drawer yet** |
+| Relate/Dependencies · Checklist | ⚠️ stubs |
+| "Hide N empty fields" · field search/expand in detail | ⚠️ not yet |
+| **Full-page** task view (vs 480px side drawer) | ⚠️ we have the drawer; a full-page route is a gap |
+
+**Fields panel ("Create new" / "Add existing") — founder: "we have this, make sure it works":**
+- ✅ Built (`FieldShelf`, Phase 5): Create-new (44-type catalog, grouped) · Add-existing (copy from sibling
+  board) · per-view show/hide · drag-reorder · choice-option editor.
+- ⚠️ Gaps vs ClickUp's panel: a **"Suggested"** group (context-aware field ideas) · **AI fields**
+  (Summary/Custom Text/Custom Dropdown) · the **"Add existing → Shown/Hidden" toggles for BUILT-IN fields**
+  (Status, Start date, Time tracked, Dependencies, Task Type, Lists, Linked Docs…) — today show/hide only
+  covers *custom* fields, not the built-in columns. **Verify end-to-end + close these gaps.**
+
+**Build (task detail phase):** (a) add a **full-page task route** that reuses the drawer's sections;
+(b) inline **subtask mini-table** + **checklist** + **relate/dependencies** in the detail; (c) "hide empty
+fields" + field search in the detail; (d) extend FieldShelf "Add existing" to toggle **built-in** field
+visibility + add Suggested/AI groups; (e) confirm the same field set renders identically across table/board/
+calendar/gantt (the connection principle).
 
 ## 5. Build order (tasks)
 
@@ -121,8 +166,10 @@ Users can **save any task/list/space as a custom template** and reuse.
 3. **Task Types system** — `ItemType` model + seed defaults + manage page + recommended library + picker/column/filter. (Pending the architecture decision in §2.)
 4. **Attachments external sources** — Dropbox/OneDrive/Box/Google Drive/New Google Doc via connectors.
 5. **Template Center** — `Template` model + center UI + built-in library + save/apply (own phase; biggest).
-6. **Phase 2 (next founder input):** edit-statuses UI + status templates.
-7. **Future phase (founder):** task **detail view** (post-creation full task page).
+6. **Task Detail View** — full-page route reusing the drawer; inline subtask mini-table + checklist +
+   relate/dependencies; "hide empty fields"; extend FieldShelf "Add existing" to built-in fields +
+   Suggested/AI groups; verify the field set renders identically across all views (connection principle).
+7. **Phase 2 (next founder input):** edit-statuses UI + status templates.
 
 ## Open questions for founder
 - §2 flag: Item-type re-skin vs route-to-dedicated-model for Objective/Key Result/Goal/Person.
