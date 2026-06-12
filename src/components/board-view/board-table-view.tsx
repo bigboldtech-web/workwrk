@@ -26,6 +26,8 @@ import { AssigneePicker, PersonAvatar } from "./assignee-picker";
 import { FieldValue } from "./field-value";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
+import { useItemTypes, type ItemTypeLite } from "./use-item-types";
+import { itemTypeIcon } from "@/lib/item-type-icons";
 import type { FieldChoice } from "@/lib/field-catalog";
 
 interface BoardTableViewProps {
@@ -56,6 +58,7 @@ type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "own
 export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, gridStyle = "list" }: BoardTableViewProps) {
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
+  const { byId: itemTypeMap } = useItemTypes();
   // New rows default to the board's first status (its "not started").
   const firstStatus = statuses[0]?.value ?? "TO_DO";
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -491,7 +494,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit]);
 
-  const colCount = 8 + customFields.length; // select/handle + name + status + owner + priority + tags + created + actions
+  const colCount = 9 + customFields.length; // select/handle + name + status + owner + priority + type + tags + created + actions
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -507,6 +510,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         row={row}
         customFields={customFields}
         statuses={statuses}
+        itemTypeMap={itemTypeMap}
         canEdit={canEdit}
         monday={monday}
         selected={selected.has(row.id)}
@@ -596,6 +600,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               <th className="px-4 py-2 font-medium w-[140px]">Status</th>
               <th className="px-4 py-2 font-medium w-[180px]">Owner</th>
               <th className="px-4 py-2 font-medium w-[110px]">Priority</th>
+              <th className="px-4 py-2 font-medium w-[130px]">Type</th>
               <th className="px-4 py-2 font-medium w-[160px]">Tags</th>
               {customFields.map((f) => (
                 <th key={f.key} className="px-4 py-2 font-medium">{f.label}</th>
@@ -856,6 +861,7 @@ function Row({
   row,
   customFields,
   statuses,
+  itemTypeMap,
   canEdit,
   monday = false,
   selected,
@@ -879,6 +885,7 @@ function Row({
   row: BoardItemRow;
   customFields: FieldDef[];
   statuses: StatusOption[];
+  itemTypeMap: Map<string, ItemTypeLite>;
   canEdit: boolean;
   monday?: boolean;
   selected: boolean;
@@ -980,6 +987,9 @@ function Row({
           compact
           onChange={(priority) => onUpdate(row.id, { priority })}
         />
+      </td>
+      <td className="px-4 py-2">
+        <TypeCell itemTypeId={row.itemTypeId ?? null} itemTypeMap={itemTypeMap} />
       </td>
       <td className="px-4 py-2">
         <TagPicker
@@ -1225,6 +1235,8 @@ function GroupSummaryRow({
       <td className="px-4 py-1.5">
         {prioritySegs.length ? <StackedBar segments={prioritySegs} /> : <span className="text-[11px] text-zinc-300">—</span>}
       </td>
+      {/* Type spacer */}
+      <td className="px-4 py-1.5" />
       {/* Tags */}
       <td className="px-4 py-1.5">
         {tags.length === 0 ? (
@@ -1486,6 +1498,19 @@ function TitleCell({
       }}
       className="w-full bg-transparent outline-none border-b border-[var(--os-brand)]"
     />
+  );
+}
+
+// Type cell — read-only chip showing the row's ItemType (icon + name).
+// Editing the type happens in the create modal + item drawer.
+function TypeCell({ itemTypeId, itemTypeMap }: { itemTypeId: string | null; itemTypeMap: Map<string, ItemTypeLite> }) {
+  const t = itemTypeId ? itemTypeMap.get(itemTypeId) : null;
+  if (!t) return <span className="text-xs text-zinc-300">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[12.5px] text-zinc-600">
+      {React.createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-400" })}
+      <span className="truncate">{t.singular}</span>
+    </span>
   );
 }
 

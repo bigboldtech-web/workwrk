@@ -10,7 +10,7 @@
 // never offer a filter that would return zero rows at open time.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, ChevronDown, Flag, Search, Tag as TagIcon, Users, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Flag, Search, Shapes, Tag as TagIcon, Users, X } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   isDoneStatus,
@@ -19,6 +19,8 @@ import {
   type StatusOption,
 } from "@/lib/board-items-shared";
 import { PersonAvatar, type PersonRef } from "./assignee-picker";
+import { useItemTypes } from "./use-item-types";
+import { itemTypeIcon } from "@/lib/item-type-icons";
 
 export interface BoardFilters {
   search: string;
@@ -26,6 +28,7 @@ export interface BoardFilters {
   owners: string[];      // user ids; "__unassigned__" sentinel allowed
   priorities: string[];
   tagIds: string[];
+  itemTypes: string[];   // ItemType ids; "__none__" = untyped (default)
   hideDone: boolean;
 }
 
@@ -35,6 +38,7 @@ export const EMPTY_FILTERS: BoardFilters = {
   owners: [],
   priorities: [],
   tagIds: [],
+  itemTypes: [],
   hideDone: false,
 };
 
@@ -47,12 +51,13 @@ export function parseFilters(raw: unknown): BoardFilters {
     owners: arr(r.owners),
     priorities: arr(r.priorities),
     tagIds: arr(r.tagIds),
+    itemTypes: arr(r.itemTypes),
     hideDone: r.hideDone === true,
   };
 }
 
 export function filtersActive(f: BoardFilters): boolean {
-  return !!(f.search.trim() || f.statuses.length || f.owners.length || f.priorities.length || f.tagIds.length || f.hideDone);
+  return !!(f.search.trim() || f.statuses.length || f.owners.length || f.priorities.length || f.tagIds.length || f.itemTypes.length || f.hideDone);
 }
 
 /**
@@ -68,6 +73,7 @@ export function applyFilters(items: BoardItemRow[], f: BoardFilters, statuses: S
   const statusSet = new Set(f.statuses);
   const ownerSet = new Set(f.owners);
   const prioritySet = new Set(f.priorities);
+  const typeSet = new Set(f.itemTypes);
   const tagSet = new Set(f.tagIds);
 
   const matches = (it: BoardItemRow): boolean => {
@@ -78,6 +84,7 @@ export function applyFilters(items: BoardItemRow[], f: BoardFilters, statuses: S
       if (!ownerSet.has(key)) return false;
     }
     if (prioritySet.size && !prioritySet.has(it.priority ?? "")) return false;
+    if (typeSet.size && !typeSet.has(it.itemTypeId ?? "__none__")) return false;
     if (tagSet.size && !(it.tags ?? []).some((t) => tagSet.has(t.id))) return false;
     if (q) {
       const owner = it.owner ? `${it.owner.firstName ?? ""} ${it.owner.lastName ?? ""}`.toLowerCase() : "";
@@ -133,7 +140,24 @@ export function BoardFilterBar({ items, filters, statuses, onChange }: BoardFilt
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [items]);
 
-  const toggle = (key: "statuses" | "owners" | "priorities" | "tagIds", value: string) => {
+  // Item types present on this board (plus an "Untyped" bucket if any
+  // row has no itemTypeId), resolved to names via the shared cache.
+  const { byId: typeMap } = useItemTypes();
+  const itemTypeFacet = useMemo(() => {
+    const ids = new Set<string>();
+    let hasNone = false;
+    for (const it of items) {
+      if (it.itemTypeId) ids.add(it.itemTypeId);
+      else hasNone = true;
+    }
+    const list = Array.from(ids)
+      .map((id) => typeMap.get(id))
+      .filter((t): t is NonNullable<typeof t> => !!t)
+      .sort((a, b) => a.singular.localeCompare(b.singular));
+    return { list, hasNone };
+  }, [items, typeMap]);
+
+  const toggle = (key: "statuses" | "owners" | "priorities" | "tagIds" | "itemTypes", value: string) => {
     const cur = filters[key];
     onChange({
       ...filters,
@@ -222,6 +246,34 @@ export function BoardFilterBar({ items, filters, statuses, onChange }: BoardFilt
           </>
         )}
       />
+
+      {itemTypeFacet.list.length > 0 || itemTypeFacet.hasNone ? (
+        <FacetMenu
+          label="Type"
+          Icon={Shapes}
+          activeCount={filters.itemTypes.length}
+          render={() => (
+            <>
+              {itemTypeFacet.list.map((t) => {
+                const Icon = itemTypeIcon(t.icon);
+                return (
+                  <FacetRow key={t.id} active={filters.itemTypes.includes(t.id)} onClick={() => toggle("itemTypes", t.id)}>
+                    <span className="inline-flex items-center gap-2 text-[12.5px]">
+                      <Icon className="w-3.5 h-3.5 text-zinc-400" />
+                      {t.singular}
+                    </span>
+                  </FacetRow>
+                );
+              })}
+              {itemTypeFacet.hasNone ? (
+                <FacetRow active={filters.itemTypes.includes("__none__")} onClick={() => toggle("itemTypes", "__none__")}>
+                  <span className="text-[12.5px] text-zinc-500">Untyped</span>
+                </FacetRow>
+              ) : null}
+            </>
+          )}
+        />
+      ) : null}
 
       {tags.length > 0 ? (
         <FacetMenu
