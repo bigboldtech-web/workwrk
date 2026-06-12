@@ -13,17 +13,12 @@
 // no decorative borders, single accent for active controls, type-driven
 // hierarchy. Drawer slides from the right at 480px, full-height.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Trash2, X, ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
-import { AssigneePicker } from "./assignee-picker";
-import { FieldValue } from "./field-value";
-import { PriorityPicker } from "./priority-picker";
-import { TagPicker } from "./tag-picker";
-import { ItemThread } from "./item-thread";
-import { LinkedAttachments } from "./linked-attachments";
-import { TimeTracker } from "./time-tracker";
+import { BoardItemDetail, type DetailPatch } from "./board-item-detail";
 
 interface BoardItemDrawerProps {
   itemId: string | null;
@@ -40,6 +35,8 @@ interface BoardItemDrawerProps {
   onClose: () => void;
   onItemChanged?: (item: BoardItemRow) => void;
   onItemArchived?: (itemId: string) => void;
+  /** Navigate the drawer to another item (used by the subtask list). */
+  onOpenItem?: (itemId: string) => void;
 }
 
 export function BoardItemDrawer({
@@ -51,6 +48,7 @@ export function BoardItemDrawer({
   onClose,
   onItemChanged,
   onItemArchived,
+  onOpenItem,
 }: BoardItemDrawerProps) {
   const customFields: FieldDef[] = fields ?? [];
   const statusOptions: StatusOption[] = statuses ?? [...DEFAULT_STATUS_OPTIONS];
@@ -99,7 +97,7 @@ export function BoardItemDrawer({
   }, [itemId, onClose]);
 
   const patch = useCallback(async (
-    body: Partial<Pick<BoardItemRow, "title" | "status"> & { metadata: Record<string, unknown>; startAt: string | null; dueAt: string | null; ownerId: string | null; priority: string | null; tagIds: string[] }>,
+    body: DetailPatch,
     optimistic?: Partial<BoardItemRow>,
   ) => {
     if (!item) return;
@@ -177,6 +175,15 @@ export function BoardItemDrawer({
               </button>
               <span className="text-xs text-zinc-500">Item</span>
               <div className="ml-auto flex items-center gap-1">
+                {item ? (
+                  <Link
+                    href={`/item/${item.id}`}
+                    className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 px-2 py-1 rounded hover:bg-zinc-100"
+                    title="Open full page"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Full page
+                  </Link>
+                ) : null}
                 {canEdit && item ? (
                   <button
                     type="button"
@@ -201,349 +208,22 @@ export function BoardItemDrawer({
             {loading || !item ? (
               <div className="flex-1 px-5 py-6 text-sm text-zinc-500">Loading…</div>
             ) : (
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-                <TitleField item={item} canEdit={canEdit} onSave={(t) => patch({ title: t })} />
-
-                {/* Field grid: status, owner, custom fields, dates */}
-                <div className="space-y-3">
-                  <Row label="Status">
-                    <StatusPicker
-                      value={item.status}
-                      statuses={statusOptions}
-                      canEdit={canEdit}
-                      onChange={(v) => patch({ status: v })}
-                    />
-                  </Row>
-                  <Row label="Owner">
-                    <AssigneePicker
-                      value={item.owner ? { ...item.owner, email: null } : null}
-                      canEdit={canEdit}
-                      onChange={(person) =>
-                        patch(
-                          { ownerId: person?.id ?? null },
-                          {
-                            owner: person
-                              ? {
-                                  id: person.id,
-                                  firstName: person.firstName ?? "",
-                                  lastName: person.lastName ?? "",
-                                  avatar: person.avatar,
-                                }
-                              : null,
-                          },
-                        )
-                      }
-                    />
-                  </Row>
-                  <Row label="Priority">
-                    <PriorityPicker
-                      value={item.priority ?? null}
-                      canEdit={canEdit}
-                      onChange={(priority) => patch({ priority })}
-                    />
-                  </Row>
-                  <Row label="Tags">
-                    <TagPicker
-                      value={item.tags ?? []}
-                      canEdit={canEdit}
-                      onChange={(tags) => patch({ tagIds: tags.map((t) => t.id) }, { tags })}
-                    />
-                  </Row>
-                  <Row label="Start date">
-                    <DateField
-                      value={item.startAt ?? null}
-                      canEdit={canEdit}
-                      onSave={(v) => patch({ startAt: v })}
-                    />
-                  </Row>
-                  <Row label="Due date">
-                    <DateField
-                      value={item.dueAt ?? null}
-                      canEdit={canEdit}
-                      onSave={(v) => patch({ dueAt: v })}
-                    />
-                  </Row>
-                  {customFields.map((f) => (
-                    <Row key={f.key} label={f.label}>
-                      <FieldValue
-                        field={f}
-                        value={item.metadata?.[f.key]}
-                        mode="edit"
-                        disabled={!canEdit}
-                        currentUserId={currentUserId}
-                        onChange={(next) => patch({ metadata: { ...item.metadata, [f.key]: next } })}
-                      />
-                    </Row>
-                  ))}
-                  <Row label="Created">
-                    <span className="text-sm">{new Date(item.createdAt).toLocaleString()}</span>
-                  </Row>
-                  <Row label="Updated">
-                    <span className="text-sm text-zinc-500">{new Date(item.updatedAt).toLocaleString()}</span>
-                  </Row>
-                </div>
-
-                {/* Description */}
-                <DescriptionField
+              <div className="flex-1 overflow-y-auto px-5 py-4">
+                <BoardItemDetail
                   item={item}
                   canEdit={canEdit}
-                  onSave={(desc) =>
-                    patch({ metadata: { ...item.metadata, description: desc } })
-                  }
+                  currentUserId={currentUserId}
+                  customFields={customFields}
+                  statusOptions={statusOptions}
+                  onPatch={patch}
+                  layout="drawer"
+                  onOpenItem={onOpenItem}
                 />
-
-                {/* Linked notes + whiteboards + files */}
-                <LinkedAttachments
-                  sourceType="BOARD_ITEM"
-                  sourceId={item.id}
-                  spaceId={item.spaceId ?? null}
-                  canEdit={canEdit}
-                />
-
-                {/* Time tracking */}
-                <TimeTracker
-                  entityType="BOARD_ITEM"
-                  entityId={item.id}
-                  canEdit={canEdit}
-                />
-
-                {/* Comments + Activity thread */}
-                <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statusOptions} />
               </div>
             )}
           </div>
         ) : null}
       </aside>
     </>
-  );
-}
-
-// ── Subcomponents ─────────────────────────────────────────────────
-
-function DateField({
-  value,
-  canEdit,
-  onSave,
-}: {
-  value: Date | string | null;
-  canEdit: boolean;
-  onSave: (iso: string | null) => void;
-}) {
-  // <input type="date"> expects YYYY-MM-DD. Convert from Date/ISO.
-  const toInputValue = (v: Date | string | null): string => {
-    if (!v) return "";
-    const d = v instanceof Date ? v : new Date(v);
-    if (Number.isNaN(d.getTime())) return "";
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-  const inputValue = toInputValue(value);
-
-  if (!canEdit) {
-    return (
-      <span className="text-sm text-zinc-700">
-        {inputValue ? new Date(inputValue).toLocaleDateString() : <span className="text-xs text-zinc-400">Not set</span>}
-      </span>
-    );
-  }
-
-  return (
-    <div className="inline-flex items-center gap-1.5">
-      <input
-        type="date"
-        value={inputValue}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (!v) { onSave(null); return; }
-          // Build a midnight UTC ISO so the date stored matches the
-          // calendar day the user picked regardless of their tz.
-          const iso = `${v}T00:00:00.000Z`;
-          onSave(iso);
-        }}
-        className="h-7 px-2 text-sm border border-zinc-200 rounded bg-white focus:outline-none focus:border-zinc-400"
-      />
-      {inputValue ? (
-        <button
-          type="button"
-          onClick={() => onSave(null)}
-          className="text-xs text-zinc-400 hover:text-zinc-700"
-          aria-label="Clear date"
-          title="Clear"
-        >
-          <X className="w-3 h-3" />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline gap-3">
-      <span className="text-xs text-zinc-500 w-[88px] flex-shrink-0">{label}</span>
-      <div className="flex-1 min-w-0">{children}</div>
-    </div>
-  );
-}
-
-function TitleField({
-  item,
-  canEdit,
-  onSave,
-}: {
-  item: BoardItemRow;
-  canEdit: boolean;
-  onSave: (title: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(item.title);
-  // Re-sync draft from the prop using the official derived-state-during-
-  // render pattern: setState inside render is allowed when guarded by an
-  // equality check. Avoids the cascading-renders lint flag that fires
-  // on useEffect(setDraft).
-  const [syncedTitle, setSyncedTitle] = useState(item.title);
-  if (syncedTitle !== item.title) {
-    setSyncedTitle(item.title);
-    setDraft(item.title);
-  }
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
-
-  const commit = () => {
-    const trimmed = draft.trim();
-    if (!trimmed) { setDraft(item.title); setEditing(false); return; }
-    if (trimmed !== item.title) onSave(trimmed);
-    setEditing(false);
-  };
-
-  if (!canEdit || !editing) {
-    return (
-      <button
-        type="button"
-        onClick={() => canEdit && setEditing(true)}
-        className="w-full text-left text-lg font-semibold"
-      >
-        {item.title}
-      </button>
-    );
-  }
-  return (
-    <input
-      ref={inputRef}
-      type="text"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") { setDraft(item.title); setEditing(false); }
-      }}
-      className="w-full text-lg font-semibold bg-transparent outline-none border-b border-[var(--os-brand)]"
-    />
-  );
-}
-
-function DescriptionField({
-  item,
-  canEdit,
-  onSave,
-}: {
-  item: BoardItemRow;
-  canEdit: boolean;
-  onSave: (description: string) => void;
-}) {
-  const initial = typeof item.metadata?.description === "string" ? item.metadata.description : "";
-  const [draft, setDraft] = useState(initial);
-  useEffect(() => { setDraft(initial); }, [initial]);
-
-  return (
-    <div>
-      <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Description</h3>
-      <textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => { if (draft !== initial) onSave(draft); }}
-        disabled={!canEdit}
-        rows={4}
-        placeholder={canEdit ? "Add a description…" : "No description"}
-        className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)] disabled:opacity-60"
-      />
-    </div>
-  );
-}
-
-function StatusPicker({
-  value,
-  statuses,
-  canEdit,
-  onChange,
-}: {
-  value: string | null;
-  statuses: StatusOption[];
-  canEdit: boolean;
-  onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const current = value ? statuses.find((o) => o.value === value) ?? null : null;
-
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [open]);
-
-  const pill = current ? (
-    <span
-      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-      style={{ background: `${current.color}22`, color: current.color }}
-    >
-      {current.label}
-    </span>
-  ) : (
-    <span className="text-xs text-zinc-500">—</span>
-  );
-
-  if (!canEdit) return pill;
-  return (
-    <div className="relative inline-block" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5"
-      >
-        {pill}
-        <ChevronDown className="w-3 h-3 text-zinc-500" />
-      </button>
-      {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
-          {statuses.map((opt) => {
-            const active = opt.value === value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => { onChange(opt.value); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
-              >
-                <span
-                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                  style={{ background: `${opt.color}22`, color: opt.color }}
-                >
-                  {opt.label}
-                </span>
-                {active ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
   );
 }

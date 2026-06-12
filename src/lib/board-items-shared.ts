@@ -139,5 +139,8 @@ export interface BoardItemRow {
    *  to the right Space (Phase 20). Optional because other surfaces
    *  may pass through a BoardItemRow without including it. */
   spaceId?: string | null;
+  /** Parent board id — surfaced by GET /api/items/[id] so the detail
+   *  view can list/create subtasks against the board. */
+  boardId?: string | null;
   owner?: { id: string; firstName: string; lastName: string; avatar: string | null } | null;
 }

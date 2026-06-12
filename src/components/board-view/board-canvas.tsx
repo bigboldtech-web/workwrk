@@ -330,6 +330,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         onClose={closeDrawer}
         onItemChanged={handleItemChanged}
         onItemArchived={handleItemArchived}
+        onOpenItem={(id) => setOpenItemId(id)}
       />
 
       <BoardStatusEditor

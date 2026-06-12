@@ -7,12 +7,14 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { archiveBoardItem, deleteBoardItem, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board-items";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
+import { parseBoardSchema } from "@/lib/field-catalog";
+import { getBoardStatuses } from "@/lib/board-items-shared";
 import { prisma } from "@/lib/prisma";
 
 async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
   const item = await prisma.item.findUnique({
     where: { id: itemId },
-    include: { board: { select: { id: true, spaceId: true, organizationId: true } } },
+    include: { board: { select: { id: true, slug: true, name: true, spaceId: true, organizationId: true, schema: true, statuses: true } } },
   });
   if (!item || item.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
@@ -20,7 +22,8 @@ async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel:
   // Phase 23b — gate via parent Board (which composes Space + Board.visibility).
   const board = await getBoardForReader(item.boardId, c.userId, c.accessLevel);
   if (!board) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  return { item };
+  const canEdit = await canEditBoard(item.boardId, c.userId, c.accessLevel);
+  return { item, canEdit };
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -56,12 +59,24 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       startAt: gate.item.startAt,
       dueAt: gate.item.dueAt,
       priority: gate.item.priority,
+      itemTypeId: gate.item.itemTypeId,
+      parentItemId: gate.item.parentItemId,
       tags: tagAssignments.filter((a) => !a.tag.archived).map((a) => ({ id: a.tag.id, name: a.tag.name, color: a.tag.color })),
       archivedAt: gate.item.archivedAt,
       createdAt: gate.item.createdAt,
       updatedAt: gate.item.updatedAt,
       owner,
     },
+    // Board context so a standalone detail page (no board host) can
+    // render custom fields + the right status palette + breadcrumb.
+    board: {
+      id: gate.item.board.id,
+      slug: gate.item.board.slug,
+      name: gate.item.board.name,
+      fields: parseBoardSchema(gate.item.board.schema).fields,
+      statuses: getBoardStatuses(gate.item.board),
+    },
+    canEdit: gate.canEdit,
   });
 }
 
