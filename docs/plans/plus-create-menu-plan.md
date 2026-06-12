@@ -1,102 +1,75 @@
-# "+" Create Menu — Redesign + Database (Plan v0.1)
+# "+" Create Menu — Redesign + Every Button (Plan v1.0, handoff-ready)
 
-> **Status:** Draft framework. Verified current-state filled in by Claude; sections marked
-> **[NEEDS INPUT]** await the founder's per-button behavior list. Plan-only — no code this session.
-> **Decisions locked:** (1) plan only, execute in a later chat; (2) "Database" builds on the existing
-> `DataTable` (Stackby-style tables), not a new engine.
+> **Framing:** we are **ENHANCING** the current system to ClickUp parity — not removing anything. The "+"
+> menu is the entry point because it creates & connects everything. Read `00-index.md` first.
+> **Decisions:** Database builds on the existing `DataTable`; build the menu chrome first (low risk).
+> Constraints: branch `feat/alignment-system`; verify with `tsc`/`eslint`; **never `next build` while the
+> user's `pnpm dev` runs**.
 
-## 1. Purpose
+## 1. Why
+`CreateMenu` in `src/components/layout/os/click-sidebar.tsx` is the single "create anything" control. Two
+problems: (a) the chrome is unpolished vs the ClickUp reference; (b) half the items just
+`router.push("/x?new=1")` and the target pages ignore `?new`, so they **create nothing**. Every button needs
+a real create flow; add a **Database** item.
 
-The sidebar "+" create menu (`CreateMenu` in `src/components/layout/os/click-sidebar.tsx`) is the single
-"create anything" entry point — ClickUp's most-used control. Two problems to solve:
-1. **Chrome/UX:** the menu looks unpolished and inconsistent vs. the ClickUp reference.
-2. **Behavior:** half the items don't actually create anything — they navigate to a list page with a
-   dead `?new=1` param. Each item needs a real, clean create flow.
-Plus: **add a "Database"** item (in-house Google-Sheets-style tables), built on our `DataTable`.
+## 2. The connected system the "+" feeds
+`Workspace → Space → Folder → List(=Board) → Task(=Item)`, plus Docs/Forms/Whiteboards/Dashboards/Databases
+in Spaces/Folders. A List has many **Views**; a List has its own **customizable statuses**; a Task has
+**subtasks, a type, statuses, fields**; fields render identically across table/detail/card/calendar/gantt and
+link to Docs/SOPs/KRAs as **nodes** (`EntityLink`). Deep specs: `views-catalog.md`, `tasks-spec.md`,
+`lists-spaces-spec.md`.
 
-## 2. Current-state audit (verified in code, 2026-06-12)
+## 3. Menu chrome (visual) — do first, isolated, no migration
+One reusable row component; reuse `ui/chip.tsx`, `ui/accent.ts` (`TAUPE`), `ui/switch.tsx`. Card: rounded-xl,
+1px `#e4e4e7` border, soft shadow, ~300px, anchored under "+". Sections w/ 10.5px uppercase zinc-400 labels,
+36px rows, 16px icons, hover `bg-zinc-50`, aligned chevrons:
+- **AI input** (top): "Describe anything to create", taupe ring. v1 = create a Task named with the text
+  (current); NLP intent-routing (task/doc/list) = fast-follow TODO.
+- **Create:** Task (⌥T) · List · Space
+- **AI:** Create with AI · Super Agent (Hot)
+- **Build:** Doc · Form · Dashboard · Whiteboard · **Database** (new)
+- **Footer:** Customize sidebar; then Import · Templates
 
-| Item | Today | Wiring | Verdict |
-|---|---|---|---|
-| **Task** | Opens rich create-task modal (Item-backed; types, templates, checklist, subtasks, followers, attachments, ⌥T) | `openCreateTask` | ✅ mature — mostly polish |
-| **List** | Opens create-list modal | `openCreateList` | ✅ real modal |
-| **Space** | Opens Space wizard | `runAppNewAction` | ✅ real flow |
-| **Create with AI** | Navigates to `/sidekick` | `router.push` | ⚠️ navigate-only — should create *in* the menu |
-| **Super Agent** ("Hot") | Navigates to `/agents` | `router.push` | ⚠️ navigate-only |
-| **Doc** | `router.push("/docs?new=1")` — **page ignores `?new`** | dead param | ❌ creates nothing |
-| **Form** | `router.push("/forms?new=1")` — page ignores `?new` | dead param | ❌ creates nothing |
-| **Dashboard** | `router.push("/dashboard?new=1")` — page ignores `?new` | dead param | ❌ creates nothing |
-| **Whiteboard** | `router.push("/whiteboards?new=1")` — page ignores `?new` | dead param | ❌ creates nothing |
-| **Database** | — | — | 🆕 to add (build on DataTable) |
-| **Customize sidebar** | Opens Customize panel | `openCustomize` | ✅ ok |
-| **Import** (footer) | Navigates to `/imports` | `router.push` | ⚠️ ok-ish |
-| **Templates** (footer) | Navigates to `/templates` | `router.push` | ⚠️ ok-ish |
-| **"Describe anything to create"** input | Top AI input (taupe border) | Enter → `openCreateTask` | ⚠️ only creates a Task; should route by intent |
+## 4. Per-button plan
 
-**Takeaway:** the redesign is *both* visual (the menu card) *and* behavioral (give Doc/Form/Dashboard/
-Whiteboard/Database/AI real create flows, not navigation).
+| Button | Creates | Flow / UI | API | Status today | Build |
+|---|---|---|---|---|---|
+| **Task** | `Item` | full create-task modal (context-aware list picker, type, status, assignee, due, priority, tags, "…" extras, attachments, templates, create-variants) | `POST /api/boards/[id]/items` | ✅ modal mature | context-awareness + Task Types + per-list statuses → `tasks-spec.md` |
+| **List** | `Board` | modal: Name* · **Space-location picker** · Make-private · Use-Templates | `POST /api/boards` | ⚠️ basic | space picker + template wiring → `lists-spaces-spec.md` |
+| **Space** | `Space` | 2-step wizard (icon/name/desc/permission/private → preset/views/statuses/ClickApps/KRA) | `POST /api/spaces` | ✅ strong | + default-permission + space templates → `lists-spaces-spec.md` |
+| **Create with AI** | AI Agent | opens **agent builder** (name, instructions, tools, train) — founder: "build your own agent" | agents (`/agents`) | ⚠️ navigate-only | founder to detail; v1 = open builder |
+| **Super Agent** | — | launch/config the premium global agent | `/agents` | ⚠️ navigate-only | founder to detail |
+| **Doc** | `Doc` (=Notes) | inline "New doc" (title + **location**: space/folder) → create → open block editor; attachable to a task as a **Linked-Doc field** | `POST /api/docs` | ❌ dead `?new=1` | real inline-create + open |
+| **Form** | `Form` | inline "New form" → form builder; submissions create board Items (re-pointed) | `POST /api/forms` | ❌ dead `?new=1` | real create + builder |
+| **Dashboard** | dashboard | inline "New dashboard" → widget canvas | dashboards app | ❌ dead `?new=1` | real create + canvas |
+| **Whiteboard** | `Whiteboard` | inline "New whiteboard" → canvas | `POST /api/whiteboards` | ❌ dead `?new=1` | real create + open |
+| **Database** | `DataTable` | "New database" → name + **column preset** → grid | `POST /api/tables` | 🆕 missing | add entry; DataTable already has 9 col types/CSV/embeds (Phases 32–38); Sheets feel (formulas, currency/rating/person cols, frozen header, copy/paste) = fast-follow |
+| **Customize sidebar** | — | opens Customize panel | `openCustomize` | ✅ | — |
+| **Import** | rows | source picker. **v1: CSV** (built); roadmap: ClickUp/Asana/Trello/Excel/Sheets | `/api/.../import` | ⚠️ navigate | CSV inline; others later |
+| **Templates** | — | opens **Template Center** (Featured/Workspace/Org · filters Type/Complexity/Use-Cases/Tags/Created-by · categories · save/apply) | Template Center (`tasks-spec.md` §4) | ⚠️ navigate | the big shared system |
 
-## 3. Menu chrome redesign (clean, ClickUp-style)
+> Assumptions to confirm (sensible ClickUp defaults used): AI-input v1, Super-Agent behavior, Import v1=CSV,
+> Database v1 = create-entry + existing grid (formulas next).
 
-Reuse our design system: `ui/chip.tsx`, taupe accent `ui/accent.ts` (`TAUPE`), shared `ui/switch.tsx`.
-Target layout (matches the ClickUp reference the founder shared):
-- **Card:** rounded-xl, 1px `#e4e4e7` border, soft shadow, ~300px wide, white. Anchored under the "+".
-- **AI input row** (top): "Describe anything to create" with the taupe focus ring; routes by intent
-  (task / doc / list…) instead of always creating a Task. **[NEEDS INPUT: desired AI routing behavior]**
-- **Section: Create** — Task (⌥T), List, Space. Each row: icon + label + optional shortcut/▸ affordance,
-  hover `bg-zinc-50`, 13px text, consistent 36px row height.
-- **Section: AI** — Create with AI, Super Agent (Hot badge).
-- **Section: Build** — Doc, Form, Dashboard, Whiteboard, **Database** (new).
-- **Footer divider** — Customize your sidebar; then a 2-button row: Import · Templates.
-- **Consistency:** one row component, one icon size (16px), aligned chevrons for items with sub-menus,
-  section labels in 10.5px uppercase zinc-400. (Today the spacing/dividers are uneven — unify them.)
+## 5. Database → "Google Sheets in-house" (build on DataTable)
+**Reuse:** `DataTable` model · `/tables` + `/tables/[id]` grid · `POST /api/tables` · 9 column types · row/col
+CRUD · CSV import · Space-scoping · doc embeds (Phases 32–38). **Sheets-feel roadmap (prioritize w/ founder):**
+formulas + cell refs (`=A1+B2`, SUM/AVG) · richer cols (currency/percent/rating/person/relation/lookup/created)
+· frozen header + col resize/reorder · cell selection + copy/paste + fill-down · row virtualization at scale.
 
-## 4. Per-button plan (template + draft; complete with founder's list)
+## 6. Shared backbones (build once; many buttons depend on them — see `00-index.md`)
+1. **Template Center** (`kind=TASK/LIST/SPACE/DOC/VIEW/WHITEBOARD`) — Templates button + List/Space "Use Templates".
+2. **Per-list statuses** — Task button's status picker; list/space status editors.
+3. **EntityLink connection-as-field** — Doc/SOP/KRA as columns (KRA field ✅; add Linked-Doc/SOP; finish Relationship).
 
-For **every** button capture: **Trigger** (icon/shortcut/badge) · **Creates** (entity + model + API) ·
-**Flow** (inline modal / full page / wizard) · **UI/UX** (fields, steps, empty state) · **Lands** (redirect/
-drawer/toast) · **Sub-options** (templates/sources) · **Status** (works/stub/new) · **Effort**.
+## 7. Build order (this menu)
+1. **Chrome redesign** (§3).
+2. **Real inline create flows** for Doc/Form/Dashboard/Whiteboard (kill `?new=1`).
+3. **Database** create entry (reuse `/api/tables`).
+4. **Import** = CSV inline; **Create-with-AI / Super-Agent** → agent builder.
+5. **Templates** → Template Center (large; shared backbone — own effort).
 
-- **Task** — Creates `Item` via `POST /api/boards/[id]/items`. Flow: existing modal. Work: polish only.
-  **[NEEDS INPUT: any new fields/types you want]**
-- **List** — Creates a Board/List. Existing modal. **[NEEDS INPUT: parity items vs ClickUp]**
-- **Space** — Space wizard. **[NEEDS INPUT]**
-- **Doc** — Should open a "New doc" inline (title + location picker) → create `Doc` via `POST /api/docs` →
-  open the editor. Replaces dead `?new=1`. **[NEEDS INPUT: template/location options]**
-- **Form** — "New form" → `POST /api/forms` → form builder. **[NEEDS INPUT]**
-- **Dashboard** — "New dashboard" → create + open. **[NEEDS INPUT: widget set]**
-- **Whiteboard** — "New whiteboard" → create + open. **[NEEDS INPUT]**
-- **Database** — see §5. Creates a `DataTable` (+ optional Space) → opens the grid. **[NEEDS INPUT: column presets]**
-- **Create with AI** — **founder: this creates a custom AI agent** — build/train your own agent that then
-  works per its config. (Detailed spec coming from founder.) Wire to the agents system (`/agents`).
-- **Super Agent** — **[NEEDS INPUT: relationship to Create-with-AI; what it does from the menu]**
-- **Import** — **[NEEDS INPUT: which sources — CSV, ClickUp, Asana, Trello, Sheets?]**
-- **Templates** — **[NEEDS INPUT: template gallery contents + categories]**
-
-## 5. Database (build on DataTable → "Google Sheets in-house")
-
-**Already built (reuse, don't rebuild):** `DataTable` model · `/tables` list + `/tables/[id]` grid editor ·
-`POST /api/tables` · **9 column types** (short_text, long_text, number, select, multi_select, date,
-checkbox, url, email) · row/column CRUD (right-click delete) · CSV import · Space-scoping · embeds in docs ·
-sidebar tree + library tabs (Phases 32–38).
-
-**Gap to a Sheets feel (candidate scope — prioritize with founder):**
-- Formula column type + cell references (`=A1+B2`, SUM/AVG) — *the* defining Sheets feature.
-- Richer column types: currency, percent, rating, person/owner, attachment, relation/lookup, created/updated.
-- Frozen header row + column resize/reorder; cell selection + copy/paste ranges; fill-down.
-- Scale: pagination/virtualized rows for large sheets.
-- "Database" create entry in the "+" menu → name + column preset → `POST /api/tables` → open grid.
-**[NEEDS INPUT: which of these matter for v1, and how "spreadsheet" vs "structured DB" you want it to feel]**
-
-## 6. What to send me (your per-button list)
-
-For each menu item, tell me: what it should **create**, the **flow** (quick inline modal vs full page),
-the **fields/steps**, where it **lands**, and any **sub-options** (templates, import sources). Especially:
-AI/Super-Agent in-menu behavior, Templates gallery, Import sources, and your Database/Sheets v1 priorities.
-
-## 7. Suggested phasing (for the build chat)
-
-1. **Menu chrome redesign** (one row component, sections, AI input, Database entry) — visual, low risk.
-2. **Real create flows** for Doc/Form/Dashboard/Whiteboard (kill `?new=1`).
-3. **Database** create entry + DataTable "sheets" enhancements (formulas first).
-4. **AI/Super Agent** in-menu behavior; **Templates** gallery; **Import** sources.
+## 8. Verify (per step)
+`npx tsc --noEmit` clean · `npx eslint` touched files · manual (behind login, user drives): each "+" item
+opens a real create flow & lands correctly; no `?new=1` dead links. Commit per step on `feat/alignment-system`.
+**Do not `next build` while the dev server runs.**

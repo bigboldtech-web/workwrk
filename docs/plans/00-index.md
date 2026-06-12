@@ -1,10 +1,17 @@
 # ClickUp/Monday-parity Build Plan — INDEX (start here)
 
-Capstone for the founder's spec series (2026-06-12). The product is **one OS**: a ClickUp/Monday-style PPMS
-(**Space → List → Task** = our **Space → Board → Item**, with **Views**) infused with **SOPs / KRAs / KPIs /
-OKRs**. Everything is **connected** (Lego): fields defined on a List render in the table cell ⇄ task detail ⇄
-board card ⇄ calendar/gantt, and link to Docs/SOPs/KRAs/Forms via `EntityLink`. Plan-only so far — no build
-yet. All specs live in `docs/plans/`.
+Capstone for the founder's spec series (2026-06-12). **Mission: ENHANCE the current WorkwrK system to full
+ClickUp parity** (+ Monday's board/list/view types). **We are NOT removing or replacing anything** — Inbox,
+Assigned Comments, My Work, Home, Docs(=Notes), Forms, Dashboards, Whiteboards all exist and **stay**; the
+job is to make them **actually work and connect**. **Start from the "+"** (it creates & connects everything —
+see `plus-create-menu-plan.md`).
+
+The product is **one connected OS**: a ClickUp/Monday-style PPMS (**Space → Folder → List → Task** = our
+**Space → Folder → Board → Item**, with **Views**) infused with **SOPs / KRAs / KPIs / OKRs**. Everything is
+**connected** (Lego): fields defined on a List render in the table cell ⇄ task detail ⇄ board card ⇄
+calendar/gantt, and link to Docs/SOPs/KRAs/Forms via `EntityLink`. Plan-only so far — no build yet. All specs
+live in `docs/plans/`. _(Ignore any older "old OS vs new OS / retire" wording elsewhere — superseded; the
+StudioBoard/duplicate-custom-fields cleanup already done in commit `bf0a39f` was dead-code removal and stays.)_
 
 ## The spec docs (read in this order)
 1. **`views-catalog.md`** — every view type (List/Table/Board/Calendar/Gantt built; Chart/Dashboard/Doc/Form/
