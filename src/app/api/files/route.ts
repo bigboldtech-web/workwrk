@@ -10,12 +10,51 @@ import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { visibleSpaceIds } from "@/lib/space";
+import { canReadBoard } from "@/lib/board";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const orgId = getOrgId(session);
   const sp = new URL(req.url).searchParams;
+
+  // ?boardId= — files attached to this board's items via EntityLink
+  // (BOARD_ITEM → FILE). Powers the board File-gallery view. Gated by
+  // the board read resolver, so per-board visibility composes in.
+  const boardId = sp.get("boardId");
+  if (boardId) {
+    const accessLevelB = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+    const canRead = await canReadBoard(boardId, getUserId(session), accessLevelB);
+    if (!canRead) return jsonError("not found", 404);
+    const items = await prisma.item.findMany({
+      where: { boardId, archivedAt: null },
+      select: { id: true },
+    });
+    const itemIds = items.map((i) => i.id);
+    const links = itemIds.length
+      ? await prisma.entityLink.findMany({
+          where: {
+            organizationId: orgId,
+            targetType: "FILE",
+            sourceType: "BOARD_ITEM",
+            sourceId: { in: itemIds },
+          },
+          select: { targetId: true, sourceId: true },
+        })
+      : [];
+    const fileIds = Array.from(new Set(links.map((l) => l.targetId)));
+    const files = fileIds.length
+      ? await prisma.fileEntry.findMany({
+          where: { id: { in: fileIds }, organizationId: orgId },
+          orderBy: { updatedAt: "desc" },
+        })
+      : [];
+    // Map each file back to one of its source items for "open task".
+    const itemByFile = new Map<string, string>();
+    for (const l of links) if (!itemByFile.has(l.targetId)) itemByFile.set(l.targetId, l.sourceId);
+    return jsonSuccess(files.map((f) => ({ ...f, itemId: itemByFile.get(f.id) ?? null })));
+  }
+
   const folderIdRaw = sp.get("folderId");
   const folderId = folderIdRaw === "root" || folderIdRaw === null ? null : folderIdRaw;
   const starred = sp.get("starred") === "true";

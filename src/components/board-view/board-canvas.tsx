@@ -20,6 +20,8 @@ import { BoardChartView } from "./board-chart-view";
 import { BoardDashboardView } from "./board-dashboard-view";
 import { BoardFormView } from "./board-form-view";
 import { BoardDocView } from "./board-doc-view";
+import { BoardFileGalleryView } from "./board-file-gallery-view";
+import { BoardWorkloadView } from "./board-workload-view";
 import { BoardItemDrawer } from "./board-item-drawer";
 import { BoardFilterBar, applyFilters, filtersActive, parseFilters, type BoardFilters } from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
@@ -230,6 +232,15 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardFormView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
       ) : viewType === "DOC" ? (
         <BoardDocView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
+      ) : viewType === "FILE_GALLERY" ? (
+        <BoardFileGalleryView boardId={boardId} onOpenItem={(id) => setOpenItemId(id)} />
+      ) : viewType === "WORKLOAD" ? (
+        <BoardWorkloadView
+          initialItems={filteredItems}
+          statuses={statuses}
+          variant={viewConfig?.variant === "team" ? "team" : "workload"}
+          onOpenItem={(id) => setOpenItemId(id)}
+        />
       ) : (
         <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center bg-white">
           <div className="text-base font-medium mb-1">
