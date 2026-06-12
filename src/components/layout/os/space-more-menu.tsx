@@ -346,20 +346,18 @@ function SpaceMoreMenu({
 
       <div className="h-px bg-zinc-100 my-1" />
 
-      <MenuItem Icon={Zap}       label="Automations"   disabled />
-      <MenuItem Icon={Tag}       label="Custom Fields" disabled />
-      <MenuItem Icon={CircleDot} label="Task statuses" disabled />
-
-      <MenuItem Icon={MoreHorizontal} label="More" submenu disabled />
+      <MenuItem Icon={Zap}       label="Automations"   onClick={() => toast("Automations are coming soon")} />
+      <MenuItem Icon={Tag}       label="Custom Fields" onClick={() => toast("Custom Fields are set on each List")} />
+      <MenuItem Icon={CircleDot} label="Task statuses" onClick={() => toast("Task statuses are set on each List")} />
 
       <div className="h-px bg-zinc-100 my-1" />
 
-      <MenuItem Icon={Download}       label="Imports"   submenu disabled />
+      <MenuItem Icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
       <MenuItem Icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ applyContext: { spaceId: space.id } }); }} />
       <MenuItem Icon={Save}           label="Save as template" busy={busy === "save-template"} onClick={saveAsTemplate} />
-      <MenuItem Icon={ArrowRightLeft} label="Move"      submenu disabled />
-      <MenuItem Icon={Copy}           label="Duplicate" disabled />
-      <MenuItem Icon={Settings}       label="Space settings" submenu disabled />
+      <MenuItem Icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
+      <MenuItem Icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
+      <MenuItem Icon={Settings}       label="Space settings" onClick={() => { onClose(); router.push(`/spaces/${space.slug ?? space.id}`); }} />
       <MenuItem Icon={EyeOff}         label="Hide from sidebar" onClick={() => toast("Hide coming soon")} />
       <MenuItem Icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
       <MenuItem Icon={Trash2}         label="Delete"    destructive disabled />

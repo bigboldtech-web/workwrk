@@ -15,12 +15,13 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Archive, Loader2, Star,
-  Link as LinkIcon, Plus, Zap, Tag, CircleDot,
+  Link as LinkIcon, Zap,
   Download, Files, ArrowRightLeft, Copy, Trash2, Share2,
   ChevronRight,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
+import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
 
 interface FolderRowLike {
@@ -96,6 +97,7 @@ function FolderMoreMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const { openTemplateCenter } = useOsShell();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(folder.name);
   const [busy, setBusy] = useState<string | null>(null);
@@ -293,29 +295,24 @@ function FolderMoreMenu({
       <Item Icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
       <Item Icon={LinkIcon} label="Copy link" onClick={copyLink} />
 
-      <Item Icon={Plus}    label="Create new"   submenu disabled />
       <Item Icon={Palette} label="Folder color" onClick={() => setMode("icon")} submenu />
 
       <div className="h-px bg-zinc-100 my-1" />
 
-      <Item Icon={Zap}        label="Automations"    disabled />
-      <Item Icon={Tag}        label="Custom Fields"  disabled />
-      <Item Icon={CircleDot}  label="Task statuses"  disabled />
-
-      <Item Icon={MoreHorizontal} label="More"      submenu disabled />
+      <Item Icon={Zap}        label="Automations"    onClick={() => toast("Automations are coming soon")} />
 
       <div className="h-px bg-zinc-100 my-1" />
 
-      <Item Icon={Download}       label="Imports"   submenu disabled />
-      <Item Icon={Files}          label="Templates" submenu disabled />
-      <Item Icon={ArrowRightLeft} label="Move"      submenu disabled />
-      <Item Icon={Copy}           label="Duplicate" disabled />
+      <Item Icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
+      <Item Icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ kind: "FOLDER" }); }} />
+      <Item Icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
+      <Item Icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
       <Item Icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
       <Item Icon={Trash2}         label="Delete"    destructive disabled />
 
       <div className="h-px bg-zinc-100 my-1" />
 
-      <Item Icon={Share2} label="Sharing & Permissions" disabled />
+      <Item Icon={Share2} label="Sharing & Permissions" onClick={() => toast("Folder sharing is coming soon")} />
     </div>
   );
 }
