@@ -10,29 +10,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Bot,
-  Brush,
-  CheckCircle2,
   ChevronsLeft,
   ChevronDown,
-  FileText,
-  Import,
-  LayoutDashboard,
-  ListChecks,
   Plus,
-  Rocket,
   Search,
   SlidersHorizontal,
-  Sparkles,
   X,
-  ClipboardCheck,
-  type LucideIcon,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { APPS, findAppForPath, getApp, NEW_EVENT_PREFIX } from "./apps-catalog";
 import { usePathname } from "next/navigation";
 import { SidebarSearchProvider, useSidebarSearch } from "./sidebar-search-context";
-import { MorePortal } from "./more-portal";
+import { CreateMenu } from "./create-menu";
 
 const SIDEBAR_WIDTH_KEY = "workwrk:os:sidebar-width";
 const DEFAULT_SIDEBAR_WIDTH = 244;
@@ -41,50 +30,6 @@ const MAX_SIDEBAR_WIDTH = 320;
 
 function clampSidebarWidth(width: number) {
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
-}
-
-function CreateMenuItem({
-  Icon,
-  label,
-  description,
-  shortcut,
-  badge,
-  active,
-  iconClassName = "text-zinc-500",
-  onClick,
-}: {
-  Icon: LucideIcon;
-  label: string;
-  description?: string;
-  shortcut?: string;
-  badge?: string;
-  active?: boolean;
-  iconClassName?: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex min-h-8 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] text-zinc-900 ${
-        active ? "bg-zinc-100" : "hover:bg-zinc-50"
-      }`}
-    >
-      <Icon className={`h-4 w-4 shrink-0 ${iconClassName}`} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{label}</span>
-        {description ? (
-          <span className="block truncate text-[12px] font-normal text-zinc-500">{description}</span>
-        ) : null}
-      </span>
-      {badge ? (
-        <span className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600">
-          {badge}
-        </span>
-      ) : null}
-      {shortcut ? <span className="text-[12px] text-zinc-400">{shortcut}</span> : null}
-    </button>
-  );
 }
 
 export function ClickSidebar() {
@@ -99,7 +44,7 @@ export function ClickSidebar() {
 }
 
 function ClickSidebarBody() {
-  const { activeAppKey, toggleSidebar, openCustomize, openCreateTask, openCreateList } = useOsShell();
+  const { activeAppKey, toggleSidebar, openCustomize } = useOsShell();
   const pathname = usePathname() || "";
   const router = useRouter();
   const { query, setQuery } = useSidebarSearch();
@@ -109,7 +54,6 @@ function ClickSidebarBody() {
   const [resizing, setResizing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const createButtonRef = useRef<HTMLButtonElement>(null);
-  const createPanelRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef({ startX: 0, startWidth: DEFAULT_SIDEBAR_WIDTH });
   const sidebarWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH);
 
@@ -148,11 +92,6 @@ function ClickSidebarBody() {
   };
 
   const closeCreateMenu = () => setCreateOpen(false);
-
-  const runCreateAction = (action: () => void) => {
-    closeCreateMenu();
-    action();
-  };
 
   const openSearch = () => {
     setSearching(true);
@@ -314,115 +253,12 @@ function ClickSidebarBody() {
         </div>
       </div>
 
-      {createOpen ? (
-        <>
-          <div className="fixed inset-0 z-30" onClick={closeCreateMenu} aria-hidden />
-          <MorePortal anchorRef={createButtonRef} panelRef={createPanelRef} width={330} open={createOpen} placement="below">
-            <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_14px_34px_rgba(0,0,0,0.14)]">
-              <div className="p-2">
-                <input
-                  type="text"
-                  className="h-8 w-full rounded-lg border border-[#b78d80] bg-white px-2.5 text-[13px] outline-none"
-                  placeholder="Describe anything to create"
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") runCreateAction(openCreateTask);
-                    if (event.key === "Escape") closeCreateMenu();
-                  }}
-                  autoFocus
-                />
-              </div>
-              <div className="px-2 pb-2">
-                <div className="px-2 py-1 text-[12px] font-medium text-zinc-500">Create</div>
-                <CreateMenuItem
-                  Icon={CheckCircle2}
-                  label="Task"
-                  shortcut="⌥T"
-                  active
-                  onClick={() => runCreateAction(openCreateTask)}
-                />
-                <CreateMenuItem
-                  Icon={ListChecks}
-                  label="List"
-                  description="Track tasks, projects, people & more"
-                  onClick={() => runCreateAction(openCreateList)}
-                />
-                <CreateMenuItem
-                  Icon={Sparkles}
-                  label="Space"
-                  description="Organize work by team or department"
-                  onClick={() => runCreateAction(runAppNewAction)}
-                />
-              </div>
-              <div className="border-t border-zinc-100 px-2 py-2">
-                <CreateMenuItem
-                  Icon={Sparkles}
-                  label="Create with AI"
-                  iconClassName="text-fuchsia-500"
-                  onClick={() => runCreateAction(() => router.push("/sidekick"))}
-                />
-                <CreateMenuItem
-                  Icon={Bot}
-                  label="Super Agent"
-                  badge="Hot"
-                  iconClassName="text-blue-500"
-                  onClick={() => runCreateAction(() => router.push("/agents"))}
-                />
-              </div>
-              <div className="border-t border-zinc-100 px-2 py-2">
-                <CreateMenuItem
-                  Icon={FileText}
-                  label="Doc"
-                  iconClassName="text-blue-500"
-                  onClick={() => runCreateAction(() => router.push("/docs?new=1"))}
-                />
-                <CreateMenuItem
-                  Icon={ClipboardCheck}
-                  label="Form"
-                  iconClassName="text-violet-500"
-                  onClick={() => runCreateAction(() => router.push("/forms?new=1"))}
-                />
-                <CreateMenuItem
-                  Icon={LayoutDashboard}
-                  label="Dashboard"
-                  iconClassName="text-purple-500"
-                  onClick={() => runCreateAction(() => router.push("/dashboard?new=1"))}
-                />
-                <CreateMenuItem
-                  Icon={Brush}
-                  label="Whiteboard"
-                  iconClassName="text-amber-500"
-                  onClick={() => runCreateAction(() => router.push("/whiteboards?new=1"))}
-                />
-              </div>
-              <div className="border-t border-zinc-100 px-2 py-2">
-                <CreateMenuItem
-                  Icon={SlidersHorizontal}
-                  label="Customize your sidebar"
-                  onClick={() => runCreateAction(openCustomize)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 p-2">
-                <button
-                  type="button"
-                  onClick={() => runCreateAction(() => router.push("/imports"))}
-                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50"
-                >
-                  <Import className="h-4 w-4 text-zinc-500" />
-                  Import
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runCreateAction(() => router.push("/templates"))}
-                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50"
-                >
-                  <Rocket className="h-4 w-4 text-zinc-500" />
-                  Templates
-                </button>
-              </div>
-            </div>
-          </MorePortal>
-        </>
-      ) : null}
+      <CreateMenu
+        anchorRef={createButtonRef}
+        open={createOpen}
+        onClose={closeCreateMenu}
+        onCreateSpace={runAppNewAction}
+      />
 
       <div
         role="separator"
