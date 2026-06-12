@@ -17,7 +17,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
 import { canEditSpace, getSpaceForReader } from "@/lib/space";
-import type { StatusOption } from "@/lib/board-items-shared";
+import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 
 const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
@@ -83,9 +83,16 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
   // Ensure the Space exists in the org; reject otherwise.
   const space = await prisma.space.findFirst({
     where: { id: input.spaceId, organizationId: input.organizationId },
-    select: { id: true },
+    select: { id: true, settings: true },
   });
   if (!space) throw new Error("Space not found");
+
+  // Cascade (backbone #1): a new board inherits the Space wizard's
+  // workflow statuses. parseBoardStatuses accepts the wizard's
+  // { key, label, color, group } shape directly; when the Space has no
+  // wizard workflow the board's statuses stay NULL → the default trio.
+  const spaceSettings = (space.settings ?? {}) as { workflow?: { statuses?: unknown } };
+  const seededStatuses = parseBoardStatuses(spaceSettings.workflow?.statuses);
 
   // Optional Folder must live in the same Space.
   if (input.folderId) {
@@ -116,6 +123,7 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
         visibility: input.visibility ?? "WORKSPACE",
         schema: itemType === "studio-item" ? { fields: [] } : {},
         settings: {},
+        ...(seededStatuses ? { statuses: seededStatuses as unknown as Prisma.InputJsonValue } : {}),
       },
     });
     const defaultView = await tx.view.create({
