@@ -69,9 +69,47 @@ const PRIORITIES: { key: PriorityKey; label: string; color: string }[] = [
 ];
 
 type WorkspaceTag = { id: string; name: string; color: string | null };
-type SpaceRow = { id: string; name: string; icon: string | null; color: string | null };
+type SpaceRow = { id: string; slug?: string; name: string; icon: string | null; color: string | null };
 type BoardRow = { id: string; slug: string; name: string; spaceId: string | null };
 type SelectedList = { id: string; slug: string; name: string; spaceId: string | null };
+
+const LAST_LIST_KEY = "workwrk:create-task:last-list";
+
+// Context-aware destination (tasks-spec §1): derive the list/space from
+// the current route so every "+" lands correctly without asking.
+//   /boards/<slug>  → that board
+//   /spaces/<slug>  → that space's first board (still pickable in-modal)
+// Returns null on Inbox/global routes → the modal shows "Select List…".
+function deriveListFromRoute(boards: BoardRow[], spaces: SpaceRow[]): SelectedList | null {
+  if (typeof window === "undefined") return null;
+  const path = window.location.pathname;
+  const boardMatch = path.match(/\/boards\/([^/?#]+)/);
+  if (boardMatch) {
+    const b = boards.find((x) => x.slug === decodeURIComponent(boardMatch[1]));
+    if (b) return { id: b.id, slug: b.slug, name: b.name, spaceId: b.spaceId };
+  }
+  const spaceMatch = path.match(/\/spaces\/([^/?#]+)/);
+  if (spaceMatch) {
+    const slug = decodeURIComponent(spaceMatch[1]);
+    const space = spaces.find((s) => s.slug === slug);
+    if (space) {
+      const b = boards.find((x) => x.spaceId === space.id);
+      if (b) return { id: b.id, slug: b.slug, name: b.name, spaceId: b.spaceId };
+    }
+  }
+  return null;
+}
+
+// Fallback when the route has no board/space context: the last list the
+// user created into (persisted in localStorage).
+function lastUsedList(boards: BoardRow[]): SelectedList | null {
+  try {
+    const id = window.localStorage.getItem(LAST_LIST_KEY);
+    if (!id) return null;
+    const b = boards.find((x) => x.id === id);
+    return b ? { id: b.id, slug: b.slug, name: b.name, spaceId: b.spaceId } : null;
+  } catch { return null; }
+}
 type Person = { id: string; firstName?: string | null; lastName?: string | null; email?: string | null; avatar?: string | null };
 type ChecklistItem = { text: string; done: boolean };
 type ExtraKey = "TIME_ESTIMATE" | "DEPENDENCIES" | "SUBTASKS" | "CHECKLIST";
@@ -267,6 +305,15 @@ export function CreateTaskModal() {
       spaceId: createTaskPreselect.spaceId,
     });
   }, [createTaskOpen, createTaskPreselect]);
+
+  // No explicit preselect → derive the destination from the current
+  // route (board/space page), falling back to the last-used list. Only
+  // fills an empty selection, so a manual pick is never overwritten.
+  useEffect(() => {
+    if (!createTaskOpen || createTaskPreselect || boards.length === 0) return;
+    const picked = deriveListFromRoute(boards, spaces) ?? lastUsedList(boards);
+    if (picked) setSelectedList((prev) => prev ?? picked);
+  }, [createTaskOpen, createTaskPreselect, boards, spaces]);
 
   // ── Load lists + people once on first open ──
   useEffect(() => {
@@ -585,6 +632,7 @@ export function CreateTaskModal() {
           ),
         );
       }
+      try { window.localStorage.setItem(LAST_LIST_KEY, selectedList.id); } catch {}
       setNotice(`Created “${item?.title ?? tpl.name}” from template`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create from template");
@@ -647,6 +695,8 @@ export function CreateTaskModal() {
           ),
         );
       }
+      // Remember this list as the fallback for context-free opens.
+      try { window.localStorage.setItem(LAST_LIST_KEY, selectedList.id); } catch {}
       return { id: item.id, slug: selectedList.slug };
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create task");
