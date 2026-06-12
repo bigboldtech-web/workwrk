@@ -351,7 +351,7 @@ function BoardTreeRow({
             parentSpaceName={spaceName}
           />
           <BoardMoreTrigger
-            board={{ id: board.id, name: board.name, icon: board.icon, color: board.color }}
+            board={{ id: board.id, name: board.name, slug: board.slug, icon: board.icon, color: board.color }}
             onUpdated={onChanged}
           />
         </span>

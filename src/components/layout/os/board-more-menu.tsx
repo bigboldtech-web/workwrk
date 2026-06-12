@@ -14,8 +14,9 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Share2, Archive, Loader2, Star,
-  Link as LinkIcon, Plus, Zap, Tag, CircleDot,
+  Link as LinkIcon, Zap, Tag, CircleDot,
   Download, Files, ArrowRightLeft, Copy, Trash2, ChevronRight, Save,
+  Shapes, Info, Mail,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
@@ -25,6 +26,7 @@ import { MorePortal } from "./more-portal";
 interface BoardRowLike {
   id: string;
   name: string;
+  slug?: string;
   icon: string | null;
   color: string | null;
 }
@@ -141,6 +143,14 @@ function BoardMoreMenu({
       setStarred(starred);
     }
   }, [board.id, starred]);
+
+  // Custom Fields / Task statuses open the matching editor on the board
+  // page via ?panel=; needs the slug. Falls back to a toast if absent.
+  const openBoardPanel = useCallback((panel: "fields" | "statuses") => {
+    onClose();
+    if (board.slug) router.push(`/boards/${board.slug}?panel=${panel}`);
+    else toast("Open the List to edit this");
+  }, [board.slug, onClose, router, toast]);
 
   const saveAsTemplate = useCallback(async () => {
     setBusy("save-template");
@@ -318,24 +328,24 @@ function BoardMoreMenu({
       <Item Icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
       <Item Icon={LinkIcon} label="Copy link" onClick={copyLink} />
 
-      <Item Icon={Plus}    label="Create new" submenu disabled />
       <Item Icon={Palette} label="List color" onClick={() => setMode("icon")} submenu />
 
       <div className="h-px bg-zinc-100 my-1" />
 
-      <Item Icon={Zap}       label="Automations"   disabled />
-      <Item Icon={Tag}       label="Custom Fields" disabled />
-      <Item Icon={CircleDot} label="Task statuses" disabled />
-
-      <Item Icon={MoreHorizontal} label="More" submenu disabled />
+      <Item Icon={Tag}       label="Custom Fields" onClick={() => openBoardPanel("fields")} />
+      <Item Icon={CircleDot} label="Task statuses" onClick={() => openBoardPanel("statuses")} />
+      <Item Icon={Shapes}    label="Default task type" onClick={() => { onClose(); router.push("/settings/task-types"); }} />
+      <Item Icon={Info}      label="List info" onClick={() => { onClose(); toast(`“${board.name}” — List (Board)`); }} />
+      <Item Icon={Mail}      label="Email to List" onClick={() => toast("Email-to-List is coming soon")} />
+      <Item Icon={Zap}       label="Automations" onClick={() => toast("Automations are coming soon")} />
 
       <div className="h-px bg-zinc-100 my-1" />
 
-      <Item Icon={Download}       label="Imports"   submenu disabled />
+      <Item Icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
       <Item Icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ kind: "LIST" }); }} />
       <Item Icon={Save}           label="Save as template" busy={busy === "save-template"} onClick={saveAsTemplate} />
-      <Item Icon={ArrowRightLeft} label="Move"      submenu disabled />
-      <Item Icon={Copy}           label="Duplicate" disabled />
+      <Item Icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
+      <Item Icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
       <Item Icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
       <Item Icon={Trash2}         label="Delete"    destructive disabled />
 

@@ -74,6 +74,24 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     if (itemParam) setOpenItemId(itemParam);
   }
 
+  // ?panel=fields|statuses — deep link from the sidebar List "…" menu
+  // (Custom Fields / Task statuses) opens the matching editor on arrival.
+  const [trackedPanel, setTrackedPanel] = useState<string | null>(null);
+  const panelParam = searchParams?.get("panel") ?? null;
+  if (panelParam !== trackedPanel) {
+    setTrackedPanel(panelParam);
+    if (panelParam === "fields") setShelfOpen(true);
+    if (panelParam === "statuses") setStatusEditorOpen(true);
+  }
+
+  const stripPanel = useCallback(() => {
+    if (!searchParams?.get("panel")) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("panel");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [router, pathname, searchParams]);
+
   const closeDrawer = useCallback(() => {
     setOpenItemId(null);
     if (searchParams?.get("item")) {
@@ -318,7 +336,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         open={statusEditorOpen}
         canEdit={canEdit}
         statuses={statuses}
-        onClose={() => setStatusEditorOpen(false)}
+        onClose={() => { setStatusEditorOpen(false); stripPanel(); }}
       />
 
       <FieldShelf
@@ -328,7 +346,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         fields={fields}
         hiddenFields={hiddenFields}
         onToggleHidden={viewId ? toggleHiddenField : undefined}
-        onClose={() => setShelfOpen(false)}
+        onClose={() => { setShelfOpen(false); stripPanel(); }}
         onFieldsChanged={setFields}
       />
     </>

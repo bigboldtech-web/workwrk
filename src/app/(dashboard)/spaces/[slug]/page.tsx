@@ -844,7 +844,7 @@ export default async function SpacePage(props: {
                                     parentSpaceName={space.name}
                                   />
                                   <BoardMoreTrigger
-                                    board={{ id: b.id, name: b.name, icon: b.icon, color: b.color }}
+                                    board={{ id: b.id, name: b.name, slug: b.slug, icon: b.icon, color: b.color }}
                                   />
                                 </span>
                               </span>
