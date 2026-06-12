@@ -33,6 +33,8 @@ import {
   FileUp,
   RefreshCw,
   Save,
+  Cloud,
+  FileText,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { useRouter } from "next/navigation";
@@ -511,6 +513,45 @@ export function CreateTaskModal() {
         }
       }),
     );
+  };
+
+  // External sources (Dropbox/OneDrive/Box/Google Drive/New Google Doc).
+  // Until OAuth file-pickers are wired, attach by share link — which still
+  // creates a real FileEntry + EntityLink through the same path local
+  // uploads use, so the link shows up as an attachment everywhere.
+  const attachExternal = async (provider: string) => {
+    setOpenMenu(null);
+    if (provider === "New Google Doc") {
+      // Open a blank Google Doc; the user pastes its share link back.
+      if (typeof window !== "undefined") window.open("https://docs.new", "_blank", "noopener,noreferrer");
+    }
+    const raw = window.prompt(`Paste the ${provider} share link:`);
+    const url = raw?.trim() ?? "";
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) { setNotice("Enter a valid https link"); return; }
+    const guess = (() => { try { return decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() || provider); } catch { return provider; } })();
+    const name = (window.prompt("Attachment name:", guess) ?? guess).trim() || url;
+    setUploading((n) => n + 1);
+    try {
+      const entry = await fetch("/api/files", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          url,
+          mimeType: "text/uri-list",
+          spaceId: selectedList?.spaceId ?? undefined,
+          description: `Linked from ${provider}`,
+        }),
+      }).then((r) => r.json());
+      const id = entry?.id ?? entry?.data?.id;
+      if (id) setStagedFiles((p) => [...p, { id, name, mimeType: "text/uri-list", url }]);
+      else setNotice("Couldn't attach link");
+    } catch {
+      setNotice("Couldn't attach link");
+    } finally {
+      setUploading((n) => Math.max(0, n - 1));
+    }
   };
 
   // ── Templates ──
@@ -1253,8 +1294,8 @@ export function CreateTaskModal() {
                   </button>
                   <div className="border-t border-zinc-100 my-1" />
                   {["Dropbox", "OneDrive/SharePoint", "Box", "Google Drive", "New Google Doc"].map((label) => (
-                    <button key={label} type="button" onClick={() => { setOpenMenu(null); setNotice("Cloud providers aren’t connected yet"); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-400 hover:bg-zinc-50">
-                      <Paperclip className="w-4 h-4 text-zinc-300" />
+                    <button key={label} type="button" onClick={() => void attachExternal(label)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                      {label === "New Google Doc" ? <FileText className="w-4 h-4 text-blue-500" /> : <Cloud className="w-4 h-4 text-zinc-500" />}
                       <span className="flex-1">{label}</span>
                     </button>
                   ))}
