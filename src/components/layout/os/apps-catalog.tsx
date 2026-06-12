@@ -1238,8 +1238,8 @@ function DashboardsSidebar() {
   return (
     <>
       <ul>
-        <NavItem href="/dashboard" Icon={BarChart3} label="All Dashboards" />
-        <NavItem href="/dashboard?mine=1" Icon={BarChart3} label="My Dashboards" />
+        <NavItem href="/dashboards" Icon={BarChart3} label="All Dashboards" />
+        <NavItem href="/dashboards?mine=1" Icon={BarChart3} label="My Dashboards" />
       </ul>
       <SectionLabel>Favorites</SectionLabel>
       <EmptyState title="Star a Dashboard to see it here" />
@@ -1353,10 +1353,10 @@ export const APPS: AppEntry[] = [
   { key: "docs", label: "Notes", Icon: FileText, defaultHref: "/docs",
     matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
     newAction: { label: "New note", href: "/docs?new=1" } },
-  { key: "dashboards", label: "Dashboa..", Icon: BarChart3, defaultHref: "/dashboard",
-    matchPaths: ["/dashboard"], Sidebar: DashboardsSidebar,
+  { key: "dashboards", label: "Dashboa..", Icon: BarChart3, defaultHref: "/dashboards",
+    matchPaths: ["/dashboards"], Sidebar: DashboardsSidebar,
     category: "Core", defaultPinned: true,
-    newAction: { label: "New Dashboard", href: "/dashboard?new=1" } },
+    newAction: { label: "New Dashboard", href: "/dashboards?new=1" } },
   { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library",
     matchPaths: ["/library", "/whiteboards", "/docs"], Sidebar: LibrarySidebar,
     category: "Core", defaultPinned: true,

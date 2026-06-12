@@ -132,6 +132,8 @@ model Organization {
   chatSessions         ChatSession[]
   // 🆕 Whiteboards (Excalidraw-powered canvases)
   whiteboards          Whiteboard[]
+  // 🆕 User-created dashboards (the "+" menu → Dashboard)
+  dashboards           Dashboard[]
   // 🆕 Phase 4 — universal Doc + version history. Polymorphic; can
   // attach to any entity (task, ticket, board row) OR stand alone.
   docs                 Doc[]
@@ -5868,6 +5870,31 @@ model Whiteboard {
   @@index([organizationId, ownerId])
   @@index([spaceId])
   @@index([productSlug])
+}
+
+// User-created dashboards (the sidebar "+" menu → Dashboard). v1 stores
+// the widget list as opaque JSON; the widget-canvas renderer lands with
+// the Dashboard view phase (docs/plans/views-catalog.md §B).
+model Dashboard {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?      @db.Text
+  // Widget list — [{ id, type, config }] — opaque to the server.
+  widgets        Json         @default("[]")
+  // Owner is the creator. Org-wide visibility by default, mirroring
+  // Whiteboard; granular sharing is a follow-up.
+  ownerId        String?
+  archivedAt     DateTime?
+  // Optional pinning to a Space so it shows under that surface.
+  spaceId        String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, archivedAt])
+  @@index([organizationId, ownerId])
+  @@index([spaceId])
 }
 
 // ==========================================
