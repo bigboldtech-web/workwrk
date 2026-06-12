@@ -10,7 +10,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
-import type { BoardItemRow } from "@/lib/board-items-shared";
+import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { BoardTableView } from "./board-table-view";
 import { BoardKanbanView } from "./board-kanban-view";
@@ -29,13 +29,17 @@ interface BoardCanvasProps {
   viewConfig: Record<string, unknown>;
   initialItems: BoardItemRow[];
   initialFields: FieldDef[];
+  /** Per-List statuses (backbone #1) — the board's own set, resolved
+   *  server-side via getBoardStatuses(board). Every renderer + the
+   *  drawer + the filter bar read THIS set, never the global default. */
+  statuses: StatusOption[];
   canEdit: boolean;
   /** Threaded through to the drawer so the comments thread can gate
    *  "delete my own comment" without an extra session fetch. */
   currentUserId: string | null;
 }
 
-export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, canEdit, currentUserId }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId }: BoardCanvasProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -122,7 +126,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     });
   }, [boardId, viewId, viewConfig, hiddenFields]);
 
-  const filteredItems = useMemo(() => applyFilters(items, filters), [items, filters]);
+  const filteredItems = useMemo(() => applyFilters(items, filters, statuses), [items, filters, statuses]);
 
   const handleItemChanged = useCallback((updated: BoardItemRow) => {
     setItems((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
@@ -137,7 +141,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   return (
     <>
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <BoardFilterBar items={items} filters={filters} onChange={handleFiltersChange} />
+        <BoardFilterBar items={items} filters={filters} statuses={statuses} onChange={handleFiltersChange} />
         {filtersActive(filters) ? (
           <span className="text-[11px] text-zinc-400 tabular-nums">
             {filteredItems.length} of {items.length}
@@ -161,6 +165,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           viewConfig={viewConfig}
           initialItems={filteredItems}
           initialFields={visibleFields}
+          statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
@@ -170,6 +175,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           boardId={boardId}
           initialItems={filteredItems}
           initialFields={visibleFields}
+          statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
         />
@@ -178,6 +184,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           boardId={boardId}
           initialItems={filteredItems}
           initialFields={fields}
+          statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           onItemCreated={(item) => setItems((prev) => [...prev, item])}
@@ -187,6 +194,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardGanttView
           initialItems={filteredItems}
           initialFields={fields}
+          statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           onItemChanged={handleItemChanged}
@@ -208,6 +216,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         canEdit={canEdit}
         currentUserId={currentUserId}
         fields={fields}
+        statuses={statuses}
         onClose={closeDrawer}
         onItemChanged={handleItemChanged}
         onItemArchived={handleItemArchived}

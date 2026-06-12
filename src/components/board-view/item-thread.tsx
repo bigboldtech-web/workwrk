@@ -14,9 +14,9 @@
 //   ARCHIVED        → "Mai archived this row"
 //   COMMENTED       → "Mai commented"
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Send, Trash2 } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS } from "@/lib/board-items-shared";
+import { DEFAULT_STATUS_OPTIONS, type StatusOption } from "@/lib/board-items-shared";
 import type { ThreadActivity, ThreadUpdate } from "@/lib/item-thread";
 
 type Tab = "comments" | "activity";
@@ -26,13 +26,12 @@ interface ItemThreadProps {
   canEdit: boolean;
   /** The current user's id — used to gate the "delete my comment" affordance. */
   currentUserId: string | null;
+  /** Per-List statuses — resolves status values in activity rows to
+   *  their labels. Falls back to the canonical default set. */
+  statuses?: StatusOption[];
 }
 
-const STATUS_LABEL: Record<string, string> = Object.fromEntries(
-  DEFAULT_STATUS_OPTIONS.map((o) => [o.value, o.label]),
-);
-
-export function ItemThread({ itemId, canEdit, currentUserId }: ItemThreadProps) {
+export function ItemThread({ itemId, canEdit, currentUserId, statuses }: ItemThreadProps) {
   const [tab, setTab] = useState<Tab>("comments");
   const [updates, setUpdates] = useState<ThreadUpdate[]>([]);
   const [activity, setActivity] = useState<ThreadActivity[]>([]);
@@ -124,7 +123,7 @@ export function ItemThread({ itemId, canEdit, currentUserId }: ItemThreadProps) 
           onDelete={deleteComment}
         />
       ) : (
-        <ActivityTab activity={activity} loading={loading} />
+        <ActivityTab activity={activity} loading={loading} statuses={statuses ?? [...DEFAULT_STATUS_OPTIONS]} />
       )}
     </div>
   );
@@ -250,14 +249,14 @@ function CommentsTab({
   );
 }
 
-function ActivityTab({ activity, loading }: { activity: ThreadActivity[]; loading: boolean }) {
+function ActivityTab({ activity, loading, statuses }: { activity: ThreadActivity[]; loading: boolean; statuses: StatusOption[] }) {
   if (loading) return <div className="text-xs text-zinc-500 py-2">Loading…</div>;
   if (activity.length === 0) return <div className="text-xs text-zinc-500 py-2">No activity yet.</div>;
   return (
     <ul className="space-y-2">
       {activity.map((a) => {
         const actor = a.actor ? `${a.actor.firstName} ${a.actor.lastName}` : "System";
-        const description = describeActivity(a);
+        const description = describeActivity(a, statuses);
         return (
           <li key={a.id} className="flex items-baseline gap-2 text-xs">
             <span className="text-zinc-500 whitespace-nowrap">{relativeTime(new Date(a.createdAt))}</span>
@@ -271,14 +270,15 @@ function ActivityTab({ activity, loading }: { activity: ThreadActivity[]; loadin
   );
 }
 
-function describeActivity(a: ThreadActivity): string {
+function describeActivity(a: ThreadActivity, statuses: StatusOption[]): string {
   const meta = a.meta;
+  const statusLabel = (v: string) => statuses.find((o) => o.value === v)?.label ?? v;
   switch (a.action) {
     case "CREATED":
       return "created this row";
     case "STATUS_CHANGED": {
-      const from = typeof meta.from === "string" ? (STATUS_LABEL[meta.from] ?? meta.from) : "—";
-      const to = typeof meta.to === "string" ? (STATUS_LABEL[meta.to] ?? meta.to) : "—";
+      const from = typeof meta.from === "string" ? statusLabel(meta.from) : "—";
+      const to = typeof meta.to === "string" ? statusLabel(meta.to) : "—";
       return `changed status from ${from} → ${to}`;
     }
     case "TITLE_CHANGED": {

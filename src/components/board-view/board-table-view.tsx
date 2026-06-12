@@ -17,10 +17,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Plus, Trash2, X, ChevronDown, ChevronRight, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy } from "lucide-react";
 import {
-  DEFAULT_STATUS_OPTIONS,
   PRIORITY_OPTIONS,
   type BoardItemRow,
-  type ItemTag,
+  type StatusOption,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar } from "./assignee-picker";
@@ -38,6 +37,8 @@ interface BoardTableViewProps {
   initialItems: BoardItemRow[];
   /** Custom fields from Board.schema.fields. Each becomes a column. */
   initialFields?: FieldDef[];
+  /** Per-List statuses (backbone #1) — the board's own set. */
+  statuses: StatusOption[];
   canEdit: boolean;
   /** When set, clicking a row's title opens the row drawer. The
    *  parent owns drawer state; we just emit the id. */
@@ -52,14 +53,11 @@ interface BoardTableViewProps {
  *  is what the server persists. */
 type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags">> & { tagIds?: string[] };
 
-type StatusOption = { value: string; label: string; color: string };
-const STATUS_BY_VALUE: Map<string, StatusOption> = new Map(
-  DEFAULT_STATUS_OPTIONS.map((o) => [o.value as string, { ...o } as StatusOption]),
-);
-
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, canEdit, onOpenItem, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, gridStyle = "list" }: BoardTableViewProps) {
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
+  // New rows default to the board's first status (its "not started").
+  const firstStatus = statuses[0]?.value ?? "TO_DO";
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,7 +143,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title: `${row.title} (copy)`,
-          status: row.status ?? "TO_DO",
+          status: row.status ?? firstStatus,
           ownerId: row.ownerId,
           metadata: row.metadata,
           parentItemId: row.parentItemId ?? null,
@@ -160,7 +158,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to duplicate");
     }
-  }, [boardId, canEdit]);
+  }, [boardId, canEdit, firstStatus]);
 
   const addSubtask = useCallback(async (parentId: string, parentStatus: string | null) => {
     if (!canEdit) return;
@@ -171,7 +169,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title: "New subtask",
-          status: parentStatus ?? "TO_DO",
+          status: parentStatus ?? firstStatus,
           parentItemId: parentId,
         }),
       });
@@ -185,7 +183,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } finally {
       setAdding(false);
     }
-  }, [boardId, canEdit]);
+  }, [boardId, canEdit, firstStatus]);
 
   // Re-sync if the parent ever passes a refreshed initial set.
   useEffect(() => { setItems(initialItems); }, [initialItems]);
@@ -228,14 +226,22 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     const resolved: Bucket[] = [];
     if (groupBy === "status") {
-      // Honor DEFAULT_STATUS_OPTIONS order; append Unset last if needed.
-      for (const opt of DEFAULT_STATUS_OPTIONS) {
+      // Honor the board's own status order; rows whose status no longer
+      // exists in the set (e.g. after an edit) keep a gray bucket of
+      // their raw value instead of silently disappearing; Unset last.
+      for (const opt of statuses) {
         const rows = map.get(opt.value) ?? [];
         if (rows.length > 0) {
           resolved.push({ key: opt.value, label: opt.label, color: opt.color, rows });
           map.delete(opt.value);
         }
       }
+      const orphaned = Array.from(map.entries())
+        .filter(([k]) => k !== "__unset__")
+        .map(([k, rows]) => ({ key: k, label: k, color: "#A1A1AA" as string | null, rows }));
+      orphaned.sort((a, b) => a.label.localeCompare(b.label));
+      resolved.push(...orphaned);
+      for (const o of orphaned) map.delete(o.key);
     } else if (groupBy === "priority") {
       // Honor URGENT→LOW severity order; Unset (no priority) appends last.
       for (const opt of PRIORITY_OPTIONS) {
@@ -288,7 +294,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     if (groupDirection === "desc") resolved.reverse();
     return resolved;
-  }, [groupBy, topLevel, customFields, groupDirection]);
+  }, [groupBy, topLevel, customFields, groupDirection, statuses]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => {
@@ -431,7 +437,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "New item", status: "TO_DO" }),
+        body: JSON.stringify({ title: "New item", status: firstStatus }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -444,7 +450,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } finally {
       setAdding(false);
     }
-  }, [boardId, canEdit]);
+  }, [boardId, canEdit, firstStatus]);
 
   const handleUpdate = useCallback(async (id: string, patch: RowPatch) => {
     if (!canEdit) return;
@@ -500,6 +506,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         key={row.id}
         row={row}
         customFields={customFields}
+        statuses={statuses}
         canEdit={canEdit}
         monday={monday}
         selected={selected.has(row.id)}
@@ -621,7 +628,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                             )}
                             <span className="text-[10.5px] text-zinc-500 tabular-nums">{b.rows.length}</span>
                           </button>
-                          <GroupStatusBreakdown rows={b.rows} />
+                          <GroupStatusBreakdown rows={b.rows} statuses={statuses} />
                         </div>
                       </td>
                     </tr>
@@ -630,14 +637,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                       : null}
                     {/* Monday-style per-group summary footer — aggregates
                         every column (stacked bars, people, sums…). */}
-                    <GroupSummaryRow rows={b.rows} customFields={customFields} railColor={b.color} />
+                    <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} />
                   </React.Fragment>
                 );
               })
             ) : (
               <>
                 {topLevel.flatMap((row) => renderRowAndSubtasks(row, 0))}
-                {items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} railColor={null} /> : null}
+                {items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} /> : null}
               </>
             )}
             {canEdit && !buckets ? (
@@ -664,6 +671,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       <BulkActionBar
         selectedCount={selected.size}
         busy={bulkBusy}
+        statuses={statuses}
         onClear={clearSelection}
         onArchive={bulkArchive}
         onStatus={bulkStatus}
@@ -677,6 +685,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 function BulkActionBar({
   selectedCount,
   busy,
+  statuses,
   onClear,
   onArchive,
   onStatus,
@@ -685,6 +694,7 @@ function BulkActionBar({
 }: {
   selectedCount: number;
   busy: boolean;
+  statuses: StatusOption[];
   onClear: () => void;
   onArchive: () => void;
   onStatus: (status: string) => void;
@@ -704,7 +714,7 @@ function BulkActionBar({
           <ChevronDown className="w-3 h-3" />
         </summary>
         <div className="absolute left-0 bottom-full mb-1 w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1 text-zinc-900">
-          {DEFAULT_STATUS_OPTIONS.map((o) => (
+          {statuses.map((o) => (
             <button
               key={o.value}
               type="button"
@@ -845,6 +855,7 @@ function BulkOwner({ onSet, busy }: { onSet: (ownerId: string | null) => void; b
 function Row({
   row,
   customFields,
+  statuses,
   canEdit,
   monday = false,
   selected,
@@ -867,6 +878,7 @@ function Row({
 }: {
   row: BoardItemRow;
   customFields: FieldDef[];
+  statuses: StatusOption[];
   canEdit: boolean;
   monday?: boolean;
   selected: boolean;
@@ -956,7 +968,7 @@ function Row({
         </div>
       </td>
       <td className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-2"}>
-        <StatusCell row={row} canEdit={canEdit} onUpdate={onUpdate} monday={monday} />
+        <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} monday={monday} />
       </td>
       <td className="px-4 py-2">
         <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
@@ -1142,10 +1154,12 @@ function CustomFieldSummary({ field, rows }: { field: FieldDef; rows: BoardItemR
 function GroupSummaryRow({
   rows,
   customFields,
+  statuses,
   railColor,
 }: {
   rows: BoardItemRow[];
   customFields: FieldDef[];
+  statuses: StatusOption[];
   railColor: string | null;
 }) {
   // Status + priority stacked bars.
@@ -1153,13 +1167,13 @@ function GroupSummaryRow({
     const counts = new Map<string, number>();
     for (const r of rows) counts.set(r.status ?? "__none__", (counts.get(r.status ?? "__none__") ?? 0) + 1);
     const segs: BarSeg[] = [];
-    for (const o of DEFAULT_STATUS_OPTIONS) {
+    for (const o of statuses) {
       const n = counts.get(o.value);
       if (n) { segs.push({ color: o.color, count: n, label: o.label }); counts.delete(o.value); }
     }
     for (const [v, n] of counts) segs.push({ color: "#d4d4d8", count: n, label: v === "__none__" ? "No status" : v });
     return segs;
-  }, [rows]);
+  }, [rows, statuses]);
 
   const prioritySegs = useMemo<BarSeg[]>(() => {
     const counts = new Map<string, number>();
@@ -1240,19 +1254,16 @@ function GroupSummaryRow({
   );
 }
 
-function GroupStatusBreakdown({ rows }: { rows: BoardItemRow[] }) {
-  // Compute open/in-progress/done buckets by mapping the row's status
-  // through DEFAULT_STATUS_OPTIONS' group. Matches the ClickUp
-  // "5 OPEN / 3 IN PROGRESS / 1 CLOSED" popover.
-  const counts = { OPEN: 0, IN_PROGRESS: 0, CLOSED: 0 } as Record<string, number>;
+function GroupStatusBreakdown({ rows, statuses }: { rows: BoardItemRow[]; statuses: StatusOption[] }) {
+  // Bucket rows by their status's real group (per-List statuses carry
+  // ACTIVE|DONE|CLOSED) — replaces the old hardcoded-value heuristic.
+  // Unknown/unset statuses count as OPEN. Matches the ClickUp
+  // "5 OPEN / 3 DONE / 1 CLOSED" popover.
+  const groupByValue = new Map(statuses.map((o) => [o.value, o.group] as const));
+  const counts = { ACTIVE: 0, DONE: 0, CLOSED: 0 } as Record<string, number>;
   for (const r of rows) {
-    const opt = STATUS_BY_VALUE.get(r.status ?? "");
-    if (!opt) { counts.OPEN += 1; continue; }
-    // Heuristic: TO_DO + IN_PROGRESS palette colors map to OPEN/IN_PROGRESS
-    // groups; everything else (COMPLETE, DONE, CLOSED) counts as CLOSED.
-    if (r.status === "IN_PROGRESS" || r.status === "IN_REVIEW") counts.IN_PROGRESS += 1;
-    else if (r.status === "COMPLETE" || r.status === "DONE" || r.status === "CLOSED" || r.status === "CLOSED_WON" || r.status === "CLOSED_LOST" || r.status === "RESOLVED" || r.status === "RENEWED" || r.status === "EXPANSION" || r.status === "CHURNED") counts.CLOSED += 1;
-    else counts.OPEN += 1;
+    const group = (r.status ? groupByValue.get(r.status) : null) ?? "ACTIVE";
+    counts[group] += 1;
   }
   return (
     <details className="relative inline-block">
@@ -1263,9 +1274,9 @@ function GroupStatusBreakdown({ rows }: { rows: BoardItemRow[] }) {
         …
       </summary>
       <div className="absolute left-0 top-full mt-1 z-50 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1.5">
-        {(["OPEN", "IN_PROGRESS", "CLOSED"] as const).map((bucket) => {
-          const dotColor = bucket === "OPEN" ? "#71717A" : bucket === "IN_PROGRESS" ? "#6366F1" : "#10B981";
-          const label = bucket === "IN_PROGRESS" ? "IN PROGRESS" : bucket;
+        {(["ACTIVE", "DONE", "CLOSED"] as const).map((bucket) => {
+          const dotColor = bucket === "ACTIVE" ? "#71717A" : bucket === "DONE" ? "#10B981" : "#EC4899";
+          const label = bucket === "ACTIVE" ? "OPEN" : bucket;
           return (
             <div key={bucket} className="flex items-center gap-2 px-3 py-1 text-[11.5px]">
               <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: dotColor }} aria-hidden />
@@ -1480,11 +1491,13 @@ function TitleCell({
 
 function StatusCell({
   row,
+  statuses,
   canEdit,
   onUpdate,
   monday = false,
 }: {
   row: BoardItemRow;
+  statuses: StatusOption[];
   canEdit: boolean;
   onUpdate: (id: string, patch: Partial<Pick<BoardItemRow, "status">>) => void;
   /** Monday-style Table variant: status fills the whole cell with the
@@ -1493,7 +1506,10 @@ function StatusCell({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const current = useMemo(() => (row.status ? STATUS_BY_VALUE.get(row.status) : null), [row.status]);
+  const current = useMemo(
+    () => (row.status ? statuses.find((o) => o.value === row.status) ?? null : null),
+    [row.status, statuses],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -1524,7 +1540,7 @@ function StatusCell({
         </button>
         {open ? (
           <div className="absolute z-10 mt-1 left-0 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
-            {DEFAULT_STATUS_OPTIONS.map((opt) => {
+            {statuses.map((opt) => {
               const active = opt.value === row.status;
               return (
                 <button
@@ -1571,7 +1587,7 @@ function StatusCell({
       </button>
       {open ? (
         <div className="absolute z-10 mt-1 left-0 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
-          {DEFAULT_STATUS_OPTIONS.map((opt) => {
+          {statuses.map((opt) => {
             const active = opt.value === row.status;
             return (
               <button

@@ -12,10 +12,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, ChevronDown, Flag, Search, Tag as TagIcon, Users, X } from "lucide-react";
 import {
-  DEFAULT_STATUS_OPTIONS,
   PRIORITY_OPTIONS,
+  isDoneStatus,
   type BoardItemRow,
   type ItemTag,
+  type StatusOption,
 } from "@/lib/board-items-shared";
 import { PersonAvatar, type PersonRef } from "./assignee-picker";
 
@@ -57,9 +58,11 @@ export function filtersActive(f: BoardFilters): boolean {
 /**
  * Apply filters to the flat item list. An item survives when it matches
  * every active facet; ancestors of surviving subtasks are kept too so
- * the table can still render the parent chain.
+ * the table can still render the parent chain. `statuses` is the
+ * board's own set — hideDone hides every DONE/CLOSED-group status, not
+ * just the literal "DONE".
  */
-export function applyFilters(items: BoardItemRow[], f: BoardFilters): BoardItemRow[] {
+export function applyFilters(items: BoardItemRow[], f: BoardFilters, statuses: StatusOption[]): BoardItemRow[] {
   if (!filtersActive(f)) return items;
   const q = f.search.trim().toLowerCase();
   const statusSet = new Set(f.statuses);
@@ -68,7 +71,7 @@ export function applyFilters(items: BoardItemRow[], f: BoardFilters): BoardItemR
   const tagSet = new Set(f.tagIds);
 
   const matches = (it: BoardItemRow): boolean => {
-    if (f.hideDone && it.status === "DONE") return false;
+    if (f.hideDone && isDoneStatus(statuses, it.status)) return false;
     if (statusSet.size && !statusSet.has(it.status ?? "")) return false;
     if (ownerSet.size) {
       const key = it.ownerId ?? "__unassigned__";
@@ -104,10 +107,12 @@ export function applyFilters(items: BoardItemRow[], f: BoardFilters): BoardItemR
 interface BoardFilterBarProps {
   items: BoardItemRow[];
   filters: BoardFilters;
+  /** The board's own status set — drives the Status facet options. */
+  statuses: StatusOption[];
   onChange: (next: BoardFilters) => void;
 }
 
-export function BoardFilterBar({ items, filters, onChange }: BoardFilterBarProps) {
+export function BoardFilterBar({ items, filters, statuses, onChange }: BoardFilterBarProps) {
   // Facet options present on this board.
   const owners = useMemo(() => {
     const map = new Map<string, PersonRef>();
@@ -148,7 +153,7 @@ export function BoardFilterBar({ items, filters, onChange }: BoardFilterBarProps
         activeCount={filters.statuses.length}
         render={() => (
           <>
-            {DEFAULT_STATUS_OPTIONS.map((o) => (
+            {statuses.map((o) => (
               <FacetRow
                 key={o.value}
                 active={filters.statuses.includes(o.value)}

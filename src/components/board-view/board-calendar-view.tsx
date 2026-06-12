@@ -10,13 +10,15 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
-import { STATUS_LOOKUP, type BoardItemRow } from "@/lib/board-items-shared";
+import { makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 
 interface BoardCalendarViewProps {
   boardId: string;
   initialItems: BoardItemRow[];
   initialFields?: FieldDef[];
+  /** Per-List statuses (backbone #1) — drives the chip dot colors. */
+  statuses: StatusOption[];
   canEdit: boolean;
   onOpenItem?: (itemId: string) => void;
   /** Called after a day-cell "+" creates an item, so the parent canvas
@@ -31,8 +33,9 @@ function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function BoardCalendarView({ boardId, initialItems, initialFields, canEdit, onOpenItem, onItemCreated, onItemChanged }: BoardCalendarViewProps) {
+export function BoardCalendarView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged }: BoardCalendarViewProps) {
   const now = new Date();
+  const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   const [month, setMonth] = useState<{ y: number; m: number }>({ y: now.getFullYear(), m: now.getMonth() });
   const [error, setError] = useState<string | null>(null);
   const [busyDay, setBusyDay] = useState<string | null>(null);
@@ -261,7 +264,7 @@ export function BoardCalendarView({ boardId, initialItems, initialFields, canEdi
                 ) : null}
                 <ul className="space-y-0.5">
                   {dayItems.slice(0, 3).map((it) => {
-                    const dot = (it.status ? STATUS_LOOKUP[it.status]?.color : null) ?? "#A1A1AA";
+                    const dot = (it.status ? statusLookup[it.status]?.color : null) ?? "#A1A1AA";
                     return (
                       <li key={it.id}>
                         <button

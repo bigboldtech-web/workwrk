@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { STATUS_LOOKUP, type BoardItemRow } from "@/lib/board-items-shared";
+import { makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 
 const WEEK_COUNT = 12;
@@ -34,6 +34,8 @@ interface DragState {
 interface BoardGanttViewProps {
   initialItems: BoardItemRow[];
   initialFields?: FieldDef[];
+  /** Per-List statuses (backbone #1) — drives the bar colors. */
+  statuses: StatusOption[];
   canEdit?: boolean;
   onOpenItem?: (itemId: string) => void;
   /** Called after a drag/resize PATCH succeeds so the canvas syncs
@@ -58,7 +60,8 @@ function shiftToIso(d: Date, deltaDays: number): string {
   return `${y}-${m}-${day}T00:00:00.000Z`;
 }
 
-export function BoardGanttView({ initialItems, initialFields, canEdit = false, onOpenItem, onItemChanged }: BoardGanttViewProps) {
+export function BoardGanttView({ initialItems, initialFields, statuses, canEdit = false, onOpenItem, onItemChanged }: BoardGanttViewProps) {
+  const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   const today = new Date();
   // Window anchor — start 2 weeks back from this week so "now" sits
   // about a sixth into the chart, with most space for what's ahead.
@@ -345,7 +348,7 @@ export function BoardGanttView({ initialItems, initialFields, canEdit = false, o
                 }
                 const leftPct = (dispStartCol / totalDays) * 100;
                 const widthPct = (dispSpan / totalDays) * 100;
-                const color = (item.status ? STATUS_LOOKUP[item.status]?.color : null) ?? "#94a3b8";
+                const color = (item.status ? statusLookup[item.status]?.color : null) ?? "#94a3b8";
                 return (
                   <div
                     key={item.id}

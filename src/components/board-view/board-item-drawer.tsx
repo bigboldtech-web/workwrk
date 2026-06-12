@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Trash2, X } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS, STATUS_LOOKUP, type BoardItemRow } from "@/lib/board-items-shared";
+import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker } from "./assignee-picker";
 import { FieldValue } from "./field-value";
@@ -34,6 +34,9 @@ interface BoardItemDrawerProps {
   /** Custom fields defined on the parent Board. Renders editor rows
    *  in the field grid; empty array means no custom fields. */
   fields?: FieldDef[];
+  /** Per-List statuses (backbone #1) — the parent board's own set.
+   *  Defaults to the canonical trio for callers without board context. */
+  statuses?: StatusOption[];
   onClose: () => void;
   onItemChanged?: (item: BoardItemRow) => void;
   onItemArchived?: (itemId: string) => void;
@@ -44,11 +47,13 @@ export function BoardItemDrawer({
   canEdit,
   currentUserId,
   fields,
+  statuses,
   onClose,
   onItemChanged,
   onItemArchived,
 }: BoardItemDrawerProps) {
   const customFields: FieldDef[] = fields ?? [];
+  const statusOptions: StatusOption[] = statuses ?? [...DEFAULT_STATUS_OPTIONS];
   const [item, setItem] = useState<BoardItemRow | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -204,6 +209,7 @@ export function BoardItemDrawer({
                   <Row label="Status">
                     <StatusPicker
                       value={item.status}
+                      statuses={statusOptions}
                       canEdit={canEdit}
                       onChange={(v) => patch({ status: v })}
                     />
@@ -302,7 +308,7 @@ export function BoardItemDrawer({
                 />
 
                 {/* Comments + Activity thread */}
-                <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} />
+                <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statusOptions} />
               </div>
             )}
           </div>
@@ -471,16 +477,18 @@ function DescriptionField({
 
 function StatusPicker({
   value,
+  statuses,
   canEdit,
   onChange,
 }: {
   value: string | null;
+  statuses: StatusOption[];
   canEdit: boolean;
   onChange: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const current = value ? STATUS_LOOKUP[value] : null;
+  const current = value ? statuses.find((o) => o.value === value) ?? null : null;
 
   useEffect(() => {
     if (!open) return;
@@ -515,7 +523,7 @@ function StatusPicker({
       </button>
       {open ? (
         <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
-          {DEFAULT_STATUS_OPTIONS.map((opt) => {
+          {statuses.map((opt) => {
             const active = opt.value === value;
             return (
               <button

@@ -18,7 +18,7 @@ import {
 import { createElement } from "react";
 import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
 import type { ViewType } from "@/generated/prisma";
-import { listBoardItems } from "@/lib/board-items";
+import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { canEditSpace } from "@/lib/space";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
@@ -107,6 +107,9 @@ export default async function BoardPage(props: {
     ? prefs.home.favoriteBoardIds.includes(board.id)
     : false;
   const initialFields = parseBoardSchema(board.schema).fields;
+  // Per-List statuses (backbone #1) — the board's own set, or the
+  // canonical default trio when Board.statuses is null.
+  const statuses = getBoardStatuses(board);
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -250,6 +253,7 @@ export default async function BoardPage(props: {
           viewConfig={(activeView?.config as Record<string, unknown> | null) ?? {}}
           initialItems={items}
           initialFields={initialFields}
+          statuses={statuses}
           canEdit={canEdit}
           currentUserId={u.id}
         />

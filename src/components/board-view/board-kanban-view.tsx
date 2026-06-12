@@ -2,7 +2,7 @@
 
 // BoardKanbanView — Phase 3c KANBAN renderer for studio-item Boards.
 //
-// One column per status option from DEFAULT_STATUS_OPTIONS. Cards
+// One column per status option from the board's own status set. Cards
 // inside a column show the title, owner avatar, and created date.
 // Native HTML5 drag-and-drop lets the user re-status a row by
 // dropping it into another column; uses optimistic update + refetch
@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, Plus, X } from "lucide-react";
-import { DEFAULT_STATUS_OPTIONS, STATUS_LOOKUP, type BoardItemRow } from "@/lib/board-items-shared";
+import { isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { PriorityFlag } from "./priority-picker";
@@ -29,13 +29,13 @@ interface BoardKanbanViewProps {
   /** Custom fields from Board.schema.fields — the first two choice-type
    *  fields render as chips on each card. */
   initialFields?: FieldDef[];
+  /** Per-List statuses (backbone #1) — one column per entry, in order. */
+  statuses: StatusOption[];
   canEdit: boolean;
   onOpenItem?: (itemId: string) => void;
 }
 
-const STATUS_ORDER = DEFAULT_STATUS_OPTIONS.map((o) => o.value);
-
-export function BoardKanbanView({ boardId, initialItems, initialFields, canEdit, onOpenItem }: BoardKanbanViewProps) {
+export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem }: BoardKanbanViewProps) {
   // Card chips show at most the first two choice-type custom fields —
   // keeps cards compact while surfacing the most pill-like data.
   const chipFields = useMemo(
@@ -49,17 +49,18 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, canEdit,
 
   useEffect(() => { setItems(initialItems); }, [initialItems]);
 
+  const statusOrder = useMemo(() => statuses.map((o) => o.value), [statuses]);
   const grouped = useMemo(() => {
     const map = new Map<string, BoardItemRow[]>();
-    for (const s of STATUS_ORDER) map.set(s, []);
-    // Any rows with statuses outside the default palette get bucketed
+    for (const s of statusOrder) map.set(s, []);
+    // Any rows with statuses outside the board's set get bucketed
     // into the first column so they don't disappear from the board.
     for (const row of items) {
-      const bucket = row.status && map.has(row.status) ? row.status : STATUS_ORDER[0];
-      map.get(bucket)!.push(row);
+      const bucket = row.status && map.has(row.status) ? row.status : statusOrder[0];
+      if (bucket) map.get(bucket)!.push(row);
     }
     return map;
-  }, [items]);
+  }, [items, statusOrder]);
 
   const refetch = useCallback(async () => {
     try {
@@ -119,8 +120,8 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, canEdit,
       ) : null}
 
       <div className="flex gap-3 overflow-x-auto pb-2">
-        {STATUS_ORDER.map((status) => {
-          const meta = STATUS_LOOKUP[status];
+        {statuses.map((meta) => {
+          const status = meta.value;
           const cards = grouped.get(status) ?? [];
           const isHover = hoverColumn === status;
           return (
@@ -173,6 +174,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, canEdit,
                     key={card.id}
                     card={card}
                     chipFields={chipFields}
+                    statuses={statuses}
                     canEdit={canEdit}
                     onDragStart={() => setDragId(card.id)}
                     onDragEnd={() => { setDragId(null); setHoverColumn(null); }}
@@ -201,6 +203,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, canEdit,
 function KanbanCard({
   card,
   chipFields,
+  statuses,
   canEdit,
   onDragStart,
   onDragEnd,
@@ -209,6 +212,7 @@ function KanbanCard({
 }: {
   card: BoardItemRow;
   chipFields: FieldDef[];
+  statuses: StatusOption[];
   canEdit: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -216,7 +220,9 @@ function KanbanCard({
   onOpen?: () => void;
 }) {
   const due = card.dueAt ? new Date(card.dueAt) : null;
-  const overdue = !!due && due < new Date() && card.status !== "DONE";
+  // Group-driven: any DONE/CLOSED-group status stops the overdue flag,
+  // not just the literal "DONE".
+  const overdue = !!due && due < new Date() && !isDoneStatus(statuses, card.status);
   const tags = card.tags ?? [];
   const fieldChips = chipFields.filter((f) => {
     const v = card.metadata?.[f.key];
