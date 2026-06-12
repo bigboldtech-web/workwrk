@@ -67,8 +67,9 @@ drawer/toast) · **Sub-options** (templates/sources) · **Status** (works/stub/n
 - **Dashboard** — "New dashboard" → create + open. **[NEEDS INPUT: widget set]**
 - **Whiteboard** — "New whiteboard" → create + open. **[NEEDS INPUT]**
 - **Database** — see §5. Creates a `DataTable` (+ optional Space) → opens the grid. **[NEEDS INPUT: column presets]**
-- **Create with AI / Super Agent** — **[NEEDS INPUT: what should these *do* from the menu — generate a
-  board/doc from a prompt? launch an agent run? — define the in-menu behavior]**
+- **Create with AI** — **founder: this creates a custom AI agent** — build/train your own agent that then
+  works per its config. (Detailed spec coming from founder.) Wire to the agents system (`/agents`).
+- **Super Agent** — **[NEEDS INPUT: relationship to Create-with-AI; what it does from the menu]**
 - **Import** — **[NEEDS INPUT: which sources — CSV, ClickUp, Asana, Trello, Sheets?]**
 - **Templates** — **[NEEDS INPUT: template gallery contents + categories]**
 

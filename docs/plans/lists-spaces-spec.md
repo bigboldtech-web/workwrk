@@ -64,6 +64,50 @@ in the space (the missing wire from tasks-spec §3).
 **Space templates** (e.g. Marketing/Advertising) — **founder will send next**; a Space template bundles
 Lists + their fields/statuses/views + docs + modules. Same Template Center, `kind=SPACE`.
 
+## 2b. Management (right-click) menus — Space / Folder / List
+
+Every hierarchy node has a "…" menu. ClickUp's are rich; ours are thin today.
+
+**Full option set (ClickUp) + our status:**
+| Option | Space | Folder | List | Our status |
+|---|:-:|:-:|:-:|---|
+| Favorite (Sidebar/Top, sections) | ✓ | ✓ | ✓ | ✅ (toggle; no sidebar/top sections) |
+| Rename | ✓ | ✓ | ✓ | ✅ |
+| Copy link | ✓ | ✓ | ✓ | ⚠️ missing |
+| Create new (▸ submenu) | ✓ | ✓ | ✓ | ⚠️ partial (per-space "+") |
+| Color & Icon / Folder color | ✓ | ✓ | ✓ | ✅ |
+| **Automations** | ✓ | ✓ | ✓ | ⚠️ (Automation Hub deferred) |
+| **Custom Fields** (opens field editor) | ✓ | ✓ | ✓ | ⚠️ open `FieldShelf` from here |
+| **Task statuses** (opens status editor) | ✓ | ✓ | ✓ | ⚠️ status editor not built (tasks-spec §3 P2) |
+| More (▸) | ✓ | ✓ | ✓ | ⚠️ |
+| **List Info** | – | – | ✓ | ⚠️ |
+| **Default task type** | – | – | ✓ | ⚠️ (needs ItemType — tasks-spec §2) |
+| **Email to List** | – | – | ✓ | ⚠️ inbound-email→Item |
+| Imports (▸) | ✓ | ✓ | ✓ | ⚠️ |
+| Templates (▸ save/browse) | ✓ | ✓ | ✓ | ⚠️ → Template Center |
+| Hide (Space only) | ✓ | – | – | ⚠️ stub |
+| Move | – | ✓ | ✓ | ⚠️ (re-parent folder/list) |
+| Duplicate | ✓ | ✓ | ✓ | ⚠️ missing |
+| Archive | ✓ | ✓ | ✓ | ✅ |
+| Delete | ✓ | ✓ | ✓ | ⚠️ (we soft-archive; hard delete TBD) |
+| **Sharing & Permissions** | ✓ | ✓ | ✓ | ⚠️ partial (board Share dialog exists) |
+
+Files: `space-more-menu.tsx`, `folder-more-menu.tsx`, `board-more-menu.tsx` (today: rename / icon&color /
+favorite / archive [+ share on board]). **Build:** expand all three to the full set, routing the heavy ones
+to existing systems — Custom Fields → `FieldShelf`; Task statuses → new status editor; Templates → Template
+Center; Automations → Automation Hub (deferred); add Copy link / Duplicate / Move / Hide / Sharing.
+
+### List group-status "…" menu (per status group in a List view)
+**Rename · New status · Edit statuses · Collapse group · Hide status · Select all · Collapse all groups ·
+Automate status.** Plus the **"Set up your List"** hint row: *Create new fields · Copy settings from another
+list · Get AI suggestions*. (Edit-statuses + Automate-status tie to tasks-spec §3 Phase 2 + Automation Hub.)
+
+### Space template bundle (Marketing Team Operations example)
+A **Space** template bundles: **Status groups** (multiple: COMPLETE/PLANNED/IN PROGRESS/CANCELLED/OPEN) ·
+**ClickApps** (6: Priorities, Tags, Time Estimates, Custom Fields, Dependency Warning, Multiple Assignees) ·
+**View types** (List/Doc/Whiteboard) · (also Lists/Folders/Docs/OKRs). Materialize path for Template Center
+`kind=SPACE`: create Space + workflow (statuses/modules/views) + child Lists + their fields/views + docs.
+
 ## 3. Hierarchy & "everything connects" (recap)
 
 `Space` (team/dept, owns workflow defaults + apps + permissions)
@@ -79,7 +123,10 @@ tasks-spec §3: statuses per-List, inheriting Space defaults.)
 2. **Per-List statuses wired from Space wizard** (shared with tasks-spec §3, build step 2).
 3. **Default permission** on Space + cascade of workflow defaults (views/statuses/modules) to new Lists.
 4. **Template Center `kind=LIST` and `kind=SPACE`** materialize paths (shared with tasks-spec §4 / Template Center).
-5. **Space templates** library (after founder sends the Marketing/Advertising example).
+5. **Space templates** library (Marketing Team Operations etc.) via Template Center `kind=SPACE`.
+6. **Expand the Space/Folder/List "…" menus** to the full ClickUp set (Copy link, Duplicate, Move, Hide,
+   Custom Fields → FieldShelf, Task statuses → status editor, Templates, Sharing & Permissions, List Info,
+   Default task type, Email to List); add the group-status "…" menu (rename/new/edit/hide/automate status).
 
 ## Open questions
 - Keep our **KRA-linking** in Space creation (PPMS bonus) — yes? (Recommend yes.)
