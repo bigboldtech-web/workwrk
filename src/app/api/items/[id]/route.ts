@@ -105,6 +105,8 @@ const patchSchema = z.object({
   // Task-system phase 2 — first-class priority + workspace tags.
   priority: z.enum(PRIORITY_OPTIONS.map((p) => p.value) as [string, ...string[]]).nullable().optional(),
   tagIds: z.array(z.string().min(1)).max(20).optional(),
+  // Task Types — re-skin this row as an ItemType (null = default).
+  itemTypeId: z.string().min(1).nullable().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

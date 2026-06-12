@@ -44,6 +44,8 @@ const createSchema = z.object({
   // Task-system phase 2 — first-class priority + workspace tags on create.
   priority: z.enum(PRIORITY_OPTIONS.map((p) => p.value) as [string, ...string[]]).nullable().optional(),
   tagIds: z.array(z.string().min(1)).max(20).optional(),
+  // Task Types — the ItemType to re-skin this row as (null = default).
+  itemTypeId: z.string().min(1).nullable().optional(),
   // Phase 72 — pass to create a subtask under the given parent.
   parentItemId: z.string().min(1).nullable().optional(),
 });
@@ -78,6 +80,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       startAt: parsed.data.startAt ?? null,
       dueAt: parsed.data.dueAt ?? null,
       priority: parsed.data.priority ?? null,
+      itemTypeId: parsed.data.itemTypeId ?? null,
       tagIds: parsed.data.tagIds,
       parentItemId: parsed.data.parentItemId ?? null,
       actorId: c.userId,

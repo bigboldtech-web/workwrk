@@ -117,6 +117,9 @@ export interface BoardItemRow {
   /** Task-system phase 2 — first-class priority (URGENT|HIGH|NORMAL|LOW),
    *  null = none. */
   priority?: string | null;
+  /** Task Types — the ItemType this row is re-skinned as. null = the
+   *  org's default type, resolved at render time. */
+  itemTypeId?: string | null;
   /** Task-system phase 2 — workspace Tags applied to this item via
    *  TagAssignment(BOARD_ITEM). Optional: cheaper fetch paths skip it. */
   tags?: ItemTag[];

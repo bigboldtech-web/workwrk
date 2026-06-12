@@ -61,6 +61,7 @@ function rowFrom(it: {
   startAt?: Date | null;
   dueAt?: Date | null;
   priority?: string | null;
+  itemTypeId?: string | null;
   parentItemId?: string | null;
   archivedAt: Date | null;
   createdAt: Date;
@@ -77,6 +78,7 @@ function rowFrom(it: {
     startAt: it.startAt ?? null,
     dueAt: it.dueAt ?? null,
     priority: it.priority ?? null,
+    itemTypeId: it.itemTypeId ?? null,
     parentItemId: it.parentItemId ?? null,
     archivedAt: it.archivedAt,
     createdAt: it.createdAt,
@@ -235,6 +237,8 @@ export interface CreateBoardItemInput {
   dueAt?: string | Date | null;
   /** Task-system phase 2 — URGENT|HIGH|NORMAL|LOW (case-insensitive). */
   priority?: string | null;
+  /** Task Types — the ItemType to re-skin this row as. null = default. */
+  itemTypeId?: string | null;
   /** Task-system phase 2 — workspace Tag ids to assign at create. */
   tagIds?: string[];
   /** Phase 72 — null = top-level item; set to a parent id to create a subtask. */
@@ -283,6 +287,7 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
       startAt: input.startAt == null ? null : new Date(input.startAt),
       dueAt: input.dueAt == null ? null : new Date(input.dueAt),
       priority: normalizePriority(input.priority),
+      itemTypeId: input.itemTypeId ?? null,
       metadata: (input.metadata ?? {}) as object,
       parentItemId: input.parentItemId ?? null,
     },
@@ -321,6 +326,8 @@ export interface UpdateBoardItemInput {
   dueAt?: string | Date | null;
   /** Task-system phase 2 — URGENT|HIGH|NORMAL|LOW or null to clear. */
   priority?: string | null;
+  /** Task Types — re-skin this row as an ItemType (null = default). */
+  itemTypeId?: string | null;
   /** Task-system phase 2 — full replacement set of workspace Tag ids. */
   tagIds?: string[];
 }
@@ -350,6 +357,7 @@ export async function updateBoardItem(
   if (patch.startAt !== undefined) data.startAt = patch.startAt === null ? null : new Date(patch.startAt);
   if (patch.dueAt !== undefined) data.dueAt = patch.dueAt === null ? null : new Date(patch.dueAt);
   if (patch.priority !== undefined) data.priority = normalizePriority(patch.priority);
+  if (patch.itemTypeId !== undefined) data.itemTypeId = patch.itemTypeId;
 
   const updated = await prisma.item.update({ where: { id: itemId }, data });
   const owner = updated.ownerId

@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { itemTypeIcon } from "@/lib/item-type-icons";
 import {
   X,
   ArrowDownRight,
@@ -20,9 +22,7 @@ import {
   Check,
   ListChecks,
   CircleDot,
-  Diamond,
-  ClipboardList,
-  MessageSquareText,
+  Settings as SettingsIcon,
   Loader2,
   Hourglass,
   GitFork,
@@ -41,14 +41,9 @@ import { TAUPE, taupeButton } from "@/components/ui/accent";
 
 // ── Task types ─────────────────────────────────────────────────────
 // No `type` column on Item — the chosen type is persisted into
-// Item.metadata.taskType. Each type re-skins the form to mirror ClickUp.
-type TaskTypeKey = "TASK" | "MILESTONE" | "FORM_RESPONSE" | "MEETING_NOTE";
-const TASK_TYPES: { key: TaskTypeKey; label: string; Icon: typeof CircleDot }[] = [
-  { key: "TASK", label: "Task", Icon: CircleDot },
-  { key: "MILESTONE", label: "Milestone", Icon: Diamond },
-  { key: "FORM_RESPONSE", label: "Form Response", Icon: ClipboardList },
-  { key: "MEETING_NOTE", label: "Meeting Note", Icon: MessageSquareText },
-];
+// Task Types — fetched from /api/item-types (org-level ItemType rows).
+// Item.itemTypeId stores the chosen type; null = the org default.
+type ItemTypeOpt = { id: string; singular: string; plural: string; icon: string; isDefault: boolean };
 
 // ── Statuses (resolved from the selected list's Space) ─────────────
 type StatusGroup = "ACTIVE" | "DONE" | "CLOSED";
@@ -192,7 +187,8 @@ export function CreateTaskModal() {
   // Core
   const [taskName, setTaskName] = useState("");
   const [description, setDescription] = useState("");
-  const [taskType, setTaskType] = useState<TaskTypeKey>("TASK");
+  const [itemTypes, setItemTypes] = useState<ItemTypeOpt[]>([]);
+  const [itemTypeId, setItemTypeId] = useState<string | null>(null);
   const [selectedList, setSelectedList] = useState<SelectedList | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string>("TO_DO");
 
@@ -245,7 +241,7 @@ export function CreateTaskModal() {
   const [tplMode, setTplMode] = useState<"root" | "use" | "instant" | "update" | "save">("root");
   const [tplNameDraft, setTplNameDraft] = useState("");
 
-  const activeType = TASK_TYPES.find((t) => t.key === taskType) ?? TASK_TYPES[0];
+  const activeType = itemTypes.find((t) => t.id === itemTypeId) ?? itemTypes.find((t) => t.isDefault) ?? itemTypes[0] ?? null;
 
   const statuses = useMemo<StatusDef[]>(() => {
     if (selectedList?.spaceId && statusCache[selectedList.spaceId]) return statusCache[selectedList.spaceId];
@@ -282,12 +278,18 @@ export function CreateTaskModal() {
       fetch("/api/boards?all=1", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { boards: [] })),
       fetch("/api/users?scope=all&limit=200", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { data: [] })),
       fetch("/api/item-templates", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { templates: [] })),
+      fetch("/api/item-types", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { types: [] })),
     ])
-      .then(([s, b, u, t]) => {
+      .then(([s, b, u, t, it]) => {
         setSpaces(Array.isArray(s.spaces) ? s.spaces : []);
         setBoards(Array.isArray(b.boards) ? b.boards : []);
         setPeople(Array.isArray(u.data) ? u.data : []);
         setTemplates(Array.isArray(t.templates) ? t.templates : []);
+        const types: ItemTypeOpt[] = Array.isArray(it.types) ? it.types : [];
+        setItemTypes(types);
+        // Default the picker to the org's default type unless a template
+        // already set one.
+        setItemTypeId((cur) => cur ?? types.find((x) => x.isDefault)?.id ?? null);
       })
       .catch(() => {})
       .finally(() => setLoadingLists(false));
@@ -331,12 +333,12 @@ export function CreateTaskModal() {
     setExtras([]);
     setTagDraft(""); setSubtaskDraft(""); setChecklistDraft("");
     if (!keepIdentity) {
-      setTaskType("TASK");
+      setItemTypeId(itemTypes.find((t) => t.isDefault)?.id ?? null);
       setSelectedList(null);
       setAssigneeId(null);
       setFollowers(me ? [me.id] : []);
     }
-  }, [me]);
+  }, [me, itemTypes]);
 
   const resetAndClose = useCallback(() => {
     clearFields(false);
@@ -421,7 +423,7 @@ export function CreateTaskModal() {
   };
 
   function buildMetadata(): Record<string, unknown> {
-    const md: Record<string, unknown> = { taskType };
+    const md: Record<string, unknown> = {};
     if (description.trim()) md.description = description.trim();
     if (followers.length) md.followers = followers;
     const mins = (parseInt(timeEstimate.h || "0", 10) || 0) * 60 + (parseInt(timeEstimate.m || "0", 10) || 0);
@@ -467,7 +469,7 @@ export function CreateTaskModal() {
   // ── Templates ──
   function serializeConfig(): Record<string, unknown> {
     return {
-      taskType,
+      itemTypeId,
       status: selectedStatus,
       description: description.trim() || undefined,
       priority,
@@ -479,7 +481,7 @@ export function CreateTaskModal() {
   }
 
   const applyTemplate = (cfg: Record<string, unknown>) => {
-    if (typeof cfg.taskType === "string") setTaskType(cfg.taskType as TaskTypeKey);
+    if (typeof cfg.itemTypeId === "string") setItemTypeId(cfg.itemTypeId as string);
     if (typeof cfg.status === "string") setSelectedStatus(cfg.status as string);
     setDescription(typeof cfg.description === "string" ? cfg.description : "");
     setPriority((cfg.priority as PriorityKey) ?? null);
@@ -535,7 +537,7 @@ export function CreateTaskModal() {
   // Build a create-item payload straight from a template config (used by
   // "Create instantly from template" so we don't wait on async state).
   function payloadFromConfig(cfg: Record<string, unknown>, title: string) {
-    const md: Record<string, unknown> = { taskType: (cfg.taskType as string) ?? "TASK" };
+    const md: Record<string, unknown> = {};
     if (cfg.description) md.description = cfg.description;
     const te = (cfg.timeEstimate as { h?: string; m?: string } | undefined) ?? {};
     const mins = (parseInt(te.h || "0", 10) || 0) * 60 + (parseInt(te.m || "0", 10) || 0);
@@ -551,6 +553,7 @@ export function CreateTaskModal() {
       status,
       groupKey: status,
       priority: typeof cfg.priority === "string" ? cfg.priority : null,
+      itemTypeId: typeof cfg.itemTypeId === "string" ? cfg.itemTypeId : undefined,
       tagIds,
       metadata: md,
     };
@@ -609,6 +612,7 @@ export function CreateTaskModal() {
           startAt: startAt ? startAt.toISOString() : null,
           dueAt: dueAt ? dueAt.toISOString() : null,
           priority: priority ?? null,
+          itemTypeId: itemTypeId ?? undefined,
           tagIds: tags.map((t) => t.id),
           metadata: buildMetadata(),
         }),
@@ -651,7 +655,7 @@ export function CreateTaskModal() {
       setSubmitting(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedList, taskName, selectedStatus, assigneeId, startAt, dueAt, subtasks, taskType, description, priority, tags, followers, timeEstimate, checklist]);
+  }, [selectedList, taskName, selectedStatus, assigneeId, startAt, dueAt, subtasks, itemTypeId, description, priority, tags, followers, timeEstimate, checklist]);
 
   type Variant = "default" | "open" | "another" | "duplicate";
   const handleCreate = useCallback(async (variant: Variant) => {
@@ -681,8 +685,8 @@ export function CreateTaskModal() {
 
   if (!createTaskOpen) return null;
 
-  const TypeIcon = activeType.Icon;
-  const placeholder = taskType === "TASK" ? "Task Name or type '/' for commands" : `${activeType.label} Name`;
+  const TypeIcon = itemTypeIcon(activeType?.icon);
+  const placeholder = !activeType || activeType.isDefault ? "Task Name or type '/' for commands" : `${activeType.singular} Name`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -761,23 +765,27 @@ export function CreateTaskModal() {
             <div className="relative">
               <Chip onClick={() => setOpenMenu(openMenu === "type" ? null : "type")} active>
                 <TypeIcon size={14} className="text-zinc-500" />
-                {activeType.label}
+                {activeType?.singular ?? "Task"}
                 <ChevronDown size={12} className="ml-0.5 opacity-70" />
               </Chip>
               {openMenu === "type" && (
-                <div className="absolute top-full left-0 mt-1 w-[230px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[70] py-2">
+                <div className="absolute top-full left-0 mt-1 w-[240px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[70] py-2 max-h-[320px] overflow-y-auto">
                   <div className="px-3 pb-1.5 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">Task Types</div>
-                  {TASK_TYPES.map((t) => {
-                    const Icon = t.Icon;
+                  {itemTypes.map((t) => {
+                    const Icon = itemTypeIcon(t.icon);
+                    const selected = (itemTypeId ?? activeType?.id) === t.id;
                     return (
-                      <button key={t.key} type="button" onClick={() => { setTaskType(t.key); setOpenMenu(null); }} className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] ${taskType === t.key ? "bg-zinc-50 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"}`}>
+                      <button key={t.id} type="button" onClick={() => { setItemTypeId(t.id); setOpenMenu(null); }} className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] ${selected ? "bg-zinc-50 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"}`}>
                         <Icon className="w-4 h-4 text-zinc-500" />
-                        <span className="flex-1">{t.label}</span>
-                        {t.key === "TASK" && <span className="text-[11px] text-zinc-400">(default)</span>}
-                        {taskType === t.key && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
+                        <span className="flex-1 truncate">{t.singular}</span>
+                        {t.isDefault && <span className="text-[11px] text-zinc-400">(default)</span>}
+                        {selected && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
                       </button>
                     );
                   })}
+                  <Link href="/settings/task-types" onClick={() => setOpenMenu(null)} className="mt-1 flex items-center gap-2 px-3 py-2 text-[12px] text-zinc-500 hover:bg-zinc-50 border-t border-zinc-100">
+                    <SettingsIcon className="w-3.5 h-3.5" /> Manage task types
+                  </Link>
                 </div>
               )}
             </div>
@@ -1224,7 +1232,7 @@ export function CreateTaskModal() {
             <div className="flex items-center rounded-lg shadow-sm overflow-visible ml-1 relative">
               <button type="button" onClick={() => handleCreate("default")} disabled={submitting} className={`px-4 h-[34px] text-[13px] rounded-l-lg inline-flex items-center gap-2 ${taupeButton}`}>
                 {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                Create {activeType.label}
+                Create {activeType?.singular ?? "Task"}
               </button>
               <button type="button" onClick={() => setOpenMenu(openMenu === "createMenu" ? null : "createMenu")} disabled={submitting} className={`px-2 h-[34px] flex items-center justify-center rounded-r-lg border-l border-white/25 ${taupeButton}`}>
                 {openMenu === "createMenu" ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
