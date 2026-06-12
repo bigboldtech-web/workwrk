@@ -19,10 +19,11 @@ import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Lock, Globe, Archive, Settings,
   Share2, EyeOff, Loader2, ChevronRight, Star, Link as LinkIcon,
-  Plus, Zap, Tag, CircleDot, Download, Files, ArrowRightLeft, Copy, Trash2,
+  Plus, Zap, Tag, CircleDot, Download, Files, ArrowRightLeft, Copy, Trash2, Save,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
+import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
 
 interface SpaceRowLike {
@@ -111,6 +112,7 @@ function SpaceMoreMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const { openTemplateCenter } = useOsShell();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(space.name);
   const [busy, setBusy] = useState<string | null>(null);
@@ -158,6 +160,24 @@ function SpaceMoreMenu({
       toast("Couldn't copy");
     }
   }, [space, toast]);
+
+  const saveAsTemplate = useCallback(async () => {
+    setBusy("save-template");
+    try {
+      const res = await fetch("/api/template-center/save-as", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: "SPACE", spaceId: space.id }),
+      });
+      if (!res.ok) throw new Error();
+      toast(`Saved “${space.name}” as a template`);
+      onClose();
+    } catch {
+      toast("Couldn't save template");
+    } finally {
+      setBusy(null);
+    }
+  }, [space.id, space.name, toast, onClose]);
 
   const patch = async (body: Record<string, unknown>, kind: string) => {
     setBusy(kind);
@@ -335,7 +355,8 @@ function SpaceMoreMenu({
       <div className="h-px bg-zinc-100 my-1" />
 
       <MenuItem Icon={Download}       label="Imports"   submenu disabled />
-      <MenuItem Icon={Files}          label="Templates" submenu disabled />
+      <MenuItem Icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ applyContext: { spaceId: space.id } }); }} />
+      <MenuItem Icon={Save}           label="Save as template" busy={busy === "save-template"} onClick={saveAsTemplate} />
       <MenuItem Icon={ArrowRightLeft} label="Move"      submenu disabled />
       <MenuItem Icon={Copy}           label="Duplicate" disabled />
       <MenuItem Icon={Settings}       label="Space settings" submenu disabled />

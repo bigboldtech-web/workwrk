@@ -32,10 +32,28 @@ import { OsSidekickPanel } from "./sidekick-panel";
 import { SetStatusModal } from "./set-status-modal";
 import { CreateTaskModal } from "./create-task-modal";
 import { CreateListModal } from "./create-list-modal";
+import { TemplateCenter } from "@/components/templates/template-center";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
   return <CustomizePanel open={customizeOpen} onOpenChange={setCustomizeOpen} />;
+}
+
+function TemplateCenterMount() {
+  const { templateCenterOpen, templateCenterOpts, closeTemplateCenter, openCreateTask } = useOsShell();
+  return (
+    <TemplateCenter
+      open={templateCenterOpen}
+      onClose={closeTemplateCenter}
+      kind={templateCenterOpts?.kind}
+      applyContext={templateCenterOpts?.applyContext}
+      onApplied={(result) => {
+        // A TASK template hands off to the create-task modal, which has
+        // its own template picker for filling the task config.
+        if (result.kind === "TASK") openCreateTask();
+      }}
+    />
+  );
 }
 
 export function OsShell({ children }: { children: React.ReactNode }) {
@@ -63,6 +81,7 @@ export function OsShell({ children }: { children: React.ReactNode }) {
           <QuickCaptureHandler />
           <CreateTaskModal />
           <CreateListModal />
+          <TemplateCenterMount />
         </div>
       </OsToastProvider>
     </OsShellProvider>

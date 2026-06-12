@@ -207,7 +207,7 @@ interface CreateMenuProps {
 }
 
 export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMenuProps) {
-  const { openCreateTask, openCreateList, openCustomize } = useOsShell();
+  const { openCreateTask, openCreateList, openCustomize, openTemplateCenter } = useOsShell();
   const { toast } = useOsToast();
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -457,7 +457,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                 </button>
                 <button
                   type="button"
-                  onClick={() => run(() => router.push("/templates"))}
+                  onClick={() => run(() => openTemplateCenter())}
                   className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50"
                 >
                   <Rocket className="h-4 w-4 text-zinc-500" />

@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { taupeButton } from "@/components/ui/accent";
 
 export function CreateListModal() {
-  const { createListOpen, closeCreateList } = useOsShell();
+  const { createListOpen, closeCreateList, openTemplateCenter } = useOsShell();
   const [listName, setListName] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const router = useRouter();
@@ -114,8 +114,9 @@ export function CreateListModal() {
 
         {/* Footer */}
         <div className="px-5 py-4 flex items-center justify-between bg-white mt-2 pb-6">
-          <button 
+          <button
             type="button"
+            onClick={() => { closeCreateList(); openTemplateCenter({ kind: "LIST" }); }}
             className="px-4 py-2 text-[13px] font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 transition-colors"
           >
             Use Templates

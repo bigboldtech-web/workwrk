@@ -137,3 +137,51 @@ export async function applySpaceTemplate(
 
   return { spaceId: space.id, slug: space.slug };
 }
+
+// ── Snapshot existing entities into template payloads ──────────────
+// Powers "Save as template" from a List or Space.
+
+/** Snapshot a Board's structure (statuses, fields, views) into a LIST
+ *  payload. Returns null if the board is missing. Items are intentionally
+ *  NOT captured — templates seed structure, not a board's live work. */
+export async function snapshotBoard(boardId: string): Promise<{ name: string; payload: ListTemplatePayload } | null> {
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    include: { views: { orderBy: { displayOrder: "asc" } } },
+  });
+  if (!board) return null;
+  const schema = (board.schema ?? {}) as { fields?: FieldDef[] };
+  const defaultView = board.views.find((v) => v.isDefault)?.type ?? board.views[0]?.type ?? "TABLE";
+  const payload: ListTemplatePayload = {
+    icon: board.icon ?? undefined,
+    color: board.color ?? undefined,
+    statuses: Array.isArray(board.statuses) ? (board.statuses as unknown as StatusOption[]) : undefined,
+    fields: Array.isArray(schema.fields) ? schema.fields : undefined,
+    views: board.views.map((v) => ({ type: v.type, name: v.name, config: (v.config ?? {}) as Record<string, unknown> })),
+    defaultView,
+  };
+  return { name: board.name, payload };
+}
+
+/** Snapshot a Space (its workflow settings + each child Board's structure)
+ *  into a SPACE payload. Returns null if the space is missing. */
+export async function snapshotSpace(spaceId: string): Promise<{ name: string; payload: SpaceTemplatePayload } | null> {
+  const space = await prisma.space.findUnique({
+    where: { id: spaceId },
+    include: { boards: { where: { archivedAt: null }, select: { id: true } } },
+  });
+  if (!space) return null;
+  const settings = (space.settings ?? {}) as { workflow?: Record<string, unknown> };
+  const lists: Array<{ name: string } & ListTemplatePayload> = [];
+  for (const b of space.boards) {
+    const snap = await snapshotBoard(b.id);
+    if (snap) lists.push({ name: snap.name, ...snap.payload });
+  }
+  const payload: SpaceTemplatePayload = {
+    icon: space.icon ?? undefined,
+    color: space.color ?? undefined,
+    workflow: settings.workflow,
+    lists,
+  };
+  return { name: space.name, payload };
+}

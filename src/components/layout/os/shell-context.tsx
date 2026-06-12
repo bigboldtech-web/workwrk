@@ -26,6 +26,15 @@ function ensureAlwaysPinned(keys: string[]): string[] {
 
 export type Lens = "me" | "we";
 
+/** Options for opening the Template Center. `kind` scopes the browser to
+ *  one template type (e.g. LIST from the create-list modal); `applyContext`
+ *  carries the target Space for applying a LIST template inline. */
+export type TemplateCenterKind = "TASK" | "LIST" | "SPACE" | "FOLDER" | "DOC" | "VIEW" | "WHITEBOARD";
+export type TemplateCenterOpts = {
+  kind?: TemplateCenterKind;
+  applyContext?: { spaceId?: string };
+};
+
 /** Board the create-task modal should preselect as its destination
  *  list (mirrors the modal's SelectedList shape). */
 export type CreateTaskPreselect = {
@@ -105,6 +114,14 @@ type ShellState = {
   createListOpen: boolean;
   openCreateList: () => void;
   closeCreateList: () => void;
+
+  // 🆕 Template Center — the OS-wide template browser/apply modal.
+  // Mounted once at OsShell level; opened from the "+" menu, the
+  // create-list/space modals ("Use Templates"), and "…" context menus.
+  templateCenterOpen: boolean;
+  templateCenterOpts: TemplateCenterOpts | null;
+  openTemplateCenter: (opts?: TemplateCenterOpts) => void;
+  closeTemplateCenter: () => void;
 
   // 🆕 2026-06-03 — App-switcher state (ClickUp-style two-column nav).
   // activeAppKey drives which "app" (Home/Planner/Teams/…) the
@@ -193,6 +210,8 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [createTaskPreselect, setCreateTaskPreselect] = useState<CreateTaskPreselect | null>(null);
   const [createListOpen, setCreateListOpen] = useState(false);
+  const [templateCenterOpen, setTemplateCenterOpen] = useState(false);
+  const [templateCenterOpts, setTemplateCenterOpts] = useState<TemplateCenterOpts | null>(null);
   const [lens, setLensState] = useState<Lens>("me");
   const [openItem, setOpenItem] = useState<OpenItem | null>(null);
   const [rowVersions, setRowVersions] = useState<Record<string, number>>({});
@@ -403,6 +422,14 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const openCreateList = useCallback(() => setCreateListOpen(true), []);
   const closeCreateList = useCallback(() => setCreateListOpen(false), []);
+  const openTemplateCenter = useCallback((opts?: TemplateCenterOpts) => {
+    setTemplateCenterOpts(opts ?? null);
+    setTemplateCenterOpen(true);
+  }, []);
+  const closeTemplateCenter = useCallback(() => {
+    setTemplateCenterOpen(false);
+    setTemplateCenterOpts(null);
+  }, []);
   const openItemDrawer = useCallback((it: OpenItem) => setOpenItem(it), []);
   const closeItemDrawer = useCallback(() => setOpenItem(null), []);
   const bumpRowVersion = useCallback((moduleId: string) => {
@@ -481,6 +508,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
       createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect,
       createListOpen, openCreateList, closeCreateList,
+      templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter,
       lens, setLens,
       openItem, openItemDrawer, closeItemDrawer,
       bumpRowVersion, rowVersion,
@@ -494,7 +522,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedNotifications, setMutedNotifications,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

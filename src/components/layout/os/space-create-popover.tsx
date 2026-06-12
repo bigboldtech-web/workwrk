@@ -13,6 +13,7 @@ import {
   Download, LayoutTemplate, ChevronRight, Loader2, Database,
 } from "lucide-react";
 import { useOsToast } from "./toast";
+import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
 
 interface Props {
@@ -105,6 +106,7 @@ function SpaceCreateMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const { openTemplateCenter } = useOsShell();
   const [busyKind, setBusyKind] = useState<string | null>(null);
 
   const stub = (label: string) => () => toast(`${label} creation coming soon`);
@@ -232,7 +234,7 @@ function SpaceCreateMenu({
       <MenuItem
         Icon={LayoutTemplate}
         label="Templates"
-        onClick={stub("Templates")}
+        onClick={() => { onCreated?.(); openTemplateCenter({ applyContext: { spaceId } }); }}
       />
     </div>
   );

@@ -15,10 +15,11 @@ import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Share2, Archive, Loader2, Star,
   Link as LinkIcon, Plus, Zap, Tag, CircleDot,
-  Download, Files, ArrowRightLeft, Copy, Trash2, ChevronRight,
+  Download, Files, ArrowRightLeft, Copy, Trash2, ChevronRight, Save,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
+import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
 
 interface BoardRowLike {
@@ -102,6 +103,7 @@ function BoardMoreMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const { openTemplateCenter } = useOsShell();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(board.name);
   const [busy, setBusy] = useState<string | null>(null);
@@ -139,6 +141,24 @@ function BoardMoreMenu({
       setStarred(starred);
     }
   }, [board.id, starred]);
+
+  const saveAsTemplate = useCallback(async () => {
+    setBusy("save-template");
+    try {
+      const res = await fetch("/api/template-center/save-as", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: "LIST", boardId: board.id }),
+      });
+      if (!res.ok) throw new Error();
+      toast(`Saved “${board.name}” as a template`);
+      onClose();
+    } catch {
+      toast("Couldn't save template");
+    } finally {
+      setBusy(null);
+    }
+  }, [board.id, board.name, toast, onClose]);
 
   const copyLink = useCallback(async () => {
     try {
@@ -312,7 +332,8 @@ function BoardMoreMenu({
       <div className="h-px bg-zinc-100 my-1" />
 
       <Item Icon={Download}       label="Imports"   submenu disabled />
-      <Item Icon={Files}          label="Templates" submenu disabled />
+      <Item Icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ kind: "LIST" }); }} />
+      <Item Icon={Save}           label="Save as template" busy={busy === "save-template"} onClick={saveAsTemplate} />
       <Item Icon={ArrowRightLeft} label="Move"      submenu disabled />
       <Item Icon={Copy}           label="Duplicate" disabled />
       <Item Icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />

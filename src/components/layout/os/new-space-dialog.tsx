@@ -16,6 +16,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Info, Users } from "lucide-react";
+import { useOsShell } from "./shell-context";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { SPACE_COLOR_PALETTE } from "./space-icon-catalog";
 import { SpaceWizardStep2, type Step2SubScreen, type UserOption, type KraOption } from "./space-wizard-step2";
@@ -226,6 +227,7 @@ function Step1({
   onCancel: () => void;
   onContinue: () => void;
 }) {
+  const { openTemplateCenter } = useOsShell();
   const showNameError = error === "Space name is required";
 
   return (
@@ -317,9 +319,7 @@ function Step1({
       <div className="px-6 py-4 mt-2 border-t border-border flex items-center justify-between">
         <button
           type="button"
-          onClick={() => {
-            /* Templates gallery — coming soon */
-          }}
+          onClick={() => { onCancel(); openTemplateCenter({ kind: "SPACE" }); }}
           className="text-[12.5px] text-muted hover:text-foreground transition-colors"
         >
           Use Templates
