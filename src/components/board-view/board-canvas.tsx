@@ -18,6 +18,8 @@ import { BoardCalendarView } from "./board-calendar-view";
 import { BoardGanttView } from "./board-gantt-view";
 import { BoardChartView } from "./board-chart-view";
 import { BoardDashboardView } from "./board-dashboard-view";
+import { BoardFormView } from "./board-form-view";
+import { BoardDocView } from "./board-doc-view";
 import { BoardItemDrawer } from "./board-item-drawer";
 import { BoardFilterBar, applyFilters, filtersActive, parseFilters, type BoardFilters } from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
@@ -224,6 +226,10 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "DASHBOARD" ? (
         <BoardDashboardView initialItems={filteredItems} statuses={statuses} />
+      ) : viewType === "FORM" ? (
+        <BoardFormView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
+      ) : viewType === "DOC" ? (
+        <BoardDocView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
       ) : (
         <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center bg-white">
           <div className="text-base font-medium mb-1">
