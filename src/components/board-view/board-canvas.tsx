@@ -22,6 +22,9 @@ import { BoardFormView } from "./board-form-view";
 import { BoardDocView } from "./board-doc-view";
 import { BoardFileGalleryView } from "./board-file-gallery-view";
 import { BoardWorkloadView } from "./board-workload-view";
+import { BoardTimelineView } from "./board-timeline-view";
+import { BoardMapView } from "./board-map-view";
+import { BoardWhiteboardView } from "./board-whiteboard-view";
 import { BoardItemDrawer } from "./board-item-drawer";
 import { BoardFilterBar, applyFilters, filtersActive, parseFilters, type BoardFilters } from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
@@ -241,6 +244,22 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           variant={viewConfig?.variant === "team" ? "team" : "workload"}
           onOpenItem={(id) => setOpenItemId(id)}
         />
+      ) : viewType === "TIMELINE" ? (
+        <BoardTimelineView
+          initialItems={filteredItems}
+          statuses={statuses}
+          onOpenItem={(id) => setOpenItemId(id)}
+        />
+      ) : viewType === "MAP" ? (
+        <BoardMapView
+          viewConfig={viewConfig}
+          initialItems={filteredItems}
+          initialFields={fields}
+          statuses={statuses}
+          onOpenItem={(id) => setOpenItemId(id)}
+        />
+      ) : viewType === "WHITEBOARD" ? (
+        <BoardWhiteboardView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
       ) : (
         <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center bg-white">
           <div className="text-base font-medium mb-1">
