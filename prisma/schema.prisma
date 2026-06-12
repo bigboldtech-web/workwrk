@@ -773,6 +773,28 @@ enum TemplateComplexity {
   ADVANCED
 }
 
+// ── Task Types (ClickUp parity) ────────────────────────────────────
+// An org-level, presentational re-skin of an Item (Task / Milestone /
+// Bug / Deal …). Item.itemTypeId points here. NOT a replacement for our
+// first-class OKR/KRA/KPI/User models — those stay dedicated; an Item
+// may *link* to them via EntityLink rather than being re-typed into them.
+model ItemType {
+  id             String   @id @default(cuid())
+  organizationId String
+  singular       String
+  plural         String
+  icon           String   @default("CircleDot") // lucide icon name
+  description    String?
+  category       String?
+  isDefault      Boolean  @default(false) // the org's default type for new tasks
+  builtIn        Boolean  @default(false) // seeded (Task/Milestone/Form Response/Meeting Note)
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
 model PasswordResetToken {
   id        String   @id @default(cuid())
   token     String   @unique
@@ -4830,6 +4852,9 @@ model Item {
   // Phase 58 date hoist). Values: URGENT | HIGH | NORMAL | LOW;
   // null = no priority (ClickUp default). Plain string like `status`.
   priority       String?
+  // 🆕 Task Types — presentational re-skin (Task/Milestone/Bug/Deal…).
+  // null = the org's default type. Migrated from metadata.taskType.
+  itemTypeId     String?
   metadata       Json         @default("{}")
   // 🆕 Phase 72 — subtask self-relation. Top-level items have parentItemId
   // = null; subtasks point to their parent. Cascade delete so removing
@@ -4847,6 +4872,7 @@ model Item {
   @@index([boardId, priority])
   @@index([boardId, parentItemId])
   @@index([itemType])
+  @@index([itemTypeId])
   @@index([ownerId])
 }
 
