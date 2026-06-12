@@ -26,7 +26,7 @@ type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | 
 type RollupFn = "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" | "CONCAT";
 
 type Column = {
-  id: string; type: ColType; label: string; options?: string[]; formula?: string;
+  id: string; type: ColType; label: string; options?: string[]; formula?: string; width?: number;
   // Relational (Stackby-style)
   linkTableId?: string;   // link → target DataTable
   linkColumnId?: string;  // lookup/rollup → which link column on THIS table to follow
@@ -83,6 +83,9 @@ function rowTitle(row: ApiRow | undefined, titleColId: string): string {
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
 
+// Sticky header cells stay pinned while the grid body scrolls.
+const STICKY_TH: React.CSSProperties = { position: "sticky", top: 0, zIndex: 3, background: "#fff" };
+
 export default function TableEditorPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -110,6 +113,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [configColId, setConfigColId] = useState<string | null>(null);
   // Org users (for Person columns), lazy-loaded when one exists.
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
+  // Column drag-reorder + resize.
+  const [dragColId, setDragColId] = useState<string | null>(null);
+  const resizeRef = useRef<{ colId: string; startX: number; startW: number } | null>(null);
 
   useEffect(() => { void params.then((p) => setTableId(p.id)); }, [params]);
 
@@ -296,6 +302,43 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const cols = table.columns.filter((c) => c.id !== colId);
     setTable({ ...table, columns: cols });
     void persistColumns(cols);
+  }
+
+  // Drag-to-reorder columns (handle = the column-type icon).
+  function moveColumn(fromId: string, toId: string) {
+    if (!table || fromId === toId) return;
+    const cols = [...table.columns];
+    const from = cols.findIndex((c) => c.id === fromId);
+    const to = cols.findIndex((c) => c.id === toId);
+    if (from < 0 || to < 0) return;
+    const [moved] = cols.splice(from, 1);
+    cols.splice(to, 0, moved);
+    setTable({ ...table, columns: cols });
+    void persistColumns(cols);
+  }
+
+  // Column resize — width persisted on the column (optimistic update while
+  // dragging; persist once on release).
+  function setColumnWidthLocal(colId: string, width: number) {
+    setTable((prev) => prev ? { ...prev, columns: prev.columns.map((c) => c.id === colId ? { ...c, width } : c) } : prev);
+  }
+  function startResize(e: React.MouseEvent, colId: string) {
+    e.preventDefault();
+    const col = table?.columns.find((c) => c.id === colId);
+    resizeRef.current = { colId, startX: e.clientX, startW: col?.width ?? 160 };
+    const onMove = (ev: MouseEvent) => {
+      const st = resizeRef.current;
+      if (!st) return;
+      setColumnWidthLocal(st.colId, Math.max(80, st.startW + (ev.clientX - st.startX)));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      resizeRef.current = null;
+      setTable((prev) => { if (prev) void persistColumns(prev.columns); return prev; });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   }
 
   async function addRow() {
@@ -634,12 +677,25 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         <table className="dtbl__grid">
           <thead>
             <tr>
-              <th className="dtbl__rowhandle" />
-              <th className="dtbl__rowexpand" />
+              <th className="dtbl__rowhandle" style={STICKY_TH} />
+              <th className="dtbl__rowexpand" style={STICKY_TH} />
               {table.columns.map((c, colIndex) => (
-                <th key={c.id} className="dtbl__col">
-                  <div className="dtbl__col-head">
-                    <span className="dtbl__col-icon" title={`Column ${columnLetter(colIndex)}`}>{COL_ICON[c.type]}</span>
+                <th
+                  key={c.id}
+                  className="dtbl__col"
+                  style={{ ...STICKY_TH, ...(c.width ? { width: c.width, minWidth: c.width } : {}), position: "sticky", opacity: dragColId === c.id ? 0.5 : 1 }}
+                  onDragOver={(e) => { if (dragColId) e.preventDefault(); }}
+                  onDrop={(e) => { e.preventDefault(); if (dragColId) moveColumn(dragColId, c.id); setDragColId(null); }}
+                >
+                  <div className="dtbl__col-head" style={{ position: "relative" }}>
+                    <span
+                      className="dtbl__col-icon"
+                      title={`Column ${columnLetter(colIndex)} · drag to reorder`}
+                      draggable
+                      onDragStart={() => setDragColId(c.id)}
+                      onDragEnd={() => setDragColId(null)}
+                      style={{ cursor: "grab" }}
+                    >{COL_ICON[c.type]}</span>
                     <input
                       type="text"
                       value={c.label}
@@ -653,6 +709,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                       <button type="button" className="dtbl__col-del" onClick={() => setConfigColId(c.id)} title="Configure relation"><Link2 /></button>
                     ) : null}
                     <button type="button" className="dtbl__col-del" onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
+                    {/* Resize handle */}
+                    <span
+                      onMouseDown={(e) => startResize(e, c.id)}
+                      title="Drag to resize"
+                      style={{ position: "absolute", right: -4, top: 0, bottom: 0, width: 8, cursor: "col-resize" }}
+                    />
                   </div>
                 </th>
               ))}
@@ -682,7 +744,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                   <button type="button" onClick={() => setActiveRowId(r.id)} title="Open row"><ChevronRight /></button>
                 </td>
                 {table.columns.map((c, colIndex) => (
-                  <td key={c.id} className="dtbl__cell">
+                  <td key={c.id} className="dtbl__cell" style={c.width ? { width: c.width, minWidth: c.width, maxWidth: c.width } : undefined}>
                     {c.type === "formula" ? (
                       <FormulaCell value={formulaEngine.cellValue(colIndex, rowIndexById.get(r.id) ?? 0)} />
                     ) : c.type === "link" ? (
