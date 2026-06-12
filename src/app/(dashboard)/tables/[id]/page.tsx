@@ -14,27 +14,28 @@ import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
   LayoutGrid, Columns, ChevronLeft, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock,
+  Globe, Lock, Sigma,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { makeFormulaEngine, columnLetter } from "@/lib/sheet-formula";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
-type ColType = "short_text" | "long_text" | "number" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email";
+type ColType = "short_text" | "long_text" | "number" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula";
 
-type Column = { id: string; type: ColType; label: string; options?: string[] };
+type Column = { id: string; type: ColType; label: string; options?: string[]; formula?: string };
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; rowCount: number; isPublic?: boolean };
 type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
 const COL_LABEL: Record<ColType, string> = {
   short_text: "Short text", long_text: "Long text", number: "Number",
   select: "Single choice", multi_select: "Multiple choice", date: "Date",
-  checkbox: "Checkbox", url: "URL", email: "Email",
+  checkbox: "Checkbox", url: "URL", email: "Email", formula: "Formula",
 };
 
 const COL_ICON: Record<ColType, React.ReactNode> = {
   short_text: <Type />, long_text: <AlignLeft />, number: <Hash />,
   select: <List />, multi_select: <List />, date: <CalIcon />,
-  checkbox: <CheckSquare />, url: <LinkIcon />, email: <AtSign />,
+  checkbox: <CheckSquare />, url: <LinkIcon />, email: <AtSign />, formula: <Sigma />,
 };
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
@@ -94,7 +95,28 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   function addColumn(type: ColType) {
     if (!table) return;
-    const cols = [...table.columns, { id: newId(), type, label: COL_LABEL[type], ...(type === "select" || type === "multi_select" ? { options: ["Option 1"] } : {}) }];
+    let formula: string | undefined;
+    if (type === "formula") {
+      const f = window.prompt("Formula (e.g. =A+B, =SUM(C), =A1+B2):", "=");
+      if (f == null) return; // cancelled
+      formula = f.trim();
+    }
+    const cols = [...table.columns, {
+      id: newId(), type, label: COL_LABEL[type],
+      ...(type === "select" || type === "multi_select" ? { options: ["Option 1"] } : {}),
+      ...(formula !== undefined ? { formula } : {}),
+    }];
+    setTable({ ...table, columns: cols });
+    void persistColumns(cols);
+  }
+
+  function editFormula(colId: string) {
+    if (!table) return;
+    const col = table.columns.find((c) => c.id === colId);
+    if (!col) return;
+    const f = window.prompt("Edit formula:", col.formula ?? "=");
+    if (f == null) return;
+    const cols = table.columns.map((c) => c.id === colId ? { ...c, formula: f.trim() } : c);
     setTable({ ...table, columns: cols });
     void persistColumns(cols);
   }
@@ -194,6 +216,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }
 
   const columnTypes = useMemo(() => Object.keys(COL_LABEL) as ColType[], []);
+
+  // Formula engine over the current grid + stable row-index lookup.
+  const formulaEngine = useMemo(() => makeFormulaEngine(table?.columns ?? [], rows ?? []), [table?.columns, rows]);
+  const rowIndexById = useMemo(() => {
+    const m = new Map<string, number>();
+    (rows ?? []).forEach((r, i) => m.set(r.id, i));
+    return m;
+  }, [rows]);
 
   const kanbanColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "select"), [table?.columns]);
   const dateColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "date"), [table?.columns]);
@@ -382,16 +412,19 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             <tr>
               <th className="dtbl__rowhandle" />
               <th className="dtbl__rowexpand" />
-              {table.columns.map((c) => (
+              {table.columns.map((c, colIndex) => (
                 <th key={c.id} className="dtbl__col">
                   <div className="dtbl__col-head">
-                    <span className="dtbl__col-icon">{COL_ICON[c.type]}</span>
+                    <span className="dtbl__col-icon" title={`Column ${columnLetter(colIndex)}`}>{COL_ICON[c.type]}</span>
                     <input
                       type="text"
                       value={c.label}
                       onChange={(e) => setTable({ ...table, columns: table.columns.map((x) => x.id === c.id ? { ...x, label: e.target.value } : x) })}
                       onBlur={(e) => renameColumn(c.id, e.target.value.trim() || COL_LABEL[c.type])}
                     />
+                    {c.type === "formula" ? (
+                      <button type="button" className="dtbl__col-del" onClick={() => editFormula(c.id)} title={`Edit formula (${c.formula || "none"})`}><Sigma /></button>
+                    ) : null}
                     <button type="button" className="dtbl__col-del" onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
                   </div>
                 </th>
@@ -421,9 +454,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 <td className="dtbl__rowexpand">
                   <button type="button" onClick={() => setActiveRowId(r.id)} title="Open row"><ChevronRight /></button>
                 </td>
-                {table.columns.map((c) => (
+                {table.columns.map((c, colIndex) => (
                   <td key={c.id} className="dtbl__cell">
-                    <CellEditor column={c} value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+                    {c.type === "formula" ? (
+                      <FormulaCell value={formulaEngine.cellValue(colIndex, rowIndexById.get(r.id) ?? 0)} />
+                    ) : (
+                      <CellEditor column={c} value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+                    )}
                   </td>
                 ))}
                 <td />
@@ -547,6 +584,15 @@ function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove, onCardC
   );
 }
 
+function FormulaCell({ value }: { value: number | string }) {
+  const isErr = typeof value === "string" && value.startsWith("#");
+  return (
+    <span className="dtbl__input" style={{ display: "inline-block", color: isErr ? "#dc2626" : "#3f3f46", opacity: value === "" ? 0.4 : 1 }} title="Computed (read-only)">
+      {value === "" ? "—" : String(value)}
+    </span>
+  );
+}
+
 function CellEditor({ column, value, onChange }: { column: Column; value: unknown; onChange: (v: unknown) => void }) {
   const t = column.type;
   if (t === "short_text" || t === "email" || t === "url") {
@@ -621,6 +667,9 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
         ))}
       </div>
     );
+  }
+  if (t === "formula") {
+    return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }} title={column.formula}>= computed (grid view)</span>;
   }
   return null;
 }
