@@ -20,13 +20,35 @@
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/item-thread";
-import { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS, type BoardItemRow, type ItemTag } from "@/lib/board-items-shared";
+import {
+  DEFAULT_STATUS_OPTIONS,
+  PRIORITY_OPTIONS,
+  getBoardStatuses,
+  isDoneStatus,
+  makeStatusLookup,
+  parseBoardStatuses,
+  type BoardItemRow,
+  type ItemTag,
+  type StatusGroup,
+  type StatusOption,
+} from "@/lib/board-items-shared";
 
 // Re-export the client-safe pieces so existing server code (API routes,
 // page server components) keeps working with `from "@/lib/board-items"`.
 // Client components must import from `@/lib/board-items-shared` directly
 // to avoid pulling Prisma + pg into the browser bundle.
-export { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS, type BoardItemRow, type ItemTag };
+export {
+  DEFAULT_STATUS_OPTIONS,
+  PRIORITY_OPTIONS,
+  getBoardStatuses,
+  isDoneStatus,
+  makeStatusLookup,
+  parseBoardStatuses,
+  type BoardItemRow,
+  type ItemTag,
+  type StatusGroup,
+  type StatusOption,
+};
 
 function rowFrom(it: {
   id: string;

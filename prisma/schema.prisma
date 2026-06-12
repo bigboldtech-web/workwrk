@@ -4669,6 +4669,10 @@ model Board {
   archivedAt     DateTime?
   schema         Json         @default("{}")
   settings       Json         @default("{}")
+  // Per-List statuses (ClickUp parity backbone #1) — array of
+  // { value, label, color, group: ACTIVE|DONE|CLOSED }. null = use the
+  // canonical default trio. Read via getBoardStatuses().
+  statuses       Json?
   // 🆕 Phase 1 shell — Board-level visibility. Resolver in Phase 6
   // composes this with Space.visibility + SpaceMember + reporting
   // line + org role to decide whether the viewer can read/edit.
