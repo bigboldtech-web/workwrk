@@ -16,7 +16,7 @@ import Link from "next/link";
 import {
   SlidersHorizontal, Building2, Boxes, Award, Shield, BarChart3,
   Tag, FileCheck, Key, Calendar as CalendarIcon, Users, BookOpen,
-  Sparkles, ChevronRight, type LucideIcon,
+  Sparkles, ChevronRight, Shapes, type LucideIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -129,6 +129,13 @@ export default function SettingsPage() {
           title: "Tags & labels",
           description: "Shared taxonomy across boards, tasks, and SOPs.",
           Icon: Tag, color: C.pink,
+          fields: [{ label: "Manage", value: "Open" }],
+        },
+        {
+          href: "/settings/task-types",
+          title: "Task types",
+          description: "Re-skin tasks as Milestones, Bugs, Deals & more.",
+          Icon: Shapes, color: C.indigo,
           fields: [{ label: "Manage", value: "Open" }],
         },
         {
