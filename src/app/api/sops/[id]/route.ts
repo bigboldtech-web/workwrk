@@ -38,9 +38,16 @@ export async function GET(
   if (sop.folderId && !isOrgAdmin(session)) {
     const access = await prisma.sOPFolderAccess.findUnique({
       where: { folderId_userId: { folderId: sop.folderId, userId: (session.user as any).id } },
-      select: { folderId: true },
+      select: { role: true },
     });
     if (!access) return jsonError("SOP not found", 404);
+    // Within a folder, consumers (VIEWER) only see PUBLISHED SOPs; drafts
+    // are visible to the author, folder Editors/Owners, and admins.
+    if (sop.status !== "PUBLISHED"
+        && sop.createdById !== (session.user as any).id
+        && access.role !== "EDITOR" && access.role !== "OWNER") {
+      return jsonError("SOP not found", 404);
+    }
   }
 
   const enriched = await enrichScribeScreenshots(sop as any);
@@ -68,9 +75,11 @@ export async function PATCH(
   });
   if (!existing) return jsonError("SOP not found", 404);
 
-  // Write access to the existing folder is required before any mutation.
-  if (!(await canWriteToFolder(session, existing.folderId))) {
-    return jsonError("You don't have access to this SOP's folder", 403);
+  // Edit gate: the author, a folder Editor/Owner, or an org admin may
+  // edit. (canWriteToFolder now requires an EDITOR/OWNER folder role.)
+  const isAuthor = existing.createdById === getUserId(session);
+  if (!isAuthor && !(await canWriteToFolder(session, existing.folderId))) {
+    return jsonError("You can only edit SOPs you authored or have edit access to.", 403);
   }
 
   const body = await req.json();
@@ -153,6 +162,9 @@ export async function PATCH(
 
   if (status !== undefined) {
     if (status === "PUBLISHED") {
+      // Publishing requires the dedicated capability (split out from edit).
+      const publishDenied = await requirePermission(session, "sops", "publish");
+      if (publishDenied) return publishDenied;
       // Validating before the publish write-through prevents the
       // original bug: a publish that accepts blank form values and
       // silently nukes the live row. Helper covers `null`, `{}`, and
@@ -169,6 +181,7 @@ export async function PATCH(
 
       data.status = status;
       data.publishedAt = new Date();
+      data.publishedBy = getUserId(session);
       // Snapshot the existing pre-publish state so we can roll back to
       // the prior draft if needed. Skip if we already snapshotted above
       // (PUBLISHED → PUBLISHED with content edits already wrote one).

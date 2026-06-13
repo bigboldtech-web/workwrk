@@ -148,6 +148,7 @@ export async function POST(req: NextRequest) {
       folderId: resolvedFolderId,
       tags: cleanTags,
       organizationId: getOrgId(session),
+      createdById: getUserId(session),
       ...(kraId ? { kraId } : {}),
     },
   });

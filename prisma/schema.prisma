@@ -514,6 +514,7 @@ model User {
   taskComments            TaskComment[]                @relation("TaskCommentAuthor")
   calendarSubscriptions   CalendarSubscription[]       @relation("CalendarSubscriptionUser")
   sopFolderAccess         SOPFolderAccess[]            @relation("SOPFolderAccessUser")
+  sopsAuthored            SOP[]                        @relation("SOPAuthor")
   expensesReported        Expense[]                    @relation("ExpenseReporter")
   expensesApproved        Expense[]                    @relation("ExpenseApprover")
   compDecisionsAsSubject  CompensationDecision[]       @relation("CompDecisionSubject")
@@ -1287,11 +1288,18 @@ model SOP {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   publishedAt    DateTime?
+  // Author + publisher governance (Phase 3). createdById = who authored
+  // the SOP (drafts editable by author / admins / folder Editors);
+  // publishedBy = who last published it (audit). Nullable for backfill.
+  createdById    String?
+  createdBy      User?           @relation("SOPAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  publishedBy    String?
 
   @@index([organizationId])
   @@index([category])
   @@index([shareToken])
   @@index([folderId])
+  @@index([createdById])
   @@index([tags], type: Gin)
 }
 
@@ -1368,10 +1376,20 @@ model SOPFolderAccess {
   folder    SOPFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
   userId    String
   user      User      @relation("SOPFolderAccessUser", fields: [userId], references: [id], onDelete: Cascade)
+  // Folder role (Phase 3): VIEWER = read published only · EDITOR = read +
+  // write + see drafts · OWNER = also manage the folder's access list.
+  // Defaults to EDITOR so existing grants keep their write behaviour.
+  role      SOPFolderRole @default(EDITOR)
   grantedAt DateTime  @default(now())
 
   @@id([folderId, userId])
   @@index([userId])
+}
+
+enum SOPFolderRole {
+  VIEWER
+  EDITOR
+  OWNER
 }
 
 enum SOPType {

@@ -47,15 +47,27 @@ export async function sopVisibilityWhere(
 
   const grants = await prisma.sOPFolderAccess.findMany({
     where: { userId },
-    select: { folderId: true },
+    select: { folderId: true, role: true },
   });
-  const seedIds = grants.map((g) => g.folderId);
-  const folderIds = await expandAccessibleFolderIds(seedIds);
+  // Folders the user can VIEW (any role) vs EDIT (EDITOR/OWNER). Within a
+  // folder, viewers see only PUBLISHED SOPs; editors/owners and the author
+  // also see drafts.
+  const viewFolderIds = await expandAccessibleFolderIds(grants.map((g) => g.folderId));
+  const editFolderIds = await expandAccessibleFolderIds(
+    grants.filter((g) => g.role === "EDITOR" || g.role === "OWNER").map((g) => g.folderId),
+  );
 
   return {
     OR: [
+      // Unfoldered SOPs stay org-wide visible (any status) — matches the
+      // existing "null folder = public" semantic. Use folders for control.
       { folderId: null },
-      ...(folderIds.length > 0 ? [{ folderId: { in: folderIds } }] : []),
+      // In folders the user can VIEW: published SOPs only.
+      ...(viewFolderIds.length > 0 ? [{ status: "PUBLISHED", folderId: { in: viewFolderIds } }] : []),
+      // The user's own authored SOPs, any status, wherever they live.
+      { createdById: userId },
+      // In folders the user can EDIT (Editor/Owner): drafts included.
+      ...(editFolderIds.length > 0 ? [{ folderId: { in: editFolderIds } }] : []),
     ],
   };
 }
@@ -89,8 +101,9 @@ export async function canWriteToFolder(
 
   if (rows.length === 0) return false;
 
+  // Only EDITOR / OWNER folder roles confer write. VIEWER is read-only.
   const grant = await prisma.sOPFolderAccess.findFirst({
-    where: { userId, folderId: { in: rows.map((r) => r.id) } },
+    where: { userId, folderId: { in: rows.map((r) => r.id) }, role: { in: ["EDITOR", "OWNER"] } },
     select: { folderId: true },
   });
   return !!grant;
