@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, FolderKanban, Link2, Plus, X, ExternalLink, Loader2 } from "lucide-react";
+import { Boxes, FolderKanban, Target, Link2, Plus, X, ExternalLink, Loader2 } from "lucide-react";
 import { LinkExistingPicker } from "@/components/board-view/link-existing-picker";
 
 interface HydratedLink {
@@ -17,19 +17,22 @@ interface HydratedLink {
   target?: { title: string | null; subtitle?: string | null; href?: string | null };
 }
 
-type Kind = "SPACE" | "BOARD";
+type Kind = "SPACE" | "BOARD" | "KRA";
 
 export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: boolean }) {
   const [spaces, setSpaces] = useState<HydratedLink[] | null>(null);
   const [boards, setBoards] = useState<HydratedLink[] | null>(null);
+  const [kras, setKras] = useState<HydratedLink[] | null>(null);
 
   const load = useCallback(() => {
     Promise.all([
       fetch(`/api/entity-links?sourceType=OKR&sourceId=${okrId}&filterTargetType=SPACE`).then((r) => r.json()).catch(() => ({ links: [] })),
       fetch(`/api/entity-links?sourceType=OKR&sourceId=${okrId}&filterTargetType=BOARD`).then((r) => r.json()).catch(() => ({ links: [] })),
-    ]).then(([sp, bd]) => {
+      fetch(`/api/entity-links?sourceType=OKR&sourceId=${okrId}&filterTargetType=KRA`).then((r) => r.json()).catch(() => ({ links: [] })),
+    ]).then(([sp, bd, kr]) => {
       setSpaces(sp.links ?? []);
       setBoards(bd.links ?? []);
+      setKras(kr.links ?? []);
     });
   }, [okrId]);
 
@@ -37,6 +40,23 @@ export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: bool
 
   return (
     <div className="space-y-4">
+      <LinkRow
+        kind="KRA"
+        title="KRAs"
+        Icon={Target}
+        okrId={okrId}
+        items={kras}
+        canEdit={canEdit}
+        onReload={load}
+        emptyHint="Link the KRAs (key result areas) whose work drives this objective."
+        loadCandidates={async () => {
+          const res = await fetch("/api/kras?limit=200");
+          const data = await res.json().catch(() => ({}));
+          const list: Array<{ id: string; name: string; category?: string | null }> = data?.data ?? [];
+          return list.map((k) => ({ id: k.id, title: k.name, subtitle: k.category ?? null }));
+        }}
+        fallbackHref={() => "/kra-kpi"}
+      />
       <LinkRow
         kind="SPACE"
         title="Spaces"
