@@ -18,9 +18,8 @@ import {
   Tag, FileCheck, Key, Calendar as CalendarIcon, Users, BookOpen,
   Sparkles, ChevronRight, Shapes, type LucideIcon,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type ApiSettings = {
@@ -245,14 +244,12 @@ export default function SettingsPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Settings"
-        Icon={SlidersHorizontal}
-        iconGradient={GRAD.bluePurple}
-        description={data === null ? "Loading…" : `${org?.name ?? "Workspace"} · ${moduleCount} modules on · plan ${org?.plan ?? "—"}`}
-        people={[PEOPLE.bb]}
-        morePeople={0}
-      />
+      <div className="px-6 pb-2 pt-6">
+        <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Overview</h1>
+        <p className="mt-0.5 text-[13px] text-zinc-500">
+          {data === null ? "Loading…" : `${org?.name ?? "Workspace"} · ${moduleCount} modules on · plan ${org?.plan ?? "—"}`}
+        </p>
+      </div>
 
       {loadError ? (
         <OsEmptyView Icon={SlidersHorizontal} iconGradient={GRAD.redPink} title="Couldn't load settings" subtitle={`API error: ${loadError}.`} cta="Retry" />

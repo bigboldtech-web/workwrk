@@ -17,6 +17,7 @@
 // untouched in case we want to revert; this shell uses the new Click*
 // variants in click-topbar.tsx / click-app-rail.tsx / click-sidebar.tsx.
 
+import { usePathname } from "next/navigation";
 import { OsShellProvider, useOsShell } from "./shell-context";
 import { OsCommandPalette } from "./command-palette";
 import { QuickCaptureHandler } from "./quick-capture";
@@ -59,30 +60,44 @@ function TemplateCenterMount() {
 export function OsShell({ children }: { children: React.ReactNode }) {
   // ClickUp-style shell: compact topbar over rounded rail, sidebar, and
   // content panels with small page-background gutters between them.
+  //
+  // Settings/account run in a dedicated full-screen "settings mode": the
+  // rail + Home sidebar + topbar step aside and the settings/account
+  // layouts supply their own SettingsShell chrome. We keep the providers
+  // mounted so settings pages still get shell-context + toasts + theme.
+  const pathname = usePathname() || "";
+  const settingsMode = pathname.startsWith("/settings") || pathname.startsWith("/account");
+
   return (
     <OsShellProvider>
       <OsToastProvider>
         <ThemeApplier />
-        <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5 overflow-hidden">
-          <ClickTopbar />
-          <div className="flex-1 flex min-h-0 relative gap-1.5 overflow-hidden">
-            <ClickAppRail />
-            <ClickSidebar />
-            <AppsMorePopover />
-            <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-white rounded-xl border border-zinc-200">
-              {children}
-            </main>
-            <OsSidekickPanel />
+        {settingsMode ? (
+          <div className="workwrk-os h-screen overflow-hidden bg-white text-zinc-900">
+            {children}
           </div>
-          <OsCommandPalette />
-          <OsItemDrawer />
-          <CustomizeMount />
-          <SetStatusModal />
-          <QuickCaptureHandler />
-          <CreateTaskModal />
-          <CreateListModal />
-          <TemplateCenterMount />
-        </div>
+        ) : (
+          <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5 overflow-hidden">
+            <ClickTopbar />
+            <div className="flex-1 flex min-h-0 relative gap-1.5 overflow-hidden">
+              <ClickAppRail />
+              <ClickSidebar />
+              <AppsMorePopover />
+              <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-white rounded-xl border border-zinc-200">
+                {children}
+              </main>
+              <OsSidekickPanel />
+            </div>
+            <OsCommandPalette />
+            <OsItemDrawer />
+            <CustomizeMount />
+            <SetStatusModal />
+            <QuickCaptureHandler />
+            <CreateTaskModal />
+            <CreateListModal />
+            <TemplateCenterMount />
+          </div>
+        )}
       </OsToastProvider>
     </OsShellProvider>
   );
