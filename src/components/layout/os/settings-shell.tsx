@@ -37,7 +37,7 @@ const SECTIONS: NavSection[] = [
       { label: "Hierarchy", icon: Network, href: "/settings/hierarchy" },
       { label: "Roles & permissions", icon: ShieldCheck, href: "/settings/permissions" },
       { label: "Audit log", icon: FileCheck, href: "/settings/audit" },
-      { label: "Enabled modules", icon: Boxes },
+      { label: "Enabled modules", icon: Boxes, href: "/settings/modules" },
     ],
   },
   {
@@ -47,8 +47,8 @@ const SECTIONS: NavSection[] = [
       { label: "Identity & profile", icon: Building2, href: "/settings/identity" },
       { label: "Tags & labels", icon: Tag, href: "/settings/tags" },
       { label: "Task types", icon: Shapes, href: "/settings/task-types" },
-      { label: "Locale & finance", icon: Globe },
-      { label: "Plan & billing", icon: CreditCard },
+      { label: "Locale & finance", icon: Globe, href: "/settings/locale" },
+      { label: "Plan & billing", icon: CreditCard, href: "/settings/billing" },
     ],
   },
   {
@@ -56,8 +56,8 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: "API keys", icon: Key, href: "/settings/api" },
       { label: "Calendar feeds", icon: Calendar, href: "/settings/calendar" },
-      { label: "Integrations", icon: Plug },
-      { label: "Import / Export", icon: Download },
+      { label: "Integrations", icon: Plug, href: "/settings/integrations" },
+      { label: "Import / Export", icon: Download, href: "/settings/import-export" },
     ],
   },
   {
@@ -70,9 +70,9 @@ const SECTIONS: NavSection[] = [
     label: "Account",
     items: [
       { label: "Security", icon: Shield, href: "/account/security" },
-      { label: "Profile", icon: User },
-      { label: "Notifications", icon: Bell },
-      { label: "Appearance", icon: Palette },
+      { label: "Profile", icon: User, href: "/account/profile" },
+      { label: "Notifications", icon: Bell, href: "/account/notifications" },
+      { label: "Appearance", icon: Palette, href: "/account/appearance" },
     ],
   },
 ];

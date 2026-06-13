@@ -68,6 +68,7 @@ export async function GET() {
         timezone: settings.timezone || "Asia/Kolkata",
         currency: settings.currency || "INR",
         fiscalYearStart: settings.fiscalYearStart || 4,
+        language: settings.language || "en",
         reviewFrequency: settings.reviewFrequency || "QUARTERLY",
         scoreWeights: settings.scoreWeights || {
           kpi: 40, manager: 25, peer: 10, self: 5, sopCompliance: 20,
@@ -160,6 +161,7 @@ export async function PATCH(req: Request) {
         if (data.timezone !== undefined) generalSettings.timezone = data.timezone;
         if (data.currency !== undefined) generalSettings.currency = data.currency;
         if (data.fiscalYearStart !== undefined) generalSettings.fiscalYearStart = data.fiscalYearStart;
+        if (data.language !== undefined) generalSettings.language = data.language;
         if (data.reviewFrequency !== undefined) generalSettings.reviewFrequency = data.reviewFrequency;
         if (data.scoreWeights !== undefined) generalSettings.scoreWeights = data.scoreWeights;
         if (data.scoringBands !== undefined) generalSettings.scoringBands = data.scoringBands;
