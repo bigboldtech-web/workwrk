@@ -1,8 +1,13 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getTeamUserIds } from "@/lib/team";
 import { sendEmail } from "@/lib/email";
 import { sopAssignedTemplate } from "@/lib/email-templates";
+
+// Roles that may assign org-wide; everyone else is scoped to their own
+// report tree. Mirrors the scope logic on GET /api/kras.
+const ORG_WIDE_ASSIGNERS = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
 
 // GET: Get SOP assignments — by userId (my assignments) or by sopId (who's assigned)
 export async function GET(req: NextRequest) {
@@ -93,6 +98,19 @@ export async function POST(req: NextRequest) {
 
   if (resolvedUserIds.length === 0) {
     return jsonError("No users specified. Provide userIds[] or departmentId");
+  }
+
+  // Governance: managers may only assign SOPs to people in their own
+  // report tree. Org-wide roles (admin / exec / HR) assign anywhere. For a
+  // department-wide assign, a manager's reach is the intersection with
+  // their reports.
+  const callerLevel = (session.user as any).accessLevel as string;
+  if (!ORG_WIDE_ASSIGNERS.has(callerLevel)) {
+    const teamIds = new Set(await getTeamUserIds(orgId, getUserId(session)));
+    resolvedUserIds = resolvedUserIds.filter((uid) => teamIds.has(uid));
+    if (resolvedUserIds.length === 0) {
+      return jsonError("You can only assign SOPs to people who report to you.", 403);
+    }
   }
 
   const assignerId = getUserId(session);

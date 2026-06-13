@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
+import { getTeamUserIds } from "@/lib/team";
+
+// Roles that may assign org-wide; everyone else is scoped to their own
+// report tree. Mirrors the scope logic on GET /api/kras.
+const ORG_WIDE_ASSIGNERS = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -133,6 +138,16 @@ export async function POST(req: NextRequest) {
     where: { id: userId, organizationId: orgId },
   });
   if (!user) return jsonError("User not found", 404);
+
+  // Governance: managers may only assign KRAs to people in their own
+  // report tree. Org-wide roles (admin / exec / HR) assign anywhere.
+  const callerLevel = (session.user as any).accessLevel as string;
+  if (!ORG_WIDE_ASSIGNERS.has(callerLevel)) {
+    const teamIds = await getTeamUserIds(orgId, getUserId(session));
+    if (!teamIds.includes(userId)) {
+      return jsonError("You can only assign KRAs to people who report to you.", 403);
+    }
+  }
 
   // Check if this KRA is already assigned to this user
   const existing = await prisma.kRAAssignment.findUnique({
