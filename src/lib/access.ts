@@ -39,6 +39,7 @@ export type ModuleName =
   | "today"             // every authed user
   | "team/alignment"    // manager+
   | "team/reviews"      // manager+
+  | "team/kpi-reviews"  // manager+
   | "team/rollup"       // director+
   | "org/admin"         // org admin
   | "spaces"            // every authed user
@@ -92,6 +93,7 @@ function resolveModule(viewer: ViewerContext, name: ModuleName): AccessDecision 
         : { permission: "read", reason: "limited to your own row (employee tier)" };
     case "team/alignment":
     case "team/reviews":
+    case "team/kpi-reviews":
       return isManagerOrAbove(viewer)
         ? { permission: "read", reason: "manager+ access level" }
         : { permission: "none", reason: "below manager tier" };

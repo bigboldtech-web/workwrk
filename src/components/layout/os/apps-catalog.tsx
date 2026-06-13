@@ -823,6 +823,7 @@ function TeamsSidebar() {
       <ul>
         <NavItem href="/team/alignment" Icon={Users} label="Alignment" active={pathname === "/team/alignment"} />
         <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Reviews" active={pathname === "/team/reviews"} />
+        <NavItem href="/team/kpi-reviews" Icon={Award} label="KPI approvals" active={pathname === "/team/kpi-reviews"} />
         <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={pathname === "/team/rollup"} />
       </ul>
       <SectionLabel>People</SectionLabel>
