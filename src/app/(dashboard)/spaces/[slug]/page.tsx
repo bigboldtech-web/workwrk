@@ -10,7 +10,6 @@ import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { createElement } from "react";
 import {
   Folder as FolderIcon, Lock,
   Sparkles, Users as UsersIcon, User as UserIconSmall,
@@ -29,7 +28,8 @@ import { getEffectivePreferences } from "@/lib/preferences";
 import { ShareBoardButton } from "@/components/layout/os/share-board-button";
 import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
 import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
-import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
+import { EntityTile } from "@/components/ui/entity-tile";
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
@@ -525,7 +525,6 @@ export default async function SpacePage(props: {
     })
     .sort((a, b) => b.count - a.count);
   const accent = space.color ?? DEFAULT_SPACE_COLOR;
-  const Icon = getSpaceIcon(space.icon);
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -535,12 +534,7 @@ export default async function SpacePage(props: {
           <Link href="/spaces" className="hover:text-zinc-900">Spaces</Link>
         </div>
         <div className="flex items-center gap-3">
-          <span
-            className="h-9 w-9 rounded-lg flex items-center justify-center text-white text-sm font-semibold uppercase shrink-0"
-            style={{ backgroundColor: accent }}
-          >
-            {Icon ? createElement(Icon, { className: "h-4 w-4" }) : (space.name[0] ?? "?")}
-          </span>
+          <EntityTile size="lg" icon={space.icon} color={space.color} name={space.name} />
           <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-1.5 min-w-0">
             <span className="truncate">{space.name}</span>
             <button
@@ -607,41 +601,37 @@ export default async function SpacePage(props: {
       {/* View tabs — matches ClickUp's Space-level view switcher.
           Overview + List are functional; others stub until the
           cross-board renderers ship. */}
-      <div className="px-6 border-b border-zinc-100">
-        <div className="flex items-center gap-0.5 -mb-px">
-          {VIEW_TABS.map((t) => {
-            const active = view === t.key;
-            const className = `inline-flex items-center gap-1.5 px-3 py-2 text-[12.5px] border-b-2 transition-colors ${
-              active
-                ? "border-zinc-900 text-zinc-900 font-medium"
-                : t.enabled
-                  ? "border-transparent text-zinc-500 hover:text-zinc-900 hover:border-zinc-200"
-                  : "border-transparent text-zinc-400 cursor-not-allowed"
-            }`;
-            if (t.enabled) {
-              return (
-                <Link
-                  key={t.key}
-                  href={t.key === "overview" ? `/spaces/${space.slug}` : `/spaces/${space.slug}?view=${t.key}`}
-                  className={className}
-                >
-                  <t.Icon className="w-3.5 h-3.5" />
-                  {t.label}
-                </Link>
-              );
-            }
+      <ViewTabStrip className="px-6">
+        {VIEW_TABS.map((t) => {
+          const active = view === t.key;
+          if (t.enabled) {
             return (
-              <span key={t.key} className={className} aria-disabled="true" title="Coming soon">
-                <t.Icon className="w-3.5 h-3.5" />
-                {t.label}
+              <ViewTab
+                key={t.key}
+                icon={t.Icon}
+                label={t.label}
+                active={active}
+                href={t.key === "overview" ? `/spaces/${space.slug}` : `/spaces/${space.slug}?view=${t.key}`}
+              />
+            );
+          }
+          return (
+            <ViewTab
+              key={t.key}
+              icon={t.Icon}
+              label={t.label}
+              active={active}
+              title="Coming soon"
+              className="text-zinc-400 cursor-not-allowed hover:text-zinc-400"
+              trailing={
                 <span className="ml-1 text-[9px] uppercase tracking-wide text-zinc-400 bg-zinc-100 px-1 py-px rounded">
                   soon
                 </span>
-              </span>
-            );
-          })}
-        </div>
-      </div>
+              }
+            />
+          );
+        })}
+      </ViewTabStrip>
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">

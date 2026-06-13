@@ -5,8 +5,9 @@
 // Priority cell, the drawer row, and the create-task modal.
 
 import { useEffect, useRef, useState } from "react";
-import { Ban, Check, Flag } from "lucide-react";
+import { Ban, Flag } from "lucide-react";
 import { PRIORITY_OPTIONS } from "@/lib/board-items-shared";
+import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 
 export { PRIORITY_OPTIONS };
 
@@ -65,26 +66,24 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
           {PRIORITY_OPTIONS.map((p) => {
             const active = value?.toUpperCase() === p.value;
             return (
-              <button
+              <MenuItem
                 key={p.value}
-                type="button"
+                leading={<Flag className="w-3.5 h-3.5 shrink-0" style={{ color: p.color }} fill={p.color} />}
+                label={p.label}
+                selected={active}
                 onClick={() => { onChange(p.value); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-[12.5px] hover:bg-zinc-50"
-              >
-                <Flag className="w-3.5 h-3.5" style={{ color: p.color }} fill={p.color} />
-                {p.label}
-                {active ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
-              </button>
+              />
             );
           })}
           {value ? (
-            <button
-              type="button"
-              onClick={() => { onChange(null); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-[12.5px] text-zinc-500 hover:bg-zinc-50 border-t border-zinc-100"
-            >
-              <Ban className="w-3.5 h-3.5" /> Clear
-            </button>
+            <>
+              <MenuSeparator />
+              <MenuItem
+                icon={Ban}
+                label="Clear"
+                onClick={() => { onChange(null); setOpen(false); }}
+              />
+            </>
           ) : null}
         </div>
       ) : null}

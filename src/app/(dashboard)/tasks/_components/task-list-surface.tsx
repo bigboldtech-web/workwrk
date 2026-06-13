@@ -60,6 +60,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { EntityTile } from "@/components/ui/entity-tile";
 
 type ViewKind =
   | "list"
@@ -1304,9 +1305,7 @@ function ViewCatalogItem({ view, onClick }: { view: ViewDef; onClick: () => void
       className="flex h-8 items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-100"
       onClick={onClick}
     >
-      <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-white" style={{ backgroundColor: view.swatch }}>
-        <view.Icon className="h-3 w-3" />
-      </span>
+      <EntityTile size="sm" icon={view.Icon} color={view.swatch} name={view.label} />
       <span className="truncate font-medium">{view.label}</span>
       {view.tag ? <span className="truncate text-zinc-500">{view.tag}</span> : null}
     </button>

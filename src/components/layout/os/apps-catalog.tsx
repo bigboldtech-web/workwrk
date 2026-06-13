@@ -33,6 +33,8 @@ import { SpaceTreeRow } from "./space-tree-row";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
+import { EntityTile } from "@/components/ui/entity-tile";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 
 export interface AppEntry {
   key: string;
@@ -159,14 +161,14 @@ function MoreNavItem() {
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
           <MorePortal anchorRef={buttonRef} panelRef={panelRef} width={240} open={open} placement="right">
-            <ul className="bg-white border border-zinc-200 rounded-lg shadow-lg py-1.5">
-              <MoreItem href="#"        Icon={Inbox}      label="Drafts & Sent" disabled pinned />
-              <MoreItem href="/spaces"  Icon={Folder}     label="All Spaces"    onClick={() => setOpen(false)} pinned />
-              <MoreItem href="/tasks"   Icon={CheckSquare} label="All Tasks"    onClick={() => setOpen(false)} pinned />
-              <li className="h-px bg-zinc-100 my-1" />
-              <MoreItem
+            <MenuList>
+              <MenuItem href="#" icon={Inbox} label="Drafts & Sent" disabled title="Coming soon" trailing={<Pin className="w-3.5 h-3.5 text-zinc-400" />} />
+              <MenuItem href="/spaces" icon={Folder} label="All Spaces" onClick={() => setOpen(false)} trailing={<Pin className="w-3.5 h-3.5 text-zinc-400" />} />
+              <MenuItem href="/tasks" icon={CheckSquare} label="All Tasks" onClick={() => setOpen(false)} trailing={<Pin className="w-3.5 h-3.5 text-zinc-400" />} />
+              <MenuSeparator />
+              <MenuItem
                 href="#"
-                Icon={SettingsIcon}
+                icon={SettingsIcon}
                 label="Customize"
                 onClick={(e) => {
                   e.preventDefault();
@@ -174,54 +176,10 @@ function MoreNavItem() {
                   openCustomize();
                 }}
               />
-            </ul>
+            </MenuList>
           </MorePortal>
         </>
       ) : null}
-    </li>
-  );
-}
-
-function MoreItem({
-  href,
-  Icon,
-  label,
-  disabled,
-  pinned,
-  onClick,
-}: {
-  href: string;
-  Icon: LucideIcon;
-  label: string;
-  disabled?: boolean;
-  pinned?: boolean;
-  onClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void;
-}) {
-  if (disabled) {
-    return (
-      <li>
-        <span
-          title="Coming soon"
-          className="flex items-center gap-2 px-2.5 py-1 text-[12px] text-zinc-400 cursor-not-allowed"
-        >
-          <Icon className="w-3.5 h-3.5 text-zinc-300" />
-          <span className="flex-1">{label}</span>
-          {pinned ? <Pin className="w-3.5 h-3.5 text-zinc-400" /> : null}
-        </span>
-      </li>
-    );
-  }
-  return (
-    <li>
-      <Link
-        href={href}
-        onClick={onClick}
-        className="flex items-center gap-2 px-2.5 py-1 text-[12px] text-zinc-700 hover:bg-zinc-50"
-      >
-        <Icon className="w-3.5 h-3.5 text-zinc-500" />
-        <span className="flex-1">{label}</span>
-        {pinned ? <Pin className="w-3.5 h-3.5 text-zinc-400" /> : null}
-      </Link>
     </li>
   );
 }
@@ -560,21 +518,15 @@ function HomeSidebar() {
               ) : null}
               {favoriteSpaces.map((s) => {
                 const active = pathname === `/spaces/${s.slug}`;
-                const bg = s.color ?? "#71717A";
                 return (
                   <li key={`s-${s.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${s.slug}`}
-                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
-                      <span
-                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
-                        style={{ backgroundColor: bg }}
-                      >
-                        {s.icon ?? s.name[0] ?? "?"}
-                      </span>
+                      <EntityTile size="sm" icon={s.icon} color={s.color} name={s.name} />
                       <span className="truncate flex-1">{s.name}</span>
                     </Link>
                     <UnstarButton kind="space" id={s.id} />
@@ -586,21 +538,15 @@ function HomeSidebar() {
               ) : null}
               {favoriteBoards.map((b) => {
                 const active = pathname === `/boards/${b.slug}`;
-                const bg = b.color ?? "#71717A";
                 return (
                   <li key={`b-${b.id}`} className="group/fav relative">
                     <Link
                       href={`/boards/${b.slug}`}
-                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
-                      <span
-                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
-                        style={{ backgroundColor: bg }}
-                      >
-                        {b.icon ?? b.name[0] ?? "?"}
-                      </span>
+                      <EntityTile size="sm" icon={b.icon} color={b.color} name={b.name} />
                       <span className="truncate flex-1">{b.name}</span>
                     </Link>
                     <UnstarButton kind="board" id={b.id} />
@@ -616,11 +562,11 @@ function HomeSidebar() {
                   <li key={`d-${d.id}`} className="group/fav relative">
                     <Link
                       href={`/docs/${d.id}`}
-                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
-                      <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
+                      <EntityTile size="sm" color="#3B82F6" fallbackIcon={FileText} name={d.title} />
                       <span className="truncate flex-1">{d.title}</span>
                     </Link>
                     <UnstarButton kind="doc" id={d.id} />
@@ -631,19 +577,13 @@ function HomeSidebar() {
                 <FavSubLabel>Folders</FavSubLabel>
               ) : null}
               {favoriteFolders.map((f) => {
-                const bg = f.color ?? "#71717A";
                 return (
                   <li key={`f-${f.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${f.space.slug}#folder-${f.id}`}
-                      className="flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] text-zinc-700 hover:bg-white/80"
+                      className="flex h-7 items-center gap-2 px-2 rounded-md text-[12px] text-zinc-700 hover:bg-white/80"
                     >
-                      <span
-                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold uppercase shrink-0"
-                        style={{ backgroundColor: bg }}
-                      >
-                        <Folder className="w-2.5 h-2.5" />
-                      </span>
+                      <EntityTile size="sm" color={f.color} fallbackIcon={Folder} name={f.name} />
                       <span className="truncate flex-1">{f.name}</span>
                     </Link>
                     <UnstarButton kind="folder" id={f.id} />
@@ -659,16 +599,11 @@ function HomeSidebar() {
                   <li key={`t-${t.id}`} className="group/fav relative">
                     <Link
                       href={`/tables/${t.id}`}
-                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
-                      <span
-                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold shrink-0"
-                        style={{ backgroundColor: "#0EA5E9" }}
-                      >
-                        <FileSpreadsheet className="w-2.5 h-2.5" />
-                      </span>
+                      <EntityTile size="sm" color="#0EA5E9" fallbackIcon={FileSpreadsheet} name={t.name} />
                       <span className="truncate flex-1">{t.name}</span>
                     </Link>
                     <UnstarButton kind="table" id={t.id} />
@@ -684,16 +619,11 @@ function HomeSidebar() {
                   <li key={`w-${w.id}`} className="group/fav relative">
                     <Link
                       href={`/whiteboards/${w.id}`}
-                      className={`flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[12px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
-                      <span
-                        className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold shrink-0"
-                        style={{ backgroundColor: "#06B6D4" }}
-                      >
-                        <Brush className="w-2.5 h-2.5" />
-                      </span>
+                      <EntityTile size="sm" color="#06B6D4" fallbackIcon={Brush} name={w.name} />
                       <span className="truncate flex-1">{w.name}</span>
                     </Link>
                     <UnstarButton kind="whiteboard" id={w.id} />
@@ -709,14 +639,9 @@ function HomeSidebar() {
                     href={f.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] text-zinc-700 hover:bg-white/80"
+                    className="flex h-7 items-center gap-2 px-2 rounded-md text-[12px] text-zinc-700 hover:bg-white/80"
                   >
-                    <span
-                      className="h-4 w-4 rounded flex items-center justify-center text-white text-[9px] font-semibold shrink-0"
-                      style={{ backgroundColor: "#A1A1AA" }}
-                    >
-                      <FileText className="w-2.5 h-2.5" />
-                    </span>
+                    <EntityTile size="sm" color="#A1A1AA" fallbackIcon={FileText} name={f.name} />
                     <span className="truncate flex-1">{f.name}</span>
                   </a>
                   <UnstarButton kind="file" id={f.id} />
@@ -778,7 +703,7 @@ function HomeSidebar() {
             <button
               type="button"
               onClick={() => setNewSpaceOpen(true)}
-              className="w-full flex h-[26px] items-center gap-2 px-2 rounded-md text-[12px] text-zinc-500 hover:bg-white/80"
+              className="w-full flex h-7 items-center gap-2 px-2 rounded-md text-[12px] text-zinc-500 hover:bg-white/80"
             >
               <Plus className="w-4 h-4" />
               <span>New Space</span>
@@ -1353,7 +1278,7 @@ export const APPS: AppEntry[] = [
   { key: "docs", label: "Notes", Icon: FileText, defaultHref: "/docs",
     matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
     newAction: { label: "New note", href: "/docs?new=1" } },
-  { key: "dashboards", label: "Dashboa..", Icon: BarChart3, defaultHref: "/dashboards",
+  { key: "dashboards", label: "Dashboard", Icon: BarChart3, defaultHref: "/dashboards",
     matchPaths: ["/dashboards"], Sidebar: DashboardsSidebar,
     category: "Core", defaultPinned: true,
     newAction: { label: "New Dashboard", href: "/dashboards?new=1" } },
@@ -1372,7 +1297,7 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/okrs", "/goals"], Sidebar: GoalsSidebar,
     category: "Core", defaultPinned: true,
     newAction: { label: "New Goal", href: "/okrs?new=1" } },
-  { key: "timesheets", label: "Timeshe..", Icon: Clock, defaultHref: "/timesheets",
+  { key: "timesheets", label: "Timesheets", Icon: Clock, defaultHref: "/timesheets",
     matchPaths: ["/timesheets", "/time-off"], Sidebar: TimesheetsSidebar,
     category: "Core", defaultPinned: true,
     newAction: { label: "Log time", href: "/timesheets?new=1" } },
@@ -1408,7 +1333,7 @@ export const APPS: AppEntry[] = [
   { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor",
     matchPaths: ["/candor"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/candor", label: "Candor", Icon: MessageSquare }]) },
-  { key: "announcements", label: "Announce..", Icon: Megaphone, defaultHref: "/announcements",
+  { key: "announcements", label: "Announce", Icon: Megaphone, defaultHref: "/announcements",
     matchPaths: ["/announcements"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/announcements", label: "Announcements", Icon: Megaphone }]) },
   { key: "kudos", label: "Kudos", Icon: ThumbsUp, defaultHref: "/kudos",
@@ -1462,7 +1387,7 @@ export const APPS: AppEntry[] = [
   { key: "build", label: "Build", Icon: Wrench, defaultHref: "/build",
     matchPaths: ["/build"], category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/build", label: "Build apps", Icon: Wrench }]) },
-  { key: "store", label: "Marketp..", Icon: ShoppingBag, defaultHref: "/store",
+  { key: "store", label: "Marketplace", Icon: ShoppingBag, defaultHref: "/store",
     matchPaths: ["/store"], category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/store", label: "Marketplace", Icon: ShoppingBag }]) },
 

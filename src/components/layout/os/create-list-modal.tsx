@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Trophy, Rocket, Timer, ChevronDown, Check, Loader2, Boxes } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { EntityTile } from "@/components/ui/entity-tile";
 import { useOsShell } from "./shell-context";
 import { useRouter } from "next/navigation";
 import { taupeButton } from "@/components/ui/accent";
@@ -197,11 +198,12 @@ export function CreateListModal() {
 }
 
 function SpaceGlyph({ space }: { space: SpaceRow }) {
-  const color = space.color || "#71717A";
-  const initial = space.name.trim()[0]?.toUpperCase() ?? "S";
   return (
-    <span className="w-[18px] h-[18px] rounded flex items-center justify-center text-white font-medium text-[10px] shrink-0" style={{ background: color }}>
-      {space.icon ? <Boxes className="w-3 h-3" /> : initial}
-    </span>
+    <EntityTile
+      size="sm"
+      icon={space.icon ? Boxes : null}
+      color={space.color}
+      name={space.name}
+    />
   );
 }

@@ -39,6 +39,7 @@ import {
 import { useOsShell } from "./shell-context";
 import { useRouter } from "next/navigation";
 import { Chip, StatusChip } from "@/components/ui/chip";
+import { EntityTile } from "@/components/ui/entity-tile";
 import { TAUPE, taupeButton } from "@/components/ui/accent";
 
 // ── Task types ─────────────────────────────────────────────────────
@@ -827,9 +828,7 @@ export function CreateTaskModal() {
                       grouped.map(({ space, boards: sb }) => (
                         <div key={space?.id ?? "__none__"} className="px-1 pb-1">
                           <div className="flex items-center gap-2 px-2.5 py-1.5">
-                            <span className="w-[18px] h-[18px] rounded flex items-center justify-center text-white font-semibold text-[10px] shrink-0" style={{ backgroundColor: space?.color ?? "#a1a1aa" }}>
-                              {(space?.name ?? "·").charAt(0).toUpperCase()}
-                            </span>
+                            <EntityTile size="sm" color={space?.color ?? "#a1a1aa"} name={space?.name ?? "·"} />
                             <span className="text-[12px] font-medium text-zinc-500 truncate">{space?.name ?? "Other"}</span>
                           </div>
                           {sb.map((b) => (

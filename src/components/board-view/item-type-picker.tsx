@@ -5,9 +5,10 @@
 // id; null = the org's default type.
 
 import { useState, createElement } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useItemTypes } from "./use-item-types";
 import { itemTypeIcon } from "@/lib/item-type-icons";
+import { MenuItem } from "@/components/ui/menu";
 
 export function ItemTypePicker({ value, canEdit, onChange }: { value: string | null; canEdit: boolean; onChange: (id: string | null) => void }) {
   const { list, byId, default: def } = useItemTypes();
@@ -30,11 +31,13 @@ export function ItemTypePicker({ value, canEdit, onChange }: { value: string | n
       {open ? (
         <div className="absolute z-10 mt-1 left-0 min-w-[200px] max-h-[280px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
           {list.map((t) => (
-            <button key={t.id} type="button" onClick={() => { onChange(t.id); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
-              {createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-500 shrink-0" })}
-              <span className="flex-1 truncate">{t.singular}{t.isDefault ? <span className="ml-1.5 text-[10px] text-zinc-400">(default)</span> : null}</span>
-              {(value ?? def?.id) === t.id ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
-            </button>
+            <MenuItem
+              key={t.id}
+              leading={createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-500 shrink-0" })}
+              label={<>{t.singular}{t.isDefault ? <span className="ml-1.5 text-[10px] text-zinc-400">(default)</span> : null}</>}
+              selected={(value ?? def?.id) === t.id}
+              onClick={() => { onChange(t.id); setOpen(false); }}
+            />
           ))}
         </div>
       ) : null}

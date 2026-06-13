@@ -6,15 +6,16 @@
 // open dialogs; Doc + Whiteboard POST + redirect; the rest are stubs
 // until their primitives land.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, ListChecks, FolderPlus, FileText, BarChart3, Brush, ClipboardCheck,
-  Download, LayoutTemplate, ChevronRight, Loader2, Database,
+  Download, LayoutTemplate, ChevronRight, Database,
 } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
+import { MenuItem, MenuList, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
 
 interface Props {
   spaceId: string;
@@ -176,109 +177,72 @@ function SpaceCreateMenu({
   };
 
   return (
-    <div
-      role="menu"
-      className="bg-white rounded-xl border border-zinc-200 shadow-2xl py-1.5"
-    >
-      <SectionLabel>Create</SectionLabel>
+    <MenuList className="px-1.5">
+      <MenuSectionLabel className="px-2">Create</MenuSectionLabel>
       <MenuItem
-        Icon={ListChecks}
+        variant="inset"
+        icon={ListChecks}
         label="List"
-        subtitle="Track tasks, projects, people & more"
+        description="Track tasks, projects, people & more"
         onClick={onRequestBoard}
       />
       <MenuItem
-        Icon={FolderPlus}
+        variant="inset"
+        icon={FolderPlus}
         label="Folder"
-        subtitle="Group Lists, Docs & more"
+        description="Group Lists, Docs & more"
         onClick={onRequestFolder}
       />
       <MenuItem
-        Icon={FileText}
+        variant="inset"
+        icon={FileText}
         label="Doc"
         busy={busyKind === "doc"}
         onClick={createDoc}
       />
       <MenuItem
-        Icon={BarChart3}
+        variant="inset"
+        icon={BarChart3}
         label="Dashboard"
         onClick={stub("Dashboard")}
       />
       <MenuItem
-        Icon={Brush}
+        variant="inset"
+        icon={Brush}
         label="Whiteboard"
         busy={busyKind === "whiteboard"}
         onClick={createWhiteboard}
       />
       <MenuItem
-        Icon={Database}
+        variant="inset"
+        icon={Database}
         label="Database"
-        subtitle="Flexible spreadsheet · CRM, lists, anything"
+        description="Flexible spreadsheet · CRM, lists, anything"
         busy={busyKind === "database"}
         onClick={createDatabase}
       />
       <MenuItem
-        Icon={ClipboardCheck}
+        variant="inset"
+        icon={ClipboardCheck}
         label="Form"
         onClick={stub("Form")}
       />
 
-      <div className="h-px bg-zinc-100 my-1.5" />
+      <MenuSeparator />
 
       <MenuItem
-        Icon={Download}
+        variant="inset"
+        icon={Download}
         label="Imports"
         trailing={<ChevronRight className="h-3.5 w-3.5 text-zinc-400" />}
         onClick={stub("Imports")}
       />
       <MenuItem
-        Icon={LayoutTemplate}
+        variant="inset"
+        icon={LayoutTemplate}
         label="Templates"
         onClick={() => { onCreated?.(); openTemplateCenter({ applyContext: { spaceId } }); }}
       />
-    </div>
-  );
-}
-
-function SectionLabel({ children }: { children: ReactNode }) {
-  return (
-    <div className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-wide text-zinc-400 font-semibold">
-      {children}
-    </div>
-  );
-}
-
-function MenuItem({
-  Icon,
-  label,
-  subtitle,
-  trailing,
-  busy,
-  onClick,
-}: {
-  Icon: typeof Plus;
-  label: string;
-  subtitle?: string;
-  trailing?: ReactNode;
-  busy?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      disabled={busy}
-      className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-zinc-50 disabled:opacity-50"
-    >
-      <Icon className="h-4 w-4 text-zinc-500 shrink-0" />
-      <span className="flex-1 min-w-0">
-        <span className="block text-[13px] font-medium text-zinc-900">{label}</span>
-        {subtitle ? (
-          <span className="block text-[11.5px] text-zinc-500 mt-0.5 leading-snug">{subtitle}</span>
-        ) : null}
-      </span>
-      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : trailing}
-    </button>
+    </MenuList>
   );
 }

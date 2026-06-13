@@ -23,7 +23,6 @@ import {
   Boxes,
   Brush,
   CheckCircle2,
-  ChevronRight,
   ClipboardCheck,
   Database,
   FileText,
@@ -40,6 +39,7 @@ import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { MorePortal } from "./more-portal";
 import { TAUPE, taupeButton } from "@/components/ui/accent";
+import { MenuItem, MenuSectionLabel } from "@/components/ui/menu";
 
 const MENU_WIDTH = 312;
 
@@ -137,64 +137,6 @@ const BUILD_META: Record<BuildKind, {
     href: (id) => `/tables/${id}`,
   },
 };
-
-function MenuSectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="px-2 pb-0.5 pt-1 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">
-      {children}
-    </div>
-  );
-}
-
-// The one reusable row. 36px tall, 16px icon, optional description /
-// shortcut / badge, and an aligned chevron for rows that open a
-// follow-up step instead of firing immediately.
-function MenuRow({
-  Icon,
-  label,
-  description,
-  shortcut,
-  badge,
-  chevron,
-  active,
-  iconClassName = "text-zinc-500",
-  onClick,
-}: {
-  Icon: LucideIcon;
-  label: string;
-  description?: string;
-  shortcut?: string;
-  badge?: string;
-  chevron?: boolean;
-  active?: boolean;
-  iconClassName?: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] text-zinc-900 ${
-        active ? "bg-zinc-100" : "hover:bg-zinc-50"
-      }`}
-    >
-      <Icon className={`h-4 w-4 shrink-0 ${iconClassName}`} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{label}</span>
-        {description ? (
-          <span className="block truncate text-[12px] font-normal text-zinc-500">{description}</span>
-        ) : null}
-      </span>
-      {badge ? (
-        <span className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600">
-          {badge}
-        </span>
-      ) : null}
-      {shortcut ? <span className="text-[12px] text-zinc-400">{shortcut}</span> : null}
-      {chevron ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300" /> : null}
-    </button>
-  );
-}
 
 interface CreateMenuProps {
   anchorRef: RefObject<HTMLButtonElement | null>;
@@ -363,85 +305,100 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                 />
               </div>
               <div className="px-2 pb-2">
-                <MenuSectionLabel>Create</MenuSectionLabel>
-                <MenuRow
-                  Icon={CheckCircle2}
+                <MenuSectionLabel className="px-2">Create</MenuSectionLabel>
+                <MenuItem
+                  variant="inset"
+                  icon={CheckCircle2}
                   label="Task"
                   shortcut="⌥T"
                   active
                   onClick={() => run(openCreateTask)}
                 />
-                <MenuRow
-                  Icon={ListChecks}
+                <MenuItem
+                  variant="inset"
+                  icon={ListChecks}
                   label="List"
                   description="Track tasks, projects, people & more"
                   onClick={() => run(openCreateList)}
                 />
-                <MenuRow
-                  Icon={Boxes}
+                <MenuItem
+                  variant="inset"
+                  icon={Boxes}
                   label="Space"
                   description="Organize work by team or department"
                   onClick={() => run(onCreateSpace)}
                 />
               </div>
               <div className="border-t border-zinc-100 px-2 pb-2 pt-1">
-                <MenuSectionLabel>AI</MenuSectionLabel>
-                <MenuRow
-                  Icon={Sparkles}
+                <MenuSectionLabel className="px-2">AI</MenuSectionLabel>
+                <MenuItem
+                  variant="inset"
+                  icon={Sparkles}
                   label="Create with AI"
                   iconClassName="text-fuchsia-500"
                   onClick={() => run(() => router.push("/sidekick"))}
                 />
-                <MenuRow
-                  Icon={Bot}
+                <MenuItem
+                  variant="inset"
+                  icon={Bot}
                   label="Super Agent"
-                  badge="Hot"
+                  badge={
+                    <span className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600">
+                      Hot
+                    </span>
+                  }
                   iconClassName="text-blue-500"
                   onClick={() => run(() => router.push("/agents"))}
                 />
               </div>
               <div className="border-t border-zinc-100 px-2 pb-2 pt-1">
-                <MenuSectionLabel>Build</MenuSectionLabel>
-                <MenuRow
-                  Icon={FileText}
+                <MenuSectionLabel className="px-2">Build</MenuSectionLabel>
+                <MenuItem
+                  variant="inset"
+                  icon={FileText}
                   label="Doc"
                   iconClassName="text-blue-500"
-                  chevron
+                  submenu
                   onClick={() => setBuildKind("doc")}
                 />
-                <MenuRow
-                  Icon={ClipboardCheck}
+                <MenuItem
+                  variant="inset"
+                  icon={ClipboardCheck}
                   label="Form"
                   iconClassName="text-violet-500"
-                  chevron
+                  submenu
                   onClick={() => setBuildKind("form")}
                 />
-                <MenuRow
-                  Icon={LayoutDashboard}
+                <MenuItem
+                  variant="inset"
+                  icon={LayoutDashboard}
                   label="Dashboard"
                   iconClassName="text-purple-500"
-                  chevron
+                  submenu
                   onClick={() => setBuildKind("dashboard")}
                 />
-                <MenuRow
-                  Icon={Brush}
+                <MenuItem
+                  variant="inset"
+                  icon={Brush}
                   label="Whiteboard"
                   iconClassName="text-amber-500"
-                  chevron
+                  submenu
                   onClick={() => setBuildKind("whiteboard")}
                 />
-                <MenuRow
-                  Icon={Database}
+                <MenuItem
+                  variant="inset"
+                  icon={Database}
                   label="Database"
                   description="Spreadsheet-style rows & columns"
                   iconClassName="text-emerald-600"
-                  chevron
+                  submenu
                   onClick={() => setBuildKind("database")}
                 />
               </div>
               <div className="border-t border-zinc-100 px-2 py-2">
-                <MenuRow
-                  Icon={SlidersHorizontal}
+                <MenuItem
+                  variant="inset"
+                  icon={SlidersHorizontal}
                   label="Customize your sidebar"
                   onClick={() => run(openCustomize)}
                 />

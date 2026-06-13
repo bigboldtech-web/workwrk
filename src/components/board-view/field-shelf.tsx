@@ -17,6 +17,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, Plus, Search, Trash2, X } from "lucide-react";
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import {
   FIELD_CATALOG,
   type FieldChoice,
@@ -232,10 +233,10 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
               <span className="text-sm font-medium">Fields</span>
             </div>
 
-            <div className="flex items-center gap-3 px-5 mt-3 border-b border-zinc-200">
-              <TabBtn active={tab === "create"} onClick={() => setTab("create")} label="Create new" />
-              <TabBtn active={tab === "existing"} onClick={() => setTab("existing")} label="Add existing" />
-            </div>
+            <ViewTabStrip className="px-5 mt-3">
+              <ViewTab active={tab === "create"} onClick={() => setTab("create")} label="Create new" />
+              <ViewTab active={tab === "existing"} onClick={() => setTab("existing")} label="Add existing" />
+            </ViewTabStrip>
 
             <div className="px-5 pt-3 pb-2">
               <div className="relative">
@@ -329,22 +330,6 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
         ) : null}
       </aside>
     </>
-  );
-}
-
-function TabBtn({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-sm py-2 -mb-px border-b-2 px-1 ${
-        active
-          ? "border-foreground text-zinc-900"
-          : "border-transparent text-zinc-500 hover:text-zinc-900"
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 

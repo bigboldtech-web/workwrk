@@ -6,8 +6,9 @@
 // create-task modal. Values are Tag ids; display uses the tag's color.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Plus, Tag as TagIcon, X } from "lucide-react";
+import { Plus, Tag as TagIcon, X } from "lucide-react";
 import type { ItemTag } from "@/lib/board-items-shared";
+import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 
 const FALLBACK_COLOR = "#94a3b8";
 
@@ -163,26 +164,25 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
                 {filtered.map((t) => {
                   const active = value.some((v) => v.id === t.id);
                   return (
-                    <button
+                    <MenuItem
                       key={t.id}
-                      type="button"
+                      leading={<TagChip tag={t} />}
+                      label={null}
+                      selected={active}
                       onClick={() => toggle(t)}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-[12.5px] hover:bg-zinc-50"
-                    >
-                      <TagChip tag={t} />
-                      {active ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
-                    </button>
+                    />
                   );
                 })}
                 {q && !exactMatch ? (
-                  <button
-                    type="button"
-                    disabled={creating}
-                    onClick={() => void createTag(query.trim())}
-                    className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-[12.5px] text-zinc-600 hover:bg-zinc-50 border-t border-zinc-100 disabled:opacity-50"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Create “{query.trim()}”
-                  </button>
+                  <>
+                    <MenuSeparator />
+                    <MenuItem
+                      icon={Plus}
+                      label={<>Create “{query.trim()}”</>}
+                      disabled={creating}
+                      onClick={() => void createTag(query.trim())}
+                    />
+                  </>
                 ) : null}
                 {!filtered.length && !q ? (
                   <div className="px-3 py-3 text-[11.5px] text-zinc-400">No tags yet — type to create one</div>

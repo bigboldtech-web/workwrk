@@ -9,15 +9,14 @@
 // for management, opening the existing FolderMoreTrigger /
 // BoardMoreTrigger / ShareBoardButton components.
 
-import { createElement, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, Loader2,
   Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { getSpaceIcon } from "./space-icon-catalog";
+import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceMoreTrigger } from "./space-more-menu";
 import { SpaceCreateTrigger } from "./space-create-popover";
 import { BoardMoreTrigger } from "./board-more-menu";
@@ -80,8 +79,6 @@ interface ChildrenPayload {
   whiteboards: WhiteboardChild[];
 }
 
-const DEFAULT_COLOR = "#71717A";
-
 interface Props {
   space: SpaceRow;
   isActive: boolean;
@@ -140,7 +137,7 @@ export function SpaceTreeRow({
   return (
     <li className="group/space relative">
       <div
-        className={`flex h-[26px] items-center gap-2 px-2 rounded-md ${
+        className={`flex h-7 items-center gap-2 px-2 rounded-md ${
           isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
         }`}
       >
@@ -163,8 +160,8 @@ export function SpaceTreeRow({
             isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
           }`}
         >
-          <SpaceTile space={space} />
-          <span className="truncate flex-1">{space.name}</span>
+          <EntityTile size="sm" icon={space.icon} color={space.color} name={space.name} />
+          <span className="min-w-0 flex-1 truncate">{space.name}</span>
           {space.visibility === "PRIVATE" ? (
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
           ) : null}
@@ -232,19 +229,6 @@ export function SpaceTreeRow({
   );
 }
 
-function SpaceTile({ space }: { space: SpaceRow }) {
-  const Icon = getSpaceIcon(space.icon);
-  const bg = space.color ?? DEFAULT_COLOR;
-  return (
-    <span
-      className="h-[18px] w-[18px] rounded-md flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
-      style={{ backgroundColor: bg }}
-    >
-      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : (space.name[0] ?? "?")}
-    </span>
-  );
-}
-
 function FolderTreeRow({
   folder,
   spaceId,
@@ -265,7 +249,7 @@ function FolderTreeRow({
 
   return (
     <li className="group/folderrow relative">
-      <div className="flex h-[25px] items-center gap-2 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="flex h-7 items-center gap-2 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -277,8 +261,8 @@ function FolderTreeRow({
             expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />
           ) : null}
         </button>
-        <ChildTile color={folder.color} icon={folder.icon} fallback={FolderIcon} name={folder.name} />
-        <span className="text-[12px] text-zinc-700 truncate flex-1">{folder.name}</span>
+        <EntityTile size="sm" icon={folder.icon} color={folder.color} name={folder.name} fallbackIcon={FolderIcon} />
+        <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-700">{folder.name}</span>
         <span className="opacity-0 group-hover/folderrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
           <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
@@ -330,14 +314,14 @@ function BoardTreeRow({
   const router = useRouter();
   return (
     <li className="group/boardrow relative">
-      <div className="flex h-[25px] items-center gap-2 pl-[18px] pr-1.5 rounded-md hover:bg-white/80">
+      <div className="flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <ChildTile color={board.color} icon={board.icon} fallback={null} name={board.name} />
-          <span className="truncate">{board.name}</span>
+          <EntityTile size="sm" icon={board.icon} color={board.color} name={board.name} />
+          <span className="min-w-0 flex-1 truncate">{board.name}</span>
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
           ) : null}
@@ -370,14 +354,14 @@ function TableTreeRow({
   const router = useRouter();
   return (
     <li className="group/tablerow relative">
-      <div className="flex h-[25px] items-center gap-2 pl-[18px] pr-1.5 rounded-md hover:bg-white/80">
+      <div className="flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <ChildTile color="#0EA5E9" icon={null} fallback={TableIcon} name={table.name} />
-          <span className="truncate">{table.name}</span>
+          <EntityTile size="sm" color="#0EA5E9" fallbackIcon={TableIcon} name={table.name} />
+          <span className="min-w-0 flex-1 truncate">{table.name}</span>
         </button>
         <span className="opacity-0 group-hover/tablerow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
           <SidebarQuickStar kind="table" id={table.id} />
@@ -392,19 +376,14 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
   const router = useRouter();
   return (
     <li className="group/docrow relative">
-      <div className="flex h-[25px] items-center gap-2 pl-[18px] pr-1.5 rounded-md hover:bg-white/80">
+      <div className="flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <span
-            className="h-4 w-4 rounded flex items-center justify-center text-white shrink-0"
-            style={{ backgroundColor: "#3B82F6" }}
-          >
-            <FileText className="h-2.5 w-2.5" />
-          </span>
-          <span className="truncate">{doc.title || "Untitled"}</span>
+          <EntityTile size="sm" color="#3B82F6" fallbackIcon={FileText} name={doc.title} />
+          <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
         </button>
         <span className="opacity-0 group-hover/docrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
           <SidebarQuickStar kind="doc" id={doc.id} />
@@ -418,48 +397,20 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
   return (
     <li className="group/wbrow relative">
-      <div className="flex h-[25px] items-center gap-2 pl-[18px] pr-1.5 rounded-md hover:bg-white/80">
+      <div className="flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <span
-            className="h-4 w-4 rounded flex items-center justify-center text-white shrink-0"
-            style={{ backgroundColor: "#F59E0B" }}
-          >
-            <WhiteboardIcon className="h-2.5 w-2.5" />
-          </span>
-          <span className="truncate">{whiteboard.name || "Untitled whiteboard"}</span>
+          <EntityTile size="sm" color="#F59E0B" fallbackIcon={WhiteboardIcon} name={whiteboard.name} />
+          <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled whiteboard"}</span>
         </button>
         <span className="opacity-0 group-hover/wbrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
           <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
         </span>
       </div>
     </li>
-  );
-}
-
-function ChildTile({
-  color,
-  icon,
-  fallback,
-  name,
-}: {
-  color: string | null;
-  icon: string | null;
-  fallback: LucideIcon | null;
-  name: string;
-}) {
-  const Icon = getSpaceIcon(icon) ?? fallback;
-  const bg = color ?? DEFAULT_COLOR;
-  return (
-    <span
-      className="h-[18px] w-[18px] rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
-      style={{ backgroundColor: bg }}
-    >
-      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : (name[0] ?? "?")}
-    </span>
   );
 }
 

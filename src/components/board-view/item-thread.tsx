@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Send, Trash2 } from "lucide-react";
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { DEFAULT_STATUS_OPTIONS, type StatusOption } from "@/lib/board-items-shared";
 import type { ThreadActivity, ThreadUpdate } from "@/lib/item-thread";
 
@@ -103,10 +104,20 @@ export function ItemThread({ itemId, canEdit, currentUserId, statuses }: ItemThr
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-2 border-b border-zinc-200">
-        <TabButton active={tab === "comments"} onClick={() => setTab("comments")} label="Comments" count={updates.length} />
-        <TabButton active={tab === "activity"} onClick={() => setTab("activity")} label="Activity" count={activity.length} />
-      </div>
+      <ViewTabStrip className="mb-2">
+        <ViewTab
+          active={tab === "comments"}
+          onClick={() => setTab("comments")}
+          label="Comments"
+          trailing={<span className="text-xs text-zinc-500">{updates.length}</span>}
+        />
+        <ViewTab
+          active={tab === "activity"}
+          onClick={() => setTab("activity")}
+          label="Activity"
+          trailing={<span className="text-xs text-zinc-500">{activity.length}</span>}
+        />
+      </ViewTabStrip>
 
       {error ? <div className="text-xs text-red-500 mb-2">{error}</div> : null}
 
@@ -126,32 +137,6 @@ export function ItemThread({ itemId, canEdit, currentUserId, statuses }: ItemThr
         <ActivityTab activity={activity} loading={loading} statuses={statuses ?? [...DEFAULT_STATUS_OPTIONS]} />
       )}
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  label,
-  count,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-sm py-2 -mb-px border-b-2 px-1 ${
-        active
-          ? "border-foreground text-zinc-900"
-          : "border-transparent text-zinc-500 hover:text-zinc-900"
-      }`}
-    >
-      {label} <span className="text-xs text-zinc-500">{count}</span>
-    </button>
   );
 }
 

@@ -7,7 +7,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Check, ChevronDown, Search, UserX } from "lucide-react";
+import { ChevronDown, Search, UserX } from "lucide-react";
+import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 
 export interface PersonRef {
   id: string;
@@ -154,13 +155,14 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
           </div>
           <div className="max-h-[260px] overflow-y-auto py-1">
             {value ? (
-              <button
-                type="button"
-                onClick={() => { onChange(null); setOpen(false); }}
-                className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-zinc-500 hover:bg-zinc-50 border-b border-zinc-100"
-              >
-                <UserX className="w-3.5 h-3.5" /> Unassign
-              </button>
+              <>
+                <MenuItem
+                  icon={UserX}
+                  label="Unassign"
+                  onClick={() => { onChange(null); setOpen(false); }}
+                />
+                <MenuSeparator />
+              </>
             ) : null}
             {people === null || loading ? (
               <div className="px-3 py-3 text-[11.5px] text-zinc-400">Loading…</div>
@@ -171,16 +173,13 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
                 const isMe = p.id === meId;
                 const active = p.id === value?.id;
                 return (
-                  <button
+                  <MenuItem
                     key={p.id}
-                    type="button"
+                    leading={<PersonAvatar person={p} size={22} />}
+                    label={isMe ? "Me" : personName(p)}
+                    selected={active}
                     onClick={() => { onChange(p); setOpen(false); }}
-                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] hover:bg-zinc-50"
-                  >
-                    <PersonAvatar person={p} size={22} />
-                    <span className="truncate">{isMe ? "Me" : personName(p)}</span>
-                    {active ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
-                  </button>
+                  />
                 );
               })
             )}

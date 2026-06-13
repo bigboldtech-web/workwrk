@@ -15,9 +15,10 @@ import {
   ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
   ListFilter, Glasses, Zap, Folder as FolderIcon,
   Activity as ActivityIcon, Grid3X3, ListTree, SquareStack,
+  type LucideIcon,
 } from "lucide-react";
-import { createElement } from "react";
-import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
+import { EntityTile } from "@/components/ui/entity-tile";
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import type { ViewType } from "@/generated/prisma";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { canEditSpace } from "@/lib/space";
@@ -31,7 +32,7 @@ import { getEffectivePreferences } from "@/lib/preferences";
 
 export const dynamic = "force-dynamic";
 
-const VIEW_ICONS: Record<ViewType, React.ComponentType<{ className?: string }>> = {
+const VIEW_ICONS: Record<ViewType, LucideIcon> = {
   TABLE: ListIcon,
   KANBAN: LayoutGrid,
   CALENDAR: CalIcon,
@@ -129,10 +130,11 @@ export default async function BoardPage(props: {
           href={`/spaces/${board.space.slug}`}
           className="inline-flex items-center gap-1.5 text-[13px] text-zinc-700 hover:text-zinc-900 min-w-0"
         >
-          <SpaceTile
+          <EntityTile
+            size="md"
             icon={board.space.icon}
             color={board.space.color}
-            fallback={board.space.name[0] ?? "?"}
+            name={board.space.name}
           />
           <span className="truncate">{board.space.name}</span>
         </Link>
@@ -142,9 +144,12 @@ export default async function BoardPage(props: {
           <>
             <ChevronRight className="w-3 h-3 text-zinc-400 shrink-0" />
             <span className="inline-flex items-center gap-1.5 text-[13px] text-zinc-700 min-w-0">
-              <FolderTile
+              <EntityTile
+                size="md"
                 icon={board.folder.icon}
                 color={board.folder.color}
+                name={board.folder.name}
+                fallbackIcon={FolderIcon}
               />
               <span className="truncate">{board.folder.name}</span>
             </span>
@@ -157,7 +162,7 @@ export default async function BoardPage(props: {
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3.5 h-3.5 text-zinc-500" />
           ) : (
-            <BoardTile icon={board.icon} color={board.color} fallback={board.name[0] ?? "?"} />
+            <EntityTile size="md" icon={board.icon} color={board.color} name={board.name} />
           )}
           <span className="truncate">{board.name}</span>
         </h1>
@@ -207,7 +212,7 @@ export default async function BoardPage(props: {
 
       {/* View tabs — clicking switches the active view via ?view=<id>.
           Phase 65: tabs were previously inert (always rendered default). */}
-      <div className="px-6 border-b border-zinc-200 flex items-center gap-1">
+      <ViewTabStrip className="px-6">
         {board.views.map((v) => {
           // Monday-style Table views are TABLE type with config.grid; show
           // the Table icon to distinguish them from the List tab.
@@ -220,26 +225,31 @@ export default async function BoardPage(props: {
             ? `/boards/${board.slug}`
             : `/boards/${board.slug}?view=${v.id}`;
           return (
-            <span
+            <ViewTab
               key={v.id}
-              className={`group/view inline-flex items-center gap-1 px-2 py-2.5 text-sm border-b-2 -mb-px transition-colors ${
-                active
-                  ? "border-zinc-900 text-zinc-900 font-medium"
-                  : "border-transparent text-zinc-600 hover:text-zinc-900"
-              }`}
-            >
-              <Link href={href} className="inline-flex items-center gap-1.5">
-                <VIcon className={`w-3.5 h-3.5 ${active ? "text-zinc-900" : color}`} />
-                {v.name}
-              </Link>
-              <span className="opacity-0 group-hover/view:opacity-100 transition-opacity">
-                <ViewTabMenu boardId={board.id} view={v} />
-              </span>
-            </span>
+              icon={VIcon}
+              iconClassName={color}
+              label={v.name}
+              active={active}
+              href={href}
+              trailing={
+                <span
+                  className="opacity-0 group-hover/view:opacity-100 transition-opacity"
+                  onClick={(e) => {
+                    // Tab body is now a single <Link>; keep menu clicks
+                    // (trigger + panel rows) from navigating the tab.
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                >
+                  <ViewTabMenu boardId={board.id} view={v} />
+                </span>
+              }
+            />
           );
         })}
         <NewViewTrigger boardId={board.id} />
-      </div>
+      </ViewTabStrip>
 
       {/* Action row — the functional filter bar lives inside BoardCanvas
           (it owns the items it filters); this row keeps task creation. */}
@@ -268,47 +278,5 @@ export default async function BoardPage(props: {
         />
       </div>
     </div>
-  );
-}
-
-function SpaceTile({ icon, color, fallback }: { icon: string | null; color: string | null; fallback: string }) {
-  const Icon = getSpaceIcon(icon);
-  const bg = color ?? "#71717A";
-  return (
-    <span
-      className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
-      style={{ backgroundColor: bg }}
-    >
-      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : fallback}
-    </span>
-  );
-}
-
-function FolderTile({ icon, color }: { icon: string | null; color: string | null }) {
-  const Icon = getSpaceIcon(icon);
-  const tint = color ?? "#71717A";
-  if (Icon) {
-    return (
-      <span
-        className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
-        style={{ backgroundColor: tint }}
-      >
-        {createElement(Icon, { className: "h-3 w-3" })}
-      </span>
-    );
-  }
-  return <FolderIcon className="h-3.5 w-3.5 shrink-0" style={{ color: tint }} />;
-}
-
-function BoardTile({ icon, color, fallback }: { icon: string | null; color: string | null; fallback: string }) {
-  const Icon = getSpaceIcon(icon);
-  const bg = color ?? "#A1A1AA";
-  return (
-    <span
-      className="h-5 w-5 rounded flex items-center justify-center text-white text-[10px] font-semibold uppercase shrink-0"
-      style={{ backgroundColor: bg }}
-    >
-      {Icon ? createElement(Icon, { className: "h-3 w-3" }) : fallback}
-    </span>
   );
 }

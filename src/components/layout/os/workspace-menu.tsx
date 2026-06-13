@@ -27,6 +27,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Settings as SettingsIcon, Users as UsersIcon, Sparkles, LayoutGrid, Zap, Plus,
 } from "lucide-react";
+import { MenuItem } from "@/components/ui/menu";
 
 interface WorkspaceMenuProps {
   open: boolean;
@@ -120,9 +121,9 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
           <div className="px-4 pb-2 pt-1">
             <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-medium mb-1.5">Manage</div>
             <ul className="space-y-0.5">
-              <MenuRow Icon={Sparkles}    label="Apps" />
-              <MenuRow Icon={LayoutGrid}  label="Templates" />
-              <MenuRow Icon={Zap}         label="Automations" />
+              <li><MenuItem variant="inset" icon={Sparkles}    label="Apps" /></li>
+              <li><MenuItem variant="inset" icon={LayoutGrid}  label="Templates" /></li>
+              <li><MenuItem variant="inset" icon={Zap}         label="Automations" /></li>
             </ul>
           </div>
 
@@ -134,16 +135,19 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
             <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-medium mb-1.5">Switch Workspaces</div>
             <ul className="space-y-0.5">
               <li>
-                <button className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-sm">
-                  <span className="w-6 h-6 rounded-md bg-zinc-900 text-white flex items-center justify-center text-[10px] font-bold">K</span>
-                  <span className="flex-1 text-left text-zinc-900">Cashkr Team</span>
-                </button>
+                <MenuItem
+                  variant="inset"
+                  leading={<span className="w-6 h-6 rounded-md bg-zinc-900 text-white flex items-center justify-center text-[10px] font-bold shrink-0">K</span>}
+                  label="Cashkr Team"
+                  selected
+                />
               </li>
               <li>
-                <button className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-sm">
-                  <span className="w-6 h-6 rounded-md text-white flex items-center justify-center text-[10px] font-bold" style={{ background: "var(--os-brand)" }}>IS</span>
-                  <span className="flex-1 text-left text-zinc-900">Ibrahim Surya's Workspace</span>
-                </button>
+                <MenuItem
+                  variant="inset"
+                  leading={<span className="w-6 h-6 rounded-md text-white flex items-center justify-center text-[10px] font-bold shrink-0" style={{ background: "var(--os-brand)" }}>IS</span>}
+                  label="Ibrahim Surya's Workspace"
+                />
               </li>
             </ul>
           </div>
@@ -165,24 +169,5 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
         </div>
       )}
     </div>
-  );
-}
-
-function MenuRow({
-  Icon, label,
-}: {
-  Icon: React.ComponentType<{ className?: string }>;
-  label: string;
-}) {
-  return (
-    <li>
-      <button
-        type="button"
-        className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-sm text-zinc-700"
-      >
-        <Icon className="w-4 h-4 text-zinc-500" />
-        <span className="flex-1 text-left">{label}</span>
-      </button>
-    </li>
   );
 }

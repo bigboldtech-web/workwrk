@@ -14,11 +14,29 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UserPlus, ArrowUpCircle, LayoutGrid, ExternalLink, PinOff, Sparkles } from "lucide-react";
 import { useSession } from "next-auth/react";
+import { MenuItem, MenuList } from "@/components/ui/menu";
 import { APPS, canAccessApp, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
 import { useOsShell } from "./shell-context";
 
 const HOVER_OPEN_MS = 180;
 const HOVER_CLOSE_MS = 120;
+
+// One rail-label treatment so every cell is the same height and full
+// words never clip. Centered under the icon, up to 2 lines, then
+// ellipsis — no more hard-coded "Dashboa.." / "Timeshe..".
+function RailLabel({ children, italic }: { children: React.ReactNode; italic?: boolean }) {
+  return (
+    <span className="flex h-[20px] w-full items-center justify-center px-px">
+      <span
+        className={`line-clamp-2 break-words text-center text-[9px] leading-[1.1] ${
+          italic ? "italic" : ""
+        }`}
+      >
+        {children}
+      </span>
+    </span>
+  );
+}
 
 export function ClickAppRail() {
   const pathname = usePathname() || "";
@@ -192,9 +210,7 @@ export function ClickAppRail() {
                 >
                   <app.Icon className="w-[16px] h-[16px]" />
                 </span>
-                {iconsOnly ? null : (
-                  <span className="text-[9px] leading-tight truncate max-w-[52px]">{app.label}</span>
-                )}
+                {iconsOnly ? null : <RailLabel>{app.label}</RailLabel>}
               </button>
               {isHovered && !dragKey && !active ? <AppRailHoverPreview app={app} /> : null}
             </div>
@@ -220,9 +236,7 @@ export function ClickAppRail() {
               <span className="flex items-center justify-center w-[26px] h-[26px] rounded-md border border-dashed border-white/40 group-hover:bg-white/10">
                 <ghostApp.Icon className="w-[16px] h-[16px]" />
               </span>
-              {iconsOnly ? null : (
-                <span className="text-[9px] leading-tight truncate max-w-[52px] italic">{ghostApp.label}</span>
-              )}
+              {iconsOnly ? null : <RailLabel italic>{ghostApp.label}</RailLabel>}
             </button>
             {hoverKey === ghostApp.key && !dragKey ? <AppRailHoverPreview app={ghostApp} /> : null}
           </div>
@@ -250,7 +264,7 @@ export function ClickAppRail() {
             >
               <LayoutGrid className="w-[16px] h-[16px]" />
             </span>
-            {iconsOnly ? null : <span className="text-[9px] leading-tight">More</span>}
+            {iconsOnly ? null : <RailLabel>More</RailLabel>}
           </button>
         </div>
       </nav>
@@ -262,7 +276,7 @@ export function ClickAppRail() {
           className="w-full flex flex-col items-center gap-0.5 py-1.5 text-white hover:bg-white/15"
         >
           <UserPlus className="w-[16px] h-[16px]" />
-          {iconsOnly ? null : <span className="text-[9px]">Invite</span>}
+          {iconsOnly ? null : <RailLabel>Invite</RailLabel>}
         </Link>
         <Link
           href="/settings"
@@ -270,7 +284,7 @@ export function ClickAppRail() {
           className="w-full flex flex-col items-center gap-0.5 py-1.5 text-white hover:bg-white/15"
         >
           <ArrowUpCircle className="w-[16px] h-[16px]" />
-          {iconsOnly ? null : <span className="text-[9px]">Upgrade</span>}
+          {iconsOnly ? null : <RailLabel>Upgrade</RailLabel>}
         </Link>
       </div>
 
@@ -325,33 +339,24 @@ function RailContextMenu({
   const app = APPS.find((a) => a.key === appKey);
   if (!app) return null;
   return (
-    <div
-      role="menu"
-      className="fixed z-50 w-[200px] bg-white rounded-md shadow-lg border border-zinc-200 py-1 text-[13px]"
+    <MenuList
+      className="fixed z-50 w-[200px]"
       style={{ left: x, top: y }}
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => { e.preventDefault(); onClose(); }}
     >
-      <button
-        type="button"
-        role="menuitem"
+      <MenuItem
+        icon={ExternalLink}
+        label={`Open ${app.label.replace(/\.\.$/, "")}`}
         onClick={onOpen}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-50"
-      >
-        <ExternalLink className="w-3.5 h-3.5 text-zinc-500" />
-        <span>Open {app.label.replace(/\.\.$/, "")}</span>
-      </button>
+      />
       {!isAlwaysPinned(app.key) ? (
-        <button
-          type="button"
-          role="menuitem"
+        <MenuItem
+          icon={PinOff}
+          label="Unpin from sidebar"
           onClick={onUnpin}
-          className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-50 text-zinc-800"
-        >
-          <PinOff className="w-3.5 h-3.5 text-zinc-500" />
-          <span>Unpin from sidebar</span>
-        </button>
+        />
       ) : null}
-    </div>
+    </MenuList>
   );
 }

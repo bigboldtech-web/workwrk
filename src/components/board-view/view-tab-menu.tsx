@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import { useOsToast } from "@/components/layout/os/toast";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 
 interface ViewLike {
   id: string;
@@ -213,11 +214,11 @@ function ViewMenuPanel({
   }
 
   return (
-    <div role="menu" className="bg-white rounded-xl border border-zinc-200 shadow-2xl py-1.5">
-      <Item Icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
+    <MenuList>
+      <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
       {!view.isDefault ? (
-        <Item
-          Icon={Star}
+        <MenuItem
+          icon={Star}
           label="Set as default"
           busy={busy === "default"}
           onClick={async () => {
@@ -226,40 +227,10 @@ function ViewMenuPanel({
           }}
         />
       ) : null}
-      <Item Icon={Copy} label="Duplicate" busy={busy === "dup"} onClick={duplicate} />
-      <div className="h-px bg-zinc-100 my-1" />
-      <Item Icon={Trash2} label="Delete" destructive busy={busy === "del"} onClick={remove} />
-    </div>
-  );
-}
-
-function Item({
-  Icon,
-  label,
-  busy,
-  destructive,
-  onClick,
-}: {
-  Icon: typeof Edit2;
-  label: string;
-  busy?: boolean;
-  destructive?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      disabled={busy}
-      className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] disabled:opacity-50 ${
-        destructive ? "text-red-600 hover:bg-red-50" : "text-zinc-800 hover:bg-zinc-50"
-      }`}
-    >
-      <Icon className={`h-3.5 w-3.5 shrink-0 ${destructive ? "text-red-500" : "text-zinc-500"}`} />
-      <span className="flex-1">{label}</span>
-      {busy ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400" /> : null}
-    </button>
+      <MenuItem icon={Copy} label="Duplicate" busy={busy === "dup"} onClick={duplicate} />
+      <MenuSeparator />
+      <MenuItem icon={Trash2} label="Delete" destructive busy={busy === "del"} onClick={remove} />
+    </MenuList>
   );
 }
 

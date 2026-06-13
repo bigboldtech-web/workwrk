@@ -8,11 +8,12 @@
 //   Rename → PATCH /api/tables/[id] { name }
 //   Delete → DELETE /api/tables/[id]  (hard delete — rows cascade)
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Edit2, Trash2, Loader2 } from "lucide-react";
 import { useOsToast } from "./toast";
 import { MorePortal } from "./more-portal";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 
 interface TableRowLike {
   id: string;
@@ -187,40 +188,10 @@ function TableMoreMenu({
   }
 
   return (
-    <div role="menu" className="bg-white rounded-xl border border-zinc-200 shadow-2xl py-1.5">
-      <Item Icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
-      <div className="h-px bg-zinc-100 my-1" />
-      <Item Icon={Trash2} label="Delete table" destructive busy={busy === "delete"} onClick={remove} />
-    </div>
-  );
-}
-
-function Item({
-  Icon,
-  label,
-  busy,
-  destructive,
-  onClick,
-}: {
-  Icon: typeof Edit2;
-  label: string | ReactNode;
-  busy?: boolean;
-  destructive?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      disabled={busy}
-      className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] disabled:opacity-50 ${
-        destructive ? "text-red-600 hover:bg-red-50" : "text-zinc-800 hover:bg-zinc-50"
-      }`}
-    >
-      <Icon className={`h-3.5 w-3.5 shrink-0 ${destructive ? "text-red-500" : "text-zinc-500"}`} />
-      <span className="flex-1">{label}</span>
-      {busy ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400" /> : null}
-    </button>
+    <MenuList>
+      <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
+      <MenuSeparator />
+      <MenuItem icon={Trash2} label="Delete table" destructive busy={busy === "delete"} onClick={remove} />
+    </MenuList>
   );
 }

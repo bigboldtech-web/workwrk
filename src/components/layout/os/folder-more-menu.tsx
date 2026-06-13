@@ -11,18 +11,18 @@
 // Folders don't have visibility / member overrides (they inherit from
 // Space), so there's no Share row here — keeps the menu tight.
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Archive, Loader2, Star,
   Link as LinkIcon, Zap,
   Download, Files, ArrowRightLeft, Copy, Trash2, Share2,
-  ChevronRight,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 
 interface FolderRowLike {
   id: string;
@@ -285,90 +285,34 @@ function FolderMoreMenu({
   }
 
   return (
-    <div role="menu" className="bg-white rounded-xl border border-zinc-200 shadow-2xl py-1.5">
-      <Item
-        Icon={Star}
+    <MenuList>
+      <MenuItem
+        icon={Star}
         label={starred ? "Unfavorite" : "Favorite"}
         onClick={toggleFavorite}
         iconFilled={!!starred}
       />
-      <Item Icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
-      <Item Icon={LinkIcon} label="Copy link" onClick={copyLink} />
+      <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
+      <MenuItem icon={LinkIcon} label="Copy link" onClick={copyLink} />
 
-      <Item Icon={Palette} label="Folder color" onClick={() => setMode("icon")} submenu />
+      <MenuItem icon={Palette} label="Folder color" onClick={() => setMode("icon")} submenu />
 
-      <div className="h-px bg-zinc-100 my-1" />
+      <MenuSeparator />
 
-      <Item Icon={Zap}        label="Automations"    onClick={() => toast("Automations are coming soon")} />
+      <MenuItem icon={Zap}        label="Automations"    onClick={() => toast("Automations are coming soon")} />
 
-      <div className="h-px bg-zinc-100 my-1" />
+      <MenuSeparator />
 
-      <Item Icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
-      <Item Icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ kind: "FOLDER" }); }} />
-      <Item Icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
-      <Item Icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
-      <Item Icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
-      <Item Icon={Trash2}         label="Delete"    destructive disabled />
+      <MenuItem icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
+      <MenuItem icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ kind: "FOLDER" }); }} />
+      <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
+      <MenuItem icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
+      <MenuItem icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
+      <MenuItem icon={Trash2}         label="Delete"    destructive disabled title="Coming soon" />
 
-      <div className="h-px bg-zinc-100 my-1" />
+      <MenuSeparator />
 
-      <Item Icon={Share2} label="Sharing & Permissions" onClick={() => toast("Folder sharing is coming soon")} />
-    </div>
-  );
-}
-
-function Item({
-  Icon,
-  label,
-  busy,
-  destructive,
-  onClick,
-  submenu,
-  disabled,
-  iconFilled,
-}: {
-  Icon: typeof Edit2;
-  label: string | ReactNode;
-  busy?: boolean;
-  destructive?: boolean;
-  onClick?: () => void;
-  submenu?: boolean;
-  disabled?: boolean;
-  iconFilled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      disabled={busy || disabled}
-      title={disabled && !busy ? "Coming soon" : undefined}
-      className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] ${
-        disabled
-          ? "text-zinc-400 cursor-not-allowed"
-          : destructive
-            ? "text-red-600 hover:bg-red-50"
-            : "text-zinc-800 hover:bg-zinc-50"
-      } disabled:opacity-100`}
-    >
-      <Icon
-        className={`h-3.5 w-3.5 shrink-0 ${
-          disabled
-            ? "text-zinc-300"
-            : destructive
-              ? "text-red-500"
-              : iconFilled
-                ? "text-amber-400"
-                : "text-zinc-500"
-        }`}
-        style={iconFilled ? { fill: "currentColor" } : undefined}
-      />
-      <span className="flex-1">{label}</span>
-      {busy ? (
-        <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
-      ) : submenu ? (
-        <ChevronRight className="h-3 w-3 text-zinc-400 shrink-0" />
-      ) : null}
-    </button>
+      <MenuItem icon={Share2} label="Sharing & Permissions" onClick={() => toast("Folder sharing is coming soon")} />
+    </MenuList>
   );
 }

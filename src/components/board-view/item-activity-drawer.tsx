@@ -13,6 +13,7 @@ import {
   X, MessageCircle, FileText, Activity as ActivityIcon, Loader2,
   Trash2, Paperclip,
 } from "lucide-react";
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { useToast } from "@/components/ui/toast";
 
 interface UpdateRow {
@@ -150,11 +151,11 @@ export function ItemActivityDrawer(props: Props) {
           </button>
         </header>
 
-        <nav className="flex-shrink-0 px-5 border-b border-zinc-200 flex gap-1">
-          <TabButton active={tab === "updates"} onClick={() => setTab("updates")} icon={MessageCircle} label="Updates" count={updates.length} />
-          <TabButton active={tab === "files"} onClick={() => setTab("files")} icon={FileText} label="Files" />
-          <TabButton active={tab === "activity"} onClick={() => setTab("activity")} icon={ActivityIcon} label="Activity Log" count={activity.length} />
-        </nav>
+        <ViewTabStrip className="flex-shrink-0 px-5">
+          <ViewTab active={tab === "updates"} onClick={() => setTab("updates")} icon={MessageCircle} label="Updates" trailing={<CountBadge count={updates.length} />} />
+          <ViewTab active={tab === "files"} onClick={() => setTab("files")} icon={FileText} label="Files" />
+          <ViewTab active={tab === "activity"} onClick={() => setTab("activity")} icon={ActivityIcon} label="Activity Log" trailing={<CountBadge count={activity.length} />} />
+        </ViewTabStrip>
 
         <div className="flex-1 overflow-y-auto">
           {tab === "updates" && (
@@ -176,24 +177,10 @@ export function ItemActivityDrawer(props: Props) {
   );
 }
 
-function TabButton({ active, onClick, icon: Icon, label, count }: { active: boolean; onClick: () => void; icon: typeof MessageCircle; label: string; count?: number }) {
+function CountBadge({ count }: { count?: number }) {
+  if (count === undefined || count <= 0) return null;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={
-        "flex items-center gap-1.5 px-3 py-2.5 -mb-px border-b-2 text-xs font-medium transition-colors " +
-        (active
-          ? "border-violet-500 text-violet-700 dark:text-violet-300"
-          : "border-transparent text-zinc-500 hover:text-zinc-900")
-      }
-    >
-      <Icon size={13} />
-      <span>{label}</span>
-      {count !== undefined && count > 0 && (
-        <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-zinc-50 text-zinc-500-2">{count}</span>
-      )}
-    </button>
+    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-zinc-50 text-zinc-500-2">{count}</span>
   );
 }
 
