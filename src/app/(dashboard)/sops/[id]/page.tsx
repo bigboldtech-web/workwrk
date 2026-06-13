@@ -423,7 +423,7 @@ export default function SOPDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
-  const { canManageSOPs } = useRole();
+  const { canManageSOPs, canPublishSOPs } = useRole();
   const [sop, setSop] = useState<SOP | null>(null);
   // Org-wide list of saved categories (with their subcategories) so the
   // detail page's editor mirrors the create dialog. Refreshed only when
@@ -1113,7 +1113,7 @@ export default function SOPDetailPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
-                  {sop.status !== "PUBLISHED" && (
+                  {sop.status !== "PUBLISHED" && canPublishSOPs && (
                     <DropdownMenuItem onSelect={() => setShowPublishDialog(true)}>
                       <Send size={14} className="mr-2" /> Publish
                     </DropdownMenuItem>

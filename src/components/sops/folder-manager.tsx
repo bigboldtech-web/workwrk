@@ -29,6 +29,8 @@ interface AccessUser {
   department?: { name: string } | null;
 }
 
+type FolderRole = "VIEWER" | "EDITOR" | "OWNER";
+
 /**
  * Admin-only: CRUD folders + manage per-folder user access.
  *
@@ -47,7 +49,7 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
   // Drill-in state
   const [selected, setSelected] = useState<Folder | null>(null);
   const [orgUsers, setOrgUsers] = useState<AccessUser[] | null>(null);
-  const [accessUserIds, setAccessUserIds] = useState<Set<string>>(new Set());
+  const [accessRoles, setAccessRoles] = useState<Map<string, FolderRole>>(new Map());
   const [accessDirty, setAccessDirty] = useState(false);
   const [savingAccess, setSavingAccess] = useState(false);
 
@@ -152,10 +154,11 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
     ]);
     const access = accessRes.ok ? await accessRes.json().then((d) => d.data ?? d) : [];
     const people = peopleRes.ok ? await peopleRes.json().then((d) => d.data ?? d) : null;
-    const grantedIds = new Set<string>(
-      (Array.isArray(access) ? access : []).map((row: any) => row.user?.id).filter(Boolean),
-    );
-    setAccessUserIds(grantedIds);
+    const grantedMap = new Map<string, FolderRole>();
+    (Array.isArray(access) ? access : []).forEach((row: any) => {
+      if (row.user?.id) grantedMap.set(row.user.id, (row.role as FolderRole) || "EDITOR");
+    });
+    setAccessRoles(grantedMap);
     // `/api/my-team` returns recursive reports for managers; admins are
     // managers too, but we want the full list. Fall back to pulling via
     // /api/users if my-team returns too few rows.
@@ -174,12 +177,17 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
   }
 
   function toggleUser(userId: string) {
-    setAccessUserIds((prev) => {
-      const next = new Set(prev);
+    setAccessRoles((prev) => {
+      const next = new Map(prev);
       if (next.has(userId)) next.delete(userId);
-      else next.add(userId);
+      else next.set(userId, "EDITOR");
       return next;
     });
+    setAccessDirty(true);
+  }
+
+  function setUserRole(userId: string, role: FolderRole) {
+    setAccessRoles((prev) => new Map(prev).set(userId, role));
     setAccessDirty(true);
   }
 
@@ -190,7 +198,7 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
       const res = await fetch(`/api/sop-folders/${selected.id}/access`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userIds: Array.from(accessUserIds) }),
+        body: JSON.stringify({ grants: Array.from(accessRoles, ([userId, role]) => ({ userId, role })) }),
       });
       if (res.ok) {
         toastSuccess("Access updated");
@@ -319,8 +327,9 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
         {selected && (
           <div className="space-y-3">
             <p className="text-xs text-muted">
-              Pick the users who can see and manage SOPs in <strong>{selected.name}</strong>.
-              Org admins always have access regardless of this list.
+              Pick who can access <strong>{selected.name}</strong> and at what level:
+              <strong> Viewer</strong> reads published SOPs · <strong>Editor</strong> writes &amp; sees drafts ·
+              <strong> Owner</strong> also manages access. Org admins always have full access.
             </p>
 
             {orgUsers === null ? (
@@ -330,26 +339,43 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
             ) : (
               <div className="max-h-96 overflow-y-auto space-y-1 border border-border rounded-lg p-1">
                 {orgUsers.map((u) => {
-                  const checked = accessUserIds.has(u.id);
+                  const role = accessRoles.get(u.id);
+                  const checked = role !== undefined;
                   return (
-                    <button
+                    <div
                       key={u.id}
-                      type="button"
-                      onClick={() => toggleUser(u.id)}
-                      className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${checked ? "bg-[rgba(212,255,46,0.08)]" : "hover:bg-surface-2"}`}
+                      className={`w-full flex items-center gap-3 p-2 rounded-md transition-colors ${checked ? "bg-[rgba(212,255,46,0.08)]" : "hover:bg-surface-2"}`}
                     >
-                      <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${checked ? "border-[#d4ff2e] bg-[#a8cc24]" : "border-border"}`}>
-                        {checked && <Check size={10} className="text-[#0a0a0a]" />}
-                      </div>
-                      <Avatar className="h-6 w-6">
-                        {u.avatar ? <AvatarImage src={u.avatar} alt="" /> : null}
-                        <AvatarFallback className="text-[9px]">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm">{u.firstName} {u.lastName}</div>
-                        {u.role?.title && <div className="text-[10px] text-muted">{u.role.title}{u.department?.name ? ` · ${u.department.name}` : ""}</div>}
-                      </div>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleUser(u.id)}
+                        className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                      >
+                        <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${checked ? "border-[#d4ff2e] bg-[#a8cc24]" : "border-border"}`}>
+                          {checked && <Check size={10} className="text-[#0a0a0a]" />}
+                        </div>
+                        <Avatar className="h-6 w-6">
+                          {u.avatar ? <AvatarImage src={u.avatar} alt="" /> : null}
+                          <AvatarFallback className="text-[9px]">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm">{u.firstName} {u.lastName}</div>
+                          {u.role?.title && <div className="text-[10px] text-muted">{u.role.title}{u.department?.name ? ` · ${u.department.name}` : ""}</div>}
+                        </div>
+                      </button>
+                      {checked && (
+                        <select
+                          value={role}
+                          onChange={(e) => setUserRole(u.id, e.target.value as FolderRole)}
+                          className="h-7 shrink-0 rounded-md border border-border bg-transparent px-1.5 text-xs"
+                          title="Folder role"
+                        >
+                          <option value="VIEWER">Viewer</option>
+                          <option value="EDITOR">Editor</option>
+                          <option value="OWNER">Owner</option>
+                        </select>
+                      )}
+                    </div>
                   );
                 })}
               </div>

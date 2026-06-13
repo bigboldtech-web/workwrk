@@ -43,6 +43,7 @@ export function useRole() {
     isExecutive,
     canManagePeople: loading ? isMgr : can("people", "edit"),
     canManageSOPs: loading ? isMgr : can("sops", "create"),
+    canPublishSOPs: loading ? isMgr : can("sops", "publish"),
     canManageReviews: loading ? isMgr : can("reviews", "create"),
     canManageKRAs: loading ? isMgr : can("kras", "create"),
     canInvite: loading ? isMgr : can("people", "create"),
