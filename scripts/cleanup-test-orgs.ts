@@ -14,12 +14,32 @@
  *   npx tsx scripts/cleanup-test-orgs.ts            # dry run — review the lists
  *   npx tsx scripts/cleanup-test-orgs.ts --confirm  # actually delete
  */
-import * as dotenv from "dotenv";
-dotenv.config({ path: ".env.production" });
-dotenv.config(); // .env — does not override vars already set above
-
+import { readFileSync, existsSync } from "node:fs";
 import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
+
+// Load .env files WITHOUT depending on the `dotenv` package (it's a devDep and
+// may not be installed on the server). Existing process.env vars (e.g. a
+// DATABASE_URL passed inline) win; otherwise .env.production then .env.
+function loadEnvFile(path: string) {
+  if (!existsSync(path)) return;
+  for (const raw of readFileSync(path, "utf8").split("\n")) {
+    const m = raw.match(/^\s*([\w.-]+)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    const key = m[1];
+    if (process.env[key] !== undefined) continue; // never override
+    let val = m[2];
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    process.env[key] = val;
+  }
+}
+loadEnvFile(".env.production");
+loadEnvFile(".env");
 
 const connStr = process.env.DATABASE_URL;
 if (!connStr) throw new Error("DATABASE_URL is not set");
