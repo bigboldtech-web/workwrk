@@ -39,6 +39,7 @@ function hostMatches(reqHost: string, configured: string): boolean {
 export function proxy(req: NextRequest) {
   const adminHost = process.env.ADMIN_HOST?.trim();
   const appHost = process.env.APP_HOST?.trim();
+  const marketingHost = process.env.MARKETING_HOST?.trim();
   const reqHost = req.headers.get("host") || "";
   const path = req.nextUrl.pathname;
   const customDomainsEnabled = process.env.CUSTOM_DOMAINS_ENABLED === "true";
@@ -83,13 +84,16 @@ export function proxy(req: NextRequest) {
 
   // 2) Custom domain — stamp the request host into a header that
   //    downstream code can read. Opt-in via CUSTOM_DOMAINS_ENABLED.
-  //    Skip for the canonical app host (no resolution needed) and
-  //    the admin host (handled above).
+  //    Skip ALL of our OWN hosts (app, admin, and the marketing apex) — only
+  //    a genuine customer white-label domain should be resolved here. The
+  //    marketing-host exclusion matters once APP_HOST moves off the apex,
+  //    otherwise workwrk.com itself gets treated as a custom domain.
   if (
     customDomainsEnabled &&
     reqHost &&
     (!appHost || !hostMatches(reqHost, appHost)) &&
-    (!adminHost || !hostMatches(reqHost, adminHost))
+    (!adminHost || !hostMatches(reqHost, adminHost)) &&
+    (!marketingHost || !hostMatches(reqHost, marketingHost))
   ) {
     const res = NextResponse.next();
     res.headers.set("x-workwrk-host", reqHost.split(":")[0].toLowerCase());
