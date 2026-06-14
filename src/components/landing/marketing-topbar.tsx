@@ -5,6 +5,7 @@
 "use client";
 
 import Link from "next/link";
+import { appHref } from "@/lib/app-url";
 import { useEffect, useState, useRef } from "react";
 import { ChevronDown, ArrowRight, Menu, X } from "lucide-react";
 import { LogoLockup } from "@/components/brand/logo";
@@ -70,7 +71,7 @@ export function MarketingTopbar() {
 
         <div className="hidden sm:flex items-center gap-1">
           <Link
-            href="/login"
+            href={appHref("/login")}
             className="text-sm text-slate-600 hover:text-slate-900 px-3 py-2 rounded-lg transition-colors"
           >
             Log in
@@ -317,7 +318,7 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
             Get a demo
           </Link>
           <Link
-            href="/login"
+            href={appHref("/login")}
             onClick={onClose}
             className="block text-center py-3 text-sm text-slate-600"
           >

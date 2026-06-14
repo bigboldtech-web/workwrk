@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { appHref } from "@/lib/app-url";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
@@ -97,7 +98,7 @@ export function BentoNav({ links = defaultLinks }: { links?: NavLink[] }) {
           ) : (
             <>
               <Link
-                href="/login"
+                href={appHref("/login")}
                 className="bento-nav-sign"
                 style={{
                   fontSize: 13,
@@ -109,7 +110,7 @@ export function BentoNav({ links = defaultLinks }: { links?: NavLink[] }) {
               >
                 {t("signIn")}
               </Link>
-              <Link href="/register" className="bento-btn bento-btn-lime">
+              <Link href={appHref("/register")} className="bento-btn bento-btn-lime">
                 {t("startFree")} <span className="arr">→</span>
               </Link>
             </>

@@ -70,10 +70,43 @@ if (googleEnabled) {
   );
 }
 
+// Cross-subdomain session: when COOKIE_DOMAIN is set (e.g. ".workwrk.com" in
+// production) the auth cookies are scoped to the parent domain, so a login on
+// app.workwrk.com is also valid on admin.workwrk.com. Left undefined in dev /
+// preview so localhost keeps working with default host-only cookies.
+// NOTE: flipping this on rotates the cookie name+scope once, logging everyone
+// out a single time — deploy it during a low-traffic window.
+const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN?.trim();
+const COOKIE_SECURE = process.env.NODE_ENV === "production";
+const crossSubdomainCookies: NextAuthOptions["cookies"] = COOKIE_DOMAIN
+  ? {
+      sessionToken: {
+        name: `${COOKIE_SECURE ? "__Secure-" : ""}next-auth.session-token`,
+        options: {
+          httpOnly: true,
+          sameSite: "lax",
+          path: "/",
+          secure: COOKIE_SECURE,
+          domain: COOKIE_DOMAIN,
+        },
+      },
+      callbackUrl: {
+        name: `${COOKIE_SECURE ? "__Secure-" : ""}next-auth.callback-url`,
+        options: {
+          sameSite: "lax",
+          path: "/",
+          secure: COOKIE_SECURE,
+          domain: COOKIE_DOMAIN,
+        },
+      },
+    }
+  : undefined;
+
 export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
   },
+  cookies: crossSubdomainCookies,
   pages: {
     signIn: "/login",
     newUser: "/welcome",

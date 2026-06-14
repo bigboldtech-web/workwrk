@@ -71,6 +71,16 @@ export function proxy(req: NextRequest) {
     }
   }
 
+  // 1b) App host — the product host's root lands in the app, not on the
+  //     marketing landing. Opt-in via APP_HOST. Soft split: every other path
+  //     still resolves on either host; a hard split (marketing 404s on app.,
+  //     app 404s on apex) is a later phase.
+  if (appHost && hostMatches(reqHost, appHost) && path === "/") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/today";
+    return NextResponse.redirect(url);
+  }
+
   // 2) Custom domain — stamp the request host into a header that
   //    downstream code can read. Opt-in via CUSTOM_DOMAINS_ENABLED.
   //    Skip for the canonical app host (no resolution needed) and
