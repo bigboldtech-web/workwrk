@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, hasRole, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { requirePlatformAdminApi } from "@/lib/platform-admin";
 import { setFeature, type EnterpriseFeature } from "@/lib/enterprise-features";
 
 /**
- * Admin → company detail. SUPER_ADMIN only.
+ * Admin → company detail. Platform staff only.
  *
  * GET    → org metadata + counts + current Enterprise feature flags.
  * PATCH  → toggle a single feature flag (body: { feature, enabled })
@@ -17,7 +18,8 @@ const VALID_PLANS = new Set(["STARTER", "GROWTH", "SCALE", "ENTERPRISE"]);
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN"])) return jsonError("Forbidden", 403);
+  const denied = await requirePlatformAdminApi(session);
+  if (denied) return denied;
 
   const { id } = await params;
   const org = await prisma.organization.findUnique({
@@ -50,7 +52,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN"])) return jsonError("Forbidden", 403);
+  const denied = await requirePlatformAdminApi(session);
+  if (denied) return denied;
 
   const { id } = await params;
   const body = await req.json();

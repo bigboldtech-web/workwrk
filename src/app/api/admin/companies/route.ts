@@ -1,14 +1,13 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, hasRole, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { AccessLevel } from "@/generated/prisma";
+import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { requirePlatformAdminApi } from "@/lib/platform-admin";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN" as AccessLevel])) {
-    return jsonError("Forbidden", 403);
-  }
+  const denied = await requirePlatformAdminApi(session);
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const search = url.searchParams.get("search") || "";
@@ -63,9 +62,8 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN" as AccessLevel])) {
-    return jsonError("Forbidden", 403);
-  }
+  const denied = await requirePlatformAdminApi(session);
+  if (denied) return denied;
 
   const body = await req.json();
   const { id, plan, status } = body;

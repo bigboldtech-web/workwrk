@@ -1,103 +1,28 @@
-"use client";
+// Server-side gate for the cross-tenant back-office (admin.workwrk.com).
+//
+// Platform STAFF only — resolved from the PlatformAdmin allowlist, NOT from
+// tenant `User.accessLevel`. A customer's own SUPER_ADMIN is an admin of THEIR
+// org, not of WorkwrK, and must never reach this surface or other tenants'
+// data/ARR. The matching API routes (/api/admin/*) gate on the same check, so
+// the security does not depend on this UI layer alone.
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { cn } from "@/lib/utils";
-import { LayoutDashboard, Building2, BarChart3, Shield, ArrowLeft, RefreshCw, Sparkles } from "lucide-react";
-import { ToastProvider } from "@/components/ui/toast";
+import { redirect } from "next/navigation";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { isPlatformAdminSession } from "@/lib/platform-admin";
+import { AdminShell } from "./admin-shell";
 
-const adminNav = [
-  { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
-  { name: "Companies", href: "/admin/companies", icon: Building2 },
-  { name: "AppSumo Codes", href: "/admin/appsumo", icon: Sparkles },
-  { name: "Analytics", href: "/admin/analytics", icon: BarChart3 },
-];
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/login");
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const { data: session, status } = useSession();
-  const router = useRouter();
+  const allowed = await isPlatformAdminSession(session);
+  // Non-staff (incl. customers' own super-admins) are bounced to the app and
+  // never told the back-office exists.
+  // NOTE: once admin.workwrk.com is live (subdomain phase), revisit this
+  // target so it doesn't loop on the admin host — redirect to the app host.
+  if (!allowed) redirect("/today");
 
-  useEffect(() => {
-    if (status === "loading") return;
-    if (!session) {
-      router.push("/login");
-      return;
-    }
-    if ((session.user as any)?.accessLevel !== "SUPER_ADMIN") {
-      router.push("/dashboard");
-    }
-  }, [session, status, router]);
-
-  if (status === "loading") {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <RefreshCw className="h-6 w-6 animate-spin text-muted" />
-      </div>
-    );
-  }
-
-  if (!session || (session.user as any)?.accessLevel !== "SUPER_ADMIN") {
-    return null;
-  }
-
-  return (
-    <div className="flex h-screen bg-background text-foreground">
-      {/* Sidebar */}
-      <aside className="w-[240px] border-r border-border bg-background flex flex-col">
-        <div className="h-16 flex items-center px-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Shield size={20} className="text-red-400" />
-            <span className="font-bold text-sm">WorkwrK Admin</span>
-          </div>
-        </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {adminNav.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
-                  isActive
-                    ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                    : "text-muted hover:bg-surface-2 hover:text-foreground"
-                )}
-              >
-                <item.icon size={18} />
-                <span>{item.name}</span>
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="px-3 py-4 border-t border-border">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-muted hover:bg-surface-2 hover:text-foreground transition-all"
-          >
-            <ArrowLeft size={16} />
-            <span>Back to Dashboard</span>
-          </Link>
-        </div>
-      </aside>
-
-      {/* Main */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 border-b border-border flex items-center justify-between px-6 bg-background/80 backdrop-blur">
-          <h1 className="text-sm font-medium text-muted">Super Admin Panel</h1>
-          <div className="flex items-center gap-2 text-xs text-muted">
-            <Shield size={12} className="text-red-400" />
-            {(session.user as any)?.email}
-          </div>
-        </header>
-        <main className="flex-1 overflow-y-auto p-6">
-          <ToastProvider>{children}</ToastProvider>
-        </main>
-      </div>
-    </div>
-  );
+  const email = (session.user as { email?: string | null }).email ?? null;
+  return <AdminShell email={email}>{children}</AdminShell>;
 }

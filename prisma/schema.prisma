@@ -580,6 +580,19 @@ model OrganizationMembership {
   @@index([organizationId])
 }
 
+/// Allowlist of WorkwrK PLATFORM STAFF (the vendor's own employees) who may
+/// access the cross-tenant back-office at admin.workwrk.com — every tenant's
+/// data + ARR. This is deliberately NOT a tenant role: it is separate from
+/// `User.accessLevel` so a customer's own SUPER_ADMIN can never reach other
+/// tenants' data. Keyed by email so staff can be pre-authorized before (or
+/// across) any User row. Emails are stored lower-cased.
+model PlatformAdmin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, hasRole, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { AccessLevel } from "@/generated/prisma";
+import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { requirePlatformAdminApi } from "@/lib/platform-admin";
 
 // Founder dashboard stats. Single endpoint so the admin page only
 // makes one fetch. Adds funnel + MRR-over-time + cohort churn on top
@@ -33,9 +33,8 @@ function fmtMonth(d: Date): string {
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN" as AccessLevel])) {
-    return jsonError("Forbidden", 403);
-  }
+  const denied = await requirePlatformAdminApi(session);
+  if (denied) return denied;
 
   const now = new Date();
   const thirtyDaysAgo = new Date(Date.now() - 30 * DAY_MS);

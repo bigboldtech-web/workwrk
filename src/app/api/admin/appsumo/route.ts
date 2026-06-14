@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, hasRole, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { requirePlatformAdminApi } from "@/lib/platform-admin";
 import type { Plan } from "@/generated/prisma";
 
 /**
  * /api/admin/appsumo — WorkwrK staff endpoints for AppSumo code
- * management. SUPER_ADMIN only.
+ * management. Platform staff only.
  *
  * GET    → list of codes with redemption status (paginated)
  * POST   → bulk import. Body: { codes: [{code, tier, plan, seats}] }
@@ -17,7 +18,8 @@ const VALID_PLANS = new Set(["STARTER", "GROWTH", "SCALE", "ENTERPRISE"] as cons
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN"])) return jsonError("Forbidden", 403);
+  const denied = await requirePlatformAdminApi(session);
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const filter = url.searchParams.get("filter") ?? "all"; // all / unused / redeemed / refunded
@@ -58,7 +60,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN"])) return jsonError("Forbidden", 403);
+  const denied = await requirePlatformAdminApi(session);
+  if (denied) return denied;
 
   const body = await req.json();
   const items = Array.isArray(body?.codes) ? body.codes : [];
@@ -92,7 +95,8 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN"])) return jsonError("Forbidden", 403);
+  const denied = await requirePlatformAdminApi(session);
+  if (denied) return denied;
 
   const body = await req.json();
   const code = typeof body?.code === "string" ? body.code.trim() : "";
