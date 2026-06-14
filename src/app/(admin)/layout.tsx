@@ -21,8 +21,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const session = await getServerSession(authOptions);
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/+$/, "");
 
+  // bbtadmin is a STANDALONE back-office with its own login on its own host —
+  // internal staff never need to touch the customer app. The proxy allows
+  // /login + /api/auth through on the admin host; callbackUrl returns the
+  // staff member to the console after they sign in. (Relative, not the app
+  // host — this is a self-contained system.)
   if (!session?.user) {
-    redirect(appUrl ? `${appUrl}/login` : "/login");
+    redirect("/login?callbackUrl=/admin");
   }
 
   const allowed = await isPlatformAdminSession(session);
