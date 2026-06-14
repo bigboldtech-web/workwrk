@@ -27,8 +27,10 @@ const adapter = new PrismaPg({ connectionString: connStr });
 const prisma = new PrismaClient({ adapter });
 
 const CONFIRM = process.argv.includes("--confirm");
-const KEEP_NAME_RE = /cashk/i; // matches "Cashkr Team" / "Cashker" etc.
-const MIN_REAL_USERS = 10; // the real org has ~18 users; junk orgs have 1
+// Keep only orgs with a real team. The genuine Cashkr org has ~18 users; every
+// junk org — including the empty duplicate "CashKr" (1 user) — has fewer, so a
+// user-count floor cleanly separates real data from test data by name.
+const MIN_REAL_USERS = 10;
 
 interface OrgRow {
   id: string;
@@ -56,8 +58,8 @@ async function main() {
     orderBy: { createdAt: "asc" },
   })) as OrgRow[];
 
-  const keep = orgs.filter((o) => KEEP_NAME_RE.test(o.name));
-  const del = orgs.filter((o) => !KEEP_NAME_RE.test(o.name));
+  const keep = orgs.filter((o) => o._count.users >= MIN_REAL_USERS);
+  const del = orgs.filter((o) => o._count.users < MIN_REAL_USERS);
 
   console.log(`\nTotal orgs: ${orgs.length}\n`);
   console.log(`=== KEEP (${keep.length}) ===`);
@@ -67,12 +69,8 @@ async function main() {
 
   // Safety guards — refuse to run if the result looks wrong.
   if (keep.length === 0 || del.length === orgs.length) {
-    console.error("\nABORT: keep set is empty. Adjust KEEP_NAME_RE and re-run.");
-    process.exit(1);
-  }
-  if (!keep.some((o) => o._count.users >= MIN_REAL_USERS)) {
     console.error(
-      `\nABORT: no kept org has >= ${MIN_REAL_USERS} users — the keep filter may be wrong. Nothing deleted.`,
+      `\nABORT: keep set is empty (no org with >= ${MIN_REAL_USERS} users). Nothing deleted.`,
     );
     process.exit(1);
   }
