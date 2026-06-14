@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
+import { logAuditEvent } from "@/lib/activity";
 import { setFeature, type EnterpriseFeature } from "@/lib/enterprise-features";
 
 /**
@@ -57,6 +58,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const body = await req.json();
+  const actorId = getUserId(session);
 
   // Plan change
   if (typeof body?.plan === "string") {
@@ -64,6 +66,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await prisma.organization.update({
       where: { id },
       data: { plan: body.plan },
+    });
+    logAuditEvent({
+      type: "admin.org.plan_changed",
+      actorId,
+      organizationId: id,
+      description: `Platform staff changed plan to ${body.plan}`,
+      targetType: "Organization",
+      targetId: id,
+      metadata: { plan: body.plan },
+      severity: "warning",
     });
   }
 
@@ -81,6 +93,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await prisma.organization.update({
       where: { id },
       data: { status: body.status as "ACTIVE" | "TRIAL" | "SUSPENDED" | "CANCELLED" },
+    });
+    logAuditEvent({
+      type: "admin.org.status_changed",
+      actorId,
+      organizationId: id,
+      description: `Platform staff set status to ${body.status}`,
+      targetType: "Organization",
+      targetId: id,
+      metadata: { status: body.status },
+      // Suspend/cancel lock users out — log those as critical.
+      severity: body.status === "ACTIVE" || body.status === "TRIAL" ? "warning" : "critical",
     });
   }
 

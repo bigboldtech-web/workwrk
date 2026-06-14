@@ -123,7 +123,21 @@ export default function CompanyDetailPage() {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs text-muted">Status</label>
-            <Select value={company.status} onValueChange={(v) => patch({ status: v }, "Status")} disabled={saving !== null}>
+            <Select
+              value={company.status}
+              onValueChange={(v) => {
+                if (
+                  (v === "SUSPENDED" || v === "CANCELLED") &&
+                  !window.confirm(
+                    `Set ${company.name} to ${v}? This immediately blocks all of their users from signing in.`,
+                  )
+                ) {
+                  return;
+                }
+                patch({ status: v }, "Status");
+              }}
+              disabled={saving !== null}
+            >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ACTIVE">Active</SelectItem>

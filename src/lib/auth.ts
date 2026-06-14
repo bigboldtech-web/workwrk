@@ -40,6 +40,9 @@ const providers = [
       // org admin scheduled the destruction; sign-ins during the
       // grace window would just create new audit clutter for data
       // that's about to disappear.
+      if (user.organization.status === "SUSPENDED") {
+        throw new Error("This workspace is suspended. Please contact WorkwrK support.");
+      }
       if (user.organization.status === "CANCELLED") {
         throw new Error("This organization has been scheduled for deletion. Contact your administrator if this was a mistake.");
       }
@@ -129,7 +132,7 @@ export const authOptions: NextAuthOptions = {
       });
       if (!existing) return false;
       // Mirror the credentials path: refuse sign-in for a soft-deleted org.
-      if (existing.organization.status === "CANCELLED") return false;
+      if (existing.organization.status === "CANCELLED" || existing.organization.status === "SUSPENDED") return false;
       return true;
     },
 
