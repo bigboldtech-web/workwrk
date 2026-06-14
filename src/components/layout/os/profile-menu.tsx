@@ -30,6 +30,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 import {
   SmilePlus, BellOff, Bell, ChevronRight, Settings, Palette, Command,
   HelpCircle, Trash2, LogOut, Pin, PinOff,
@@ -82,9 +83,12 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
   };
 
   const handleLogout = async () => {
-    try { await fetch("/api/auth/signout", { method: "POST" }); } catch {}
     onClose();
-    router.push("/login");
+    // Use NextAuth's signOut so the CSRF token is included and the session
+    // cookie (including the cross-subdomain .workwrk.com scope) is actually
+    // cleared. A bare POST to /api/auth/signout is rejected by CSRF and never
+    // logs the user out — which made logout silently bounce back into the app.
+    await signOut({ callbackUrl: "/login" });
   };
 
   const statusLabel = presenceStatus.label === "Online"
