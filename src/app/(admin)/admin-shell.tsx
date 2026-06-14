@@ -7,7 +7,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Building2, BarChart3, Shield, ArrowLeft, Sparkles, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Building2, BarChart3, Shield, LogOut, Sparkles, ShieldCheck } from "lucide-react";
+import { signOut } from "next-auth/react";
 import { ToastProvider } from "@/components/ui/toast";
 
 const adminNav = [
@@ -58,13 +59,14 @@ export function AdminShell({
           })}
         </nav>
         <div className="px-3 py-4 border-t border-border">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-muted hover:bg-surface-2 hover:text-foreground transition-all"
+          <button
+            type="button"
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-muted hover:bg-surface-2 hover:text-foreground transition-all"
           >
-            <ArrowLeft size={16} />
-            <span>Back to Dashboard</span>
-          </Link>
+            <LogOut size={16} />
+            <span>Log out</span>
+          </button>
         </div>
       </aside>
 
