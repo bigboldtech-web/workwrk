@@ -1418,10 +1418,10 @@ export default function SOPDetailPage() {
                   full editing happens in the dedicated /sops/new/text
                   editor (richer UI, single-purpose chrome). */}
               {sop.content && (sop.content as any).type === "blocks" && (
-                <Card>
-                  <CardContent className="p-4 sm:p-6">
-                    {editing ? (
-                      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-4 text-sm">
+                editing ? (
+                  <Card>
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-zinc-200 p-4 text-sm">
                         <div>
                           <div className="font-medium">Block editor</div>
                           <div className="text-xs text-zinc-500">
@@ -1434,16 +1434,38 @@ export default function SOPDetailPage() {
                           <Link href={`/sops/new/text?id=${sop.id}`}>Open editor</Link>
                         </Button>
                       </div>
-                    ) : (
-                      <BlockEditor
-                        key={sop.id}
-                        initialBlocks={sopBlocks}
-                        onSave={() => { /* read-only here */ }}
-                        readonly
-                      />
-                    )}
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  // Notes-style reader: clean white canvas + a word-count meta
+                  // strip + a centered reading column, using the same block
+                  // engine as Notes (so Written SOPs read exactly like a note).
+                  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+                    <div className="flex items-center gap-1.5 border-b border-zinc-100 px-6 py-2.5 text-xs text-zinc-400">
+                      <FileText size={13} />
+                      {(() => {
+                        const w = (sopBlocks ?? []).reduce(
+                          (a: number, b: any) =>
+                            a + (typeof b?.text === "string"
+                              ? b.text.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length
+                              : 0),
+                          0,
+                        );
+                        return `${w.toLocaleString()} word${w === 1 ? "" : "s"} · ${Math.max(1, Math.round(w / 220))} min read`;
+                      })()}
+                    </div>
+                    <div className="px-5 py-6 sm:px-10 sm:py-9">
+                      <div className="mx-auto max-w-3xl">
+                        <BlockEditor
+                          key={sop.id}
+                          initialBlocks={sopBlocks}
+                          onSave={() => { /* read-only */ }}
+                          readonly
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )
               )}
 
               {/* Steps / Checklist Builder — suppressed for blocks-typed
