@@ -1367,11 +1367,12 @@ export const APPS: AppEntry[] = [
 
   // ── Knowledge ───────────────────────────────────────────────
   { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops",
-    matchPaths: ["/sops"], category: "Knowledge",
+    matchPaths: ["/sops"], category: "Knowledge", defaultPinned: true,
     Sidebar: linksSidebar([
-      { href: "/sops",            label: "All SOPs",   Icon: ScrollText },
-      { href: "/sops/my-sops",    label: "My SOPs",    Icon: ScrollText },
-      { href: "/sops/compliance", label: "Compliance", Icon: ShieldCheck },
+      { href: "/sops",               label: "All SOPs",             Icon: ScrollText },
+      { href: "/sops/new/checklist", label: "New step-by-step SOP", Icon: Workflow },
+      { href: "/sops/my-sops",       label: "My SOPs",              Icon: ScrollText },
+      { href: "/sops/compliance",    label: "Compliance & runs",    Icon: ShieldCheck },
     ]) },
   { key: "policies", label: "Policies", Icon: ShieldCheck, defaultHref: "/policies",
     matchPaths: ["/policies"], category: "Knowledge", requiredAccess: "hr-admin",
