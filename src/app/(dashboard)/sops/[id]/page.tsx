@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -1360,20 +1361,18 @@ export default function SOPDetailPage() {
         {/* Left: Tabs */}
         <div className={showInfo ? "lg:col-span-2" : ""}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full justify-start">
-              <TabsTrigger value="content" className="gap-1.5">
-                <FileText size={14} /> Content
-              </TabsTrigger>
-              <TabsTrigger value="compliance" className="gap-1.5">
-                <Users size={14} /> Compliance
-              </TabsTrigger>
-              <TabsTrigger value="assignments" className="gap-1.5">
-                <UserPlus size={14} /> Assignments ({assignments.length})
-              </TabsTrigger>
-              <TabsTrigger value="history" className="gap-1.5">
-                <Clock size={14} /> History
-              </TabsTrigger>
-            </TabsList>
+            <ViewTabStrip>
+              <ViewTab icon={FileText} label="Content" active={activeTab === "content"} onClick={() => setActiveTab("content")} />
+              <ViewTab icon={Users} label="Compliance" active={activeTab === "compliance"} onClick={() => setActiveTab("compliance")} />
+              <ViewTab
+                icon={UserPlus}
+                label="Assignments"
+                trailing={<span className="ml-1 rounded bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500">{assignments.length}</span>}
+                active={activeTab === "assignments"}
+                onClick={() => setActiveTab("assignments")}
+              />
+              <ViewTab icon={Clock} label="History" active={activeTab === "history"} onClick={() => setActiveTab("history")} />
+            </ViewTabStrip>
 
             {/* Content Tab */}
             <TabsContent value="content" className="space-y-4 mt-4">
