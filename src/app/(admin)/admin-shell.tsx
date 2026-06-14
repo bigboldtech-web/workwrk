@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Building2, BarChart3, Shield, ArrowLeft, Sparkles } from "lucide-react";
+import { LayoutDashboard, Building2, BarChart3, Shield, ArrowLeft, Sparkles, ShieldCheck } from "lucide-react";
 import { ToastProvider } from "@/components/ui/toast";
 
 const adminNav = [
@@ -15,6 +15,7 @@ const adminNav = [
   { name: "Companies", href: "/admin/companies", icon: Building2 },
   { name: "AppSumo Codes", href: "/admin/appsumo", icon: Sparkles },
   { name: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+  { name: "Platform Staff", href: "/admin/staff", icon: ShieldCheck },
 ];
 
 export function AdminShell({
