@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { CreditCard, Loader2 } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
 import { useToast } from "@/components/ui/toast";
-import { PLAN_LIMITS } from "@/lib/plan-limits";
+import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 
 type Plan = "STARTER" | "GROWTH" | "SCALE" | "ENTERPRISE";
 type Status = "ACTIVE" | "TRIAL" | "SUSPENDED" | "CANCELLED";

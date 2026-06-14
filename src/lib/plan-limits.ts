@@ -1,11 +1,10 @@
 import { prisma } from "./prisma";
+import { PLAN_LIMITS } from "./plan-limits-data";
 
-export const PLAN_LIMITS: Record<string, { users: number; sops: number; ai: number }> = {
-  STARTER: { users: 10, sops: 3, ai: 50 },
-  GROWTH: { users: 50, sops: 20, ai: 500 },
-  SCALE: { users: 200, sops: 100, ai: 2000 },
-  ENTERPRISE: { users: 99999, sops: 99999, ai: 99999 },
-};
+// Re-export so existing server callers `import { PLAN_LIMITS } from
+// "@/lib/plan-limits"` keep working. The data itself lives in the pure
+// plan-limits-data.ts so Client Components can import it without pg.
+export { PLAN_LIMITS };
 
 type LimitType = "users" | "sops" | "ai";
 
