@@ -5,7 +5,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
-import { FileText, ListChecks, Video, BookCopy, Sparkles, ArrowRight, ClipboardCheck, Loader2 } from "lucide-react";
+import { FileText, ListChecks, MousePointerClick, BookCopy, Sparkles, ArrowRight, ClipboardCheck, Loader2 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -33,11 +33,11 @@ const TYPES: {
     bullets: ["Step list with optional notes", "Assignable as process runs", "Tracks completion + share link"],
   },
   {
-    type: "RECORDED", Icon: Video,
+    type: "RECORDED", Icon: MousePointerClick,
     tile: "bg-rose-50", iconColor: "text-rose-600", dot: "bg-rose-400",
-    label: "Screen-recorded SOP",
-    tagline: "Capture screen + audio while doing the thing — fastest way to show, not tell.",
-    bullets: ["Browser-native screen capture", "Saves a video you can share", "Pairs with annotated steps"],
+    label: "Click-capture SOP",
+    tagline: "Click through a task — the recorder extension auto-captures a screenshot + step for each click.",
+    bullets: ["Scribe-style screenshot per step", "Auto-writes the step text", "No video, no narration"],
   },
 ];
 
@@ -47,6 +47,12 @@ export default function NewSopPage() {
   const { toast } = useOsToast();
 
   async function pickType(type: SOPType) {
+    // Click-capture SOPs are built by the recorder extension (Scribe flow), so
+    // we don't pre-create an empty SOP — just open the setup / how-to page.
+    if (type === "RECORDED") {
+      router.push("/sops/new/record");
+      return;
+    }
     setCreating(type);
     const defaultTitle = type === "WRITTEN" ? "Untitled written SOP"
       : type === "CHECKLIST" ? "Untitled checklist"
@@ -64,8 +70,7 @@ export default function NewSopPage() {
       if (!res.ok) throw new Error(`POST ${res.status}`);
       const data = await res.json();
       const sop = data.data ?? data;
-      if (type === "RECORDED") router.push(`/sops/new/record?id=${encodeURIComponent(sop.id)}`);
-      else if (type === "CHECKLIST") router.push(`/sops/new/checklist?id=${encodeURIComponent(sop.id)}`);
+      if (type === "CHECKLIST") router.push(`/sops/new/checklist?id=${encodeURIComponent(sop.id)}`);
       else router.push(`/sops/new/text?id=${encodeURIComponent(sop.id)}`);
     } catch {
       toast("Couldn't create SOP");
