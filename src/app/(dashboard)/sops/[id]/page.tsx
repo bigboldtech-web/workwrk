@@ -1376,13 +1376,13 @@ export default function SOPDetailPage() {
 
             {/* Content Tab */}
             <TabsContent value="content" className="space-y-4 mt-4">
-              {/* Description */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">Description</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {editing ? (
+              {/* Description — subtle intro when viewing; full card only while editing. */}
+              {editing ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Description</CardTitle>
+                  </CardHeader>
+                  <CardContent>
                     <Textarea
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
@@ -1390,27 +1390,30 @@ export default function SOPDetailPage() {
                       rows={3}
                       className="bg-transparent border-zinc-200"
                     />
-                  ) : (
-                    <p className="text-sm text-zinc-500">
-                      {sop.description || "No description provided."}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              ) : sop.description ? (
+                <p className="max-w-3xl text-[13.5px] leading-relaxed text-zinc-500">{sop.description}</p>
+              ) : null}
 
               {/* Rich Text Editor for "Write" type SOPs — parent owns the
                   html so the top-bar Save persists it along with title /
                   description / type-specific content in one request. */}
               {sop.content && (sop.content as any).type === "richtext" && (
-                <Card>
-                  <CardContent className="p-0">
-                    <RichTextSopEditor
-                      content={richtextHtml}
-                      editable={editing}
-                      onChange={setRichtextHtml}
-                    />
-                  </CardContent>
-                </Card>
+                editing ? (
+                  <Card>
+                    <CardContent className="p-0">
+                      <RichTextSopEditor content={richtextHtml} editable onChange={setRichtextHtml} />
+                    </CardContent>
+                  </Card>
+                ) : (
+                  // Notes-style reader: clean white canvas, centered column.
+                  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white px-5 py-6 sm:px-10 sm:py-9">
+                    <div className="mx-auto max-w-3xl">
+                      <RichTextSopEditor content={richtextHtml} editable={false} onChange={setRichtextHtml} />
+                    </div>
+                  </div>
+                )
               )}
 
               {/* Block editor — same engine as Notes. Used for new WRITTEN

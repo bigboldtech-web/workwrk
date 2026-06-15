@@ -1,42 +1,43 @@
 "use client";
 
-/* New SOP — type picker.
- *
- * Three first-class SOP types each route to a dedicated builder.
- * POST to /api/sops with the right sopType + content shape.
- */
+/* New SOP — type picker. Three first-class SOP types each route to a builder. */
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
-import { FileText, ListChecks, Video, BookCopy, Sparkles, ArrowRight, Hash, ClipboardCheck } from "lucide-react";
+import { FileText, ListChecks, Video, BookCopy, Sparkles, ArrowRight, ClipboardCheck, Loader2 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type SOPType = "WRITTEN" | "CHECKLIST" | "RECORDED";
 
-const TYPES: { type: SOPType; Icon: React.ComponentType<{ className?: string }>; hue: string; label: string; tagline: string; bullets: string[] }[] = [
+const TYPES: {
+  type: SOPType;
+  Icon: React.ComponentType<{ className?: string }>;
+  tile: string; iconColor: string; dot: string;
+  label: string; tagline: string; bullets: string[];
+}[] = [
   {
-    type: "WRITTEN",
-    Icon: FileText, hue: "var(--os-c-teal)",
+    type: "WRITTEN", Icon: FileText,
+    tile: "bg-emerald-50", iconColor: "text-emerald-600", dot: "bg-emerald-400",
     label: "Written SOP",
-    tagline: "Long-form procedure with headings, lists, and rich text.",
-    bullets: ["Markdown editor", "Versioned on every save", "Best for policies, runbooks, processes"],
+    tagline: "Long-form procedure with headings, lists, and rich text — reads like a note.",
+    bullets: ["Notes-style block editor", "Versioned on every save", "Best for policies, runbooks, processes"],
   },
   {
-    type: "CHECKLIST",
-    Icon: ListChecks, hue: "var(--os-c-blue)",
+    type: "CHECKLIST", Icon: ListChecks,
+    tile: "bg-blue-50", iconColor: "text-blue-600", dot: "bg-blue-400",
     label: "Checklist SOP",
     tagline: "Discrete steps someone can run through and tick off.",
     bullets: ["Step list with optional notes", "Assignable as process runs", "Tracks completion + share link"],
   },
   {
-    type: "RECORDED",
-    Icon: Video, hue: "var(--os-c-pink)",
+    type: "RECORDED", Icon: Video,
+    tile: "bg-rose-50", iconColor: "text-rose-600", dot: "bg-rose-400",
     label: "Screen-recorded SOP",
     tagline: "Capture screen + audio while doing the thing — fastest way to show, not tell.",
-    bullets: ["Browser-native screen capture", "Saves video you can share", "Pair with extension for annotated steps"],
+    bullets: ["Browser-native screen capture", "Saves a video you can share", "Pairs with annotated steps"],
   },
 ];
 
@@ -76,56 +77,62 @@ export default function NewSopPage() {
     <>
       <OsTitleBar
         title="New SOP"
+        showStandardActions={false}
         Icon={BookCopy}
         iconGradient={GRAD.tealGreen}
         description="Pick how you want to document this process"
         actions={
-          <div className="snew__head-actions">
-            <Link href="/sops" className="snew__nav-link"><Hash /> All SOPs</Link>
-            <Link href="/sops/my-sops" className="snew__nav-link"><ClipboardCheck /> My SOPs</Link>
+          <div className="flex items-center gap-2">
+            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">All SOPs</Link>
+            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              <ClipboardCheck className="h-3.5 w-3.5" /> My SOPs
+            </Link>
           </div>
         }
       />
 
-      <div className="snew">
-        <section className="snew__intro">
-          <h2>How do you want to document this?</h2>
-          <p>SOPs work three different ways. Pick the one that fits how your team will actually consume it.</p>
-        </section>
+      <div className="px-6 py-6">
+        <div className="mb-5">
+          <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-zinc-900">How do you want to document this?</h2>
+          <p className="mt-1 text-[13px] text-zinc-500">SOPs work three different ways. Pick the one that fits how your team will actually consume it.</p>
+        </div>
 
-        <div className="snew__cards">
+        <div className="grid max-w-5xl grid-cols-1 gap-4 md:grid-cols-3">
           {TYPES.map((t) => {
             const Icon = t.Icon;
+            const busy = creating === t.type;
             return (
               <button
                 key={t.type}
                 type="button"
-                className={`snew__card${creating === t.type ? " is-busy" : ""}`}
                 onClick={() => pickType(t.type)}
                 disabled={creating !== null}
-                style={{ ["--card-hue" as unknown as string]: t.hue }}
+                className="group flex flex-col rounded-xl border border-zinc-200 bg-white p-5 text-left transition-all hover:border-zinc-300 hover:shadow-[0_4px_16px_-8px_rgba(0,0,0,0.18)] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <span className="snew__card-accent" aria-hidden="true" />
-                <div className="snew__card-icon"><Icon /></div>
-                <div className="snew__card-body">
-                  <h3>{t.label}</h3>
-                  <p>{t.tagline}</p>
-                  <ul>
-                    {t.bullets.map((b) => <li key={b}><span /> {b}</li>)}
-                  </ul>
+                <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${t.tile}`}>
+                  <Icon className={`h-5 w-5 ${t.iconColor}`} />
                 </div>
-                <span className="snew__card-cta">
-                  {creating === t.type ? "Creating…" : <>Start <ArrowRight /></>}
+                <h3 className="mt-3 text-[15px] font-semibold text-zinc-900">{t.label}</h3>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-zinc-500">{t.tagline}</p>
+                <ul className="mt-3 space-y-1.5">
+                  {t.bullets.map((b) => (
+                    <li key={b} className="flex items-center gap-2 text-[12px] text-zinc-600">
+                      <span className={`h-1 w-1 shrink-0 rounded-full ${t.dot}`} /> {b}
+                    </li>
+                  ))}
+                </ul>
+                <span className="mt-4 inline-flex items-center gap-1 text-[13px] font-medium text-zinc-900">
+                  {busy ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" /> Creating…</>) : (<>Start <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" /></>)}
                 </span>
               </button>
             );
           })}
         </div>
 
-        <footer className="snew__foot">
-          <Sparkles />
-          <span>Need inspiration? Sidekick can draft a first version for any of these — open it after creating.</span>
-        </footer>
+        <div className="mt-5 flex max-w-5xl items-center gap-2 rounded-lg border border-violet-100 bg-violet-50/50 px-4 py-2.5 text-[12.5px] text-zinc-600">
+          <Sparkles className="h-4 w-4 shrink-0 text-violet-500" />
+          Need inspiration? Sidekick can draft a first version for any of these — open it after creating.
+        </div>
       </div>
     </>
   );
