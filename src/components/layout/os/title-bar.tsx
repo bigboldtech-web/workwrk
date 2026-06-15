@@ -31,6 +31,9 @@ export type TitleBarProps = {
   /** Hide the universal "Invite" button on pages where it doesn't fit
    *  (e.g. Settings, Account). Default: true. */
   showInvite?: boolean;
+  /** Show the universal Ask AI / Share / Invite trio. Default: true. Set false
+   *  on pages where they're noise (e.g. SOPs). */
+  showStandardActions?: boolean;
   starred?: boolean;
 };
 
@@ -43,6 +46,7 @@ export function OsTitleBar({
   morePeople = 0,
   actions,
   showInvite = true,
+  showStandardActions = true,
   starred = true,
 }: TitleBarProps) {
   // Suppress unused-prop warnings — they're part of the legacy API.
@@ -80,28 +84,32 @@ export function OsTitleBar({
           </div>
         ) : null}
         {actions}
-        <button
-          type="button"
-          className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
-        >
-          <BloomMark size={14} />
-          Ask AI
-        </button>
-        <button
-          type="button"
-          className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
-        >
-          <Share2 className="w-3.5 h-3.5" />
-          Share
-        </button>
-        {showInvite ? (
-          <button
-            type="button"
-            className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            Invite
-          </button>
+        {showStandardActions ? (
+          <>
+            <button
+              type="button"
+              className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+            >
+              <BloomMark size={14} />
+              Ask AI
+            </button>
+            <button
+              type="button"
+              className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              Share
+            </button>
+            {showInvite ? (
+              <button
+                type="button"
+                className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                Invite
+              </button>
+            ) : null}
+          </>
         ) : null}
       </div>
     </div>

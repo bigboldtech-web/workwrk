@@ -1,7 +1,7 @@
 "use client";
 
-/* SOP library — clean card grid grouped by category, aligned to the app's
- * Tailwind/zinc design language (not the old bespoke sop__* CSS).
+/* SOP library — clean card/list grid grouped by category, aligned to the app's
+ * Tailwind/zinc design language.
  *
  *  GET   /api/sops
  *  Status enum: DRAFT | IN_REVIEW | APPROVED | PUBLISHED | ARCHIVED
@@ -11,8 +11,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  BookCopy, Plus, Search, ClipboardCheck, ChevronRight, FileText,
+  BookCopy, Plus, Search, ClipboardCheck, ChevronRight, ChevronDown, FileText,
   CheckCircle2, Activity, Archive, Eye, Edit3, AlertTriangle, BookOpen, Target, Loader2,
+  LayoutGrid, List as ListIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -44,7 +45,6 @@ const STATUS_ICON: Record<SopStatus, typeof Edit3> = {
   DRAFT: Edit3, IN_REVIEW: Eye, APPROVED: ClipboardCheck,
   PUBLISHED: CheckCircle2, ARCHIVED: Archive,
 };
-// Clean signal pills, matching the rest of the app.
 const STATUS_PILL: Record<SopStatus, string> = {
   DRAFT: "bg-zinc-100 text-zinc-600",
   IN_REVIEW: "bg-amber-50 text-amber-700",
@@ -55,6 +55,8 @@ const STATUS_PILL: Record<SopStatus, string> = {
 
 const STATUS_FILTERS: Array<"ALL" | SopStatus> = ["ALL", "PUBLISHED", "APPROVED", "IN_REVIEW", "DRAFT"];
 
+const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
 export default function SopsPage() {
   const router = useRouter();
   const [rows, setRows] = useState<ApiSop[] | null>(null);
@@ -63,6 +65,7 @@ export default function SopsPage() {
   const [statusFilter, setStatusFilter] = useState<"ALL" | SopStatus>("ALL");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [view, setView] = useState<"grid" | "list">("grid");
   const { rowVersion } = useOsShell();
 
   const load = useCallback(async () => {
@@ -131,6 +134,7 @@ export default function SopsPage() {
     <>
       <OsTitleBar
         title="SOPs"
+        showStandardActions={false}
         Icon={BookCopy}
         iconGradient={GRAD.tealGreen}
         description={rows === null ? "Loading…" : `${stats.total} SOP${stats.total === 1 ? "" : "s"} · ${stats.counts.PUBLISHED} published · ${stats.totalAssignments} assignment${stats.totalAssignments === 1 ? "" : "s"}`}
@@ -160,7 +164,8 @@ export default function SopsPage() {
 
         {/* Toolbar */}
         <div className="mt-5 flex flex-wrap items-center gap-2">
-          <div className="flex h-9 min-w-[240px] flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3">
+          {/* Search */}
+          <div className="flex h-9 min-w-[200px] flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3">
             <Search className="h-4 w-4 shrink-0 text-zinc-400" />
             <input
               value={search}
@@ -169,7 +174,9 @@ export default function SopsPage() {
               className="h-full w-full bg-transparent text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400"
             />
           </div>
-          <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white p-1">
+
+          {/* Status — segmented control (soft white-on-grey active) */}
+          <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
             {STATUS_FILTERS.map((s) => {
               const active = statusFilter === s;
               const count = s === "ALL" ? stats.total : stats.counts[s as SopStatus];
@@ -179,36 +186,64 @@ export default function SopsPage() {
                   type="button"
                   onClick={() => setStatusFilter(s)}
                   className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${
-                    active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                    active ? "bg-white text-zinc-900 font-medium shadow-sm" : "text-zinc-500 hover:text-zinc-800"
                   }`}
                 >
                   {s === "ALL" ? "All" : STATUS_LABEL[s as SopStatus]}
-                  <span className={`tabular-nums ${active ? "text-zinc-300" : "text-zinc-400"}`}>{count}</span>
+                  <span className="tabular-nums text-zinc-400">{count}</span>
                 </button>
               );
             })}
           </div>
-          <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 text-[12.5px] text-zinc-600 hover:bg-zinc-50">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="accent-zinc-900" />
-            <Archive className="h-3.5 w-3.5" /> Archived
-          </label>
-        </div>
 
-        {/* Category chips */}
-        {categories.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            <CategoryChip label="All" count={stats.total} active={activeCategory === null} onClick={() => setActiveCategory(null)} />
-            {categories.map(([cat, n]) => (
-              <CategoryChip
-                key={cat}
-                label={cat}
-                count={n}
-                active={activeCategory === cat}
-                onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
-              />
-            ))}
+          {/* Category dropdown */}
+          {categories.length > 0 && (
+            <div className="relative">
+              <select
+                value={activeCategory ?? ""}
+                onChange={(e) => setActiveCategory(e.target.value || null)}
+                className="h-9 cursor-pointer appearance-none rounded-lg border border-zinc-200 bg-white pl-3 pr-8 text-[13px] text-zinc-700 outline-none hover:bg-zinc-50"
+              >
+                <option value="">All categories ({stats.total})</option>
+                {categories.map(([cat, n]) => (
+                  <option key={cat} value={cat}>{cat} ({n})</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+            </div>
+          )}
+
+          {/* View toggle */}
+          <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+            <button
+              type="button"
+              onClick={() => setView("grid")}
+              title="Card view"
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${view === "grid" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-800"}`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("list")}
+              title="List view"
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${view === "list" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-800"}`}
+            >
+              <ListIcon className="h-4 w-4" />
+            </button>
           </div>
-        )}
+
+          {/* Archived toggle */}
+          <button
+            type="button"
+            onClick={() => setShowArchived((x) => !x)}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12.5px] transition-colors ${
+              showArchived ? "border-zinc-300 bg-zinc-100 text-zinc-900" : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
+            }`}
+          >
+            <Archive className="h-3.5 w-3.5" /> Archived
+          </button>
+        </div>
 
         {/* Body */}
         <div className="mt-5">
@@ -241,9 +276,15 @@ export default function SopsPage() {
                     <span className="rounded-full bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500">{g.items.length}</span>
                     <span className="h-px flex-1 bg-zinc-100" />
                   </header>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {g.items.map((s) => <SopCard key={s.id} s={s} />)}
-                  </div>
+                  {view === "list" ? (
+                    <div className="divide-y divide-zinc-100 overflow-hidden rounded-xl border border-zinc-200 bg-white">
+                      {g.items.map((s) => <SopRow key={s.id} s={s} />)}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {g.items.map((s) => <SopCard key={s.id} s={s} />)}
+                    </div>
+                  )}
                 </section>
               ))}
             </div>
@@ -264,21 +305,6 @@ function StatTile({ Icon, label, value, sub, tint }: { Icon: typeof BookCopy; la
       <div className="mt-2 text-[22px] font-semibold tabular-nums leading-none text-zinc-900">{value}</div>
       <div className="mt-1 text-[11px] text-zinc-400">{sub}</div>
     </div>
-  );
-}
-
-function CategoryChip({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] transition-colors ${
-        active ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
-      }`}
-    >
-      {label}
-      <span className={`tabular-nums ${active ? "text-zinc-300" : "text-zinc-400"}`}>{count}</span>
-    </button>
   );
 }
 
@@ -323,11 +349,33 @@ function SopCard({ s }: { s: ApiSop }) {
           <span className="inline-flex items-center gap-1"><ClipboardCheck className="h-3 w-3" /> {s._count.assignments}</span>
         )}
         <span className="ml-auto inline-flex items-center gap-1">
-          <FileText className="h-3 w-3" />
-          {new Date(s.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+          <FileText className="h-3 w-3" /> {fmtDate(s.updatedAt)}
           <ChevronRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
         </span>
       </div>
+    </Link>
+  );
+}
+
+function SopRow({ s }: { s: ApiSop }) {
+  const Icon = STATUS_ICON[s.status];
+  return (
+    <Link href={`/sops/${s.id}`} className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-zinc-50">
+      <span className={`inline-flex w-[92px] shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_PILL[s.status]}`}>
+        <Icon className="h-3 w-3" /> {STATUS_LABEL[s.status]}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13.5px] font-medium text-zinc-900">{s.title}</span>
+        {s.description && <span className="block truncate text-[12px] text-zinc-400">{s.description}</span>}
+      </span>
+      {s._count?.steps != null && (
+        <span className="hidden shrink-0 items-center gap-1 text-[11px] text-zinc-400 sm:inline-flex"><BookOpen className="h-3 w-3" /> {s._count.steps}</span>
+      )}
+      {s._count?.assignments != null && (
+        <span className="hidden shrink-0 items-center gap-1 text-[11px] text-zinc-400 sm:inline-flex"><ClipboardCheck className="h-3 w-3" /> {s._count.assignments}</span>
+      )}
+      <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">{fmtDate(s.updatedAt)}</span>
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300 group-hover:text-zinc-500" />
     </Link>
   );
 }
