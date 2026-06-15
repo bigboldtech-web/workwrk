@@ -213,8 +213,10 @@ export default function SopsPage() {
           </button>
         </div>
 
-        {/* Status filter — its own row so it's not cramped */}
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {/* Status filter — own row. Inline styles so the global
+            `.workwrk-os button { padding:0; border:none; background:none }`
+            reset can't strip the pill padding/border/background. */}
+        <div className="mt-3 flex flex-wrap items-center" style={{ gap: "8px" }}>
           {STATUS_FILTERS.map((s) => {
             const active = statusFilter === s;
             const count = s === "ALL" ? stats.total : stats.counts[s as SopStatus];
@@ -223,12 +225,23 @@ export default function SopsPage() {
                 key={s}
                 type="button"
                 onClick={() => setStatusFilter(s)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] transition-colors ${
-                  active ? "border-zinc-300 bg-zinc-100 font-medium text-zinc-900" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
-                }`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 14px",
+                  borderRadius: "9999px",
+                  fontSize: "13px",
+                  fontWeight: active ? 600 : 400,
+                  border: active ? "1px solid var(--os-brand)" : "1px solid #e4e4e7",
+                  background: active ? "var(--os-brand)" : "#fff",
+                  color: active ? "#fff" : "#52525b",
+                  cursor: "pointer",
+                  transition: "all .12s",
+                }}
               >
                 {s === "ALL" ? "All" : STATUS_LABEL[s as SopStatus]}
-                <span className={`tabular-nums ${active ? "text-zinc-500" : "text-zinc-400"}`}>{count}</span>
+                <span style={{ color: active ? "rgba(255,255,255,0.75)" : "#a1a1aa", fontVariantNumeric: "tabular-nums" }}>{count}</span>
               </button>
             );
           })}
