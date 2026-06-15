@@ -95,16 +95,24 @@
 .workwrk-os, .workwrk-os *, .workwrk-os *::before, .workwrk-os *::after {
   box-sizing: border-box;
 }
-.workwrk-os button {
-  font-family: inherit; font-size: inherit; color: inherit;
-  cursor: pointer; background: none; border: none; padding: 0;
+/* These element resets live in @layer base (Tailwind v4) so utility classes
+   on buttons/inputs/links/lists — px-3, border, bg-white, text-white… — WIN
+   over them. Unlayered, the reset beat EVERY layered utility and silently
+   stripped padding/border/background across the OS shell, which is why
+   pills/tabs/cards kept collapsing. A bare <button> with no utilities still
+   gets the clean reset (nothing overrides it); a styled one keeps its styles. */
+@layer base {
+  .workwrk-os button {
+    font-family: inherit; font-size: inherit; color: inherit;
+    cursor: pointer; background: none; border: none; padding: 0;
+  }
+  .workwrk-os input, .workwrk-os textarea {
+    font-family: inherit; font-size: inherit; color: inherit;
+    background: none; border: none; outline: none;
+  }
+  .workwrk-os ul, .workwrk-os ol { list-style: none; padding: 0; margin: 0; }
+  .workwrk-os a { color: inherit; text-decoration: none; }
 }
-.workwrk-os input, .workwrk-os textarea {
-  font-family: inherit; font-size: inherit; color: inherit;
-  background: none; border: none; outline: none;
-}
-.workwrk-os ul, .workwrk-os ol { list-style: none; padding: 0; margin: 0; }
-.workwrk-os a { color: inherit; text-decoration: none; }
 .workwrk-os svg { display: block; }
 .workwrk-os ::-webkit-scrollbar { width: 8px; height: 8px; }
 .workwrk-os ::-webkit-scrollbar-track { background: transparent; }
