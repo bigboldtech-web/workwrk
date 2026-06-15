@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -1362,26 +1361,53 @@ export default function SOPDetailPage() {
         {/* Left: Tabs */}
         <div className={showInfo ? "lg:col-span-2" : ""}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
+            {/* Tab strip — inline styles so the global .workwrk-os button reset
+                can't strip per-tab padding (which collapsed the gaps). */}
             <div className="flex items-end justify-between gap-3 border-b border-zinc-200">
-            <ViewTabStrip className="border-b-0">
-              <ViewTab icon={FileText} label="Content" active={activeTab === "content"} onClick={() => setActiveTab("content")} />
-              <ViewTab icon={Users} label="Compliance" active={activeTab === "compliance"} onClick={() => setActiveTab("compliance")} />
-              <ViewTab
-                icon={UserPlus}
-                label="Assignments"
-                trailing={<span className="ml-1 rounded bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500">{assignments.length}</span>}
-                active={activeTab === "assignments"}
-                onClick={() => setActiveTab("assignments")}
-              />
-              <ViewTab icon={Clock} label="History" active={activeTab === "history"} onClick={() => setActiveTab("history")} />
-            </ViewTabStrip>
-            <button
-              type="button"
-              onClick={() => setShowInfo((v) => !v)}
-              className="shrink-0 inline-flex items-center gap-1 pb-2.5 pl-3 text-xs text-zinc-500 hover:text-zinc-900"
-            >
-              {showInfo ? "Hide details" : "Show details"}
-            </button>
+              <div className="flex items-center">
+                {([
+                  { key: "content", label: "Content", Icon: FileText, count: null as number | null },
+                  { key: "compliance", label: "Compliance", Icon: Users, count: null as number | null },
+                  { key: "assignments", label: "Assignments", Icon: UserPlus, count: assignments.length },
+                  { key: "history", label: "History", Icon: Clock, count: null as number | null },
+                ]).map((t) => {
+                  const active = activeTab === t.key;
+                  const Icon = t.Icon;
+                  return (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setActiveTab(t.key)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "7px",
+                        padding: "10px 16px",
+                        fontSize: "14px",
+                        color: active ? "#18181b" : "#71717a",
+                        fontWeight: active ? 600 : 400,
+                        borderBottom: active ? "2px solid #18181b" : "2px solid transparent",
+                        marginBottom: "-1px",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      <Icon size={15} />
+                      {t.label}
+                      {t.count != null && (
+                        <span style={{ borderRadius: "4px", background: "#f4f4f5", padding: "1px 6px", fontSize: "11px", color: "#71717a", fontVariantNumeric: "tabular-nums" }}>{t.count}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInfo((v) => !v)}
+                style={{ flexShrink: 0, padding: "0 0 11px 12px", fontSize: "12px", color: "#71717a", cursor: "pointer", whiteSpace: "nowrap" }}
+              >
+                {showInfo ? "Hide details" : "Show details"}
+              </button>
             </div>
 
             {/* Content Tab */}
