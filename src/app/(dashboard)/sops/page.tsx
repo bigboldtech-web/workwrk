@@ -1,10 +1,9 @@
 "use client";
 
-/* SOP library — bespoke layout grouped by category with KPI strip.
+/* SOP library — clean card grid grouped by category, aligned to the app's
+ * Tailwind/zinc design language (not the old bespoke sop__* CSS).
  *
  *  GET   /api/sops
- *  PATCH /api/sops/[id]   { status?, title?, ... }
- *
  *  Status enum: DRAFT | IN_REVIEW | APPROVED | PUBLISHED | ARCHIVED
  */
 
@@ -12,12 +11,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  BookCopy, Plus, Search, ClipboardCheck, Hash, ChevronRight, FileText,
-  CheckCircle2, Activity, Archive, Layers, Eye, Edit3, AlertTriangle, BookOpen, Target,
+  BookCopy, Plus, Search, ClipboardCheck, ChevronRight, FileText,
+  CheckCircle2, Activity, Archive, Eye, Edit3, AlertTriangle, BookOpen, Target, Loader2,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type SopStatus = "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
@@ -41,22 +40,20 @@ const STATUS_LABEL: Record<SopStatus, string> = {
   DRAFT: "Draft", IN_REVIEW: "In review", APPROVED: "Approved",
   PUBLISHED: "Published", ARCHIVED: "Archived",
 };
-const STATUS_COLOR: Record<SopStatus, string> = {
-  DRAFT: "var(--os-c-indigo)", IN_REVIEW: "var(--os-c-purple)",
-  APPROVED: "var(--os-c-blue)", PUBLISHED: "var(--os-c-green)",
-  ARCHIVED: "var(--os-ink-3)",
-};
 const STATUS_ICON: Record<SopStatus, typeof Edit3> = {
   DRAFT: Edit3, IN_REVIEW: Eye, APPROVED: ClipboardCheck,
   PUBLISHED: CheckCircle2, ARCHIVED: Archive,
 };
+// Clean signal pills, matching the rest of the app.
+const STATUS_PILL: Record<SopStatus, string> = {
+  DRAFT: "bg-zinc-100 text-zinc-600",
+  IN_REVIEW: "bg-amber-50 text-amber-700",
+  APPROVED: "bg-blue-50 text-blue-700",
+  PUBLISHED: "bg-emerald-50 text-emerald-700",
+  ARCHIVED: "bg-zinc-100 text-zinc-400",
+};
 
-const CATEGORY_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
-function categoryColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return CATEGORY_PALETTE[h % CATEGORY_PALETTE.length];
-}
+const STATUS_FILTERS: Array<"ALL" | SopStatus> = ["ALL", "PUBLISHED", "APPROVED", "IN_REVIEW", "DRAFT"];
 
 export default function SopsPage() {
   const router = useRouter();
@@ -126,7 +123,6 @@ export default function SopsPage() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, items]) => ({
         name,
-        color: categoryColor(name),
         items: items.slice().sort((a, b) => a.title.localeCompare(b.title)),
       }));
   }, [filtered]);
@@ -139,148 +135,199 @@ export default function SopsPage() {
         iconGradient={GRAD.tealGreen}
         description={rows === null ? "Loading…" : `${stats.total} SOP${stats.total === 1 ? "" : "s"} · ${stats.counts.PUBLISHED} published · ${stats.totalAssignments} assignment${stats.totalAssignments === 1 ? "" : "s"}`}
         actions={
-          <div className="sop__head-actions">
-            <Link href="/sops/my-sops" className="sop__nav-link"><ClipboardCheck /> My SOPs</Link>
-            <Link href="/sops/compliance" className="sop__nav-link"><Activity /> Compliance</Link>
-            <Link href="/sops/new" className="sop__btn-primary"><Plus /> New SOP</Link>
+          <div className="flex items-center gap-2">
+            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              <ClipboardCheck className="h-3.5 w-3.5" /> My SOPs
+            </Link>
+            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              <Activity className="h-3.5 w-3.5" /> Compliance
+            </Link>
+            <Link href="/sops/new" className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800">
+              <Plus className="h-3.5 w-3.5" /> New SOP
+            </Link>
           </div>
         }
       />
 
-      <div className="sop">
-        <div className="sop__kpis">
-          <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2}   label="Published"  value={`${stats.counts.PUBLISHED}`} sub="live in library" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Eye}            label="In review"  value={`${stats.counts.IN_REVIEW}`} sub="awaiting approval" />
-          <KpiTile accent="var(--os-c-indigo)" Icon={Edit3}          label="Drafts"     value={`${stats.counts.DRAFT}`}     sub="in progress" />
-          <KpiTile accent="var(--os-c-blue)"   Icon={ClipboardCheck} label="Assignments" value={`${stats.totalAssignments}`} sub="across SOPs" />
+      <div className="px-6 py-5">
+        {/* Stat tiles */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatTile Icon={CheckCircle2}   label="Published"   value={stats.counts.PUBLISHED}  sub="live in library"   tint="#10b981" />
+          <StatTile Icon={Eye}            label="In review"   value={stats.counts.IN_REVIEW}  sub="awaiting approval" tint="#f59e0b" />
+          <StatTile Icon={Edit3}          label="Drafts"      value={stats.counts.DRAFT}      sub="in progress"       tint="#6366f1" />
+          <StatTile Icon={ClipboardCheck} label="Assignments" value={stats.totalAssignments}  sub="across SOPs"       tint="#3b82f6" />
         </div>
 
-        <div className="sop__toolbar">
-          <div className="sop__search">
-            <Search />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, description, tags…" />
+        {/* Toolbar */}
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <div className="flex h-9 min-w-[240px] flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3">
+            <Search className="h-4 w-4 shrink-0 text-zinc-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search title, description, tags…"
+              className="h-full w-full bg-transparent text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400"
+            />
           </div>
-          <div className="sop__filters">
-            {(["ALL", "PUBLISHED", "APPROVED", "IN_REVIEW", "DRAFT"] as const).map((s) => {
-              const Icon = s === "ALL" ? Hash : STATUS_ICON[s as SopStatus];
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white p-1">
+            {STATUS_FILTERS.map((s) => {
+              const active = statusFilter === s;
+              const count = s === "ALL" ? stats.total : stats.counts[s as SopStatus];
               return (
                 <button
                   key={s}
                   type="button"
-                  className={`sop__filter${statusFilter === s ? " is-active" : ""}`}
-                  style={s !== "ALL" ? { ["--f-c" as unknown as string]: STATUS_COLOR[s as SopStatus] } : undefined}
                   onClick={() => setStatusFilter(s)}
+                  className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${
+                    active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                  }`}
                 >
-                  <Icon /> {s === "ALL" ? "All" : STATUS_LABEL[s as SopStatus]}
-                  <span>{s === "ALL" ? stats.total : stats.counts[s as SopStatus]}</span>
+                  {s === "ALL" ? "All" : STATUS_LABEL[s as SopStatus]}
+                  <span className={`tabular-nums ${active ? "text-zinc-300" : "text-zinc-400"}`}>{count}</span>
                 </button>
               );
             })}
           </div>
-          <label className="sop__archived-toggle">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-            <Archive /> Show archived
+          <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 text-[12.5px] text-zinc-600 hover:bg-zinc-50">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="accent-zinc-900" />
+            <Archive className="h-3.5 w-3.5" /> Archived
           </label>
         </div>
 
+        {/* Category chips */}
         {categories.length > 0 && (
-          <div className="sop__cats">
-            <button type="button" className={`sop__cat${activeCategory === null ? " is-active" : ""}`} onClick={() => setActiveCategory(null)}>
-              <Layers /> All <span>{stats.total}</span>
-            </button>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <CategoryChip label="All" count={stats.total} active={activeCategory === null} onClick={() => setActiveCategory(null)} />
             {categories.map(([cat, n]) => (
-              <button
+              <CategoryChip
                 key={cat}
-                type="button"
-                className={`sop__cat${activeCategory === cat ? " is-active" : ""}`}
-                style={{ ["--cat-c" as unknown as string]: categoryColor(cat) }}
+                label={cat}
+                count={n}
+                active={activeCategory === cat}
                 onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
-              >
-                <span className="sop__cat-dot" />
-                {cat}
-                <span>{n}</span>
-              </button>
+              />
             ))}
           </div>
         )}
 
-        {loadError ? (
-          <OsEmptyView Icon={BookCopy} iconGradient={GRAD.redPink} title="Couldn't load SOPs" subtitle={loadError} cta="Retry" onCta={() => void load()} />
-        ) : rows === null ? (
-          <div className="sop__loading">Loading…</div>
-        ) : stats.total === 0 ? (
-          <OsEmptyView
-            Icon={BookCopy}
-            iconGradient={GRAD.tealGreen}
-            title="No SOPs yet"
-            subtitle="Document a process once, then assign it to teammates. SOPs version automatically as you edit."
-            chips={["Text", "Checklist", "Video"]}
-            cta="New SOP"
-            onCta={() => router.push("/sops/new")}
-          />
-        ) : grouped.length === 0 ? (
-          <div className="sop__no-match"><AlertTriangle /> No SOPs match the current filter.</div>
-        ) : (
-          grouped.map((g) => (
-            <section key={g.name} className="sop__group" style={{ ["--g-c" as unknown as string]: g.color }}>
-              <header className="sop__group-head">
-                <span className="sop__group-dot" />
-                <h2>{g.name}</h2>
-                <span className="sop__group-count">{g.items.length} SOP{g.items.length === 1 ? "" : "s"}</span>
-                <span className="sop__group-line" />
-              </header>
-              <div className="sop__grid">
-                {g.items.map((s) => <SopCard key={s.id} s={s} />)}
-              </div>
-            </section>
-          ))
-        )}
+        {/* Body */}
+        <div className="mt-5">
+          {loadError ? (
+            <OsEmptyView Icon={BookCopy} iconGradient={GRAD.redPink} title="Couldn't load SOPs" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+          ) : rows === null ? (
+            <div className="flex items-center gap-2 py-16 text-sm text-zinc-400">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading SOPs…
+            </div>
+          ) : stats.total === 0 ? (
+            <OsEmptyView
+              Icon={BookCopy}
+              iconGradient={GRAD.tealGreen}
+              title="No SOPs yet"
+              subtitle="Document a process once, then assign it to teammates. SOPs version automatically as you edit."
+              chips={["Text", "Checklist", "Video"]}
+              cta="New SOP"
+              onCta={() => router.push("/sops/new")}
+            />
+          ) : grouped.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-zinc-400">
+              <AlertTriangle className="h-4 w-4" /> No SOPs match the current filter.
+            </div>
+          ) : (
+            <div className="space-y-7">
+              {grouped.map((g) => (
+                <section key={g.name}>
+                  <header className="mb-2.5 flex items-center gap-2">
+                    <h2 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-500">{g.name}</h2>
+                    <span className="rounded-full bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500">{g.items.length}</span>
+                    <span className="h-px flex-1 bg-zinc-100" />
+                  </header>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {g.items.map((s) => <SopCard key={s.id} s={s} />)}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </>
+  );
+}
+
+function StatTile({ Icon, label, value, sub, tint }: { Icon: typeof BookCopy; label: string; value: number; sub: string; tint: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-4">
+      <div className="flex items-center gap-2">
+        <Icon className="h-4 w-4" style={{ color: tint }} />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{label}</span>
+      </div>
+      <div className="mt-2 text-[22px] font-semibold tabular-nums leading-none text-zinc-900">{value}</div>
+      <div className="mt-1 text-[11px] text-zinc-400">{sub}</div>
+    </div>
+  );
+}
+
+function CategoryChip({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] transition-colors ${
+        active ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+      }`}
+    >
+      {label}
+      <span className={`tabular-nums ${active ? "text-zinc-300" : "text-zinc-400"}`}>{count}</span>
+    </button>
   );
 }
 
 function SopCard({ s }: { s: ApiSop }) {
   const Icon = STATUS_ICON[s.status];
   return (
-    <Link href={`/sops/${s.id}`} className="sop__card" style={{ ["--card-c" as unknown as string]: STATUS_COLOR[s.status] }}>
-      <header className="sop__card-head">
-        <span className="sop__card-status"><Icon /> {STATUS_LABEL[s.status]}</span>
-        <span className="sop__card-version">v{s.version}</span>
-      </header>
-      <h3 className="sop__card-title">{s.title}</h3>
+    <Link
+      href={`/sops/${s.id}`}
+      className="group flex flex-col rounded-xl border border-zinc-200 bg-white p-4 transition-all hover:border-zinc-300 hover:shadow-[0_2px_12px_-6px_rgba(0,0,0,0.15)]"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_PILL[s.status]}`}>
+          <Icon className="h-3 w-3" /> {STATUS_LABEL[s.status]}
+        </span>
+        <span className="text-[11px] text-zinc-400">v{s.version}</span>
+      </div>
+
+      <h3 className="mt-2.5 line-clamp-1 text-[14px] font-semibold text-zinc-900 group-hover:text-zinc-950">{s.title}</h3>
       {s.description && (
-        <p className="sop__card-desc">{s.description.length > 120 ? s.description.slice(0, 120) + "…" : s.description}</p>
+        <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-zinc-500">{s.description}</p>
       )}
+
       {s.tags && s.tags.length > 0 && (
-        <div className="sop__card-tags">
-          {s.tags.slice(0, 4).map((t) => <span key={t}>{t}</span>)}
-          {s.tags.length > 4 && <span className="sop__card-tag-more">+{s.tags.length - 4}</span>}
+        <div className="mt-2.5 flex flex-wrap gap-1">
+          {s.tags.slice(0, 3).map((t) => (
+            <span key={t} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10.5px] text-zinc-500">{t}</span>
+          ))}
+          {s.tags.length > 3 && <span className="text-[10.5px] text-zinc-400">+{s.tags.length - 3}</span>}
         </div>
       )}
-      <footer className="sop__card-foot">
-        {s.kra && <span title={`Measures KRA: ${s.kra.name}`}><Target /> {s.kra.name}</span>}
-        {s._count?.steps != null && <span><BookOpen /> {s._count.steps} step{s._count.steps === 1 ? "" : "s"}</span>}
-        {s._count?.assignments != null && <span><ClipboardCheck /> {s._count.assignments}</span>}
-        <span className="sop__card-updated">
-          <FileText /> {new Date(s.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-        </span>
-        <ChevronRight className="sop__card-arrow" />
-      </footer>
-    </Link>
-  );
-}
 
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof BookCopy; label: string; value: string; sub: string }) {
-  return (
-    <div className="sop__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="sop__kpi-accent" aria-hidden="true" />
-      <div className="sop__kpi-row">
-        <div className="sop__kpi-icon"><Icon /></div>
-        <div className="sop__kpi-label">{label}</div>
+      <div className="mt-3 flex items-center gap-3 border-t border-zinc-100 pt-2.5 text-[11px] text-zinc-400">
+        {s.kra && (
+          <span className="inline-flex items-center gap-1 truncate" title={`Measures KRA: ${s.kra.name}`}>
+            <Target className="h-3 w-3 shrink-0" /> <span className="truncate">{s.kra.name}</span>
+          </span>
+        )}
+        {s._count?.steps != null && (
+          <span className="inline-flex items-center gap-1"><BookOpen className="h-3 w-3" /> {s._count.steps}</span>
+        )}
+        {s._count?.assignments != null && (
+          <span className="inline-flex items-center gap-1"><ClipboardCheck className="h-3 w-3" /> {s._count.assignments}</span>
+        )}
+        <span className="ml-auto inline-flex items-center gap-1">
+          <FileText className="h-3 w-3" />
+          {new Date(s.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+          <ChevronRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+        </span>
       </div>
-      <div className="sop__kpi-value">{value}</div>
-      <div className="sop__kpi-sub">{sub}</div>
-    </div>
+    </Link>
   );
 }
