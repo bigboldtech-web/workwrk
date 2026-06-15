@@ -44,6 +44,7 @@ const TYPES: {
 export default function NewSopPage() {
   const router = useRouter();
   const [creating, setCreating] = useState<SOPType | null>(null);
+  const [hovered, setHovered] = useState<SOPType | null>(null);
   const { toast } = useOsToast();
 
   async function pickType(type: SOPType) {
@@ -112,7 +113,23 @@ export default function NewSopPage() {
                 type="button"
                 onClick={() => pickType(t.type)}
                 disabled={creating !== null}
-                className="group flex flex-col rounded-xl border border-zinc-200 bg-white p-5 text-left transition-all hover:border-zinc-300 hover:shadow-[0_4px_16px_-8px_rgba(0,0,0,0.18)] disabled:cursor-not-allowed disabled:opacity-60"
+                onMouseEnter={() => setHovered(t.type)}
+                onMouseLeave={() => setHovered(null)}
+                className="group"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  textAlign: "left",
+                  padding: "20px",
+                  borderRadius: "12px",
+                  border: hovered === t.type ? "1px solid #d4d4d8" : "1px solid #e4e4e7",
+                  background: "#fff",
+                  boxShadow: hovered === t.type ? "0 10px 26px -14px rgba(0,0,0,0.22)" : "none",
+                  transform: hovered === t.type ? "translateY(-2px)" : "none",
+                  cursor: creating !== null ? "not-allowed" : "pointer",
+                  opacity: creating !== null && creating !== t.type ? 0.55 : 1,
+                  transition: "border-color .15s, box-shadow .15s, transform .15s",
+                }}
               >
                 <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${t.tile}`}>
                   <Icon className={`h-5 w-5 ${t.iconColor}`} />
