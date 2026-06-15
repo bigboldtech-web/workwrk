@@ -141,7 +141,8 @@ export default function SopsPage() {
         actions={
           <Link
             href="/sops/new"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium hover:opacity-90"
+            style={{ background: "var(--os-brand)", color: "#fff" }}
           >
             <Plus className="h-3.5 w-3.5" /> New SOP
           </Link>
@@ -160,27 +161,6 @@ export default function SopsPage() {
               placeholder="Search title, description, tags…"
               className="h-full w-full bg-transparent text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400"
             />
-          </div>
-
-          {/* Status — segmented control */}
-          <div className="flex items-center gap-1 rounded-lg bg-zinc-100 p-1">
-            {STATUS_FILTERS.map((s) => {
-              const active = statusFilter === s;
-              const count = s === "ALL" ? stats.total : stats.counts[s as SopStatus];
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setStatusFilter(s)}
-                  className={`inline-flex h-8 items-center gap-2 rounded-md px-3 text-[13px] transition-colors ${
-                    active ? "bg-white text-zinc-900 font-medium shadow-sm" : "text-zinc-500 hover:bg-white/70 hover:text-zinc-800"
-                  }`}
-                >
-                  {s === "ALL" ? "All" : STATUS_LABEL[s as SopStatus]}
-                  <span className={`rounded px-1 text-[11px] tabular-nums ${active ? "bg-zinc-100 text-zinc-500" : "text-zinc-400"}`}>{count}</span>
-                </button>
-              );
-            })}
           </div>
 
           {/* Category dropdown */}
@@ -231,6 +211,27 @@ export default function SopsPage() {
           >
             <Archive className="h-3.5 w-3.5" /> Archived{showArchived ? " ✓" : ""}
           </button>
+        </div>
+
+        {/* Status filter — its own row so it's not cramped */}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {STATUS_FILTERS.map((s) => {
+            const active = statusFilter === s;
+            const count = s === "ALL" ? stats.total : stats.counts[s as SopStatus];
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setStatusFilter(s)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] transition-colors ${
+                  active ? "border-zinc-300 bg-zinc-100 font-medium text-zinc-900" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                }`}
+              >
+                {s === "ALL" ? "All" : STATUS_LABEL[s as SopStatus]}
+                <span className={`tabular-nums ${active ? "text-zinc-500" : "text-zinc-400"}`}>{count}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Body */}
