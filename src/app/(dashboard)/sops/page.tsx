@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BookCopy, Plus, Search, ClipboardCheck, ChevronRight, ChevronDown, FileText,
-  CheckCircle2, Activity, Archive, Eye, Edit3, AlertTriangle, BookOpen, Target, Loader2,
+  CheckCircle2, Archive, Eye, Edit3, AlertTriangle, BookOpen, Target, Loader2,
   LayoutGrid, List as ListIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
@@ -139,17 +139,12 @@ export default function SopsPage() {
         iconGradient={GRAD.tealGreen}
         description={rows === null ? "Loading…" : `${stats.total} SOP${stats.total === 1 ? "" : "s"} · ${stats.counts.PUBLISHED} published · ${stats.totalAssignments} assignment${stats.totalAssignments === 1 ? "" : "s"}`}
         actions={
-          <div className="flex items-center gap-2">
-            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
-              <ClipboardCheck className="h-3.5 w-3.5" /> My SOPs
-            </Link>
-            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
-              <Activity className="h-3.5 w-3.5" /> Compliance
-            </Link>
-            <Link href="/sops/new" className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium text-white" style={{ background: "var(--os-brand)" }}>
-              <Plus className="h-3.5 w-3.5" /> New SOP
-            </Link>
-          </div>
+          <Link
+            href="/sops/new"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+          >
+            <Plus className="h-3.5 w-3.5" /> New SOP
+          </Link>
         }
       />
 
@@ -167,8 +162,8 @@ export default function SopsPage() {
             />
           </div>
 
-          {/* Status — segmented control (soft white-on-grey active) */}
-          <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+          {/* Status — segmented control */}
+          <div className="flex items-center gap-1 rounded-lg bg-zinc-100 p-1">
             {STATUS_FILTERS.map((s) => {
               const active = statusFilter === s;
               const count = s === "ALL" ? stats.total : stats.counts[s as SopStatus];
@@ -177,12 +172,12 @@ export default function SopsPage() {
                   key={s}
                   type="button"
                   onClick={() => setStatusFilter(s)}
-                  className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${
-                    active ? "bg-white text-zinc-900 font-medium shadow-sm" : "text-zinc-500 hover:text-zinc-800"
+                  className={`inline-flex h-8 items-center gap-2 rounded-md px-3 text-[13px] transition-colors ${
+                    active ? "bg-white text-zinc-900 font-medium shadow-sm" : "text-zinc-500 hover:bg-white/70 hover:text-zinc-800"
                   }`}
                 >
                   {s === "ALL" ? "All" : STATUS_LABEL[s as SopStatus]}
-                  <span className="tabular-nums text-zinc-400">{count}</span>
+                  <span className={`rounded px-1 text-[11px] tabular-nums ${active ? "bg-zinc-100 text-zinc-500" : "text-zinc-400"}`}>{count}</span>
                 </button>
               );
             })}
@@ -229,11 +224,12 @@ export default function SopsPage() {
           <button
             type="button"
             onClick={() => setShowArchived((x) => !x)}
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12.5px] transition-colors ${
-              showArchived ? "border-zinc-300 bg-zinc-100 text-zinc-900" : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
+            title={showArchived ? "Showing archived SOPs" : "Show archived SOPs"}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] transition-colors ${
+              showArchived ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
             }`}
           >
-            <Archive className="h-3.5 w-3.5" /> Archived
+            <Archive className="h-3.5 w-3.5" /> Archived{showArchived ? " ✓" : ""}
           </button>
         </div>
 
