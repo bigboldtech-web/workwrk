@@ -1362,7 +1362,7 @@ export default function SOPDetailPage() {
         {/* Left: Tabs */}
         <div className={showInfo ? "lg:col-span-2" : ""}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <div className="flex items-center justify-between gap-3 border-b border-zinc-200">
+            <div className="flex items-end justify-between gap-3 border-b border-zinc-200">
             <ViewTabStrip className="border-b-0">
               <ViewTab icon={FileText} label="Content" active={activeTab === "content"} onClick={() => setActiveTab("content")} />
               <ViewTab icon={Users} label="Compliance" active={activeTab === "compliance"} onClick={() => setActiveTab("compliance")} />
@@ -1378,7 +1378,7 @@ export default function SOPDetailPage() {
             <button
               type="button"
               onClick={() => setShowInfo((v) => !v)}
-              className="shrink-0 inline-flex items-center gap-1 pb-2 pl-3 text-xs text-zinc-500 hover:text-zinc-900"
+              className="shrink-0 inline-flex items-center gap-1 pb-2.5 pl-3 text-xs text-zinc-500 hover:text-zinc-900"
             >
               {showInfo ? "Hide details" : "Show details"}
             </button>
