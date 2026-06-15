@@ -1041,8 +1041,8 @@ export default function SOPDetailPage() {
             <ArrowLeft size={18} />
           </Button>
           <div className="flex items-center gap-3 min-w-0">
-            <div className="rounded-lg bg-[rgba(212,255,46,0.08)] p-2 shrink-0">
-              <FileText size={20} className="text-[color:var(--accent-strong)]" />
+            <div className="rounded-lg p-2 shrink-0" style={{ background: "var(--os-brand-soft)" }}>
+              <FileText size={20} style={{ color: "var(--os-brand)" }} />
             </div>
             <div className="min-w-0">
               {editing ? (
@@ -1356,23 +1356,14 @@ export default function SOPDetailPage() {
         </div>
       </div>
 
-      {/* Main Content — Details rail collapsed by default so the SOP
-          claims full canvas width. Toggle below opens the rail when
-          the user actually needs to inspect metadata / compliance. */}
-      <div className="flex justify-end -mt-2">
-        <button
-          type="button"
-          onClick={() => setShowInfo((v) => !v)}
-          className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900"
-        >
-          {showInfo ? "Hide details" : "Show details"}
-        </button>
-      </div>
+      {/* Main Content — details rail collapsed by default so the SOP claims
+          full canvas width; "Show details" in the tab row opens the rail. */}
       <div className={"grid grid-cols-1 gap-6 " + (showInfo ? "lg:grid-cols-3" : "")}>
         {/* Left: Tabs */}
         <div className={showInfo ? "lg:col-span-2" : ""}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <ViewTabStrip>
+            <div className="flex items-center justify-between gap-3 border-b border-zinc-200">
+            <ViewTabStrip className="border-b-0">
               <ViewTab icon={FileText} label="Content" active={activeTab === "content"} onClick={() => setActiveTab("content")} />
               <ViewTab icon={Users} label="Compliance" active={activeTab === "compliance"} onClick={() => setActiveTab("compliance")} />
               <ViewTab
@@ -1384,6 +1375,14 @@ export default function SOPDetailPage() {
               />
               <ViewTab icon={Clock} label="History" active={activeTab === "history"} onClick={() => setActiveTab("history")} />
             </ViewTabStrip>
+            <button
+              type="button"
+              onClick={() => setShowInfo((v) => !v)}
+              className="shrink-0 inline-flex items-center gap-1 pb-2 pl-3 text-xs text-zinc-500 hover:text-zinc-900"
+            >
+              {showInfo ? "Hide details" : "Show details"}
+            </button>
+            </div>
 
             {/* Content Tab */}
             <TabsContent value="content" className="space-y-4 mt-6">
