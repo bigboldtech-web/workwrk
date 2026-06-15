@@ -327,6 +327,17 @@ function StepDescriptionView({ html }: { html?: string }) {
 // button used to live here; it lied about what was persisted because the
 // top-of-page Save would clobber the staged content with the pre-edit
 // version. Now there is one save path, not two.
+// Lightweight sanitizer for read-only SOP HTML (no DOMPurify dep). SOP content
+// is org-internal + authored through TipTap; this strips the dangerous bits
+// (scripts/styles/iframes, inline event handlers, javascript: URLs) as defense.
+function safeHtml(html: string): string {
+  return (html || "")
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, "")
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*\/?>/gi, "")
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(href|src)\s*=\s*("\s*javascript:[^"]*"|'\s*javascript:[^']*')/gi, '$1="#"');
+}
+
 function RichTextSopEditor({ content, editable, onChange }: { content: string; editable: boolean; onChange: (html: string) => void }) {
   return (
     <RichEditor
@@ -1407,11 +1418,14 @@ export default function SOPDetailPage() {
                     </CardContent>
                   </Card>
                 ) : (
-                  // Notes-style reader: clean white canvas, centered column.
-                  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white px-5 py-6 sm:px-10 sm:py-9">
-                    <div className="mx-auto max-w-3xl">
-                      <RichTextSopEditor content={richtextHtml} editable={false} onChange={setRichtextHtml} />
-                    </div>
+                  // Notes-style reader — render the saved HTML as full-size
+                  // prose (big headings, left-aligned reading column), not the
+                  // dark-themed prose-sm editor chrome.
+                  <div className="rounded-xl border border-zinc-200 bg-white px-6 py-7 sm:px-10 sm:py-10">
+                    <article
+                      className="prose prose-zinc max-w-3xl prose-headings:font-semibold prose-headings:text-zinc-900 prose-h1:text-[26px] prose-h2:text-[21px] prose-h3:text-[17px] prose-p:text-zinc-600 prose-li:text-zinc-600 prose-strong:text-zinc-900 prose-a:text-blue-600"
+                      dangerouslySetInnerHTML={{ __html: safeHtml(richtextHtml) }}
+                    />
                   </div>
                 )
               )}
@@ -1521,7 +1535,7 @@ export default function SOPDetailPage() {
                     />
                   </CardContent>
                 </Card>
-              ) : (
+              ) : ((sop.content as any)?.type === "recorded" || steps.length > 0 || editing) ? (
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1816,16 +1830,18 @@ export default function SOPDetailPage() {
                   )}
                 </CardContent>
               </Card>
-              )}
+              ) : null}
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">Custom fields</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <CustomFieldsPanel entityType="SOP" entityId={sop.id} showEmptyState />
-                </CardContent>
-              </Card>
+              {editing ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Custom fields</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <CustomFieldsPanel entityType="SOP" entityId={sop.id} showEmptyState />
+                  </CardContent>
+                </Card>
+              ) : null}
             </TabsContent>
 
             {/* Compliance Tab */}
