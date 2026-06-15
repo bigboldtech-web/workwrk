@@ -1386,7 +1386,7 @@ export default function SOPDetailPage() {
             </ViewTabStrip>
 
             {/* Content Tab */}
-            <TabsContent value="content" className="space-y-4 mt-4">
+            <TabsContent value="content" className="space-y-4 mt-6">
               {/* Description — subtle intro when viewing; full card only while editing. */}
               {editing ? (
                 <Card>
@@ -1404,7 +1404,7 @@ export default function SOPDetailPage() {
                   </CardContent>
                 </Card>
               ) : sop.description ? (
-                <p className="max-w-3xl text-[13.5px] leading-relaxed text-zinc-500">{sop.description}</p>
+                <p className="text-[13.5px] leading-relaxed text-zinc-500">{sop.description}</p>
               ) : null}
 
               {/* Rich Text Editor for "Write" type SOPs — parent owns the
@@ -1423,7 +1423,7 @@ export default function SOPDetailPage() {
                   // dark-themed prose-sm editor chrome.
                   <div className="rounded-xl border border-zinc-200 bg-white px-6 py-7 sm:px-10 sm:py-10">
                     <article
-                      className="prose prose-zinc max-w-3xl prose-headings:font-semibold prose-headings:text-zinc-900 prose-h1:text-[26px] prose-h2:text-[21px] prose-h3:text-[17px] prose-p:text-zinc-600 prose-li:text-zinc-600 prose-strong:text-zinc-900 prose-a:text-blue-600"
+                      className="prose prose-zinc max-w-none prose-headings:font-semibold prose-headings:text-zinc-900 prose-h1:text-[26px] prose-h2:text-[21px] prose-h3:text-[17px] prose-p:text-zinc-700 prose-li:text-zinc-700 prose-strong:text-zinc-900 prose-a:text-blue-600"
                       dangerouslySetInnerHTML={{ __html: safeHtml(richtextHtml) }}
                     />
                   </div>
@@ -1472,7 +1472,7 @@ export default function SOPDetailPage() {
                       })()}
                     </div>
                     <div className="px-5 py-6 sm:px-10 sm:py-9">
-                      <div className="mx-auto max-w-3xl">
+                      <div className="w-full">
                         <BlockEditor
                           key={sop.id}
                           initialBlocks={sopBlocks}

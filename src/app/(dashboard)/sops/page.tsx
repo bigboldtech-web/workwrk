@@ -146,7 +146,7 @@ export default function SopsPage() {
             <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
               <Activity className="h-3.5 w-3.5" /> Compliance
             </Link>
-            <Link href="/sops/new" className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800">
+            <Link href="/sops/new" className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium text-white" style={{ background: "var(--os-brand)" }}>
               <Plus className="h-3.5 w-3.5" /> New SOP
             </Link>
           </div>
@@ -154,16 +154,8 @@ export default function SopsPage() {
       />
 
       <div className="px-6 py-5">
-        {/* Stat tiles */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile Icon={CheckCircle2}   label="Published"   value={stats.counts.PUBLISHED}  sub="live in library"   tint="#10b981" />
-          <StatTile Icon={Eye}            label="In review"   value={stats.counts.IN_REVIEW}  sub="awaiting approval" tint="#f59e0b" />
-          <StatTile Icon={Edit3}          label="Drafts"      value={stats.counts.DRAFT}      sub="in progress"       tint="#6366f1" />
-          <StatTile Icon={ClipboardCheck} label="Assignments" value={stats.totalAssignments}  sub="across SOPs"       tint="#3b82f6" />
-        </div>
-
-        {/* Toolbar */}
-        <div className="mt-5 flex flex-wrap items-center gap-2">
+        {/* Toolbar (status counts live in the segmented filter — no redundant tiles) */}
+        <div className="flex flex-wrap items-center gap-2">
           {/* Search */}
           <div className="flex h-9 min-w-[200px] flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3">
             <Search className="h-4 w-4 shrink-0 text-zinc-400" />
@@ -292,19 +284,6 @@ export default function SopsPage() {
         </div>
       </div>
     </>
-  );
-}
-
-function StatTile({ Icon, label, value, sub, tint }: { Icon: typeof BookCopy; label: string; value: number; sub: string; tint: string }) {
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4" style={{ color: tint }} />
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{label}</span>
-      </div>
-      <div className="mt-2 text-[22px] font-semibold tabular-nums leading-none text-zinc-900">{value}</div>
-      <div className="mt-1 text-[11px] text-zinc-400">{sub}</div>
-    </div>
   );
 }
 
