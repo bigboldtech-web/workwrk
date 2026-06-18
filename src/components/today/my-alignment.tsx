@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Target, ChartLine, BookOpenCheck, ArrowRight, AlertCircle, ChevronRight,
-  ClipboardCheck, CheckCircle2, Clock, ListChecks,
+  ClipboardCheck, CheckCircle2, Clock, ListChecks, ShieldCheck,
 } from "lucide-react";
 import { KpiScoreModal } from "./kpi-score-modal";
 import { SopAckModal } from "./sop-ack-modal";
@@ -64,6 +64,15 @@ interface RunRow {
   sopTitle: string | null;
 }
 
+interface PolicyTodo {
+  assignmentId: string;
+  policyId: string;
+  title: string;
+  mandatory: boolean;
+  dueDate: string | null;
+  status: string;
+}
+
 interface WeeklyReviewLite {
   id: string;
   status: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED";
@@ -76,6 +85,7 @@ export function MyAlignment() {
   const [prompts, setPrompts] = useState<KpiPrompt[]>([]);
   const [sops, setSops] = useState<SopRow[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
+  const [policies, setPolicies] = useState<PolicyTodo[]>([]);
   const [weekly, setWeekly] = useState<WeeklyReviewLite | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeKpi, setActiveKpi] = useState<KpiPrompt | null>(null);
@@ -85,11 +95,12 @@ export function MyAlignment() {
     let active = true;
     (async () => {
       try {
-        const [kRes, pRes, sRes, rRes, wRes] = await Promise.all([
+        const [kRes, pRes, sRes, rRes, polRes, wRes] = await Promise.all([
           fetch("/api/me/kras",          { cache: "no-store" }),
           fetch("/api/me/kpi-prompts",   { cache: "no-store" }),
           fetch("/api/me/sops",          { cache: "no-store" }),
           fetch("/api/me/process-runs",  { cache: "no-store" }),
+          fetch("/api/me/policies",      { cache: "no-store" }),
           fetch("/api/me/weekly-review", { cache: "no-store" }),
         ]);
         if (!active) return;
@@ -97,6 +108,7 @@ export function MyAlignment() {
         if (pRes.ok) setPrompts((await pRes.json()).prompts ?? []);
         if (sRes.ok) setSops((await sRes.json()).sops ?? []);
         if (rRes.ok) setRuns((await rRes.json()).runs ?? []);
+        if (polRes.ok) setPolicies((await polRes.json()).policies ?? []);
         if (wRes.ok) {
           const data = await wRes.json();
           if (data.review) {
@@ -121,7 +133,7 @@ export function MyAlignment() {
   // If totally empty (no assignments + no weekly review yet), don't
   // show the block — keeps /today clean for new orgs that haven't
   // seeded yet.
-  if (!loading && kras.length === 0 && prompts.length === 0 && sops.length === 0 && runs.length === 0 && !weekly) {
+  if (!loading && kras.length === 0 && prompts.length === 0 && sops.length === 0 && runs.length === 0 && policies.length === 0 && !weekly) {
     return null;
   }
 
@@ -154,6 +166,32 @@ export function MyAlignment() {
           <Link href="/sops" className="text-xs font-medium text-amber-700 hover:text-amber-800 inline-flex items-center gap-1">
             Review <ArrowRight className="w-3 h-3" />
           </Link>
+        </div>
+      ) : null}
+
+      {policies.length > 0 ? (
+        <div className="rounded-md border border-zinc-200 bg-white">
+          <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
+            <ShieldCheck className="w-4 h-4 text-[var(--os-brand)]" />
+            <span className="text-sm font-medium">Policies to acknowledge</span>
+            <span className="text-xs text-zinc-400">{policies.length}</span>
+          </div>
+          <ul className="divide-y divide-zinc-100">
+            {policies.map((p) => (
+              <li key={p.assignmentId}>
+                <Link href={`/policies/${p.policyId}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-50">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{p.title}</div>
+                    <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-400">
+                      {p.mandatory ? <span className="font-medium text-amber-600">Mandatory</span> : <span>Optional</span>}
+                      {p.dueDate ? <span>· Due {new Date(p.dueDate).toLocaleDateString()}</span> : null}
+                    </div>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-zinc-400" />
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

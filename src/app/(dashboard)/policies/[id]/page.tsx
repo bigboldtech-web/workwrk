@@ -13,13 +13,16 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ShieldCheck, ArrowLeft, CheckCircle2, Loader2, Users, Pencil, Save, X } from "lucide-react";
+import { ShieldCheck, ArrowLeft, CheckCircle2, Loader2, Users, Pencil, Save, X, History, UserPlus, RotateCcw, CalendarDays } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
 
 type PolStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+type VersionRow = { id: string; version: number; title: string; createdAt: string; publishedBy: string | null };
+type AssigneeRow = { id: string; userId: string; status: string; name: string; email: string | null; completedAt: string | null };
+type OrgUser = { id: string; firstName: string; lastName: string; email: string };
 type Policy = {
   id: string;
   title: string;
@@ -59,7 +62,21 @@ export default function PolicyDetailPage() {
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editStatus, setEditStatus] = useState<PolStatus>("DRAFT");
+  const [editEffectiveDate, setEditEffectiveDate] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Version history + assignees + assign-dialog state.
+  const [versions, setVersions] = useState<VersionRow[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [assignees, setAssignees] = useState<AssigneeRow[] | null>(null);
+  const [showAssignees, setShowAssignees] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [orgUsers, setOrgUsers] = useState<OrgUser[] | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [assignAll, setAssignAll] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [userQuery, setUserQuery] = useState("");
 
   useEffect(() => {
     if (!id) return;
@@ -75,6 +92,7 @@ export default function PolicyDetailPage() {
           setEditTitle(p.title);
           setEditContent(p.content || "");
           setEditStatus(p.status);
+          setEditEffectiveDate(p.effectiveDate ? p.effectiveDate.slice(0, 10) : "");
           setEditing(true);
         }
       } catch { setLoadErr(true); }
@@ -86,7 +104,80 @@ export default function PolicyDetailPage() {
     setEditTitle(policy.title);
     setEditContent(policy.content || "");
     setEditStatus(policy.status);
+    setEditEffectiveDate(policy.effectiveDate ? policy.effectiveDate.slice(0, 10) : "");
     setEditing(true);
+  }
+
+  // ── Version history ──
+  async function openHistory() {
+    setShowHistory((v) => !v);
+    setShowAssignees(false);
+    if (versions === null && id) {
+      try {
+        const res = await fetch(`/api/policies/${id}/versions`);
+        if (res.ok) setVersions(((await res.json()).data ?? {}).versions ?? []);
+      } catch { /* ignore */ }
+    }
+  }
+  async function restore(versionId: string) {
+    if (!id || restoring) return;
+    setRestoring(versionId);
+    try {
+      const res = await fetch(`/api/policies/${id}/versions`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionId }),
+      });
+      if (!res.ok) { toast("Couldn't restore"); return; }
+      toast("Version restored");
+      const pr = await fetch(`/api/policies/${id}`); if (pr.ok) setPolicy((await pr.json()).data ?? null);
+      const vr = await fetch(`/api/policies/${id}/versions`); if (vr.ok) setVersions(((await vr.json()).data ?? {}).versions ?? []);
+    } catch { toast("Couldn't restore"); } finally { setRestoring(null); }
+  }
+
+  // ── Assignees ──
+  async function openAssignees() {
+    setShowAssignees((v) => !v);
+    setShowHistory(false);
+    if (assignees === null && id) {
+      try {
+        const res = await fetch(`/api/policies/${id}/assignments`);
+        if (res.ok) setAssignees(((await res.json()).data ?? {}).assignments ?? []);
+      } catch { /* ignore */ }
+    }
+  }
+
+  // ── Assign dialog ──
+  async function openAssign() {
+    setShowAssign(true);
+    if (orgUsers === null) {
+      try {
+        const res = await fetch(`/api/users?limit=500`);
+        if (res.ok) {
+          const j = await res.json();
+          // /api/users is paginated → data.data; be defensive about shape.
+          const arr = j.data?.data ?? j.data ?? j.users ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setOrgUsers(arr.map((u: any) => ({ id: u.id, firstName: u.firstName ?? "", lastName: u.lastName ?? "", email: u.email ?? "" })));
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  async function doAssign() {
+    if (!id || assignBusy) return;
+    if (!assignAll && selectedIds.size === 0) { toast("Pick at least one person"); return; }
+    setAssignBusy(true);
+    try {
+      const res = await fetch(`/api/policies/${id}/assignments`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(assignAll ? { all: true } : { userIds: [...selectedIds] }),
+      });
+      if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't assign"); return; }
+      const j = await res.json();
+      const count = (j.data ?? j).count ?? 0;
+      toast(`Assigned to ${count} ${count === 1 ? "person" : "people"}`);
+      setShowAssign(false); setSelectedIds(new Set()); setAssignAll(false);
+      setAssignees(null); // reload on next open
+    } catch { toast("Couldn't assign"); } finally { setAssignBusy(false); }
   }
 
   async function save() {
@@ -96,10 +187,13 @@ export default function PolicyDetailPage() {
       const res = await fetch(`/api/policies/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: editTitle.trim() || "Untitled policy", content: editContent, status: editStatus }),
+        body: JSON.stringify({ title: editTitle.trim() || "Untitled policy", content: editContent, status: editStatus, effectiveDate: editEffectiveDate || null }),
       });
       if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't save"); return; }
-      setPolicy((p) => (p ? { ...p, title: editTitle.trim() || "Untitled policy", content: editContent, status: editStatus } : p));
+      // Re-fetch so the (possibly auto-incremented) version + effective date reflect server state.
+      const pr = await fetch(`/api/policies/${id}`);
+      if (pr.ok) setPolicy((await pr.json()).data ?? null);
+      setVersions(null); // version may have changed
       setEditing(false);
       toast("Policy saved");
     } catch { toast("Couldn't save"); }
@@ -130,9 +224,20 @@ export default function PolicyDetailPage() {
         actions={
           <div className="flex items-center gap-2">
             {policy?.canEdit && !editing ? (
-              <button type="button" onClick={startEdit} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </button>
+              <>
+                <button type="button" onClick={openAssign} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                  <UserPlus className="h-3.5 w-3.5" /> Assign
+                </button>
+                <button type="button" onClick={openAssignees} className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${showAssignees ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}>
+                  <Users className="h-3.5 w-3.5" /> Assignees
+                </button>
+                <button type="button" onClick={openHistory} className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${showHistory ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}>
+                  <History className="h-3.5 w-3.5" /> History
+                </button>
+                <button type="button" onClick={startEdit} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </button>
+              </>
             ) : null}
             <Link href="/policies" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
               <ArrowLeft className="h-3.5 w-3.5" /> All policies
@@ -164,6 +269,15 @@ export default function PolicyDetailPage() {
                 <option value="PUBLISHED">Published</option>
                 <option value="ARCHIVED">Archived</option>
               </select>
+              <label className="flex items-center gap-1.5 text-[13px] text-zinc-500" title="Effective date (system field)">
+                <CalendarDays className="h-3.5 w-3.5" />
+                <input
+                  type="date"
+                  value={editEffectiveDate}
+                  onChange={(e) => setEditEffectiveDate(e.target.value)}
+                  className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-700"
+                />
+              </label>
               <div className="flex-1" />
               <button type="button" onClick={() => setEditing(false)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
                 <X className="h-3.5 w-3.5" /> Cancel
@@ -226,6 +340,63 @@ export default function PolicyDetailPage() {
               </div>
             ) : null}
 
+            {showHistory ? (
+              <div className="mt-4 rounded-xl border border-zinc-200 bg-white">
+                <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5 text-[13px] font-medium text-zinc-700">
+                  <History className="h-4 w-4 text-zinc-400" /> Version history
+                  <span className="text-zinc-400">· current v{policy.version}</span>
+                </div>
+                {versions === null ? (
+                  <div className="px-4 py-3 text-[13px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                ) : versions.length === 0 ? (
+                  <div className="px-4 py-3 text-[13px] text-zinc-400">No prior versions yet — edits to a published policy are versioned automatically.</div>
+                ) : (
+                  <ul className="divide-y divide-zinc-100">
+                    {versions.map((v) => (
+                      <li key={v.id} className="flex items-center gap-3 px-4 py-2.5">
+                        <span className="inline-flex h-6 min-w-[2.5rem] items-center justify-center rounded bg-zinc-100 px-1.5 text-[12px] font-semibold text-zinc-600">v{v.version}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13px] text-zinc-800">{v.title}</div>
+                          <div className="text-[11px] text-zinc-400">{new Date(v.createdAt).toLocaleString()}</div>
+                        </div>
+                        <button type="button" onClick={() => restore(v.id)} disabled={!!restoring} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2 text-[12px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
+                          {restoring === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Restore
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+
+            {showAssignees ? (
+              <div className="mt-4 rounded-xl border border-zinc-200 bg-white">
+                <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5 text-[13px] font-medium text-zinc-700">
+                  <Users className="h-4 w-4 text-zinc-400" /> Assignees
+                  {assignees ? <span className="text-zinc-400">· {assignees.filter((a) => a.status === "COMPLETED").length}/{assignees.length} acknowledged</span> : null}
+                </div>
+                {assignees === null ? (
+                  <div className="px-4 py-3 text-[13px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                ) : assignees.length === 0 ? (
+                  <div className="px-4 py-3 text-[13px] text-zinc-400">No one assigned yet — use <strong>Assign</strong> to send this to employees.</div>
+                ) : (
+                  <ul className="divide-y divide-zinc-100">
+                    {assignees.map((a) => (
+                      <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13px] text-zinc-800">{a.name}</div>
+                          {a.email ? <div className="truncate text-[11px] text-zinc-400">{a.email}</div> : null}
+                        </div>
+                        {a.status === "COMPLETED"
+                          ? <span className="inline-flex items-center gap-1 text-[12px] font-medium text-emerald-600"><CheckCircle2 className="h-3.5 w-3.5" /> Acknowledged</span>
+                          : <span className="text-[12px] text-amber-600">Pending</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+
             {policy.content ? (
               <article
                 className="prose prose-zinc mt-6 max-w-none prose-headings:font-semibold prose-h1:text-[22px] prose-h2:text-[18px] prose-h3:text-[15px] prose-p:text-[15px] prose-p:leading-relaxed prose-li:text-[15px]"
@@ -237,6 +408,64 @@ export default function PolicyDetailPage() {
           </>
         )}
       </div>
+
+      {showAssign ? (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4" onClick={() => setShowAssign(false)}>
+          <div className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
+              <div className="text-sm font-semibold text-zinc-900">Assign policy</div>
+              <button type="button" onClick={() => setShowAssign(false)} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="border-b border-zinc-100 px-4 py-2.5">
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-700">
+                <input type="checkbox" checked={assignAll} onChange={(e) => setAssignAll(e.target.checked)} className="h-4 w-4" style={{ accentColor: "#7c3aed" }} />
+                Everyone in the org
+              </label>
+            </div>
+            {!assignAll ? (
+              <>
+                <div className="border-b border-zinc-100 px-4 py-2">
+                  <input type="text" value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder="Search people…" className="h-8 w-full rounded-md border border-zinc-200 px-2.5 text-[13px] outline-none focus:border-zinc-300" />
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  {orgUsers === null ? (
+                    <div className="px-4 py-3 text-[13px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                  ) : (() => {
+                    const q = userQuery.trim().toLowerCase();
+                    const list = orgUsers.filter((u) => !q || `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(q));
+                    return list.length === 0 ? (
+                      <div className="px-4 py-3 text-[13px] text-zinc-400">No people match.</div>
+                    ) : (
+                      <ul>
+                        {list.map((u) => {
+                          const on = selectedIds.has(u.id);
+                          return (
+                            <li key={u.id}>
+                              <label className="flex cursor-pointer items-center gap-2.5 px-4 py-2 hover:bg-zinc-50">
+                                <input type="checkbox" checked={on} onChange={() => setSelectedIds((prev) => { const n = new Set(prev); if (on) n.delete(u.id); else n.add(u.id); return n; })} className="h-4 w-4" style={{ accentColor: "#7c3aed" }} />
+                                <div className="min-w-0">
+                                  <div className="truncate text-[13px] text-zinc-800">{u.firstName} {u.lastName}</div>
+                                  <div className="truncate text-[11px] text-zinc-400">{u.email}</div>
+                                </div>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    );
+                  })()}
+                </div>
+              </>
+            ) : null}
+            <div className="flex items-center justify-between border-t border-zinc-100 px-4 py-3">
+              <div className="text-[12px] text-zinc-400">{assignAll ? "All active employees" : `${selectedIds.size} selected`}</div>
+              <button type="button" onClick={doAssign} disabled={assignBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                {assignBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />} Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -2298,6 +2298,8 @@ model Policy {
   organizationId  String
   organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   acknowledgments PolicyAcknowledgment[]
+  assignments     PolicyAssignment[]
+  versions        PolicyVersion[]
   createdAt       DateTime               @default(now())
   updatedAt       DateTime               @updatedAt
 
@@ -2316,6 +2318,44 @@ model PolicyAcknowledgment {
   @@unique([policyId, userId])
   @@index([userId])
   @@index([policyId])
+}
+
+// Assignment of a policy to a specific employee — mirrors SOPAssignment so a
+// policy can be assigned to selected/all/department employees who then
+// acknowledge it. Acknowledgement flips status to COMPLETED.
+model PolicyAssignment {
+  id          String    @id @default(cuid())
+  policyId    String
+  policy      Policy    @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  userId      String
+  status      String    @default("ASSIGNED") // ASSIGNED | COMPLETED | OVERDUE
+  mandatory   Boolean   @default(true)
+  dueDate     DateTime?
+  assignedBy  String?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([policyId, userId])
+  @@index([userId])
+  @@index([policyId])
+}
+
+// Immutable snapshot of a policy at a point in time — mirrors SOPVersion for
+// automatic version control + history + restore. content is String (HTML).
+model PolicyVersion {
+  id          String   @id @default(cuid())
+  policyId    String
+  policy      Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  version     Int
+  title       String
+  content     String
+  status      String?
+  publishedBy String?
+  createdAt   DateTime @default(now())
+
+  @@index([policyId])
+  @@index([version])
 }
 
 // ==========================================

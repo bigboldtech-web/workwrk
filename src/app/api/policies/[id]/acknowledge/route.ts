@@ -20,5 +20,12 @@ export async function POST(
     update: {},
   });
 
+  // If this policy was assigned to the user, mark the assignment complete so
+  // tracking + /today reflect the acknowledgement.
+  await prisma.policyAssignment.updateMany({
+    where: { policyId, userId, status: { not: "COMPLETED" } },
+    data: { status: "COMPLETED", completedAt: new Date() },
+  });
+
   return jsonSuccess({ acknowledged: true });
 }
