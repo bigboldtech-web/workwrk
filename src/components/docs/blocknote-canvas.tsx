@@ -280,7 +280,15 @@ interface Props {
    * which gates doc-only features (sub-page parent, copy-link base) so the
    * SAME editor works without a backing Doc.
    */
-  entity?: { type: "doc" | "sop"; id: string };
+  entity?: { type: "doc" | "sop" | "policy"; id: string };
+  /**
+   * HTML-mode seeding. When set (and no bnDoc/legacyBlocks), the editor is
+   * seeded by parsing this HTML into blocks on mount. Used by surfaces that
+   * persist HTML strings (e.g. Policies) so they can still use this editor.
+   */
+  initialHtml?: string;
+  /** HTML-mode change callback — receives the document serialized to HTML. */
+  onHtmlChange?: (html: string) => void;
 }
 
 // Watch <html data-theme="..."> + the `.dark` class so BlockNote can
@@ -310,7 +318,7 @@ function useAppTheme(): "dark" | "light" {
   return theme;
 }
 
-export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange, docId, onComment, onAskAI, entity }: Props) {
+export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange, docId, onComment, onAskAI, entity, initialHtml, onHtmlChange }: Props) {
   const appTheme = useAppTheme();
   const router = useRouter();
   // Resolve the entity. Notes (no `entity`) behave exactly as before.
@@ -338,6 +346,24 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
   const initialEmitConsumedRef = useRef(false);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onHtmlChangeRef = useRef(onHtmlChange);
+  onHtmlChangeRef.current = onHtmlChange;
+
+  // HTML-mode seed: parse the provided HTML into blocks once on mount (sync in
+  // BlockNote v0.51). Only when there's no JSON/legacy source. Empty stays the
+  // default empty paragraph.
+  const htmlSeededRef = useRef(false);
+  useEffect(() => {
+    if (htmlSeededRef.current) return;
+    htmlSeededRef.current = true;
+    if (initialHtml && !initialBnDoc && !(legacyBlocks && legacyBlocks.length > 0)) {
+      try {
+        const blocks = editor.tryParseHTMLToBlocks(initialHtml);
+        if (blocks.length > 0) editor.replaceBlocks(editor.document, blocks);
+      } catch { /* leave the empty doc */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const emit = useCallback(() => {
     if (!initialEmitConsumedRef.current) {
@@ -352,6 +378,8 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
       // Cast at the boundary — runtime data is JSON-compatible with the
       // loose PartialBlock[] used by the parent.
       onChangeRef.current(bnDoc as unknown as BnDocJSON, mirror, plainText);
+      // HTML-mode surfaces (Policies) get the serialized HTML instead.
+      if (onHtmlChangeRef.current) onHtmlChangeRef.current(editor.blocksToFullHTML());
     }, 700);
   }, [editor]);
 
@@ -412,7 +440,7 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
         <BlockDragMenuProvider
           value={{
             docId: ent.id,
-            linkBase: ent.type === "sop" ? "/sops/" : "/docs/",
+            linkBase: ent.type === "sop" ? "/sops/" : ent.type === "policy" ? "/policies/" : "/docs/",
             features: { comment: !!onComment, askAI: !!onAskAI },
             onComment: (id) => onComment?.(id),
             onAskAI: () => onAskAI?.(),

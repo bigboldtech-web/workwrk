@@ -62,9 +62,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ChecklistBuilder, normalizeChecklistSections, ChecklistSection } from "@/components/checklist-builder";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
-import { RichEditor } from "@/components/ui/rich-editor";
 import { type Block } from "@/components/docs/block-editor";
 import { BlockNoteCanvas, type BnDocJSON } from "@/components/docs/blocknote-canvas";
+// RichEditor is retained ONLY for the compact inline step-description field
+// (recorded-SOP steps) — a small inline field where BlockNote's full-document
+// chrome (side menu / drag handles) doesn't fit. All document-level editing
+// (written/richtext SOPs, notes, policies) uses BlockNoteCanvas.
+import { RichEditor } from "@/components/ui/rich-editor";
 import { BacklinksPanel } from "@/components/docs/block-doc-editor";
 import { SopWalkthrough } from "@/components/sops/sop-walkthrough";
 import Link from "next/link";
@@ -322,32 +326,15 @@ function StepDescriptionView({ html }: { html?: string }) {
   return <p className="text-xs text-zinc-500 mt-0.5 whitespace-pre-wrap">{html}</p>;
 }
 
-// Thin pass-through around the generic RichEditor — the parent holds
-// the HTML state so the main "Save" button picks it up. An inline save
-// button used to live here; it lied about what was persisted because the
-// top-of-page Save would clobber the staged content with the pre-edit
-// version. Now there is one save path, not two.
 // Lightweight sanitizer for read-only SOP HTML (no DOMPurify dep). SOP content
-// is org-internal + authored through TipTap; this strips the dangerous bits
-// (scripts/styles/iframes, inline event handlers, javascript: URLs) as defense.
+// is org-internal; this strips the dangerous bits (scripts/styles/iframes,
+// inline event handlers, javascript: URLs) as defense.
 function safeHtml(html: string): string {
   return (html || "")
     .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, "")
     .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*\/?>/gi, "")
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/(href|src)\s*=\s*("\s*javascript:[^"]*"|'\s*javascript:[^']*')/gi, '$1="#"');
-}
-
-function RichTextSopEditor({ content, editable, onChange }: { content: string; editable: boolean; onChange: (html: string) => void }) {
-  return (
-    <RichEditor
-      content={content}
-      onChange={onChange}
-      editable={editable}
-      placeholder="Write your SOP content here. Press / for commands — headings, lists, callouts, tables, and more."
-      minHeight="400px"
-    />
-  );
 }
 
 function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: string; currentVersion: number; onRollback: () => void }) {
@@ -1448,11 +1435,18 @@ export default function SOPDetailPage() {
                   description / type-specific content in one request. */}
               {sop.content && (sop.content as any).type === "richtext" && (
                 editing ? (
-                  <Card>
-                    <CardContent className="p-0">
-                      <RichTextSopEditor content={richtextHtml} editable onChange={setRichtextHtml} />
-                    </CardContent>
-                  </Card>
+                  <div className="rounded-xl border border-zinc-200 bg-white">
+                    <BlockNoteCanvas
+                      key={sop.id + "-rt"}
+                      initialBnDoc={null}
+                      legacyBlocks={null}
+                      initialHtml={richtextHtml}
+                      readonly={false}
+                      onChange={() => { /* HTML-mode: see onHtmlChange */ }}
+                      onHtmlChange={setRichtextHtml}
+                      entity={{ type: "sop", id: sop.id }}
+                    />
+                  </div>
                 ) : (
                   // Notes-style reader — render the saved HTML as full-size
                   // prose (big headings, left-aligned reading column), not the

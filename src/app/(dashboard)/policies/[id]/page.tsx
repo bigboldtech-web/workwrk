@@ -17,7 +17,7 @@ import { ShieldCheck, ArrowLeft, CheckCircle2, Loader2, Users, Pencil, Save, X }
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
-import { RichEditor } from "@/components/ui/rich-editor";
+import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
 
 type PolStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 type Policy = {
@@ -144,7 +144,7 @@ export default function PolicyDetailPage() {
         }
       />
 
-      <div className="mx-auto max-w-3xl px-6 py-8">
+      <div className={`px-6 py-8 ${editing ? "w-full max-w-none" : "mx-auto max-w-3xl"}`}>
         {loadErr ? (
           <div className="text-sm text-zinc-500">
             Couldn&apos;t load this policy. <Link href="/policies" className="text-violet-600 underline">Back to Policies</Link>
@@ -179,7 +179,18 @@ export default function PolicyDetailPage() {
               placeholder="Policy title…"
               className="w-full border-0 border-b border-zinc-200 px-0 py-1 text-2xl font-semibold tracking-[-0.01em] text-zinc-900 outline-none focus:border-zinc-300"
             />
-            <RichEditor content={editContent} onChange={setEditContent} editable placeholder="Write the policy here. Press / for headings, lists, tables…" minHeight="400px" />
+            <div className="rounded-xl border border-zinc-200 bg-white px-10 py-7">
+              <BlockNoteCanvas
+                key={policy.id}
+                initialBnDoc={null}
+                legacyBlocks={null}
+                initialHtml={policy.content || ""}
+                readonly={false}
+                onChange={() => { /* HTML-mode: see onHtmlChange */ }}
+                onHtmlChange={setEditContent}
+                entity={{ type: "policy", id: policy.id }}
+              />
+            </div>
           </div>
         ) : (
           /* ── View mode ── */
