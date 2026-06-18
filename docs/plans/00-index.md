@@ -59,6 +59,11 @@ embeds) · per-node "…" menus (rename/icon/favorite/archive) · `/api/me/items
 - AI agent builder (Create-with-AI) detail · Super-Agent behavior · Space templates library (Marketing/
   Advertising) · Task Phase 2 edit-statuses UI detail · any remaining per-button "+" menu behaviors.
 
+## Related strategic plans (beyond ClickUp parity)
+- **`ai-performance-manager.md`** — per-person AI manager agent that scores KRA/KPI/Goal delivery monthly and
+  ranks org performance. Builds on the existing `Agent` runtime + alignment models. The payoff of the
+  "AI controls the people" pillar; layered on top of this parity work, not part of it.
+
 ## Operational notes
 - Two prod DB migrations are **local-only** (not on aaPanel): `Item.priority`+tags, and the StudioBoard/
   custom-fields drops. Run on prod before any `main` merge/deploy.
