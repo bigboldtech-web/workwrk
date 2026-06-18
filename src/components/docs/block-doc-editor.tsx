@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block, type Comment, type CommentsByBlock } from "./block-editor";
+import { collectLegacyCustomEmbeds, rehydrateMirrorWithLegacyEmbeds } from "./legacy-embed-preserve";
 import dynamic from "next/dynamic";
 import { BlockNoteCanvas } from "./blocknote-canvas";
 import type { PartialBlock } from "@blocknote/core";
@@ -67,41 +68,6 @@ type DocPayload = {
 type MeUser = { id: string; firstName?: string | null; lastName?: string | null; email?: string; avatar?: string | null };
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
-
-// Legacy block kinds that BlockNote can't render natively. These are
-// the kinds whose original data we preserve across BN edits — see
-// preservedLegacyRef in BlockDocEditor. Anything in this set that
-// survives in the BN doc as a paragraph proxy gets spliced back into
-// the persisted `blocks` mirror so server-side readers (EntityLink
-// sync, S3 presign) see the original embed, not the proxy.
-// Note: kinds that BlockNote can now round-trip natively (e.g. "subpage")
-// MUST NOT be in this set — otherwise the frozen original would mask any
-// in-BN edits to the block's props.
-const LEGACY_CUSTOM_EMBED_KINDS = new Set<Block["kind"]>([
-  "sop_card", "task_card", "note_card", "entity_link", "ai_write",
-  "tasks_view", "studio_board", "sops_list", "meetings_view", "form", "data_table",
-  "embed", "image", "file",
-  // NOTE: "callout" is intentionally absent — it round-trips as a native
-  // BlockNote block now, so freezing the original would mask in-BN edits to
-  // its emoji/color/text (same reasoning as "subpage").
-]);
-
-function collectLegacyCustomEmbeds(blocks: Block[]): Map<string, Block> {
-  const m = new Map<string, Block>();
-  for (const b of blocks) {
-    if (LEGACY_CUSTOM_EMBED_KINDS.has(b.kind)) m.set(b.id, b);
-  }
-  return m;
-}
-
-// Splice preserved originals back into a BN-derived mirror. The mirror
-// keeps block ordering; for each mirror entry whose id matches a
-// preserved legacy block, we swap in the original. Mirror entries
-// without a preserved match pass through untouched.
-function rehydrateMirrorWithLegacyEmbeds(mirror: Block[], preserved: Map<string, Block>): Block[] {
-  if (preserved.size === 0) return mirror;
-  return mirror.map((b) => preserved.get(b.id) ?? b);
-}
 
 // Convert legacy HTML into a one-shot paragraph-per-line block array.
 function htmlToBlocks(html: string): Block[] {

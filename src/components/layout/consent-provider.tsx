@@ -91,10 +91,20 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
 
   const accept = useCallback(
     async (partial: Partial<ConsentState>) => {
-      const next = await saveConsent(partial, "banner");
-      setConsent(next);
+      // Honor the choice in the UI immediately, THEN persist. Awaiting the
+      // network write first meant a failing/slow /api/consent POST (it throws
+      // on a non-OK response or non-JSON body) left the banner stuck open and
+      // the button looking dead. Dismiss optimistically; persist best-effort.
       setResolved(true);
       setShowBanner(false);
+      setConsent((prev) => ({ ...prev, ...partial }));
+      try {
+        const next = await saveConsent(partial, "banner");
+        setConsent(next);
+      } catch {
+        // Keep the locally-applied choice; the server write can be retried
+        // later (e.g. from privacy settings) without re-trapping the user.
+      }
     },
     [],
   );

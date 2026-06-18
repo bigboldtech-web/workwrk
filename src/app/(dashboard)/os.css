@@ -31,6 +31,11 @@
 
   /* Surfaces */
   --os-canvas:       #FFFFFF;
+  /* Base card/popover surface. Used ~465× as `background: var(--os-surface)`
+     but was never defined — so every floating menu (block "turn into",
+     pickers, popovers) rendered TRANSPARENT and let the text behind bleed
+     through. Defining it white makes those menus solid. */
+  --os-surface:      #FFFFFF;
   --os-surface-1:    #F6F7FB;
   --os-surface-2:    #ECEEF5;
   --os-surface-3:    #E6E9EF;
@@ -1567,6 +1572,7 @@
    ═══════════════════════════════════════════════════════════════ */
 :root.dark .workwrk-os .os-sk {
   --os-canvas:       #14171D;
+  --os-surface:      #1B1F26;
   --os-surface-1:    #1B1F26;
   --os-surface-2:    #232831;
   --os-surface-3:    #2A2F38;
@@ -16726,6 +16732,13 @@ table.os-tbl {
 .brow:hover { background: color-mix(in srgb, var(--os-brand) 2%, transparent); }
 .brow__gutter { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 120ms; padding-top: 4px; padding-left: 4px; }
 .brow:hover .brow__gutter, .brow.is-active .brow__gutter { opacity: 1; }
+/* Headings have a larger font + top padding, so the +/drag handles (sized for
+ * a body line) drift above the text. Nudge the gutter down per kind so the
+ * 22px handle centers on the heading's first line:
+ *   text-padding-top + (font-size × 1.65 line-height) / 2 − 11 (½ handle). */
+.brow--h1 .brow__gutter { padding-top: 32px; }
+.brow--h2 .brow__gutter { padding-top: 21px; }
+.brow--h3 .brow__gutter { padding-top: 13px; }
 .brow__handle { width: 22px; height: 22px; display: grid; place-items: center; color: var(--os-ink-3); border-radius: 5px; background: transparent; border: none; cursor: pointer; transition: all 120ms; }
 .brow__handle:hover { background: var(--os-surface-1); color: var(--os-ink); transform: scale(1.05); }
 .brow__handle svg { width: 13px; height: 13px; stroke-width: 2.2; }
@@ -32377,6 +32390,13 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .brow.is-drop-below { box-shadow: inset 0 -2px 0 var(--os-brand); }
 .brow.is-dragging { opacity: 0.45; }
 
+/* Whole-document selection (2nd Ctrl+A) — every row gets a tinted highlight
+ * so the doc-wide selection reads clearly even though no native text range
+ * is shown. */
+.bedit__stack.is-all-selected .brow {
+  background: color-mix(in srgb, var(--os-brand) 14%, transparent);
+}
+
 /* New block kinds — bullet / numbered / quote / code / divider */
 .brow__text-wrap { display: flex; gap: 8px; align-items: flex-start; }
 .brow__list-marker {
@@ -33840,18 +33860,18 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .bfmt__cmenu { position: relative; display: inline-block; }
 .bfmt__cmenu-pop {
   position: absolute; left: 0; top: calc(100% + 6px);
-  padding: 8px; background: #1f2230; border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  padding: 8px; background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.14);
   display: flex; flex-direction: column; gap: 6px;
   z-index: 220;
 }
 .bfmt__cmenu-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
 .bfmt__cmenu-cell {
   width: 20px; height: 20px; border-radius: 4px;
-  border: 1px solid rgba(255,255,255,0.12); cursor: pointer;
+  border: 1px solid var(--os-line); cursor: pointer;
   padding: 0; background: var(--swatch);
 }
-.bfmt__cmenu-cell:hover { transform: scale(1.1); border-color: rgba(255,255,255,0.4); }
+.bfmt__cmenu-cell:hover { transform: scale(1.1); border-color: var(--os-line-strong); }
 .bfmt__cmenu-cell--hi-yellow { --swatch: #fde68a; }
 .bfmt__cmenu-cell--hi-green  { --swatch: #bbf7d0; }
 .bfmt__cmenu-cell--hi-blue   { --swatch: #bfdbfe; }
@@ -33866,11 +33886,11 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .bfmt__cmenu-cell--tc-orange { --swatch: #c2410c; }
 .bfmt__cmenu-clear {
   padding: 4px 8px; font-size: 11px; font-weight: 600;
-  background: transparent; color: rgba(255,255,255,0.7);
-  border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
+  background: transparent; color: var(--os-ink-2);
+  border: 1px solid var(--os-line); border-radius: 4px;
   cursor: pointer;
 }
-.bfmt__cmenu-clear:hover { color: white; background: rgba(255,255,255,0.08); }
+.bfmt__cmenu-clear:hover { color: var(--os-ink); background: var(--os-surface-2); }
 
 /* ─── Cross-link cards (sop_card / task_card / note_card) ─── */
 .bcard {
@@ -34338,22 +34358,23 @@ a.prfh__contact:hover { color: var(--os-brand); }
 .bfmt {
   position: fixed; transform: translateX(-50%);
   display: inline-flex; align-items: center; gap: 1px;
-  background: #1f2230; color: white;
+  background: var(--os-surface); color: var(--os-ink);
+  border: 1px solid var(--os-line);
   border-radius: 8px; padding: 4px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.14);
   z-index: 200; user-select: none;
 }
 .bfmt button {
   display: inline-grid; place-items: center;
   width: 28px; height: 28px;
   background: transparent; border: none;
-  color: white; border-radius: 5px; cursor: pointer;
+  color: var(--os-ink-2); border-radius: 5px; cursor: pointer;
   transition: background 80ms, color 80ms;
 }
-.bfmt button:hover { background: rgba(255,255,255,0.12); }
-.bfmt button.is-active { background: var(--os-brand); color: white; }
+.bfmt button:hover { background: var(--os-surface-2); color: var(--os-ink); }
+.bfmt button.is-active { background: var(--os-brand-soft); color: var(--os-brand); }
 .bfmt button svg { width: 14px; height: 14px; }
-.bfmt__sep { width: 1px; height: 18px; background: rgba(255,255,255,0.16); margin: 0 4px; display: inline-block; }
+.bfmt__sep { width: 1px; height: 18px; background: var(--os-line); margin: 0 4px; display: inline-block; }
 
 /* Notes empty wrap to host the template-picker CTA below the OsEmptyView */
 .docs__empty-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }

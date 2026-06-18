@@ -1,26 +1,29 @@
 "use client";
 
-/* Written-SOP editor — now powered by the same block editor as Notes.
+/* Written-SOP editor — powered by the SAME BlockNote editor as Notes.
  *
- * Backwards-compatible content shapes:
- *   - { type: "blocks", blocks: Block[], meta? }   ← new shape, default for fresh SOPs
- *   - { type: "WRITTEN", body: string }            ← legacy plain text, auto-converted to paragraph blocks on first edit
- *   - { type: "richtext", html: string }           ← legacy TipTap, auto-converted via htmlToBlocks
+ * Content shapes (backwards-compatible, no data loss):
+ *   - { type: "blocks", bnDoc?: PartialBlock[], blocks: Block[], meta? }
+ *       new shape. `bnDoc` is BlockNote's source of truth; `blocks` is the
+ *       legacy mirror kept so EntityLink sync / versioning / empty-checks
+ *       keep working. Old SOPs (no bnDoc) load by converting `blocks` → BN.
+ *   - { type: "WRITTEN", body } / { type: "richtext", html }  ← legacy,
+ *       converted to blocks then to BN on load.
  *
- * The save call still uses PATCH /api/sops/[id] and writes content as
- * { type: "blocks", blocks, meta }. Title and status flow unchanged.
- *
+ * Save uses PATCH /api/sops/[id]; title + status flow unchanged.
  * URL: /sops/new/text?id=<sopId>
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { FileText, Send, Save, ArrowLeft, Hash, BookCopy, Loader2 } from "lucide-react";
+import { FileText, Send, Save, ArrowLeft, Loader2 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
-import { BlockEditor, type Block } from "@/components/docs/block-editor";
+import { type Block } from "@/components/docs/block-editor";
+import { BlockNoteCanvas, type BnDocJSON } from "@/components/docs/blocknote-canvas";
+import { collectLegacyCustomEmbeds, rehydrateMirrorWithLegacyEmbeds } from "@/components/docs/legacy-embed-preserve";
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
 
@@ -66,6 +69,10 @@ export default function WrittenSopEditor() {
 
   const [title, setTitle] = useState("");
   const [blocks, setBlocks] = useState<Block[] | null>(null);
+  const [bnDoc, setBnDoc] = useState<BnDocJSON | null>(null);
+  // Frozen custom-embed originals (sop_card/task_card/…) so they survive the
+  // blocks→BlockNote→blocks round-trip instead of decaying to paragraphs.
+  const preservedLegacyRef = useRef<Map<string, Block>>(new Map());
   const [meta, setMeta] = useState<DocMeta>({});
   const [status, setStatus] = useState<"DRAFT" | "PUBLISHED" | "ARCHIVED" | "IN_REVIEW" | "APPROVED">("DRAFT");
   const [saving, setSaving] = useState(false);
@@ -73,6 +80,31 @@ export default function WrittenSopEditor() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialLoad = useRef(true);
+  const creatingRef = useRef(false);
+
+  // Self-create: visiting /sops/new/text with no ?id mints a fresh WRITTEN SOP
+  // and redirects to it, so the editor always has a row to load/save.
+  useEffect(() => {
+    if (id || creatingRef.current) return;
+    creatingRef.current = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/sops", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: "Untitled written SOP",
+            sopType: "WRITTEN",
+            content: { type: "WRITTEN", body: "" },
+          }),
+        });
+        if (!res.ok) throw new Error(`POST ${res.status}`);
+        const data = await res.json();
+        const sop = data.data ?? data;
+        router.replace(`/sops/new/text?id=${encodeURIComponent(sop.id)}`);
+      } catch { toast("Couldn't create SOP"); }
+    })();
+  }, [id, router, toast]);
 
   // Load
   useEffect(() => {
@@ -86,15 +118,20 @@ export default function WrittenSopEditor() {
         setTitle(sop.title ?? "");
         setStatus(sop.status ?? "DRAFT");
 
-        const c = sop.content as { type?: string; blocks?: Block[]; body?: string; html?: string; meta?: DocMeta } | null;
+        const c = sop.content as { type?: string; bnDoc?: BnDocJSON; blocks?: Block[]; body?: string; html?: string; meta?: DocMeta } | null;
         if (c?.type === "blocks" && Array.isArray(c.blocks)) {
+          setBnDoc(Array.isArray(c.bnDoc) ? c.bnDoc : null);
           setBlocks(c.blocks);
           setMeta(c.meta ?? {});
+          preservedLegacyRef.current = collectLegacyCustomEmbeds(c.blocks);
         } else if (typeof c?.html === "string") {
+          setBnDoc(null);
           setBlocks(htmlToBlocks(c.html));
         } else if (typeof c?.body === "string") {
+          setBnDoc(null);
           setBlocks(bodyToBlocks(c.body));
         } else {
+          setBnDoc(null);
           setBlocks([{ id: newId(), kind: "paragraph", text: "" }]);
         }
         initialLoad.current = false;
@@ -104,7 +141,7 @@ export default function WrittenSopEditor() {
     })();
   }, [id]);
 
-  const persist = useCallback(async (nextBlocks: Block[], nextMeta: DocMeta, opts: { publish?: boolean } = {}) => {
+  const persist = useCallback(async (nextBnDoc: BnDocJSON | null, nextBlocks: Block[], nextMeta: DocMeta, opts: { publish?: boolean } = {}) => {
     if (!id) return;
     setSaving(true);
     try {
@@ -114,7 +151,9 @@ export default function WrittenSopEditor() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title.trim() || "Untitled SOP",
-          content: { type: "blocks", blocks: nextBlocks, meta: nextMeta },
+          // Keep type:"blocks" + the `blocks` mirror so EntityLink sync,
+          // versioning and empty-checks keep working; bnDoc is BN's truth.
+          content: { type: "blocks", ...(nextBnDoc ? { bnDoc: nextBnDoc } : {}), blocks: nextBlocks, meta: nextMeta },
           ...(opts.publish ? { status: newStatus } : {}),
         }),
       });
@@ -125,22 +164,24 @@ export default function WrittenSopEditor() {
     finally { setSaving(false); }
   }, [id, status, title, toast]);
 
-  const saveBlocks = useCallback(async (next: Block[]) => {
-    setBlocks(next);
-    await persist(next, meta);
+  const handleEditorChange = useCallback((nextBnDoc: BnDocJSON, mirror: Block[]) => {
+    const enriched = rehydrateMirrorWithLegacyEmbeds(mirror, preservedLegacyRef.current);
+    setBnDoc(nextBnDoc);
+    setBlocks(enriched);
+    void persist(nextBnDoc, enriched, meta);
   }, [persist, meta]);
 
   function saveTitle(next: string) {
     setTitle(next);
     if (titleTimer.current) clearTimeout(titleTimer.current);
     titleTimer.current = setTimeout(() => {
-      if (blocks) void persist(blocks, meta);
+      if (blocks) void persist(bnDoc, blocks, meta);
     }, 700);
   }
 
   if (!id) return (<>
-    <OsTitleBar title="New written SOP" Icon={FileText} iconGradient={GRAD.tealGreen} showInvite={false} />
-    <div className="sop-edit__error">Missing SOP id. <a href="/sops">Back to SOPs</a></div>
+    <OsTitleBar title="New written SOP" Icon={FileText} iconGradient={GRAD.tealGreen} showStandardActions={false} />
+    <div className="sop-edit__loading"><Loader2 className="bedit__spin" /> Creating SOP…</div>
   </>);
 
   if (loadError) {
@@ -155,28 +196,41 @@ export default function WrittenSopEditor() {
       title="Written SOP"
       Icon={FileText}
       iconGradient={GRAD.tealGreen}
+      showStandardActions={false}
       description={saving ? "Saving…" : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Auto-saves as you type"}
       actions={
-        <div className="sop-edit__head-actions">
-          <Link href="/sops" className="sop-edit__nav-link"><Hash /> SOPs</Link>
-          <Link href="/sops/new" className="sop-edit__nav-link"><BookCopy /> Pick type</Link>
-          <button type="button" onClick={() => blocks && persist(blocks, meta)} className="sop-edit__nav-link" disabled={saving || !blocks}>
-            <Save /> Save
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => blocks && persist(bnDoc, blocks, meta)}
+            disabled={saving || !blocks}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <Save className="h-3.5 w-3.5" /> Save
           </button>
           {status !== "PUBLISHED" ? (
-            <button type="button" onClick={() => blocks && persist(blocks, meta, { publish: true })} className="sop-edit__btn-primary" disabled={saving || !blocks}>
-              <Send /> Publish
+            <button
+              type="button"
+              onClick={() => blocks && persist(bnDoc, blocks, meta, { publish: true })}
+              disabled={saving || !blocks}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-[13px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              <Send className="h-3.5 w-3.5" /> Publish
             </button>
           ) : (
-            <span className="sop-edit__pub">Published</span>
+            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 text-[13px] font-medium text-emerald-700">Published</span>
           )}
         </div>
       }
     />
 
     <div className="sop-edit">
-      <button type="button" className="sop-edit__back" onClick={() => router.push("/sops")}>
-        <ArrowLeft /> All SOPs
+      <button
+        type="button"
+        onClick={() => router.push("/sops")}
+        className="inline-flex h-7 w-fit items-center gap-1.5 rounded-md px-2 text-[13px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+      >
+        <ArrowLeft className="h-4 w-4" /> All SOPs
       </button>
 
       <input
@@ -190,7 +244,14 @@ export default function WrittenSopEditor() {
       {blocks === null ? (
         <div className="sop-edit__loading"><Loader2 className="bedit__spin" /> Loading…</div>
       ) : (
-        <BlockEditor key={id} initialBlocks={blocks} onSave={saveBlocks} />
+        <BlockNoteCanvas
+          key={id}
+          initialBnDoc={bnDoc}
+          legacyBlocks={blocks}
+          readonly={false}
+          onChange={handleEditorChange}
+          entity={{ type: "sop", id }}
+        />
       )}
 
       <footer className="sop-edit__hint">

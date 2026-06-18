@@ -59,7 +59,7 @@ export default function NewSopPage() {
       : type === "CHECKLIST" ? "Untitled checklist"
       : "Untitled screen recording";
     const defaultContent =
-      type === "WRITTEN" ? { type: "WRITTEN", body: "# New SOP\n\nDescribe the procedure here." }
+      type === "WRITTEN" ? { type: "WRITTEN", body: "" }
       : type === "CHECKLIST" ? { type: "CHECKLIST", sections: [{ title: "Steps", steps: [{ id: "s1", title: "First step" }] }] }
       : { type: "RECORDED", steps: [], recordings: [] };
 
@@ -97,13 +97,13 @@ export default function NewSopPage() {
         }
       />
 
-      <div className="px-6 py-6">
-        <div className="mb-5">
-          <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-zinc-900">How do you want to document this?</h2>
-          <p className="mt-1 text-[13px] text-zinc-500">SOPs work three different ways. Pick the one that fits how your team will actually consume it.</p>
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <div className="mb-7 text-center">
+          <h2 className="text-[18px] font-semibold tracking-[-0.01em] text-zinc-900">How do you want to document this?</h2>
+          <p className="mt-1.5 text-[13px] text-zinc-500">SOPs work three different ways. Pick the one that fits how your team will actually consume it.</p>
         </div>
 
-        <div className="grid max-w-5xl grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {TYPES.map((t) => {
             const Icon = t.Icon;
             const busy = creating === t.type;
@@ -151,7 +151,7 @@ export default function NewSopPage() {
           })}
         </div>
 
-        <div className="mt-5 flex max-w-5xl items-center gap-2 rounded-lg border border-violet-100 bg-violet-50/50 px-4 py-2.5 text-[12.5px] text-zinc-600">
+        <div className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-violet-100 bg-violet-50/50 px-4 py-2.5 text-center text-[12.5px] text-zinc-600">
           <Sparkles className="h-4 w-4 shrink-0 text-violet-500" />
           Need inspiration? Sidekick can draft a first version for any of these — open it after creating.
         </div>

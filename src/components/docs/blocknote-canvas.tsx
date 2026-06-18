@@ -274,6 +274,13 @@ interface Props {
   onComment?: (blockId: string) => void;
   /** Open the note's AI panel (block drag-menu → Ask AI). */
   onAskAI?: () => void;
+  /**
+   * What this canvas is editing. Defaults to a doc (`{type:"doc", id:docId}`)
+   * so existing Notes call sites are unchanged. SOPs pass `{type:"sop", id}`,
+   * which gates doc-only features (sub-page parent, copy-link base) so the
+   * SAME editor works without a backing Doc.
+   */
+  entity?: { type: "doc" | "sop"; id: string };
 }
 
 // Watch <html data-theme="..."> + the `.dark` class so BlockNote can
@@ -282,8 +289,15 @@ function useAppTheme(): "dark" | "light" {
   const compute = (): "dark" | "light" => {
     if (typeof document === "undefined") return "light";
     const html = document.documentElement;
-    if (html.getAttribute("data-theme") === "dark") return "dark";
-    if (html.classList.contains("dark")) return "dark";
+    // Trust the resolved app theme (data-theme, written by ThemeApplier from
+    // the user's real preference incl. AUTO/night) EXCLUSIVELY when present.
+    // Do NOT fall back to the `.dark` class: next-themes applies `.dark` by
+    // default on first paint before ThemeApplier resolves, which would render
+    // the editor dark on the white UI. Absent data-theme → light (matches the
+    // default light token set).
+    const dt = html.getAttribute("data-theme");
+    if (dt === "dark") return "dark";
+    if (dt === "light") return "light";
     return "light";
   };
   const [theme, setTheme] = useState<"dark" | "light">(compute);
@@ -296,9 +310,14 @@ function useAppTheme(): "dark" | "light" {
   return theme;
 }
 
-export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange, docId, onComment, onAskAI }: Props) {
+export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange, docId, onComment, onAskAI, entity }: Props) {
   const appTheme = useAppTheme();
   const router = useRouter();
+  // Resolve the entity. Notes (no `entity`) behave exactly as before.
+  const ent = entity ?? { type: "doc" as const, id: docId ?? "" };
+  // Sub-page creation only makes sense inside a Doc tree; for SOPs pass
+  // undefined so workspaceSlashItems inserts a standalone page (no parent).
+  const slashDocId = ent.type === "doc" ? ent.id : undefined;
   const initialContent = useMemo<OurPartialBlock[] | undefined>(() => {
     if (initialBnDoc && initialBnDoc.length > 0) return initialBnDoc as unknown as OurPartialBlock[];
     if (legacyBlocks && legacyBlocks.length > 0) return legacyBlocksToBN(legacyBlocks);
@@ -376,7 +395,7 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
           triggerCharacter="/"
           getItems={async (query) =>
             filterSuggestionItems(
-              [...getDefaultReactSlashMenuItems(editor), ...workspaceSlashItems(editor, docId, onPageCreated)],
+              [...getDefaultReactSlashMenuItems(editor), ...workspaceSlashItems(editor, slashDocId, onPageCreated)],
               query,
             )
           }
@@ -392,7 +411,9 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
             context (survives BlockNote's portal). */}
         <BlockDragMenuProvider
           value={{
-            docId: docId ?? "",
+            docId: ent.id,
+            linkBase: ent.type === "sop" ? "/sops/" : "/docs/",
+            features: { comment: !!onComment, askAI: !!onAskAI },
             onComment: (id) => onComment?.(id),
             onAskAI: () => onAskAI?.(),
           }}

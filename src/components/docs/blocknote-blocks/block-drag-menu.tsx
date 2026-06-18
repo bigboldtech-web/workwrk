@@ -47,6 +47,12 @@ function MIRow({ icon, label }: { icon: ReactNode; label: string }) {
 
 type Cfg = {
   docId: string;
+  // Route base for "Copy link to block" — "/docs/" for Notes, "/sops/" for
+  // SOPs. Keeps the menu entity-agnostic.
+  linkBase: string;
+  // Which doc-only items to show. SOPs hide Comment + Ask AI in v1 (no
+  // comment thread / AI panel wired for SOPs yet).
+  features: { comment: boolean; askAI: boolean };
   onComment: (blockId: string) => void;
   onAskAI: () => void;
 };
@@ -57,6 +63,8 @@ type Cfg = {
 // live values without any ref-during-render gymnastics.
 const BlockDragMenuCtx = createContext<Cfg>({
   docId: "",
+  linkBase: "/docs/",
+  features: { comment: true, askAI: true },
   onComment: () => {},
   onAskAI: () => {},
 });
@@ -112,7 +120,7 @@ function DragMenuBody() {
     );
   };
   const copyLink = () => {
-    const url = `${window.location.origin}/docs/${cfg.docId}#${block.id}`;
+    const url = `${window.location.origin}${cfg.linkBase}${cfg.docId}#${block.id}`;
     navigator.clipboard?.writeText(url).catch(() => {});
   };
 
@@ -154,14 +162,18 @@ function DragMenuBody() {
         <MIRow icon={<Trash2 size={16} />} label="Delete" />
       </Menu.Item>
 
-      <Menu.Divider />
+      {(cfg.features.comment || cfg.features.askAI) && <Menu.Divider />}
 
-      <Menu.Item className="bn-menu-item" onClick={() => cfg.onComment(block.id)}>
-        <MIRow icon={<MessageSquare size={16} />} label="Comment" />
-      </Menu.Item>
-      <Menu.Item className="bn-menu-item" onClick={() => cfg.onAskAI()}>
-        <MIRow icon={<Sparkles size={16} />} label="Ask AI" />
-      </Menu.Item>
+      {cfg.features.comment && (
+        <Menu.Item className="bn-menu-item" onClick={() => cfg.onComment(block.id)}>
+          <MIRow icon={<MessageSquare size={16} />} label="Comment" />
+        </Menu.Item>
+      )}
+      {cfg.features.askAI && (
+        <Menu.Item className="bn-menu-item" onClick={() => cfg.onAskAI()}>
+          <MIRow icon={<Sparkles size={16} />} label="Ask AI" />
+        </Menu.Item>
+      )}
     </>
   );
 }

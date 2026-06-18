@@ -81,6 +81,28 @@ function getBlockText(b: Block): string {
   return "";
 }
 
+// Serialize blocks to light-markdown plaintext for copy/cut of a whole-doc
+// selection. Strips inline formatting tags; keeps structural prefixes so a
+// pasted copy reads like the original outline.
+function serializeBlocksToText(blocks: Block[]): string {
+  return blocks
+    .map((b) => {
+      const t = getBlockText(b).replace(/<[^>]+>/g, "").trim();
+      switch (b.kind) {
+        case "h1": return `# ${t}`;
+        case "h2": return `## ${t}`;
+        case "h3": return `### ${t}`;
+        case "bullet": return `- ${t}`;
+        case "numbered": return `1. ${t}`;
+        case "quote": return `> ${t}`;
+        case "todo": return `- [ ] ${t}`;
+        case "divider": return "---";
+        default: return t;
+      }
+    })
+    .join("\n");
+}
+
 // Build a new block of the requested kind, optionally seeded with text.
 function buildBlock(kind: BlockKind, text = ""): Block {
   switch (kind) {
@@ -205,6 +227,9 @@ export function BlockEditor({ initialBlocks, onSave, readonly = false, comments,
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [actionMenuFor, setActionMenuFor] = useState<string | null>(null);
+  // Whole-document selection (the 2nd Ctrl+A). The 1st Ctrl+A selects the
+  // current block natively; the 2nd escalates to selecting every block.
+  const [selectAll, setSelectAll] = useState(false);
 
   // Slash menu state — anchored at the row that owns the slash query.
   const [slashFor, setSlashFor] = useState<string | null>(null);
@@ -257,6 +282,133 @@ export function BlockEditor({ initialBlocks, onSave, readonly = false, comments,
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [blocks, onSave]);
 
+  // ───────── Undo / redo history ─────────
+  // `blocks` is the single source of truth, so we own undo/redo by keeping a
+  // stack of prior snapshots. Native contentEditable undo can't span block
+  // add/delete/reorder and gets clobbered by React re-seeding the DOM, so we
+  // intercept Ctrl/⌘+Z (and Shift+Z / Ctrl+Y for redo) and block the native one.
+  // Rapid text edits COALESCE into one step (debounced commit) so a single
+  // Ctrl+Z doesn't crawl back one character at a time.
+  const HIST_LIMIT = 120;
+  const histPast = useRef<Block[][]>([]);
+  const histFuture = useRef<Block[][]>([]);
+  const histPresent = useRef<Block[]>(blocks); // last snapshot folded into history
+  const histRestoring = useRef(false);
+  const histTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fold the prior snapshot into the past stack after a typing pause.
+  useEffect(() => {
+    if (histRestoring.current) { histRestoring.current = false; histPresent.current = blocks; return; }
+    if (blocks === histPresent.current) return; // mount / no-op
+    if (histTimer.current) clearTimeout(histTimer.current);
+    histTimer.current = setTimeout(() => {
+      histPast.current.push(histPresent.current);
+      if (histPast.current.length > HIST_LIMIT) histPast.current.shift();
+      histFuture.current = [];
+      histPresent.current = blocks;
+      histTimer.current = null;
+    }, 400);
+    return () => { if (histTimer.current) clearTimeout(histTimer.current); };
+  }, [blocks]);
+
+  const undo = useCallback(() => {
+    // A pending (un-folded) edit burst: the first Ctrl+Z cancels it back to
+    // the last committed snapshot, and that burst becomes redoable.
+    if (histTimer.current) {
+      clearTimeout(histTimer.current); histTimer.current = null;
+      if (blocks !== histPresent.current) {
+        histFuture.current.push(blocks);
+        histRestoring.current = true;
+        setBlocks(histPresent.current);
+        dirty.current = true;
+        return;
+      }
+    }
+    const prev = histPast.current.pop();
+    if (prev === undefined) return;
+    histFuture.current.push(histPresent.current);
+    histPresent.current = prev;
+    histRestoring.current = true;
+    setBlocks(prev);
+    dirty.current = true;
+  }, [blocks]);
+
+  const redo = useCallback(() => {
+    if (histTimer.current) { // fold any pending burst first
+      clearTimeout(histTimer.current); histTimer.current = null;
+      if (blocks !== histPresent.current) { histPast.current.push(histPresent.current); histPresent.current = blocks; }
+    }
+    const next = histFuture.current.pop();
+    if (next === undefined) return;
+    histPast.current.push(histPresent.current);
+    histPresent.current = next;
+    histRestoring.current = true;
+    setBlocks(next);
+    dirty.current = true;
+  }, [blocks]);
+
+  // ───────── Whole-document selection ops ─────────
+  const copyDocSelection = useCallback(async () => {
+    try { await navigator.clipboard.writeText(serializeBlocksToText(blocks)); } catch { /* clipboard blocked */ }
+  }, [blocks]);
+
+  const deleteDocSelection = useCallback(() => {
+    const p = emptyParagraph();
+    setBlocks([p]);
+    dirty.current = true;
+    setSelectAll(false);
+    setFocusSignal({ id: p.id, offset: "start" });
+  }, []);
+
+  // Capture phase so we beat both the per-block handler and the browser's
+  // native handling. Owns: 2-stage Ctrl+A (block → whole doc), ops on a
+  // whole-doc selection, and undo/redo (native contentEditable undo is
+  // broken for our multi-block model, so we cancel it with preventDefault).
+  const onEditorKeyDownCapture = useCallback((e: React.KeyboardEvent) => {
+    if (readonly) return;
+    const mod = e.metaKey || e.ctrlKey;
+    const k = e.key.toLowerCase();
+
+    // ── Whole-document selection mode (after the 2nd Ctrl+A) ──
+    if (selectAll) {
+      if (k === "escape") { e.preventDefault(); setSelectAll(false); return; }
+      if (k === "backspace" || k === "delete") { e.preventDefault(); deleteDocSelection(); return; }
+      if (mod && k === "c") { e.preventDefault(); void copyDocSelection(); return; }
+      if (mod && k === "x") { e.preventDefault(); void copyDocSelection(); deleteDocSelection(); return; }
+      if (mod && k === "a") { e.preventDefault(); return; } // already everything
+      if (mod && k === "z" && !e.altKey) { e.preventDefault(); setSelectAll(false); if (e.shiftKey) redo(); else undo(); return; }
+      if (mod && k === "y" && !e.altKey) { e.preventDefault(); setSelectAll(false); redo(); return; }
+      // A printable character replaces the whole doc with a fresh paragraph.
+      if (!mod && !e.altKey && e.key.length === 1) { e.preventDefault(); deleteDocSelection(); return; }
+      // Anything else (arrows, tab…) just exits selection mode and proceeds.
+      setSelectAll(false);
+      return;
+    }
+
+    // ── Ctrl/⌘+A: 1st selects the block (native), 2nd selects the doc ──
+    if (mod && k === "a" && !e.altKey) {
+      const el = (e.target as HTMLElement | null)?.closest?.(".brow__text") as HTMLElement | null;
+      const sel = typeof window !== "undefined" ? window.getSelection() : null;
+      const blockLen = (el?.textContent ?? "").length;
+      const fullySelected = !!el && !!sel && !sel.isCollapsed && blockLen > 0 && sel.toString().length >= blockLen;
+      // Escalate when the block is already fully selected, or it's empty
+      // (nothing to select within it first).
+      if (fullySelected || blockLen === 0) {
+        e.preventDefault();
+        sel?.removeAllRanges();
+        setSelectAll(true);
+      }
+      // else: let the browser select-all WITHIN the block (the 1st press).
+      return;
+    }
+
+    // ── Undo / redo ──
+    if (mod && !e.altKey) {
+      if (k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      else if (k === "y") { e.preventDefault(); redo(); }
+    }
+  }, [readonly, selectAll, blocks, undo, redo, copyDocSelection, deleteDocSelection]);
+
   // ───────── Mutators ─────────
   const update = useCallback((id: string, patch: Partial<Block>) => {
     setBlocks((prev) => prev.map((b) => b.id === id ? { ...b, ...patch } as Block : b));
@@ -306,13 +458,21 @@ export function BlockEditor({ initialBlocks, onSave, readonly = false, comments,
 
   // Replace one block with a new block of a different kind, preserving text.
   const turnInto = useCallback((id: string, kind: BlockKind, seedText?: string) => {
+    // Mint the converted block's id ONCE and reuse it for the focus signal.
+    // The bug: buildBlock() generates its own fresh id, but the focus signal
+    // was keyed on the OLD id — so after a slash-convert / "turn into" the
+    // caret had nowhere to land and vanished (you had to click back in).
+    // Changing the id (vs. preserving it) is deliberate: it remounts the row,
+    // which re-runs BOTH the content-seed effect (so existing text survives a
+    // turn-into-heading) and the focus effect (so the caret lands).
+    const freshId = newId();
     setBlocks((prev) => prev.map((b) => {
       if (b.id !== id) return b;
       const text = seedText ?? getBlockText(b);
-      return buildBlock(kind, text);
+      return { ...buildBlock(kind, text), id: freshId };
     }));
     dirty.current = true;
-    setFocusSignal({ id, offset: "end" });
+    setFocusSignal({ id: freshId, offset: "end" });
   }, []);
 
   // Reorder: move sourceId above/below targetId.
@@ -530,6 +690,8 @@ export function BlockEditor({ initialBlocks, onSave, readonly = false, comments,
   return (
     <div
       className={`bedit ${readonly ? "is-readonly" : ""} ${isDropping ? "is-dropping" : ""}`}
+      onKeyDownCapture={readonly ? undefined : onEditorKeyDownCapture}
+      onMouseDownCapture={selectAll ? () => setSelectAll(false) : undefined}
       onPaste={readonly ? undefined : handleEditorPaste}
       onDragOver={readonly ? undefined : handleEditorDragOver}
       onDragLeave={readonly ? undefined : handleEditorDragLeave}
@@ -542,7 +704,7 @@ export function BlockEditor({ initialBlocks, onSave, readonly = false, comments,
         </div>
       )}
 
-      <div className="bedit__stack">
+      <div className={`bedit__stack ${selectAll ? "is-all-selected" : ""}`}>
         {blocks.map((b, idx) => (
           <BlockRow
             key={b.id}
@@ -729,7 +891,7 @@ function InlineFormatToolbar() {
 
   return createPortal(
     <div
-      className="bfmt"
+      className="bfmt workwrk-os"
       role="toolbar"
       style={{ left: Math.max(40, state.x), top: Math.max(8, state.y - 44) }}
       onMouseDown={(e) => e.preventDefault()}
@@ -1206,6 +1368,7 @@ function BlockContent(p: ContentProps) {
             text={block.text}
             tag={block.kind === "paragraph" ? "p" : block.kind === "bullet" || block.kind === "numbered" ? "div" : block.kind === "quote" ? "div" : block.kind}
             placeholder={placeholderFor(block.kind)}
+            nativePlaceholder={false}
           />
           {showPlaceholder && (
             <span className="brow__text-ph" aria-hidden>{placeholderFor(block.kind)}</span>
@@ -1355,6 +1518,12 @@ type EditableProps = ContentProps & {
   text: string;
   tag: string;
   placeholder: string;
+  /** When false, the contentEditable does NOT emit `data-placeholder`, so the
+   *  CSS `:empty::before` placeholder won't render. Used by block kinds that
+   *  draw their own active-only placeholder span (brow__text-ph) instead —
+   *  otherwise both fire and the placeholder text doubles up / shows on every
+   *  empty row. Defaults true for kinds (todo/callout) that rely on the CSS. */
+  nativePlaceholder?: boolean;
 };
 
 // ───────── HTML sanitizer ─────────
@@ -1463,7 +1632,7 @@ function toggleInlineWrap(tagName: string) {
 }
 
 function EditableText({
-  text, tag, placeholder, readonly, focusSignal, onFocusConsumed,
+  text, tag, placeholder, nativePlaceholder = true, readonly, focusSignal, onFocusConsumed,
   onTextChange, onEnterAtEnd, onBackspaceAtStart, onArrowOut,
   slashOpen, mentionOpen, onCloseSlash, onCloseMention,
 }: EditableProps) {
@@ -1487,7 +1656,14 @@ function EditableText({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (text !== lastTextRef.current && el.innerHTML !== text) {
+    if (el.innerHTML === text) return; // already in sync — don't clobber the caret while typing
+    // Seed when the text changed externally (undo, turn-into), OR when the
+    // node is freshly mounted and still empty. The empty-node case is the
+    // important one: turn-into gives the block a NEW id → a NEW empty node,
+    // but lastTextRef was initialized to `text`, so the first check alone
+    // misses it and the block's text would render blank (the disappearing
+    // text on a heading change).
+    if (text !== lastTextRef.current || el.innerHTML === "") {
       setEditorContent(el, text);
       lastTextRef.current = text;
     }
@@ -1731,7 +1907,7 @@ function EditableText({
     className: "brow__text",
     contentEditable: !readonly,
     suppressContentEditableWarning: true,
-    "data-placeholder": placeholder,
+    ...(nativePlaceholder ? { "data-placeholder": placeholder } : {}),
     onInput,
     onKeyDown,
     onPaste,
