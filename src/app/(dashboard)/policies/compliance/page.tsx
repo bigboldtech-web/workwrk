@@ -1,58 +1,56 @@
 "use client";
 
-/* SOPs · Compliance — org compliance dashboard.
+/* Policies · Compliance — org acknowledgement-adoption dashboard.
  *
- * Reads: GET /api/sop-assignments/compliance
+ * Reads: GET /api/policies/compliance
+ * Reuses the .cmpl__* layout from the SOP compliance dashboard, adapted to
+ * ack semantics (no steps/assignment status — just acked / not acked).
  */
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ShieldCheck, AlertCircle, TrendingUp, TrendingDown, Users as UsersIcon, Building,
-  Activity, Hash, ClipboardCheck, BookCopy, CheckCircle2, Clock,
+  Activity, CheckCircle2, FileText,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
-import { useOsShell } from "@/components/layout/os/shell-context";
 
-type Overview = { total: number; completed: number; inProgress: number; overdue: number; overallRate: number };
-type DeptRow = { departmentId: string; name: string; total: number; completed: number; rate: number };
-type PersonRow = { userId: string; name: string; department: string; total: number; completed: number; overdue: number; rate: number; avgScore: number | null };
-type SopRow = { sopId: string; title: string; category: string | null; total: number; completed: number; rate: number };
-type OverdueRow = { id: string; sopTitle: string; userName: string; department: string; dueDate: string; stepsCompleted: number; stepsTotal: number };
+type Overview = { totalPolicies: number; totalUsers: number; totalRequired: number; totalAcked: number; orgRate: number; pending: number };
+type DeptRow = { departmentId: string; name: string; total: number; acked: number; rate: number };
+type PersonRow = { userId: string; name: string; department: string; total: number; acked: number; rate: number };
+type PolicyRow = { policyId: string; title: string; category: string | null; acked: number; total: number; rate: number };
+type PendingRow = { policyId: string; policyTitle: string; userId: string; userName: string; department: string };
 
 type ApiData = {
   overview: Overview;
   departmentCompliance: DeptRow[];
   personScores: PersonRow[];
-  sopCompliance: SopRow[];
-  overdueList: OverdueRow[];
+  policyCompliance: PolicyRow[];
+  pendingList: PendingRow[];
 };
 
-const MS_DAY = 86_400_000;
 function rateHue(pct: number) {
   if (pct >= 90) return "var(--os-c-green)";
   if (pct >= 70) return "var(--os-c-teal)";
   if (pct >= 40) return "var(--os-c-orange)";
   return "var(--os-c-red)";
 }
-
 const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-pink)", "var(--os-c-teal)", "var(--os-c-indigo)", "var(--os-c-blue)", "var(--os-c-red)"];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(name: string) { const [a = "", b = ""] = name.split(/\s+/); return (((a[0] ?? "") + (b[0] ?? "")) || "?").toUpperCase(); }
 
-export default function SopComplianceDashboard() {
+export default function PolicyComplianceDashboard() {
   const [data, setData] = useState<ApiData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAllBottom, setShowAllBottom] = useState(false);
   const [showAllTop, setShowAllTop] = useState(false);
-  const [showAllOverdue, setShowAllOverdue] = useState(false);
-  const { rowVersion } = useOsShell();
+  const [showAllPending, setShowAllPending] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/sop-assignments/compliance");
+      const res = await fetch("/api/policies/compliance");
       if (res.status === 403) { setLoadError("Manager access required."); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
@@ -63,44 +61,46 @@ export default function SopComplianceDashboard() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("sops");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const bottomSopsAll = (data?.sopCompliance ?? []).filter((s) => s.total > 0);
-  const topPeopleAll = (data?.personScores ?? []).filter((p) => p.total > 0);
-  const overdueAll = data?.overdueList ?? [];
-  const bottomSops = showAllBottom ? bottomSopsAll : bottomSopsAll.slice(0, 6);
-  const topPeople = showAllTop ? topPeopleAll : topPeopleAll.slice(0, 8);
-  const overdue = showAllOverdue ? overdueAll : overdueAll.slice(0, 10);
+  const bottomAll = (data?.policyCompliance ?? []);
+  const topAll = (data?.personScores ?? []).filter((p) => p.total > 0);
+  const pendingAll = data?.pendingList ?? [];
+  const bottom = showAllBottom ? bottomAll : bottomAll.slice(0, 6);
+  const top = showAllTop ? topAll : topAll.slice(0, 8);
+  const pending = showAllPending ? pendingAll : pendingAll.slice(0, 10);
 
   return (
     <>
       <OsTitleBar
-        title="SOP compliance"
+        title="Policy compliance"
         Icon={ShieldCheck}
-        iconGradient={GRAD.redPink}
+        iconGradient={GRAD.indigoBlue}
         showStandardActions={false}
-        description={data === null ? "Loading…" : `${data.overview.completed} / ${data.overview.total} complete · ${data.overview.overallRate}% org rate · ${data.overview.overdue} overdue`}
+        description={data === null ? "Loading…" : `${data.overview.totalAcked} / ${data.overview.totalRequired} acks · ${data.overview.orgRate}% org rate · ${data.overview.pending} pending`}
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Hash className="h-3.5 w-3.5" /> All SOPs</Link>
-            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><ClipboardCheck className="h-3.5 w-3.5" /> My SOPs</Link>
+            <Link href="/policies" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              <ShieldCheck className="h-3.5 w-3.5" /> All policies
+            </Link>
+            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              SOP compliance
+            </Link>
           </div>
         }
       />
 
       <div className="cmpl">
         {loadError ? (
-          <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.redPink} title="Couldn't load compliance" subtitle={loadError} cta="Retry" />
+          <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.indigoBlue} title="Couldn't load compliance" subtitle={loadError} cta="Retry" />
         ) : data === null ? (
           <div className="cmpl__loading">Loading…</div>
         ) : (
           <>
             <div className="cmpl__kpis">
-              <KpiTile accent={rateHue(data.overview.overallRate)} Icon={Activity}     label="Org rate"    value={`${data.overview.overallRate}%`} sub={`${data.overview.completed} of ${data.overview.total}`} />
-              <KpiTile accent="var(--os-c-blue)"                  Icon={BookCopy}     label="Assignments" value={`${data.overview.total}`}        sub="across SOPs" />
-              <KpiTile accent="var(--os-c-orange)"                Icon={Clock}        label="In progress" value={`${data.overview.inProgress}`}   sub="active work" />
-              <KpiTile accent={data.overview.overdue > 0 ? "var(--os-c-red)" : "var(--os-c-green)"} Icon={data.overview.overdue > 0 ? AlertCircle : CheckCircle2} label="Overdue" value={`${data.overview.overdue}`} sub={data.overview.overdue > 0 ? "needs attention" : "all on time"} />
+              <KpiTile accent={rateHue(data.overview.orgRate)} Icon={Activity} label="Org ack rate" value={`${data.overview.orgRate}%`} sub={`${data.overview.totalAcked} of ${data.overview.totalRequired}`} />
+              <KpiTile accent="var(--os-c-blue)" Icon={FileText} label="Policies" value={`${data.overview.totalPolicies}`} sub="requiring ack" />
+              <KpiTile accent="var(--os-c-indigo)" Icon={UsersIcon} label="People" value={`${data.overview.totalUsers}`} sub="in org" />
+              <KpiTile accent={data.overview.pending > 0 ? "var(--os-c-red)" : "var(--os-c-green)"} Icon={data.overview.pending > 0 ? AlertCircle : CheckCircle2} label="Pending" value={`${data.overview.pending}`} sub={data.overview.pending > 0 ? "not yet acked" : "all acknowledged"} />
             </div>
 
             <div className="cmpl__grid">
@@ -122,7 +122,7 @@ export default function SopComplianceDashboard() {
                         <div className="cmpl__bar-track">
                           <div className="cmpl__bar-fill" style={{ width: `${d.rate}%`, background: rateHue(d.rate) }} />
                         </div>
-                        <div className="cmpl__bar-sub">{d.completed} / {d.total}</div>
+                        <div className="cmpl__bar-sub">{d.acked} / {d.total}</div>
                       </div>
                     ))}
                   </div>
@@ -131,24 +131,24 @@ export default function SopComplianceDashboard() {
 
               <section className="cmpl__card">
                 <header className="cmpl__card-head">
-                  <h2><TrendingDown style={{ color: "var(--os-c-red)" }} /> Lowest-completion SOPs</h2>
-                  <span className="cmpl__card-count">{bottomSops.length}</span>
+                  <h2><TrendingDown style={{ color: "var(--os-c-red)" }} /> Lowest-adoption policies</h2>
+                  <span className="cmpl__card-count">{bottom.length}</span>
                 </header>
-                {bottomSops.length === 0 ? (
-                  <div className="cmpl__card-empty">No SOPs with completion data yet.</div>
+                {bottom.length === 0 ? (
+                  <div className="cmpl__card-empty">No policies requiring acknowledgement yet.</div>
                 ) : (
                   <div className="cmpl__list">
-                    {bottomSops.map((s) => (
-                      <div key={s.sopId} className="cmpl__sop">
+                    {bottom.map((s) => (
+                      <Link key={s.policyId} href={`/policies/${s.policyId}`} className="cmpl__sop" style={{ textDecoration: "none" }}>
                         <div className="cmpl__sop-title">{s.title}{s.category && <em> · {s.category}</em>}</div>
                         <div className="cmpl__sop-bar">
                           <div className="cmpl__sop-bar-fill" style={{ width: `${s.rate}%`, background: rateHue(s.rate) }} />
                         </div>
-                        <span className="cmpl__sop-rate" style={{ color: rateHue(s.rate) }}>{s.rate}% <em>· {s.completed}/{s.total}</em></span>
-                      </div>
+                        <span className="cmpl__sop-rate" style={{ color: rateHue(s.rate) }}>{s.rate}% <em>· {s.acked}/{s.total}</em></span>
+                      </Link>
                     ))}
-                    {bottomSopsAll.length > 6 && (
-                      <MoreToggle open={showAllBottom} total={bottomSopsAll.length} onClick={() => setShowAllBottom((v) => !v)} />
+                    {bottomAll.length > 6 && (
+                      <MoreToggle open={showAllBottom} total={bottomAll.length} onClick={() => setShowAllBottom((v) => !v)} />
                     )}
                   </div>
                 )}
@@ -157,24 +157,24 @@ export default function SopComplianceDashboard() {
               <section className="cmpl__card">
                 <header className="cmpl__card-head">
                   <h2><TrendingUp style={{ color: "var(--os-c-green)" }} /> Top performers</h2>
-                  <span className="cmpl__card-count">{topPeople.length}</span>
+                  <span className="cmpl__card-count">{top.length}</span>
                 </header>
-                {topPeople.length === 0 ? (
+                {top.length === 0 ? (
                   <div className="cmpl__card-empty">No person data yet.</div>
                 ) : (
                   <div className="cmpl__list">
-                    {topPeople.map((p) => (
+                    {top.map((p) => (
                       <div key={p.userId} className="cmpl__person">
                         <span className="cmpl__person-av" style={{ background: avColor(p.userId) }}>{initials(p.name)}</span>
                         <div className="cmpl__person-main">
                           <div className="cmpl__person-name">{p.name}</div>
-                          <div className="cmpl__person-meta">{p.department}{p.avgScore != null && ` · avg score ${p.avgScore}`}</div>
+                          <div className="cmpl__person-meta">{p.department} · {p.acked}/{p.total} acked</div>
                         </div>
                         <span className="cmpl__person-rate" style={{ color: rateHue(p.rate) }}>{p.rate}%</span>
                       </div>
                     ))}
-                    {topPeopleAll.length > 8 && (
-                      <MoreToggle open={showAllTop} total={topPeopleAll.length} onClick={() => setShowAllTop((v) => !v)} />
+                    {topAll.length > 8 && (
+                      <MoreToggle open={showAllTop} total={topAll.length} onClick={() => setShowAllTop((v) => !v)} />
                     )}
                   </div>
                 )}
@@ -182,29 +182,25 @@ export default function SopComplianceDashboard() {
 
               <section className="cmpl__card">
                 <header className="cmpl__card-head">
-                  <h2><AlertCircle style={{ color: "var(--os-c-red)" }} /> Overdue</h2>
-                  <span className="cmpl__card-count">{data.overdueList.length}</span>
+                  <h2><AlertCircle style={{ color: "var(--os-c-red)" }} /> Not yet acknowledged</h2>
+                  <span className="cmpl__card-count">{data.overview.pending}</span>
                 </header>
-                {data.overdueList.length === 0 ? (
+                {pendingAll.length === 0 ? (
                   <div className="cmpl__card-empty">
-                    <UsersIcon /> All assignments are on time.
+                    <UsersIcon /> Everyone has acknowledged every policy.
                   </div>
                 ) : (
                   <div className="cmpl__list">
-                    {overdue.map((o) => {
-                      const days = Math.floor((Date.now() - new Date(o.dueDate).getTime()) / MS_DAY);
-                      return (
-                        <div key={o.id} className="cmpl__over">
-                          <div className="cmpl__over-main">
-                            <div className="cmpl__over-title">{o.sopTitle}</div>
-                            <div className="cmpl__over-meta">{o.userName} · {o.department}</div>
-                          </div>
-                          <span className="cmpl__over-days">{days}d late</span>
+                    {pending.map((o) => (
+                      <div key={`${o.policyId}:${o.userId}`} className="cmpl__over">
+                        <div className="cmpl__over-main">
+                          <div className="cmpl__over-title">{o.policyTitle}</div>
+                          <div className="cmpl__over-meta">{o.userName} · {o.department}</div>
                         </div>
-                      );
-                    })}
-                    {overdueAll.length > 10 && (
-                      <MoreToggle open={showAllOverdue} total={overdueAll.length} onClick={() => setShowAllOverdue((v) => !v)} />
+                      </div>
+                    ))}
+                    {pendingAll.length > 10 && (
+                      <MoreToggle open={showAllPending} total={pendingAll.length} onClick={() => setShowAllPending((v) => !v)} />
                     )}
                   </div>
                 )}
@@ -219,11 +215,7 @@ export default function SopComplianceDashboard() {
 
 function MoreToggle({ open, total, onClick }: { open: boolean; total: number; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mt-1 text-[12px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
-    >
+    <button type="button" onClick={onClick} className="mt-1 text-[12px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2">
       {open ? "Show less" : `View all ${total}`}
     </button>
   );

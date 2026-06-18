@@ -1368,6 +1368,7 @@ export const APPS: AppEntry[] = [
   // ── Knowledge ───────────────────────────────────────────────
   { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops",
     matchPaths: ["/sops"], category: "Knowledge", defaultPinned: true,
+    newAction: { label: "New SOP", href: "/sops/new" },
     Sidebar: linksSidebar([
       { href: "/sops",               label: "All SOPs",             Icon: ScrollText },
       { href: "/sops/new/checklist", label: "New step-by-step SOP", Icon: Workflow },
@@ -1377,7 +1378,10 @@ export const APPS: AppEntry[] = [
     ]) },
   { key: "policies", label: "Policies", Icon: ShieldCheck, defaultHref: "/policies",
     matchPaths: ["/policies"], category: "Knowledge", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([{ href: "/policies", label: "Policies", Icon: ShieldCheck }]) },
+    Sidebar: linksSidebar([
+      { href: "/policies",            label: "All policies", Icon: ShieldCheck },
+      { href: "/policies/compliance", label: "Compliance",   Icon: BarChart3 },
+    ]) },
   { key: "learning", label: "Learning", Icon: GraduationCap, defaultHref: "/learning",
     matchPaths: ["/learning"], category: "Knowledge",
     Sidebar: linksSidebar([

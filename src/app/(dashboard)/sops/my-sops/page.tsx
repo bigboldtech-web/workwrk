@@ -88,11 +88,12 @@ export default function MySopsPage() {
         title="My SOPs"
         Icon={ClipboardCheck}
         iconGradient={GRAD.tealGreen}
+        showStandardActions={false}
         description={items === null ? "Loading…" : `${active.length} active · ${overdue.length} overdue · ${done.length} completed · ${overallPct}% steps done`}
         actions={
-          <div className="mys__head-actions">
-            <Link href="/sops" className="mys__nav-link"><Hash /> All SOPs</Link>
-            <Link href="/sops/compliance" className="mys__nav-link"><Activity /> Compliance</Link>
+          <div className="flex items-center gap-2">
+            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Hash className="h-3.5 w-3.5" /> All SOPs</Link>
+            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> Compliance</Link>
           </div>
         }
       />

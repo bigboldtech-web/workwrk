@@ -120,12 +120,13 @@ export default function ProcessRunsPage() {
         title="Process runs"
         Icon={ListChecks}
         iconGradient={GRAD.orangePink}
+        showStandardActions={false}
         description={rows === null ? "Loading…" : `${stats.total} run${stats.total === 1 ? "" : "s"} · ${stats.counts.ACTIVE} active · ${stats.counts.OVERDUE} overdue · ${stats.avgProgress}% avg`}
         actions={
-          <div className="prun__head-actions">
-            <Link href="/sops" className="prun__nav-link"><BookCopy /> SOPs</Link>
-            <Link href="/sops/my-sops" className="prun__nav-link"><Activity /> My SOPs</Link>
-            <button type="button" className="prun__btn-primary" onClick={() => toast("Start a run from any checklist SOP")}>
+          <div className="flex items-center gap-2">
+            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><BookCopy className="h-3.5 w-3.5" /> SOPs</Link>
+            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> My SOPs</Link>
+            <button type="button" onClick={() => toast("Start a run from any checklist SOP")} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500">
               Start run
             </button>
           </div>

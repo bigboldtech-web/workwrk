@@ -1,17 +1,23 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const { id } = await params;
-  const policy = await prisma.policy.findFirst({
-    where: { id, organizationId: getOrgId(session) },
-    include: { acknowledgments: { select: { userId: true, acknowledgedAt: true } }, _count: { select: { acknowledgments: true } } },
-  });
+  const orgId = getOrgId(session);
+  const userId = getUserId(session);
+  const [policy, totalUsers] = await Promise.all([
+    prisma.policy.findFirst({
+      where: { id, organizationId: orgId },
+      include: { acknowledgments: { select: { userId: true, acknowledgedAt: true } }, _count: { select: { acknowledgments: true } } },
+    }),
+    prisma.user.count({ where: { organizationId: orgId, deletedAt: null } }),
+  ]);
   if (!policy) return jsonError("Not found", 404);
-  return jsonSuccess(policy);
+  const acknowledged = policy.acknowledgments.some((a) => a.userId === userId);
+  return jsonSuccess({ ...policy, acknowledged, totalAcks: policy._count.acknowledgments, totalUsers, canEdit: isManager(session) });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

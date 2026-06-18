@@ -16,6 +16,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useRouter } from "next/navigation";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type PolStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
@@ -62,6 +63,7 @@ export default function PoliciesPage() {
   const [onlyMyAck, setOnlyMyAck] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const router = useRouter();
 
   const load = useCallback(async () => {
     try {
@@ -84,13 +86,17 @@ export default function PoliciesPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: "Untitled policy",
-          content: "Write the policy text here…",
-          status: "PUBLISHED",
+          content: "",
+          // Create as DRAFT (no org-wide notification) — the author writes
+          // the content, then Publishes from the editor.
+          status: "DRAFT",
         }),
       });
       if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't create"); return; }
-      toast("Policy created");
-      void load();
+      const data = await res.json();
+      const created = data.data ?? data;
+      if (created?.id) router.push(`/policies/${created.id}?edit=1`);
+      else { toast("Policy created"); void load(); }
     } catch { toast("Couldn't create"); }
   }
 
@@ -152,13 +158,14 @@ export default function PoliciesPage() {
         title="Policies"
         Icon={ShieldCheck}
         iconGradient={GRAD.indigoBlue}
+        showStandardActions={false}
         description={rows === null ? "Loading…" : `${stats.total} polic${stats.total === 1 ? "y" : "ies"}${stats.pendingMyAck > 0 ? ` · ${stats.pendingMyAck} need your ack` : ""} · ${stats.orgAckRate}% org ack rate`}
         actions={
-          <div className="pol__head-actions">
-            <Link href="/sops" className="pol__nav-link"><FileText /> SOPs</Link>
-            <Link href="/sops/compliance" className="pol__nav-link"><Activity /> Compliance</Link>
-            <button type="button" className="pol__btn-primary" onClick={quickAdd}>
-              <Plus /> New policy
+          <div className="flex items-center gap-2">
+            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><FileText className="h-3.5 w-3.5" /> SOPs</Link>
+            <Link href="/policies/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> Compliance</Link>
+            <button type="button" onClick={quickAdd} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500">
+              <Plus className="h-3.5 w-3.5" /> New policy
             </button>
           </div>
         }
