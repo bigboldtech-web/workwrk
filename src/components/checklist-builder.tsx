@@ -56,6 +56,36 @@ function genId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// Normalize any persisted `sections` into the rich shape the builder + runner
+// expect. Handles the legacy checklist editor shape
+// ({ title, steps:[{ id, title, notes }] }) and is idempotent on already-rich
+// data — so old checklists open in the rich builder without crashing and
+// their `notes` carry over as the step description.
+type RawStep = { id?: unknown; title?: unknown; notes?: unknown; description?: unknown; type?: unknown; inputs?: unknown; contentBlocks?: unknown };
+type RawSection = { id?: unknown; title?: unknown; steps?: unknown };
+export function normalizeChecklistSections(raw: unknown): ChecklistSection[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as RawSection[]).map((sec) => ({
+    id: typeof sec?.id === "string" ? sec.id : genId("sec"),
+    title: typeof sec?.title === "string" ? sec.title : "Steps",
+    steps: Array.isArray(sec?.steps)
+      ? (sec.steps as RawStep[]).map((st) => ({
+          id: typeof st?.id === "string" ? st.id : genId("step"),
+          title: typeof st?.title === "string" ? st.title : "",
+          description:
+            typeof st?.description === "string"
+              ? st.description
+              : typeof st?.notes === "string"
+                ? st.notes
+                : "",
+          type: (st?.type === "approval" ? "approval" : "task") as ChecklistStep["type"],
+          inputs: Array.isArray(st?.inputs) ? (st.inputs as ChecklistInputField[]) : [],
+          contentBlocks: Array.isArray(st?.contentBlocks) ? (st.contentBlocks as ChecklistContentBlock[]) : [],
+        }))
+      : [],
+  }));
+}
+
 const INPUT_TYPES: { value: ChecklistInputField["type"]; label: string; icon: typeof Hash }[] = [
   { value: "short_text", label: "Short Text", icon: AlignLeft },
   { value: "long_text", label: "Long Text", icon: AlignJustify },

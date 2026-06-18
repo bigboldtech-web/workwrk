@@ -1,27 +1,29 @@
 "use client";
 
-/* Checklist-SOP editor.
+/* Checklist-SOP editor — uses the rich ChecklistBuilder (the SAME component
+ * the SOP detail page uses): per-step content blocks (text / divider / image /
+ * video), form fields (short/long text, number, checkbox, email, website,
+ * date, dropdown, multichoice, file upload), and approval steps.
  *
- * Structured steps grouped into sections. Each step has a title and an
- * optional notes blob. Sections + steps are reorderable via the arrow
- * buttons (no DnD libs). Publishing makes the checklist available to
- * spin up as a ProcessRun.
+ * Saves { type: "CHECKLIST", sections } and can be spun up as a ProcessRun
+ * (shareable, runnable at /run/[token]). Old checklists ({title, notes}) are
+ * normalized into the rich shape on load.
  *
  * URL: /sops/new/checklist?id=<sopId>
  */
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { ListChecks, Plus, Send, Save, ArrowLeft, ChevronUp, ChevronDown, Trash2, Hash, BookCopy } from "lucide-react";
+import { ListChecks, Send, Save, ArrowLeft, Loader2 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { ChecklistBuilder, normalizeChecklistSections, type ChecklistSection } from "@/components/checklist-builder";
 
-type Step = { id: string; title: string; notes?: string };
-type Section = { title: string; steps: Step[] };
-
-function newStepId() { return Math.random().toString(36).slice(2, 10); }
+function genId(prefix: string) { return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`; }
+function emptySections(): ChecklistSection[] {
+  return [{ id: genId("sec"), title: "Steps", steps: [{ id: genId("step"), title: "", description: "", type: "task", inputs: [], contentBlocks: [] }] }];
+}
 
 export default function ChecklistSopEditor() {
   const router = useRouter();
@@ -30,12 +32,38 @@ export default function ChecklistSopEditor() {
   const { toast } = useOsToast();
 
   const [title, setTitle] = useState("");
-  const [sections, setSections] = useState<Section[]>([{ title: "Steps", steps: [{ id: newStepId(), title: "" }] }]);
+  const [sections, setSections] = useState<ChecklistSection[]>(emptySections);
   const [status, setStatus] = useState<"DRAFT" | "PUBLISHED" | "ARCHIVED" | "IN_REVIEW" | "APPROVED">("DRAFT");
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const dirty = useRef(false);
   const initialLoad = useRef(true);
+  const creatingRef = useRef(false);
+
+  // Self-create: visiting /sops/new/checklist with no ?id (e.g. the sidebar
+  // "New step-by-step SOP" link) mints a fresh CHECKLIST SOP and redirects to
+  // it, so the editor always has a row to load/save.
+  useEffect(() => {
+    if (id || creatingRef.current) return;
+    creatingRef.current = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/sops", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: "Untitled checklist",
+            sopType: "CHECKLIST",
+            content: { type: "CHECKLIST", sections: [{ title: "Steps", steps: [{ id: "s1", title: "First step" }] }] },
+          }),
+        });
+        if (!res.ok) throw new Error(`POST ${res.status}`);
+        const data = await res.json();
+        const sop = data.data ?? data;
+        router.replace(`/sops/new/checklist?id=${encodeURIComponent(sop.id)}`);
+      } catch { toast("Couldn't create checklist"); }
+    })();
+  }, [id, router, toast]);
 
   useEffect(() => {
     if (!id) return;
@@ -46,8 +74,9 @@ export default function ChecklistSopEditor() {
         const data = await res.json();
         const sop = data.data ?? data;
         setTitle(sop.title ?? "");
-        const c = sop.content as { sections?: Section[] } | null;
-        if (c?.sections && c.sections.length > 0) setSections(c.sections);
+        const c = sop.content as { sections?: unknown } | null;
+        const normalized = normalizeChecklistSections(c?.sections);
+        if (normalized.length > 0) setSections(normalized);
         setStatus(sop.status ?? "DRAFT");
         initialLoad.current = false;
       } catch { /* ignore */ }
@@ -78,100 +107,61 @@ export default function ChecklistSopEditor() {
   useEffect(() => {
     const t = setInterval(() => { if (dirty.current && !saving) void save(); }, 5000);
     return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saving, title, sections]);
 
-  function updateStep(si: number, idx: number, patch: Partial<Step>) {
-    setSections((s) => s.map((sec, i) => i !== si ? sec : { ...sec, steps: sec.steps.map((st, j) => j === idx ? { ...st, ...patch } : st) }));
-  }
-  function addStep(si: number) {
-    setSections((s) => s.map((sec, i) => i !== si ? sec : { ...sec, steps: [...sec.steps, { id: newStepId(), title: "" }] }));
-  }
-  function removeStep(si: number, idx: number) {
-    setSections((s) => s.map((sec, i) => i !== si ? sec : { ...sec, steps: sec.steps.filter((_, j) => j !== idx) }));
-  }
-  function moveStep(si: number, idx: number, dir: -1 | 1) {
-    setSections((s) => s.map((sec, i) => {
-      if (i !== si) return sec;
-      const arr = [...sec.steps];
-      const target = idx + dir;
-      if (target < 0 || target >= arr.length) return sec;
-      [arr[idx], arr[target]] = [arr[target], arr[idx]];
-      return { ...sec, steps: arr };
-    }));
-  }
-  function addSection() {
-    setSections((s) => [...s, { title: `Section ${s.length + 1}`, steps: [{ id: newStepId(), title: "" }] }]);
-  }
-  function removeSection(si: number) {
-    setSections((s) => s.filter((_, i) => i !== si));
-  }
-  function setSectionTitle(si: number, v: string) {
-    setSections((s) => s.map((sec, i) => i === si ? { ...sec, title: v } : sec));
-  }
+  const totalSteps = sections.reduce((acc, s) => acc + s.steps.length, 0);
 
   if (!id) return (<>
-    <OsTitleBar title="New checklist SOP" Icon={ListChecks} iconGradient={GRAD.indigoBlue} showInvite={false} />
-    <div className="sop-edit__error">Missing SOP id. <a href="/sops">Back to SOPs</a></div>
+    <OsTitleBar title="New checklist SOP" Icon={ListChecks} iconGradient={GRAD.indigoBlue} showStandardActions={false} />
+    <div className="sop-edit__loading"><Loader2 className="bedit__spin" /> Creating checklist…</div>
   </>);
-
-  const totalSteps = sections.reduce((acc, s) => acc + s.steps.length, 0);
 
   return (<>
     <OsTitleBar
       title="Checklist SOP"
       Icon={ListChecks}
       iconGradient={GRAD.indigoBlue}
+      showStandardActions={false}
       description={`${totalSteps} step${totalSteps === 1 ? "" : "s"} · ${saving ? "saving…" : lastSaved ? `saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "auto-saves every 5s"}`}
       actions={
-        <div className="sop-edit__head-actions">
-          <Link href="/sops" className="sop-edit__nav-link"><Hash /> SOPs</Link>
-          <Link href="/sops/new" className="sop-edit__nav-link"><BookCopy /> Pick type</Link>
-          <button type="button" onClick={() => save()} className="sop-edit__nav-link" disabled={saving}><Save /> Save</button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => save()}
+            disabled={saving}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <Save className="h-3.5 w-3.5" /> Save
+          </button>
           {status !== "PUBLISHED" ? (
-            <button type="button" onClick={() => save({ publish: true })} className="sop-edit__btn-primary" disabled={saving}><Send /> Publish</button>
+            <button
+              type="button"
+              onClick={() => save({ publish: true })}
+              disabled={saving}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-[13px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              <Send className="h-3.5 w-3.5" /> Publish
+            </button>
           ) : (
-            <span className="sop-edit__pub">Published</span>
+            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 text-[13px] font-medium text-emerald-700">Published</span>
           )}
         </div>
       }
     />
 
     <div className="sop-edit">
-      <button type="button" className="sop-edit__back" onClick={() => router.push("/sops")}>
-        <ArrowLeft /> All SOPs
+      <button
+        type="button"
+        onClick={() => router.push("/sops")}
+        className="inline-flex h-7 w-fit items-center gap-1.5 rounded-md px-2 text-[13px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+      >
+        <ArrowLeft className="h-4 w-4" /> All SOPs
       </button>
 
       <input type="text" className="sop-edit__title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Checklist title…" />
 
-      <div className="sop-edit__sections">
-        {sections.map((sec, si) => (
-          <section key={si} className="sop-edit__section">
-            <header className="sop-edit__section-head">
-              <input type="text" value={sec.title} onChange={(e) => setSectionTitle(si, e.target.value)} className="sop-edit__section-title" placeholder="Section title…" />
-              {sections.length > 1 && <button type="button" onClick={() => removeSection(si)} className="sop-edit__icon-btn" aria-label="Delete section"><Trash2 /></button>}
-            </header>
-            <ol className="sop-edit__steps">
-              {sec.steps.map((st, idx) => (
-                <li key={st.id} className="sop-edit__step">
-                  <span className="sop-edit__step-num">{idx + 1}</span>
-                  <div className="sop-edit__step-main">
-                    <input type="text" value={st.title} onChange={(e) => updateStep(si, idx, { title: e.target.value })} placeholder="Step description…" className="sop-edit__step-title" />
-                    <textarea value={st.notes ?? ""} onChange={(e) => updateStep(si, idx, { notes: e.target.value })} placeholder="Optional notes / acceptance criteria…" className="sop-edit__step-notes" rows={1} />
-                  </div>
-                  <div className="sop-edit__step-actions">
-                    <button type="button" onClick={() => moveStep(si, idx, -1)} disabled={idx === 0}><ChevronUp /></button>
-                    <button type="button" onClick={() => moveStep(si, idx, +1)} disabled={idx === sec.steps.length - 1}><ChevronDown /></button>
-                    <button type="button" onClick={() => removeStep(si, idx)} disabled={sec.steps.length === 1}><Trash2 /></button>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <button type="button" className="sop-edit__add-step" onClick={() => addStep(si)}><Plus /> Add step</button>
-          </section>
-        ))}
-
-        <button type="button" className="sop-edit__add-section" onClick={addSection}><Plus /> Add section</button>
-      </div>
+      <ChecklistBuilder sections={sections} onChange={setSections} editing />
     </div>
   </>);
 }

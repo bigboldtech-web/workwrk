@@ -59,11 +59,12 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChecklistBuilder, ChecklistSection } from "@/components/checklist-builder";
+import { ChecklistBuilder, normalizeChecklistSections, ChecklistSection } from "@/components/checklist-builder";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { RichEditor } from "@/components/ui/rich-editor";
-import { BlockEditor, type Block } from "@/components/docs/block-editor";
+import { type Block } from "@/components/docs/block-editor";
+import { BlockNoteCanvas, type BnDocJSON } from "@/components/docs/blocknote-canvas";
 import { BacklinksPanel } from "@/components/docs/block-doc-editor";
 import { SopWalkthrough } from "@/components/sops/sop-walkthrough";
 import Link from "next/link";
@@ -529,6 +530,7 @@ export default function SOPDetailPage() {
   // type:"blocks" content — the same Notes block format. Default `null`
   // means "no blocks variant loaded"; we never touch it for non-block SOPs.
   const [sopBlocks, setSopBlocks] = useState<Block[] | null>(null);
+  const [sopBnDoc, setSopBnDoc] = useState<BnDocJSON | null>(null);
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   // DnD bookkeeping: which step is currently being dragged (by id), and
@@ -648,11 +650,12 @@ export default function SOPDetailPage() {
       setTitle(data.title);
       setDescription(data.description || "");
       if (data.sopType === "CHECKLIST") {
-        setChecklistSections((data.content?.sections || []) as ChecklistSection[]);
+        setChecklistSections(normalizeChecklistSections(data.content?.sections));
       } else if (data.content?.type === "richtext") {
         setRichtextHtml((data.content as { html?: string })?.html || "");
       } else if (data.content?.type === "blocks") {
-        const c = data.content as { blocks?: Block[] };
+        const c = data.content as { bnDoc?: BnDocJSON; blocks?: Block[] };
+        setSopBnDoc(Array.isArray(c.bnDoc) ? c.bnDoc : null);
         setSopBlocks(Array.isArray(c.blocks) ? c.blocks : []);
       } else if (data.content?.type === "process_flow") {
         setProcessFlow({
@@ -705,10 +708,11 @@ export default function SOPDetailPage() {
     setDescription(snap.description || "");
     const c = (snap.content || {}) as any;
     if (sop?.sopType === "CHECKLIST") {
-      setChecklistSections((c.sections || []) as ChecklistSection[]);
+      setChecklistSections(normalizeChecklistSections(c.sections));
     } else if (c.type === "richtext") {
       setRichtextHtml(c.html || "");
     } else if (c.type === "blocks") {
+      setSopBnDoc(Array.isArray(c.bnDoc) ? (c.bnDoc as BnDocJSON) : null);
       setSopBlocks(Array.isArray(c.blocks) ? (c.blocks as Block[]) : []);
     } else if (c.type === "process_flow") {
       setProcessFlow({
@@ -728,7 +732,9 @@ export default function SOPDetailPage() {
       return { type: "richtext", html: richtextHtml };
     }
     if (sop?.content && (sop.content as any).type === "blocks") {
-      return { type: "blocks", blocks: sopBlocks ?? [] };
+      // Echo bnDoc back so a top-bar Save doesn't strip it and downgrade to
+      // legacy-only.
+      return { type: "blocks", ...(sopBnDoc ? { bnDoc: sopBnDoc } : {}), blocks: sopBlocks ?? [] };
     }
     if (sop?.content && (sop.content as any).type === "process_flow") {
       return { type: "process_flow", flow: processFlow };
@@ -1082,7 +1088,7 @@ export default function SOPDetailPage() {
                   setTitle(sop.title);
                   setDescription(sop.description || "");
                   if (sop.sopType === "CHECKLIST") {
-                    setChecklistSections((sop.content?.sections || []) as ChecklistSection[]);
+                    setChecklistSections(normalizeChecklistSections(sop.content?.sections));
                   } else if (sop.content?.type === "richtext") {
                     setRichtextHtml((sop.content as { html?: string })?.html || "");
                   } else {
@@ -1103,6 +1109,16 @@ export default function SOPDetailPage() {
             </>
           ) : (
             <>
+              {sop.status === "PUBLISHED" && sop.sopType === "CHECKLIST" && (
+                <Button
+                  size="sm"
+                  onClick={() => setShowRunDialog(true)}
+                  className="gap-1.5"
+                >
+                  <Play size={14} />
+                  Start run
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -1132,11 +1148,6 @@ export default function SOPDetailPage() {
                   {sop.status === "PUBLISHED" && (
                     <DropdownMenuItem onSelect={() => setShowAssignDialog(true)}>
                       <UserPlus size={14} className="mr-2" /> Assign
-                    </DropdownMenuItem>
-                  )}
-                  {sop.status === "PUBLISHED" && sop.sopType === "CHECKLIST" && (
-                    <DropdownMenuItem onSelect={() => setShowRunDialog(true)}>
-                      <Play size={14} className="mr-2" /> Run process
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem onSelect={() => setWalkthroughOpen(true)}>
@@ -1498,11 +1509,13 @@ export default function SOPDetailPage() {
                     </div>
                     <div className="px-5 py-6 sm:px-10 sm:py-9">
                       <div className="w-full">
-                        <BlockEditor
+                        <BlockNoteCanvas
                           key={sop.id}
-                          initialBlocks={sopBlocks}
-                          onSave={() => { /* read-only */ }}
+                          initialBnDoc={sopBnDoc}
+                          legacyBlocks={sopBlocks}
                           readonly
+                          onChange={() => { /* read-only */ }}
+                          entity={{ type: "sop", id: sop.id }}
                         />
                       </div>
                     </div>
