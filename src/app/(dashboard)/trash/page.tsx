@@ -1,98 +1,124 @@
 "use client";
 
-/* Trash — archive list. Nothing is ever hard-deleted in WorkwrK; the
- * "Trash" route surfaces everything the user has archived (items,
- * boards, docs, …) so they can restore from one place.
- *
- * This is the shell page. Real listings get wired up as each module
- * exposes a /api/<module>/archived endpoint; until then we render a
- * grouped placeholder so the menu link from the profile dropdown
- * leads somewhere intentional rather than a 404. */
+/* System-wide Trash — org recycle bin. Deleted documents (SOPs, Tables, Files,
+ * Policies …) are recoverable here for 60 days, then auto-purged. Managers only.
+ *   GET    /api/trash
+ *   POST   /api/trash/[id]/restore
+ *   DELETE /api/trash/[id]
+ */
 
-import { useState } from "react";
-import { Trash2, RotateCcw, Search, LayoutGrid, ClipboardList, FileText, Folder, Boxes } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Trash2, Loader2, RotateCcw, BookCopy, ShieldCheck, FileText, Table as TableIcon,
+  Paperclip, PenLine, FileSignature,
+} from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { GRAD } from "@/components/layout/os/catalog";
+import { useOsToast } from "@/components/layout/os/toast";
 
-type Tab = { key: string; label: string; Icon: typeof LayoutGrid };
-const TABS: Tab[] = [
-  { key: "all",    label: "All",    Icon: Boxes },
-  { key: "items",  label: "Items",  Icon: ClipboardList },
-  { key: "boards", label: "Boards", Icon: LayoutGrid },
-  { key: "docs",   label: "Docs",   Icon: FileText },
-  { key: "spaces", label: "Spaces", Icon: Folder },
-];
+type Item = { id: string; entityType: string; entityId: string; label: string; deletedByName: string | null; deletedAt: string };
+
+const TYPE_META: Record<string, { label: string; Icon: typeof FileText }> = {
+  note: { label: "Note", Icon: PenLine },
+  sop: { label: "SOP", Icon: BookCopy },
+  whiteboard: { label: "Whiteboard", Icon: FileText },
+  table: { label: "Table", Icon: TableIcon },
+  file: { label: "File", Icon: Paperclip },
+  policy: { label: "Policy", Icon: ShieldCheck },
+  contract: { label: "Contract", Icon: FileSignature },
+};
+
+function daysLeft(deletedAt: string): number {
+  const elapsed = (Date.now() - new Date(deletedAt).getTime()) / 86_400_000;
+  return Math.max(0, Math.ceil(60 - elapsed));
+}
 
 export default function TrashPage() {
-  const [tab, setTab] = useState<string>("all");
-  const [query, setQuery] = useState("");
+  const { toast } = useOsToast();
+  const [items, setItems] = useState<Item[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/trash");
+      if (res.status === 403) { setErr("Manager access required."); return; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      setItems(((d.data ?? d).items) ?? []);
+      setErr(null);
+    } catch (e) { setErr(e instanceof Error ? e.message : "load failed"); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function restore(it: Item) {
+    setBusy(it.id);
+    try {
+      const res = await fetch(`/api/trash/${it.id}/restore`, { method: "POST" });
+      if (res.ok) { toast(`Restored ${TYPE_META[it.entityType]?.label ?? "item"}`); await load(); }
+      else toast((await res.json().catch(() => ({})))?.error || "Couldn't restore");
+    } catch { toast("Couldn't restore"); } finally { setBusy(null); }
+  }
+  async function deleteForever(it: Item) {
+    if (!confirm(`Permanently delete “${it.label}”? This cannot be undone.`)) return;
+    setBusy(it.id);
+    try {
+      const res = await fetch(`/api/trash/${it.id}`, { method: "DELETE" });
+      if (res.ok) { toast("Deleted permanently"); await load(); } else toast("Couldn't delete");
+    } catch { toast("Couldn't delete"); } finally { setBusy(null); }
+  }
 
   return (
-    <div className="flex flex-col h-full">
+    <>
       <OsTitleBar
         title="Trash"
         Icon={Trash2}
-        iconGradient=""
-        description="Archived items live here forever. Nothing is ever permanently deleted — restore anything you need."
-        showInvite={false}
+        iconGradient={GRAD.redPink}
+        showStandardActions={false}
+        description={items === null ? "Loading…" : `${items.length} item${items.length === 1 ? "" : "s"} · auto-deleted 60 days after deletion`}
       />
 
-      <div className="px-6 pt-2 pb-3 border-b border-zinc-200 flex items-center gap-2">
-        <div className="flex items-center gap-0.5 bg-zinc-100 rounded-lg p-0.5">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors ${
-                tab === t.key
-                  ? "bg-white text-zinc-900 shadow-sm"
-                  : "text-zinc-600 hover:text-zinc-900"
-              }`}
-            >
-              <t.Icon className="w-3 h-3" />
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex-1" />
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search trash"
-            className="pl-7 pr-2.5 py-1 text-[12px] bg-zinc-50 border border-zinc-200 rounded-md w-[220px] focus:bg-white focus:border-zinc-300 focus:outline-none"
-          />
-        </div>
+      <div className="mx-auto max-w-4xl px-6 py-8">
+        {err ? (
+          <OsEmptyView Icon={Trash2} iconGradient={GRAD.redPink} title="Couldn't load Trash" subtitle={err} cta="Retry" onCta={() => void load()} />
+        ) : items === null ? (
+          <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center">
+            <Trash2 className="mx-auto h-8 w-8 text-zinc-300" />
+            <div className="mt-3 text-sm font-medium text-zinc-700">Trash is empty</div>
+            <div className="mt-1 text-[13px] text-zinc-500">Deleted documents (SOPs, Tables, Files, Policies …) appear here and are recoverable for 60 days.</div>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+            <ul className="divide-y divide-zinc-100">
+              {items.map((it) => {
+                const meta = TYPE_META[it.entityType] ?? { label: it.entityType, Icon: FileText };
+                const left = daysLeft(it.deletedAt);
+                return (
+                  <li key={it.id} className="flex items-center gap-3 px-4 py-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500"><meta.Icon className="h-4 w-4" /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13.5px] font-medium text-zinc-900">{it.label}</div>
+                      <div className="truncate text-[11px] text-zinc-400">
+                        {meta.label} · deleted {new Date(it.deletedAt).toLocaleDateString()}{it.deletedByName ? ` by ${it.deletedByName}` : ""}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${left <= 7 ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700"}`}>{left}d left</span>
+                    <button type="button" disabled={busy === it.id} onClick={() => restore(it)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
+                      {busy === it.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Restore
+                    </button>
+                    <button type="button" disabled={busy === it.id} onClick={() => deleteForever(it)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-red-600 hover:bg-red-50 disabled:opacity-50">
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </div>
-
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <EmptyArchive />
-      </div>
-    </div>
-  );
-}
-
-function EmptyArchive() {
-  return (
-    <div className="max-w-[640px] mx-auto py-12 text-center">
-      <div
-        className="w-14 h-14 mx-auto rounded-2xl flex items-center justify-center mb-4"
-        style={{ background: "var(--os-brand-soft)", color: "var(--os-brand-deep)" }}
-      >
-        <Trash2 className="w-6 h-6" />
-      </div>
-      <h2 className="text-[16px] font-semibold text-zinc-900 mb-1.5">No archived items yet</h2>
-      <p className="text-[13px] text-zinc-600 leading-relaxed mb-5">
-        When you archive a board, item, doc, or space, it lands here.
-        Nothing gets permanently removed — every archived record stays restorable
-        forever so you can roll back any decision.
-      </p>
-      <div className="inline-flex items-center gap-1.5 text-[12px] text-zinc-500">
-        <RotateCcw className="w-3 h-3" />
-        <span>Restore any archived item with a single click</span>
-      </div>
-    </div>
+    </>
   );
 }

@@ -7,6 +7,7 @@ import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 import { canWriteToFolder } from "@/lib/sop-access";
 import { isSOPContentEmpty, isSOPTitleEmpty } from "@/lib/sop-content";
+import { moveToTrash } from "@/lib/trash";
 
 export async function GET(
   _req: NextRequest,
@@ -265,7 +266,7 @@ export async function DELETE(
     return jsonError("You don't have access to this SOP's folder", 403);
   }
 
-  await prisma.sOP.delete({ where: { id } });
+  await moveToTrash("sop", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
 
   return jsonSuccess({ success: true });
 }

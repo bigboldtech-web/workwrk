@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
+import { moveToTrash } from "@/lib/trash";
 import { getSpaceForReader } from "@/lib/space";
 
 export async function PATCH(
@@ -69,6 +70,6 @@ export async function DELETE(
     if (!space) return jsonError("not found", 404);
   }
 
-  await prisma.fileEntry.delete({ where: { id } });
+  await moveToTrash("file", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ deleted: true });
 }

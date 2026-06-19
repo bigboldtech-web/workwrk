@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { moveToTrash } from "@/lib/trash";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -104,6 +105,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (error) return error;
   if (!isManager(session)) return jsonError("Forbidden", 403);
   const { id } = await params;
-  await prisma.policy.delete({ where: { id } });
+  await moveToTrash("policy", id, { organizationId: getOrgId(session), userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ message: "Deleted" });
 }

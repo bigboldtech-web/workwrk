@@ -2424,6 +2424,24 @@ model AgreementParty {
   @@index([token])
 }
 
+// Org-wide recycle bin. A deleted row (and its essential children) is snapshot
+// here as JSON and removed from its live table, so it vanishes from every
+// existing list. Restore re-creates from the snapshot; purged after 60 days.
+model TrashItem {
+  id             String   @id @default(cuid())
+  organizationId String
+  entityType     String // note | sop | whiteboard | table | file | policy | contract
+  entityId       String // original row id (restore re-uses it)
+  label          String // display name captured at delete time
+  snapshot       Json // { row, children? }
+  deletedById    String?
+  deletedByName  String?
+  deletedAt      DateTime @default(now())
+
+  @@index([organizationId, entityType])
+  @@index([deletedAt])
+}
+
 // ==========================================
 // OKR (OBJECTIVES & KEY RESULTS)
 // ==========================================

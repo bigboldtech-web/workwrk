@@ -4,6 +4,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { moveToTrash } from "@/lib/trash";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
@@ -80,6 +81,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     return jsonError("not found", 404);
   }
 
-  await prisma.dataTable.delete({ where: { id } });
+  await moveToTrash("table", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ deleted: true });
 }
