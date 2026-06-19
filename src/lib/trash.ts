@@ -3,9 +3,35 @@
 // every existing list with no query changes. restoreFromTrash() re-creates it
 // from the snapshot. Items are purged 60 days after deletion.
 
+import { unlink } from "fs/promises";
+import path from "path";
 import { prisma } from "@/lib/prisma";
+import { isS3Configured, deleteObject } from "@/lib/s3";
 
 export type TrashType = "note" | "sop" | "whiteboard" | "table" | "file" | "policy" | "contract";
+
+// Best-effort: free the underlying file blob (local dev file or S3 object) so
+// storage is actually reclaimed on PERMANENT deletion. Never throws.
+async function freeFileBlob(url: unknown): Promise<void> {
+  if (typeof url !== "string" || !url) return;
+  try {
+    if (url.startsWith("/api/uploads/")) {
+      const name = url.split("/").pop();
+      if (name) await unlink(path.join(process.cwd(), "public", "uploads", name)).catch(() => {});
+    } else if (/^https?:\/\//.test(url) && isS3Configured()) {
+      const key = new URL(url).pathname.replace(/^\/+/, "");
+      if (key) await deleteObject(key).catch(() => {});
+    }
+  } catch { /* best-effort — purge proceeds regardless */ }
+}
+
+// Free any external storage a trashed item references (currently file blobs).
+// Call before permanently deleting a TrashItem.
+export async function freeTrashStorage(entityType: string, snapshot: unknown): Promise<void> {
+  if (entityType !== "file") return;
+  const url = (snapshot as { row?: { url?: unknown } } | null)?.row?.url;
+  await freeFileBlob(url);
+}
 
 export const TRASH_LABEL: Record<TrashType, string> = {
   note: "Note", sop: "SOP", whiteboard: "Whiteboard", table: "Table",
@@ -135,8 +161,14 @@ export async function restoreFromTrash(item: { id: string; entityType: string; s
   await prisma.trashItem.delete({ where: { id: item.id } });
 }
 
-// Permanently delete trash older than 60 days for an org.
+// Permanently delete trash older than 60 days for an org, freeing file blobs.
 export async function purgeExpiredTrash(organizationId: string): Promise<void> {
   const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  // Free blobs for expiring files first (snapshot holds the url).
+  const expiringFiles = await prisma.trashItem.findMany({
+    where: { organizationId, deletedAt: { lt: cutoff }, entityType: "file" },
+    select: { entityType: true, snapshot: true },
+  });
+  for (const it of expiringFiles) await freeTrashStorage(it.entityType, it.snapshot);
   await prisma.trashItem.deleteMany({ where: { organizationId, deletedAt: { lt: cutoff } } });
 }

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { freeTrashStorage } from "@/lib/trash";
 
 // DELETE: permanently delete a trashed item (manager-gated).
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -27,9 +28,10 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     return jsonSuccess({ deleted: true });
   }
 
-  const item = await prisma.trashItem.findFirst({ where: { id, organizationId: orgId }, select: { id: true } });
+  const item = await prisma.trashItem.findFirst({ where: { id, organizationId: orgId }, select: { id: true, entityType: true, snapshot: true } });
   if (!item) return jsonError("Not found", 404);
 
+  await freeTrashStorage(item.entityType, item.snapshot); // reclaim file blob, if any
   await prisma.trashItem.delete({ where: { id } });
   return jsonSuccess({ deleted: true });
 }
