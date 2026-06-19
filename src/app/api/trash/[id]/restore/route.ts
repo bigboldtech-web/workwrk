@@ -10,8 +10,26 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { id } = await params;
+  const orgId = getOrgId(session);
+
+  // Archived Docs / Whiteboards: restore = unarchive in place.
+  if (id.startsWith("doc:")) {
+    const docId = id.slice(4);
+    const found = await prisma.doc.findFirst({ where: { id: docId, organizationId: orgId }, select: { id: true } });
+    if (!found) return jsonError("Not found", 404);
+    await prisma.doc.update({ where: { id: docId }, data: { archivedAt: null } });
+    return jsonSuccess({ restored: true });
+  }
+  if (id.startsWith("wb:")) {
+    const wbId = id.slice(3);
+    const found = await prisma.whiteboard.findFirst({ where: { id: wbId, organizationId: orgId }, select: { id: true } });
+    if (!found) return jsonError("Not found", 404);
+    await prisma.whiteboard.update({ where: { id: wbId }, data: { archivedAt: null } });
+    return jsonSuccess({ restored: true });
+  }
+
   const item = await prisma.trashItem.findFirst({
-    where: { id, organizationId: getOrgId(session) },
+    where: { id, organizationId: orgId },
     select: { id: true, entityType: true, snapshot: true },
   });
   if (!item) return jsonError("Not found", 404);

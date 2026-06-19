@@ -55,7 +55,7 @@ export default function TrashPage() {
   async function restore(it: Item) {
     setBusy(it.id);
     try {
-      const res = await fetch(`/api/trash/${it.id}/restore`, { method: "POST" });
+      const res = await fetch(`/api/trash/${encodeURIComponent(it.id)}/restore`, { method: "POST" });
       if (res.ok) { toast(`Restored ${TYPE_META[it.entityType]?.label ?? "item"}`); await load(); }
       else toast((await res.json().catch(() => ({})))?.error || "Couldn't restore");
     } catch { toast("Couldn't restore"); } finally { setBusy(null); }
@@ -64,7 +64,7 @@ export default function TrashPage() {
     if (!confirm(`Permanently delete “${it.label}”? This cannot be undone.`)) return;
     setBusy(it.id);
     try {
-      const res = await fetch(`/api/trash/${it.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/trash/${encodeURIComponent(it.id)}`, { method: "DELETE" });
       if (res.ok) { toast("Deleted permanently"); await load(); } else toast("Couldn't delete");
     } catch { toast("Couldn't delete"); } finally { setBusy(null); }
   }
