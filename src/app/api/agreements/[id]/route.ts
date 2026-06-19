@@ -32,6 +32,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.fields !== undefined) data.fields = body.fields;
   if (body.status !== undefined) data.status = body.status;
   if (body.category !== undefined) data.category = body.category || null;
+  if (body.archived !== undefined) data.archivedAt = body.archived ? new Date() : null;
 
   const updated = await prisma.agreement.update({ where: { id }, data });
   return jsonSuccess(updated);

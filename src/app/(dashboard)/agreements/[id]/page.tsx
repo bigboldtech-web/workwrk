@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { FileSignature, ArrowLeft, Loader2, Send, Link2, Pencil, Check, LayoutTemplate, Copy, X } from "lucide-react";
+import { FileSignature, ArrowLeft, Loader2, Send, Link2, Pencil, Check, LayoutTemplate, Copy, X, Archive } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -131,6 +131,13 @@ export default function AgreementEditorPage() {
     setAg((a) => (a ? { ...a, category } : a));
     patchAgreement({ category });
   }
+  async function archive() {
+    if (!ag) return;
+    if (!confirm("Move this to Trash? It will be auto-deleted after 60 days.")) return;
+    const res = await fetch(`/api/agreements/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: true }) });
+    if (res.ok) { toast("Moved to Trash"); window.location.href = ag.isTemplate ? "/agreements?view=templates" : "/agreements"; }
+    else toast("Couldn't archive");
+  }
 
   return (
     <>
@@ -158,6 +165,7 @@ export default function AgreementEditorPage() {
                 </button>
               </>
             )}
+            <button type="button" onClick={archive} title="Move to Trash" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50 hover:text-red-600"><Archive className="h-3.5 w-3.5" /></button>
             <Link href={ag?.isTemplate ? "/agreements?view=templates" : "/agreements"} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><ArrowLeft className="h-3.5 w-3.5" /> All</Link>
           </div>
         }

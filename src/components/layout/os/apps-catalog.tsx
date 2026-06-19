@@ -1388,6 +1388,7 @@ export const APPS: AppEntry[] = [
     Sidebar: linksSidebar([
       { href: "/agreements", label: "All contracts", Icon: FileSignature },
       { href: "/agreements?view=templates", label: "Templates", Icon: Folder },
+      { href: "/agreements?view=trash", label: "Trash", Icon: Trash2 },
     ]) },
   { key: "learning", label: "Learning", Icon: GraduationCap, defaultHref: "/learning",
     matchPaths: ["/learning"], category: "Knowledge",

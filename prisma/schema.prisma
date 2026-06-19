@@ -2389,6 +2389,7 @@ model Agreement {
   status         String           @default("DRAFT") // DRAFT | SENT | PARTIALLY_SIGNED | COMPLETED | VOIDED
   category       String? // folder/bifurcation — e.g. NDA, Vendor, Employment, Partner
   isTemplate     Boolean          @default(false) // reusable template vs a live agreement
+  archivedAt     DateTime? // soft-archive; purged 60 days after this timestamp
   templateId     String?
   createdById    String?
   createdAt      DateTime         @default(now())
@@ -2398,6 +2399,7 @@ model Agreement {
   @@index([organizationId])
   @@index([status])
   @@index([isTemplate])
+  @@index([archivedAt])
 }
 
 // A recipient on an agreement — internal org user or external contact. Each
