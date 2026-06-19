@@ -21,10 +21,10 @@ import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
 import { AgreementFieldBuilder, ordinal, type PlacedField, type BuilderParty } from "@/components/agreements/field-builder";
 
 type Party = BuilderParty;
-type Agreement = { id: string; title: string; content: string; status: string; category?: string | null; sourceType?: string; pdfUrl?: string | null; fields?: PlacedField[]; parties: Party[] };
+type Agreement = { id: string; title: string; content: string; status: string; category?: string | null; isTemplate?: boolean; sourceType?: string; pdfUrl?: string | null; fields?: PlacedField[]; parties: Party[] };
 type SendLink = { partyId: string; name: string; email: string; link: string };
 
-const CATEGORY_OPTIONS = ["NDA", "Vendor", "Employment", "Partner", "Sales", "Service", "Other"];
+const CATEGORY_OPTIONS = ["SLA", "NDA", "Vendor", "Employment", "Partner", "Sales", "Service", "Other"];
 
 export default function AgreementEditorPage() {
   const params = useParams<{ id: string }>();
@@ -121,6 +121,12 @@ export default function AgreementEditorPage() {
     const res = await fetch(`/api/agreements/${id}/save-as-template`, { method: "POST" });
     if (res.ok) toast("Saved as template"); else toast("Couldn't save template");
   }
+  async function useTemplate() {
+    const res = await fetch(`/api/agreements`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fromTemplateId: id }) });
+    if (!res.ok) { toast("Couldn't create contract"); return; }
+    const j = await res.json(); const a = j.data ?? j;
+    if (a?.id) window.location.href = `/agreements/${a.id}`;
+  }
   function setCategory(category: string) {
     setAg((a) => (a ? { ...a, category } : a));
     patchAgreement({ category });
@@ -129,11 +135,11 @@ export default function AgreementEditorPage() {
   return (
     <>
       <OsTitleBar
-        title="Agreement"
+        title={ag?.isTemplate ? "Contract template" : "Contract"}
         Icon={FileSignature}
         iconGradient={GRAD.indigoBlue}
         showStandardActions={false}
-        description={ag ? ag.status.replace(/_/g, " ").toLowerCase() : ""}
+        description={ag ? (ag.isTemplate ? "reusable template" : ag.status.replace(/_/g, " ").toLowerCase()) : ""}
         actions={
           <div className="flex items-center gap-2">
             {ag && ag.sourceType !== "pdf" ? (
@@ -141,18 +147,24 @@ export default function AgreementEditorPage() {
                 {editText ? <><Check className="h-3.5 w-3.5" /> Done editing</> : <><Pencil className="h-3.5 w-3.5" /> Edit text</>}
               </button>
             ) : null}
-            <button type="button" onClick={saveAsTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><LayoutTemplate className="h-3.5 w-3.5" /> Save as template</button>
-            <button type="button" onClick={copyViewLink} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Link2 className="h-3.5 w-3.5" /> Copy view link</button>
-            <button type="button" onClick={send} disabled={sendBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
-              {sendBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send to signers
-            </button>
-            <Link href="/agreements" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><ArrowLeft className="h-3.5 w-3.5" /> All</Link>
+            {ag?.isTemplate ? (
+              <button type="button" onClick={useTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500"><FileSignature className="h-3.5 w-3.5" /> Use template</button>
+            ) : (
+              <>
+                <button type="button" onClick={saveAsTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><LayoutTemplate className="h-3.5 w-3.5" /> Save as template</button>
+                <button type="button" onClick={copyViewLink} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Link2 className="h-3.5 w-3.5" /> Copy view link</button>
+                <button type="button" onClick={send} disabled={sendBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                  {sendBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send to signers
+                </button>
+              </>
+            )}
+            <Link href={ag?.isTemplate ? "/agreements?view=templates" : "/agreements"} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><ArrowLeft className="h-3.5 w-3.5" /> All</Link>
           </div>
         }
       />
 
       {loadErr ? (
-        <div className="px-6 py-8 text-sm text-zinc-500">Couldn&apos;t load this agreement. <Link href="/agreements" className="text-violet-600 underline">Back</Link></div>
+        <div className="px-6 py-8 text-sm text-zinc-500">Couldn&apos;t load this contract. <Link href="/agreements" className="text-violet-600 underline">Back</Link></div>
       ) : !ag ? (
         <div className="flex items-center gap-2 px-6 py-8 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
       ) : (
@@ -162,7 +174,7 @@ export default function AgreementEditorPage() {
               type="text"
               value={title}
               onChange={(e) => saveTitle(e.target.value)}
-              placeholder="Agreement title…"
+              placeholder="Contract title…"
               className="min-w-0 flex-1 border-0 border-b border-zinc-200 px-0 py-1 text-2xl font-semibold tracking-[-0.01em] text-zinc-900 outline-none focus:border-zinc-300"
             />
             <label className="flex items-center gap-1.5 text-[12px] text-zinc-500">

@@ -82,8 +82,8 @@ export async function POST(req: NextRequest) {
       category: typeof body.category === "string" ? body.category : null,
       isTemplate,
       createdById: getUserId(session),
-      // Live agreements start with the two standard parties.
-      parties: isTemplate ? undefined : {
+      // Start with the two standard parties (company + counterparty).
+      parties: {
         create: [
           { name: "1st Party", email: "", role: "COMPANY", order: 0, token: token() },
           { name: "2nd Party", email: "", role: "SIGNER", order: 1, token: token() },
