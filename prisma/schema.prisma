@@ -2292,6 +2292,11 @@ model Policy {
   content         String
   category        String? // "HR", "Security", "Compliance", "Operations", "Code of Conduct", "Leave", "Expense"
   version         Int                    @default(1)
+  // The version that acknowledgements are measured against. Bumping `version`
+  // (any edit) does NOT invalidate acks; only bumping `ackVersion` (publish with
+  // "require re-acknowledgement") forces everyone to re-acknowledge.
+  ackVersion      Int                    @default(1)
+  ackStatement    String? // custom attestation text; a default is used when null
   status          String                 @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
   requiresAck     Boolean                @default(true) // Requires employee acknowledgment
   effectiveDate   DateTime?
@@ -2307,15 +2312,23 @@ model Policy {
   @@index([status])
 }
 
+// Version-pinned, attested acknowledgement record — the legal evidence row.
+// One row per (policy, user, version): re-publishing with re-acknowledgement
+// required produces a new row for the new version rather than overwriting.
 model PolicyAcknowledgment {
-  id             String   @id @default(cuid())
-  policyId       String
-  policy         Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  userId         String
-  acknowledgedAt DateTime @default(now())
-  ipAddress      String?
+  id              String   @id @default(cuid())
+  policyId        String
+  policy          Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  userId          String
+  version         Int? // integer version acknowledged (denormalized; survives version-row deletion)
+  policyVersionId String? // optional link to the PolicyVersion row, when one exists
+  acknowledgedAt  DateTime @default(now())
+  ipAddress       String?
+  userAgent       String? // captured for the audit trail
+  contentHash     String? // sha256 of the acknowledged version's content (tamper-evidence)
+  attestation     String? // exact statement text the user agreed to
 
-  @@unique([policyId, userId])
+  @@unique([policyId, userId, version])
   @@index([userId])
   @@index([policyId])
 }
@@ -2356,6 +2369,54 @@ model PolicyVersion {
 
   @@index([policyId])
   @@index([version])
+}
+
+// ==========================================
+// AGREEMENTS (BreezeDoc-style e-signature)
+// ==========================================
+
+// A document-signing envelope: authored HTML content + placed fields, sent to
+// one or more parties (internal users or external emails) who sign via a link.
+model Agreement {
+  id             String           @id @default(cuid())
+  organizationId String
+  title          String
+  content        String           @default("") // authored HTML (BlockNote)
+  sourceType     String           @default("blocknote") // "blocknote" | "pdf"
+  pdfUrl         String?
+  // Placed fields: [{ id, type:"signature|initials|text|date", partyId, page, x, y, w, h, label, required }]
+  fields         Json             @default("[]")
+  status         String           @default("DRAFT") // DRAFT | SENT | PARTIALLY_SIGNED | COMPLETED | VOIDED
+  templateId     String?
+  createdById    String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  parties        AgreementParty[]
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+// A recipient on an agreement — internal org user or external contact. Each
+// carries its own public signing token + status + audit + filled values.
+model AgreementParty {
+  id          String    @id @default(cuid())
+  agreementId String
+  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  role        String    @default("SIGNER") // SIGNER | CLIENT | THIRD_PARTY | INTERNAL
+  name        String
+  email       String
+  userId      String? // set when the party is an internal org user
+  order       Int       @default(0) // signing order
+  token       String    @unique // public /sign/[token]
+  status      String    @default("PENDING") // PENDING | VIEWED | SIGNED | DECLINED
+  values      Json      @default("{}") // { fieldId: text | date | signatureDataUrl }
+  signedAt    DateTime?
+  ipAddress   String?
+  createdAt   DateTime  @default(now())
+
+  @@index([agreementId])
+  @@index([token])
 }
 
 // ==========================================

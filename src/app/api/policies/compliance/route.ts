@@ -1,24 +1,26 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { summarizeUserAcks, ackStatusFor, daysOverdue, type AckRecord } from "@/lib/policy-evidence";
 
-// GET: Policy compliance (acknowledgement adoption) dashboard data.
-// Ack-based analogue of /api/sop-assignments/compliance: every PUBLISHED
-// policy that requiresAck should be acknowledged by every active org user.
+// GET: Policy compliance dashboard — acknowledgement evidence, version-aware.
+// "Acked" means acked the CURRENT required version (ack.version >= ackVersion).
+// Surfaces compliance RISK (overdue, out-of-date re-acks, gaps), not a leaderboard.
 export async function GET(_req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
+  const now = new Date();
 
   const [policies, users] = await Promise.all([
     prisma.policy.findMany({
       where: { organizationId: orgId, status: "PUBLISHED", requiresAck: true },
       select: {
-        id: true, title: true, category: true,
-        acknowledgments: { select: { userId: true } },
-        assignments: { select: { userId: true } },
+        id: true, title: true, category: true, ackVersion: true,
+        acknowledgments: { select: { userId: true, version: true, acknowledgedAt: true } },
+        assignments: { select: { userId: true, dueDate: true } },
       },
     }),
     prisma.user.findMany({
@@ -32,75 +34,67 @@ export async function GET(_req: NextRequest) {
   const totalUsers = users.length;
   const totalPolicies = policies.length;
 
-  // For each policy: the EXPECTED audience — its assignees if it's been
-  // assigned to anyone, otherwise all active users — and who acked. Compliance
-  // is acked-vs-expected, so assigning narrows the obligation to the right people.
-  const expectedByPolicy = new Map<string, Set<string>>();
-  const ackByPolicy = new Map<string, Set<string>>();
-  for (const p of policies) {
-    const assigned = new Set(p.assignments.map((a) => a.userId).filter((uid) => activeIds.has(uid)));
-    expectedByPolicy.set(p.id, assigned.size > 0 ? assigned : new Set(activeIds));
-    ackByPolicy.set(p.id, new Set(p.acknowledgments.map((a) => a.userId).filter((uid) => activeIds.has(uid))));
-  }
-
-  let totalRequired = 0;
-  let totalAcked = 0;
-  for (const p of policies) {
-    const exp = expectedByPolicy.get(p.id)!;
-    const ack = ackByPolicy.get(p.id)!;
-    totalRequired += exp.size;
-    for (const uid of exp) if (ack.has(uid)) totalAcked++;
-  }
-  const orgRate = totalRequired > 0 ? Math.round((totalAcked / totalRequired) * 100) : 0;
-
-  const policyCompliance = policies
-    .map((p) => {
-      const exp = expectedByPolicy.get(p.id)!;
-      const ack = ackByPolicy.get(p.id)!;
-      let acked = 0;
-      for (const uid of exp) if (ack.has(uid)) acked++;
-      return { policyId: p.id, title: p.title, category: p.category, acked, total: exp.size, rate: exp.size > 0 ? Math.round((acked / exp.size) * 100) : 0 };
-    })
-    .sort((a, b) => a.rate - b.rate);
-
-  // Per-department + per-person + pending, iterating each policy's expected set.
+  // Expected audience per policy: its assignees if assigned to anyone, else all
+  // active users. Assigning narrows the obligation to the right people.
+  type Row = { policyId: string; policyTitle: string; userId: string; userName: string; department: string; dueDate: Date | null; daysOverdue: number; status: string; lastAckedVersion: number | null; assigned: boolean };
+  const gaps: Row[] = [];
   const deptMap = new Map<string, { name: string; total: number; acked: number }>();
-  const personMap = new Map<string, { total: number; acked: number }>();
-  const pending: { policyId: string; policyTitle: string; userId: string; userName: string; department: string }[] = [];
-  for (const p of policies) {
-    const exp = expectedByPolicy.get(p.id)!;
-    const ack = ackByPolicy.get(p.id)!;
-    for (const uid of exp) {
+  let totalRequired = 0, totalAcked = 0, overdue = 0, outOfDate = 0;
+
+  const policyCompliance = policies.map((p) => {
+    const assignedDue = new Map<string, Date | null>();
+    for (const a of p.assignments) if (activeIds.has(a.userId)) assignedDue.set(a.userId, a.dueDate);
+    const expected = assignedDue.size > 0 ? new Set(assignedDue.keys()) : new Set(activeIds);
+
+    const acksByUser = new Map<string, AckRecord[]>();
+    for (const a of p.acknowledgments) {
+      if (!activeIds.has(a.userId)) continue;
+      (acksByUser.get(a.userId) ?? acksByUser.set(a.userId, []).get(a.userId)!).push(a);
+    }
+
+    let acked = 0;
+    for (const uid of expected) {
       const u = userById.get(uid);
       if (!u) continue;
+      const summary = summarizeUserAcks(p.ackVersion, acksByUser.get(uid) ?? []);
+      const due = assignedDue.get(uid) ?? null;
+      const status = ackStatusFor(summary, due, now);
+
       const dId = u.department?.id || "unassigned";
       const dName = u.department?.name || "Unassigned";
       if (!deptMap.has(dId)) deptMap.set(dId, { name: dName, total: 0, acked: 0 });
-      if (!personMap.has(uid)) personMap.set(uid, { total: 0, acked: 0 });
       const d = deptMap.get(dId)!;
-      const pm = personMap.get(uid)!;
-      d.total++; pm.total++;
-      if (ack.has(uid)) { d.acked++; pm.acked++; }
-      else pending.push({ policyId: p.id, policyTitle: p.title, userId: uid, userName: `${u.firstName} ${u.lastName}`, department: dName });
+      d.total++;
+      totalRequired++;
+
+      if (status === "acked") { acked++; totalAcked++; d.acked++; }
+      else {
+        if (status === "overdue") overdue++;
+        if (summary.hasOlderAck) outOfDate++;
+        gaps.push({
+          policyId: p.id, policyTitle: p.title, userId: uid, userName: `${u.firstName} ${u.lastName}`,
+          department: dName, dueDate: due, daysOverdue: daysOverdue(due, now), status,
+          lastAckedVersion: summary.record?.version ?? null, assigned: assignedDue.has(uid),
+        });
+      }
     }
-  }
+    return { policyId: p.id, title: p.title, category: p.category, acked, total: expected.size, rate: expected.size > 0 ? Math.round((acked / expected.size) * 100) : 0 };
+  }).sort((a, b) => a.rate - b.rate);
+
+  const orgRate = totalRequired > 0 ? Math.round((totalAcked / totalRequired) * 100) : 0;
 
   const departmentCompliance = [...deptMap.entries()]
     .map(([id, d]) => ({ departmentId: id, name: d.name, total: d.total, acked: d.acked, rate: d.total > 0 ? Math.round((d.acked / d.total) * 100) : 0 }))
-    .sort((a, b) => b.rate - a.rate);
+    .sort((a, b) => a.rate - b.rate);
 
-  const personScores = [...personMap.entries()]
-    .map(([uid, pm]) => {
-      const u = userById.get(uid)!;
-      return { userId: uid, name: `${u.firstName} ${u.lastName}`, department: u.department?.name || "—", total: pm.total, acked: pm.acked, rate: pm.total > 0 ? Math.round((pm.acked / pm.total) * 100) : 0 };
-    })
-    .sort((a, b) => b.rate - a.rate);
+  // Open gaps: overdue first (by how overdue), then out-of-date, then pending.
+  const order = { overdue: 0, "out-of-date": 1, pending: 2 } as Record<string, number>;
+  gaps.sort((a, b) => (order[a.status] - order[b.status]) || (b.daysOverdue - a.daysOverdue));
 
   return jsonSuccess({
-    overview: { totalPolicies, totalUsers, totalRequired, totalAcked, orgRate, pending: pending.length },
+    overview: { totalPolicies, totalUsers, totalRequired, totalAcked, orgRate, pending: gaps.length, overdue, outOfDate },
     policyCompliance,
     departmentCompliance,
-    personScores,
-    pendingList: pending.slice(0, 100),
+    pendingList: gaps.slice(0, 100),
   });
 }

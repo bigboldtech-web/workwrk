@@ -280,7 +280,7 @@ interface Props {
    * which gates doc-only features (sub-page parent, copy-link base) so the
    * SAME editor works without a backing Doc.
    */
-  entity?: { type: "doc" | "sop" | "policy"; id: string };
+  entity?: { type: "doc" | "sop" | "policy" | "agreement"; id: string };
   /**
    * HTML-mode seeding. When set (and no bnDoc/legacyBlocks), the editor is
    * seeded by parsing this HTML into blocks on mount. Used by surfaces that
@@ -440,7 +440,7 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
         <BlockDragMenuProvider
           value={{
             docId: ent.id,
-            linkBase: ent.type === "sop" ? "/sops/" : ent.type === "policy" ? "/policies/" : "/docs/",
+            linkBase: ent.type === "sop" ? "/sops/" : ent.type === "policy" ? "/policies/" : ent.type === "agreement" ? "/agreements/" : "/docs/",
             features: { comment: !!onComment, askAI: !!onAskAI },
             onComment: (id) => onComment?.(id),
             onAskAI: () => onAskAI?.(),

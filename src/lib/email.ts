@@ -28,7 +28,7 @@ const FROM_ADDRESS = process.env.SMTP_FROM || "WorkwrK <noreply@workwrk.com>";
 // Preference Types
 // ==========================================
 
-export type EmailCategory = "kra" | "review" | "sop" | "policy" | "kudos" | "invitation" | "reminder" | "verify" | "survey";
+export type EmailCategory = "kra" | "review" | "sop" | "policy" | "agreement" | "kudos" | "invitation" | "reminder" | "verify" | "survey";
 
 const CATEGORY_TO_PREF: Record<string, string> = {
   kra: "kraNotifications",

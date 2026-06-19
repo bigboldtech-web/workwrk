@@ -18,7 +18,7 @@ import {
   HardDrive, Boxes,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
-  ShieldCheck,
+  ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -1381,6 +1381,12 @@ export const APPS: AppEntry[] = [
     Sidebar: linksSidebar([
       { href: "/policies",            label: "All policies", Icon: ShieldCheck },
       { href: "/policies/compliance", label: "Compliance",   Icon: BarChart3 },
+    ]) },
+  { key: "agreements", label: "Agreements", Icon: FileSignature, defaultHref: "/agreements",
+    matchPaths: ["/agreements"], category: "Knowledge", requiredAccess: "hr-admin",
+    newAction: { label: "New agreement", href: "/agreements?new=1" },
+    Sidebar: linksSidebar([
+      { href: "/agreements", label: "All agreements", Icon: FileSignature },
     ]) },
   { key: "learning", label: "Learning", Icon: GraduationCap, defaultHref: "/learning",
     matchPaths: ["/learning"], category: "Knowledge",
