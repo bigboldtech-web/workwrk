@@ -16,8 +16,6 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const agreement = await prisma.agreement.findFirst({ where: { id, organizationId: orgId }, include: { parties: true } });
   if (!agreement) return jsonError("Not found", 404);
   if (agreement.parties.length === 0) return jsonError("Add at least one party before sending");
-  const missing = agreement.parties.filter((p) => !p.email || !p.email.trim());
-  if (missing.length > 0) return jsonError(`Add an email for: ${missing.map((p) => p.name).join(", ")}`);
 
   await prisma.agreement.update({ where: { id }, data: { status: "SENT" } });
   await prisma.agreementParty.updateMany({ where: { agreementId: id, status: { not: "SIGNED" } }, data: { status: "PENDING" } });
@@ -28,6 +26,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const link = `${baseUrl}/sign/${p.token}`;
     links.push({ partyId: p.id, name: p.name, email: p.email, link });
     if (p.status === "SIGNED") continue;
+    if (!p.email || !p.email.trim()) continue; // no email → share the link manually
     const { subject, html } = documentSignTemplate({ documentTitle: agreement.title, signerName: p.name, signLink: link });
     try {
       await sendEmail({

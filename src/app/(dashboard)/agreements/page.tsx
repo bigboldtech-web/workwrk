@@ -1,19 +1,21 @@
 "use client";
 
-/* Agreements — BreezeDoc-style e-signature documents. List + create.
- *   GET  /api/agreements        list
- *   POST /api/agreements        create (blocknote | pdf) → open editor
+/* Agreements — BreezeDoc-style e-signature documents.
+ * Folders (by category) + a Templates view; create via Write / Upload PDF /
+ * Use template.
+ *   GET  /api/agreements[?templates=1]
+ *   POST /api/agreements   (blocknote | pdf | fromTemplateId)
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { FileSignature, Plus, Loader2, Users, CheckCircle2, PenLine, Upload, LayoutTemplate, X } from "lucide-react";
+import { FileSignature, Plus, Loader2, Users, CheckCircle2, PenLine, Upload, LayoutTemplate, X, Folder } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
-type Row = { id: string; title: string; status: string; updatedAt: string; partyCount: number; signedCount: number };
+type Row = { id: string; title: string; status: string; category: string | null; isTemplate: boolean; updatedAt: string; partyCount: number; signedCount: number };
 
 const STATUS_STYLE: Record<string, string> = {
   DRAFT: "bg-zinc-100 text-zinc-600",
@@ -27,21 +29,25 @@ export default function AgreementsPage() {
   const router = useRouter();
   const search = useSearchParams();
   const { toast } = useOsToast();
+  const view = search?.get("view") === "templates" ? "templates" : "agreements";
+
   const [rows, setRows] = useState<Row[] | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [step, setStep] = useState<"choose" | "template">("choose");
+  const [templates, setTemplates] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const newHandled = useRef(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/agreements");
+      const res = await fetch(`/api/agreements${view === "templates" ? "?templates=1" : ""}`);
       if (!res.ok) { setRows([]); return; }
       const j = await res.json();
       setRows(Array.isArray(j) ? j : (j.data ?? []));
     } catch { setRows([]); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  }, [view]);
+  useEffect(() => { setRows(null); void load(); }, [load]);
 
   const createWith = useCallback(async (body: Record<string, unknown>) => {
     if (busy) return;
@@ -59,39 +65,59 @@ export default function AgreementsPage() {
   async function onPickPdf(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) return;
-    if (busy) return;
+    if (!file || busy) return;
     setBusy(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
+      const fd = new FormData(); fd.append("file", file);
       const up = await fetch("/api/upload", { method: "POST", body: fd });
       if (!up.ok) { toast("Upload failed"); return; }
       const uj = await up.json();
       const url = uj.url ?? uj.data?.url;
       if (!url) { toast("Upload failed"); return; }
-      setBusy(false); // createWith manages its own busy flag
+      setBusy(false);
       await createWith({ sourceType: "pdf", pdfUrl: url, title: file.name.replace(/\.pdf$/i, "") });
     } catch { toast("Upload failed"); setBusy(false); }
   }
 
-  // Sidebar "+" routes here with ?new=1 — open the create chooser.
+  async function openTemplatePicker() {
+    setStep("template");
+    if (templates === null) {
+      try { const r = await fetch("/api/agreements?templates=1"); const j = await r.json(); setTemplates(Array.isArray(j) ? j : (j.data ?? [])); }
+      catch { setTemplates([]); }
+    }
+  }
+  function openNew() { setStep("choose"); setShowNew(true); }
+
   useEffect(() => {
-    if (search?.get("new") === "1" && !newHandled.current) { newHandled.current = true; setShowNew(true); }
+    if (search?.get("new") === "1" && !newHandled.current) { newHandled.current = true; openNew(); }
   }, [search]);
+
+  // Group live agreements into folders by category. Templates view is flat.
+  const groups = (() => {
+    const list = rows ?? [];
+    if (view === "templates") return [{ name: "Templates", items: list }];
+    const m = new Map<string, Row[]>();
+    for (const r of list) { const c = r.category || "Uncategorized"; (m.get(c) ?? m.set(c, []).get(c)!).push(r); }
+    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, items]) => ({ name, items }));
+  })();
 
   return (
     <>
       <OsTitleBar
-        title="Agreements"
-        Icon={FileSignature}
+        title={view === "templates" ? "Agreement templates" : "Agreements"}
+        Icon={view === "templates" ? Folder : FileSignature}
         iconGradient={GRAD.indigoBlue}
         showStandardActions={false}
-        description={rows === null ? "Loading…" : `${rows.length} agreement${rows.length === 1 ? "" : "s"}`}
+        description={rows === null ? "Loading…" : `${rows.length} ${view === "templates" ? "template" : "agreement"}${rows.length === 1 ? "" : "s"}`}
         actions={
-          <button type="button" onClick={() => setShowNew(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500">
-            <Plus className="h-3.5 w-3.5" /> New agreement
-          </button>
+          <div className="flex items-center gap-2">
+            <Link href={view === "templates" ? "/agreements" : "/agreements?view=templates"} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              {view === "templates" ? <><FileSignature className="h-3.5 w-3.5" /> All agreements</> : <><Folder className="h-3.5 w-3.5" /> Templates</>}
+            </Link>
+            <button type="button" onClick={openNew} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500">
+              <Plus className="h-3.5 w-3.5" /> New agreement
+            </button>
+          </div>
         }
       />
       <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={onPickPdf} />
@@ -102,26 +128,42 @@ export default function AgreementsPage() {
         ) : rows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center">
             <FileSignature className="mx-auto h-8 w-8 text-zinc-300" />
-            <div className="mt-3 text-sm font-medium text-zinc-700">No agreements yet</div>
-            <div className="mt-1 text-[13px] text-zinc-500">Write or upload a document, add signers, place signature fields, and send it for signature.</div>
-            <button type="button" onClick={() => setShowNew(true)} className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-500">
-              <Plus className="h-4 w-4" /> New agreement
-            </button>
+            <div className="mt-3 text-sm font-medium text-zinc-700">{view === "templates" ? "No templates yet" : "No agreements yet"}</div>
+            <div className="mt-1 text-[13px] text-zinc-500">{view === "templates" ? "Open an agreement and choose “Save as template” to reuse it later." : "Write or upload a document, add signers, place fields, and send it."}</div>
+            {view === "agreements" && (
+              <button type="button" onClick={openNew} className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-500"><Plus className="h-4 w-4" /> New agreement</button>
+            )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {rows.map((r) => (
-              <Link key={r.id} href={`/agreements/${r.id}`} className="rounded-xl border border-zinc-200 bg-white p-4 hover:border-zinc-300 hover:shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">{r.title}</div>
-                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium capitalize ${STATUS_STYLE[r.status] ?? "bg-zinc-100 text-zinc-600"}`}>{r.status.replace(/_/g, " ").toLowerCase()}</span>
+          <div className="space-y-7">
+            {groups.map((g) => (
+              <section key={g.name}>
+                {view === "agreements" && (
+                  <header className="mb-2.5 flex items-center gap-2">
+                    <Folder className="h-3.5 w-3.5 text-zinc-400" />
+                    <h2 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-500">{g.name}</h2>
+                    <span className="rounded-full bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500">{g.items.length}</span>
+                    <span className="h-px flex-1 bg-zinc-100" />
+                  </header>
+                )}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {g.items.map((r) => (
+                    <Link key={r.id} href={`/agreements/${r.id}`} className="rounded-xl border border-zinc-200 bg-white p-4 hover:border-zinc-300 hover:shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">{r.title}</div>
+                        {view === "templates"
+                          ? <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700">template</span>
+                          : <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium capitalize ${STATUS_STYLE[r.status] ?? "bg-zinc-100 text-zinc-600"}`}>{r.status.replace(/_/g, " ").toLowerCase()}</span>}
+                      </div>
+                      <div className="mt-3 flex items-center gap-3 text-[12px] text-zinc-400">
+                        <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {r.partyCount} part{r.partyCount === 1 ? "y" : "ies"}</span>
+                        {view === "agreements" && <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> {r.signedCount} signed</span>}
+                        <span className="ml-auto">{new Date(r.updatedAt).toLocaleDateString()}</span>
+                      </div>
+                    </Link>
+                  ))}
                 </div>
-                <div className="mt-3 flex items-center gap-3 text-[12px] text-zinc-400">
-                  <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {r.partyCount} part{r.partyCount === 1 ? "y" : "ies"}</span>
-                  <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> {r.signedCount} signed</span>
-                  <span className="ml-auto">{new Date(r.updatedAt).toLocaleDateString()}</span>
-                </div>
-              </Link>
+              </section>
             ))}
           </div>
         )}
@@ -131,15 +173,42 @@ export default function AgreementsPage() {
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4" onClick={() => !busy && setShowNew(false)}>
           <div className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-zinc-900">New agreement</h2>
+              <h2 className="text-base font-semibold text-zinc-900">{step === "template" ? "Use a template" : "New agreement"}</h2>
               <button type="button" onClick={() => !busy && setShowNew(false)} className="rounded p-1 text-zinc-400 hover:bg-zinc-100"><X className="h-4 w-4" /></button>
             </div>
-            <p className="mb-4 text-[13px] text-zinc-500">Choose how you want to start.</p>
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-              <ChooserCard Icon={PenLine} title="Write" sub="Author a document in the editor" disabled={busy} onClick={() => createWith({ sourceType: "blocknote" })} />
-              <ChooserCard Icon={Upload} title="Upload PDF" sub="Start from an existing PDF" disabled={busy} onClick={() => fileRef.current?.click()} />
-              <ChooserCard Icon={LayoutTemplate} title="Template" sub="No templates yet" disabled onClick={() => toast("Save an agreement as a template first")} />
-            </div>
+
+            {step === "choose" ? (
+              <>
+                <p className="mb-4 text-[13px] text-zinc-500">Choose how you want to start.</p>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                  <ChooserCard Icon={PenLine} title="Write" sub="Author a document in the editor" disabled={busy} onClick={() => createWith({ sourceType: "blocknote" })} />
+                  <ChooserCard Icon={Upload} title="Upload PDF" sub="Start from an existing PDF" disabled={busy} onClick={() => fileRef.current?.click()} />
+                  <ChooserCard Icon={LayoutTemplate} title="Template" sub="Reuse a saved template" disabled={busy} onClick={openTemplatePicker} />
+                </div>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => setStep("choose")} className="mb-3 text-[12px] text-zinc-500 hover:text-zinc-800">← Back</button>
+                {templates === null ? (
+                  <div className="flex items-center gap-2 py-6 text-[13px] text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading templates…</div>
+                ) : templates.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-zinc-200 p-6 text-center text-[13px] text-zinc-500">No templates yet. Open an agreement and choose “Save as template”.</div>
+                ) : (
+                  <ul className="max-h-72 space-y-1.5 overflow-y-auto">
+                    {templates.map((t) => (
+                      <li key={t.id}>
+                        <button type="button" disabled={busy} onClick={() => createWith({ fromTemplateId: t.id })}
+                          className="flex w-full items-center gap-2 rounded-lg border border-zinc-200 p-2.5 text-left hover:border-violet-300 hover:bg-violet-50/40 disabled:opacity-50">
+                          <LayoutTemplate className="h-4 w-4 shrink-0 text-violet-500" />
+                          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-zinc-800">{t.title}</span>
+                          {t.category ? <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500">{t.category}</span> : null}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
             {busy ? <div className="mt-4 flex items-center gap-2 text-[13px] text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Working…</div> : null}
           </div>
         </div>
@@ -151,7 +220,7 @@ export default function AgreementsPage() {
 function ChooserCard({ Icon, title, sub, onClick, disabled }: { Icon: typeof PenLine; title: string; sub: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled}
-      className="flex flex-col items-start gap-2 rounded-xl border border-zinc-200 p-3.5 text-left transition-colors hover:border-violet-300 hover:bg-violet-50/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-zinc-200 disabled:hover:bg-transparent">
+      className="flex flex-col items-start gap-2 rounded-xl border border-zinc-200 p-3.5 text-left transition-colors hover:border-violet-300 hover:bg-violet-50/40 disabled:cursor-not-allowed disabled:opacity-50">
       <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 text-violet-600"><Icon className="h-5 w-5" /></span>
       <span className="text-[13px] font-semibold text-zinc-900">{title}</span>
       <span className="text-[11px] leading-snug text-zinc-500">{sub}</span>

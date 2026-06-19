@@ -2387,6 +2387,8 @@ model Agreement {
   // Placed fields: [{ id, type:"signature|initials|text|date", partyId, page, x, y, w, h, label, required }]
   fields         Json             @default("[]")
   status         String           @default("DRAFT") // DRAFT | SENT | PARTIALLY_SIGNED | COMPLETED | VOIDED
+  category       String? // folder/bifurcation — e.g. NDA, Vendor, Employment, Partner
+  isTemplate     Boolean          @default(false) // reusable template vs a live agreement
   templateId     String?
   createdById    String?
   createdAt      DateTime         @default(now())
@@ -2395,6 +2397,7 @@ model Agreement {
 
   @@index([organizationId])
   @@index([status])
+  @@index([isTemplate])
 }
 
 // A recipient on an agreement — internal org user or external contact. Each

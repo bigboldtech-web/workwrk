@@ -11,7 +11,7 @@ import { Loader2, CheckCircle2, PenLine, X } from "lucide-react";
 import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
 import { PdfPages } from "@/components/agreements/pdf-pages";
 
-type Field = { id: string; type: string; partyId: string; page?: number; x: number; y: number; w: number; h: number; label?: string; required?: boolean };
+type Field = { id: string; type: string; partyId: string; page?: number; x: number; y: number; w: number; h: number; label?: string; required?: boolean; options?: string[]; defaultValue?: string };
 type SignData = {
   title: string; content: string; sourceType?: string; pdfUrl?: string | null; status: string;
   party: { id: string; name: string; email: string; role: string; status: string };
@@ -102,6 +102,15 @@ export default function SignPage() {
           className={`flex items-center justify-center rounded border-2 ${checked ? "border-violet-500 bg-violet-500 text-white" : "border-dashed border-violet-400 bg-violet-50"}`} style={base}>
           {checked ? "✓" : ""}
         </button>
+      );
+    }
+    if (f.type === "dropdown") {
+      return (
+        <select key={f.id} value={val || f.defaultValue || ""} onChange={(e) => setValues((v) => ({ ...v, [f.id]: e.target.value }))}
+          className="rounded border-2 border-dashed border-violet-400 bg-violet-50 px-1 text-[12px] text-zinc-800 outline-none" style={base}>
+          <option value="">{f.label || "Select…"}</option>
+          {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
       );
     }
     return (

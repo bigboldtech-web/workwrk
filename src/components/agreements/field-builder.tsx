@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { Signature, Type, Calendar, PenLine, Trash2, Mail, CheckSquare, ChevronDown, UserPlus, X, Plus, Link2, CheckCircle2 } from "lucide-react";
+import { Signature, Type, Calendar, PenLine, Trash2, Mail, CheckSquare, ChevronDown, UserPlus, X, Plus, CheckCircle2 } from "lucide-react";
 import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
 import { PdfPages } from "@/components/agreements/pdf-pages";
 
@@ -28,6 +28,8 @@ export interface PlacedField {
   x: number; y: number; w: number; h: number;
   label?: string;
   required?: boolean;
+  options?: string[]; // dropdown choices
+  defaultValue?: string; // dropdown default
 }
 export interface BuilderParty { id: string; name: string; role: string; email?: string; status?: string; token?: string; order?: number }
 
@@ -66,17 +68,17 @@ interface Props {
   onAddParty: () => void;
   onRemoveParty: (id: string) => void;
   onRenameParty: (id: string, name: string) => void;
-  onSetPartyEmail: (id: string, email: string) => void;
-  onCopyLink?: (p: BuilderParty) => void;
 }
 
 export function AgreementFieldBuilder({
   agreementId, content, sourceType, pdfUrl, parties, fields,
-  onFieldsChange, onAddParty, onRemoveParty, onRenameParty, onSetPartyEmail, onCopyLink,
+  onFieldsChange, onAddParty, onRemoveParty, onRenameParty,
 }: Props) {
   const [activeParty, setActiveParty] = useState<string | null>(parties[0]?.id ?? null);
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [dragType, setDragType] = useState<FieldType | null>(null);
+  const [editParty, setEditParty] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const selected = parties.find((p) => p.id === activeParty) ? activeParty : (parties[0]?.id ?? null);
@@ -163,18 +165,55 @@ export function AgreementFieldBuilder({
               <span className="text-[11px] font-semibold text-zinc-500">{fieldLabel(f.type)} · {party?.name ?? "Party"}</span>
               <button type="button" onClick={() => setSelectedField(null)} className="text-zinc-400 hover:text-zinc-700"><X className="h-3.5 w-3.5" /></button>
             </div>
-            <label className="flex cursor-pointer items-center gap-2 text-[12px] text-zinc-700">
+
+            {f.type === "dropdown" && (() => {
+              const opts = f.options ?? ["Option 1", "Option 2"];
+              const setOpts = (next: string[]) => patchField(f.id, { options: next });
+              return (
+                <div className="mb-2">
+                  <div className="mb-1 text-[12px] font-medium text-zinc-600">Options</div>
+                  <div className="space-y-1.5">
+                    {opts.map((o, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <input value={o} onChange={(e) => setOpts(opts.map((x, j) => (j === i ? e.target.value : x)))} placeholder={`Option ${i + 1}`}
+                          className="h-7 flex-1 rounded border border-zinc-200 px-2 text-[12px] outline-none focus:border-zinc-300" />
+                        {opts.length > 1 && <button type="button" onClick={() => setOpts(opts.filter((_, j) => j !== i))} className="text-zinc-300 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>}
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => setOpts([...opts, `Option ${opts.length + 1}`])} className="mt-1.5 inline-flex items-center gap-1 text-[12px] font-medium text-violet-600 hover:text-violet-700"><Plus className="h-3 w-3" /> Add option</button>
+                </div>
+              );
+            })()}
+
+            <label className="flex cursor-pointer items-center justify-between gap-2 text-[12px] text-zinc-700">
+              Required
               <button type="button" role="switch" aria-checked={!!f.required} onClick={() => patchField(f.id, { required: !f.required })}
-                className={`relative h-4 w-7 rounded-full transition-colors ${f.required ? "bg-violet-600" : "bg-zinc-300"}`}>
+                className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${f.required ? "bg-violet-600" : "bg-zinc-300"}`}>
                 <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${f.required ? "left-3.5" : "left-0.5"}`} />
               </button>
-              Required
             </label>
+
             {(f.type === "text" || f.type === "email" || f.type === "dropdown") && (
-              <input value={f.label ?? ""} onChange={(e) => patchField(f.id, { label: e.target.value })} placeholder="Label / placeholder"
-                className="mt-2 h-7 w-full rounded border border-zinc-200 px-2 text-[12px] outline-none focus:border-zinc-300" />
+              <div className="mt-2">
+                <div className="mb-1 text-[12px] font-medium text-zinc-600">Label</div>
+                <input value={f.label ?? ""} onChange={(e) => patchField(f.id, { label: e.target.value })} placeholder="Label / placeholder"
+                  className="h-7 w-full rounded border border-zinc-200 px-2 text-[12px] outline-none focus:border-zinc-300" />
+              </div>
             )}
-            <button type="button" onClick={() => removeField(f.id)} className="mt-2 inline-flex items-center gap-1 text-[12px] text-red-500 hover:text-red-600"><Trash2 className="h-3 w-3" /> Delete field</button>
+
+            {f.type === "dropdown" && (
+              <div className="mt-2">
+                <div className="mb-1 text-[12px] font-medium text-zinc-600">Default value</div>
+                <select value={f.defaultValue ?? ""} onChange={(e) => patchField(f.id, { defaultValue: e.target.value })}
+                  className="h-8 w-full rounded border border-zinc-200 bg-white px-2 text-[12px] text-zinc-700 outline-none">
+                  <option value="">None</option>
+                  {(f.options ?? []).map((o, i) => <option key={i} value={o}>{o}</option>)}
+                </select>
+              </div>
+            )}
+
+            <button type="button" onClick={() => removeField(f.id)} className="mt-2.5 inline-flex items-center gap-1 text-[12px] text-red-500 hover:text-red-600"><Trash2 className="h-3 w-3" /> Delete field</button>
           </div>
         )}
       </div>
@@ -203,20 +242,29 @@ export function AgreementFieldBuilder({
           <div className="space-y-1.5">
             {parties.map((p) => {
               const on = selected === p.id;
+              const editing = editParty === p.id;
               const color = partyColor(parties, p.id);
+              const commit = () => { onRenameParty(p.id, draftName.trim() || p.name); setEditParty(null); };
               return (
-                <div key={p.id} onClick={() => setActiveParty(p.id)}
-                  className={`cursor-pointer rounded-lg border px-2 py-1.5 transition-colors ${on ? "border-violet-300 bg-violet-50/40" : "border-zinc-200 hover:bg-zinc-50"}`}>
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-white" style={{ background: color }}><UserPlus className="h-3.5 w-3.5" /></span>
-                    <input value={p.name} onClick={(e) => e.stopPropagation()} onChange={(e) => onRenameParty(p.id, e.target.value)} className="min-w-0 flex-1 bg-transparent text-[13px] font-medium text-zinc-800 outline-none" />
-                    {p.status === "SIGNED" ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : null}
-                    {p.token && onCopyLink ? <button type="button" onClick={(e) => { e.stopPropagation(); onCopyLink(p); }} title="Copy signing link" className="rounded p-0.5 text-zinc-300 hover:text-violet-600"><Link2 className="h-3.5 w-3.5" /></button> : null}
-                    <button type="button" onClick={(e) => { e.stopPropagation(); onRemoveParty(p.id); }} className="rounded p-0.5 text-zinc-300 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>
-                  </div>
-                  {on && (
-                    <input value={p.email ?? ""} onClick={(e) => e.stopPropagation()} onChange={(e) => onSetPartyEmail(p.id, e.target.value)} placeholder="signer email"
-                      className="mt-1.5 h-7 w-full rounded border border-zinc-200 px-2 text-[12px] outline-none focus:border-zinc-300" />
+                <div key={p.id}
+                  onClick={() => { if (!editing) setActiveParty(p.id); }}
+                  onDoubleClick={() => { setEditParty(p.id); setDraftName(p.name); }}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors ${on ? "border-violet-300 bg-violet-50/40" : "border-zinc-200 hover:bg-zinc-50"}`}>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-white" style={{ background: color }}><UserPlus className="h-3.5 w-3.5" /></span>
+                  {editing ? (
+                    <>
+                      <input autoFocus value={draftName} onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setDraftName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditParty(null); }}
+                        className="min-w-0 flex-1 rounded border border-violet-300 px-2 py-1 text-[13px] font-medium text-zinc-800 outline-none" />
+                      <button type="button" onClick={(e) => { e.stopPropagation(); commit(); }} className="rounded-md bg-violet-600 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-violet-500">Save</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-zinc-800">{p.name}</span>
+                      {p.status === "SIGNED" ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : null}
+                      <button type="button" onClick={(e) => { e.stopPropagation(); onRemoveParty(p.id); }} className="rounded p-0.5 text-zinc-300 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>
+                    </>
                   )}
                 </div>
               );
@@ -226,7 +274,7 @@ export function AgreementFieldBuilder({
             <Plus className="h-3.5 w-3.5" /> Add new party
           </button>
         </div>
-        <p className="mt-2 px-1 text-[11px] leading-relaxed text-zinc-400">Select a party, then drag a field from the right onto the document — it’s assigned to that party.</p>
+        <p className="mt-2 px-1 text-[11px] leading-relaxed text-zinc-400">Click a party to select it, then drag a field from the right onto the document. Double-click a party to rename it.</p>
       </aside>
 
       {/* ── Document (center) ── */}

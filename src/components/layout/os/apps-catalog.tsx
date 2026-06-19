@@ -1387,6 +1387,7 @@ export const APPS: AppEntry[] = [
     newAction: { label: "New agreement", href: "/agreements?new=1" },
     Sidebar: linksSidebar([
       { href: "/agreements", label: "All agreements", Icon: FileSignature },
+      { href: "/agreements?view=templates", label: "Templates", Icon: Folder },
     ]) },
   { key: "learning", label: "Learning", Icon: GraduationCap, defaultHref: "/learning",
     matchPaths: ["/learning"], category: "Knowledge",
