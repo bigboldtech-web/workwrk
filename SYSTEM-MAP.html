@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorkwrK — System Map</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root { --bg:#0d0d10; --panel:#16161c; --line:#2a2a33; --txt:#e6e6ea; --mut:#9a9aa6;
+          --done:#22c55e; --part:#f59e0b; --scaf:#38bdf8; --plan:#a78bfa; --off:#71717a; --brand:#7c3aed; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  header { padding:28px 32px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:linear-gradient(180deg,#0d0d10,rgba(13,13,16,.92)); backdrop-filter:blur(6px); z-index:5; }
+  h1 { margin:0 0 4px; font-size:22px; letter-spacing:-.01em; }
+  h1 b { color:#c4b5fd; }
+  .sub { color:var(--mut); font-size:13px; max-width:900px; }
+  nav { display:flex; gap:14px; margin-top:12px; flex-wrap:wrap; }
+  nav a { color:#c4b5fd; text-decoration:none; font-size:12.5px; padding:3px 9px; border:1px solid var(--line); border-radius:999px; }
+  nav a:hover { background:#1d1d25; }
+  main { padding:24px 32px 80px; max-width:1280px; margin:0 auto; }
+  section { margin:34px 0; }
+  h2 { font-size:16px; margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin:10px 0 18px; font-size:12.5px; color:var(--mut); }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width:10px; height:10px; border-radius:3px; display:inline-block; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; overflow:auto; }
+  .mermaid { background:transparent; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; }
+  td.feat { font-weight:600; white-space:nowrap; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+  .s-done { background:rgba(34,197,94,.14); color:#4ade80; }
+  .s-part { background:rgba(245,158,11,.14); color:#fbbf24; }
+  .s-scaf { background:rgba(56,189,248,.14); color:#7dd3fc; }
+  .s-plan { background:rgba(167,139,250,.16); color:#c4b5fd; }
+  .s-off  { background:rgba(113,113,122,.18); color:#a1a1aa; }
+  .with { color:var(--mut); font-size:12.5px; }
+  .domain { color:#c4b5fd; font-weight:700; }
+  .note { color:var(--mut); font-size:12.5px; margin:8px 2px; }
+  .grid2 { display:grid; grid-template-columns:1fr; gap:14px; }
+  ul.focus { margin:6px 0; padding-left:18px; }
+  ul.focus li { margin:4px 0; }
+  code { background:#1d1d25; padding:1px 5px; border-radius:5px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><b>WorkwrK</b> — System Map &amp; Status</h1>
+  <div class="sub">People + Project Management System (Workday/ClickUp/Monday-class). This is a living map: where we've reached, how the pieces connect, and what's left to focus on one by one. Status reflects code / typecheck / migration state — not exhaustive runtime testing.</div>
+  <nav>
+    <a href="#mind">🧠 Mind map</a>
+    <a href="#flow">🔗 How it connects</a>
+    <a href="#matrix">📊 Feature status</a>
+    <a href="#focus">🎯 Focus next</a>
+  </nav>
+  <div class="legend" style="margin-top:14px">
+    <span><i class="dot" style="background:var(--done)"></i> Shipped / working</span>
+    <span><i class="dot" style="background:var(--part)"></i> Built · needs polish / prod-deploy</span>
+    <span><i class="dot" style="background:var(--scaf)"></i> Scaffolded / placeholder</span>
+    <span><i class="dot" style="background:var(--plan)"></i> Planned / deferred</span>
+    <span><i class="dot" style="background:var(--off)"></i> Built but off-rail (descoped)</span>
+  </div>
+</header>
+
+<main>
+
+<section id="mind">
+  <h2>🧠 The whole system at a glance</h2>
+  <div class="panel">
+    <pre class="mermaid">
+mindmap
+  root((WorkwrK AI PPMS))
+    Work Management
+      Spaces
+      Boards
+      Tasks and Items
+      Notes
+      Whiteboards
+      Tables and Databases
+      Files and Library
+      Forms
+      Templates
+      Calendar
+    Alignment and Governance
+      KRAs
+      KPIs
+      OKRs
+      SOPs
+      Policies
+      Contracts e-sign
+      Reviews weekly
+    People and HR
+      Teams and Org chart
+      Onboarding
+      Recruiting and Talent
+      Time off and Timesheets
+      Engagement
+      Benefits and Payroll
+    AI
+      AI workspace
+      Agents
+      Autopilot
+      Sidekick
+      Notetaker
+      AI Performance Manager planned
+    Platform
+      Settings
+      Access resolver
+      System wide Trash
+      Automation Hub deferred
+      Integrations
+      Billing and Marketplace
+      Tools and Assets
+    Finance descoped
+      GL and Journal
+      Budgets and Reports
+      Vendors and POs
+    </pre>
+  </div>
+  <div class="note">Reads outward from the core. Five active domains (Work Management, Governance, People/HR, AI, Platform) + one descoped domain (Finance) whose code is retained but removed from the rail per the PPMS focus.</div>
+</section>
+
+<section id="flow">
+  <h2>🔗 How the features work together</h2>
+  <div class="panel">
+    <pre class="mermaid">
+flowchart TD
+  classDef done fill:#16351f,stroke:#22c55e,color:#d7f7e0;
+  classDef part fill:#3a2c10,stroke:#f59e0b,color:#fde6bf;
+  classDef plan fill:#241d3a,stroke:#a78bfa,color:#e4ddff;
+  classDef off  fill:#1f1f24,stroke:#52525b,color:#c7c7cf;
+
+  SP["Spaces"]:::done --> BO["Boards"]:::done
+  SP --> FOL["Folders"]:::done
+  SP --> NO["Notes"]:::done
+  SP --> WB["Whiteboards"]:::done
+  SP --> TB["Tables / DB"]:::done
+  SP --> FI["Files"]:::done
+  BO --> TK["Tasks / Items"]:::done
+  TK --> NO
+  TK --> FI
+  TK --> TIM["Time tracking"]:::done
+
+  EL{{"EntityLink graph<br/>(connects everything)"}}:::done
+  NO --- EL
+  WB --- EL
+  TB --- EL
+  FI --- EL
+  TK --- EL
+  SOP["SOPs"]:::done --- EL
+  CON["Contracts"]:::done --- EL
+
+  AX["Access resolver"]:::done -.guards.-> SP
+  AX -.guards.-> BO
+  AX -.guards.-> NO
+
+  KRA["KRAs"]:::done --> KPI["KPIs"]:::done
+  KRA --> OKR["OKRs"]:::done
+  KPI --> OKR
+  KRA -.gates.-> TK
+  SOP -.required reading.-> TK
+  POL["Policies"]:::done -.must-acknowledge.-> USR["People"]:::done
+  KRA --> RV["Reviews (weekly)"]:::done
+  KPI --> RV
+  RV --> ROLL["IC → Manager → Director rollup"]:::done
+
+  USR --> KRA
+  USR --> ONB["Onboarding"]:::done
+  USR --> TO["Time-off / Timesheets"]:::done
+  USR --> CON
+
+  TRASH["System-wide Trash (60d)"]:::done
+  NO -.delete.-> TRASH
+  SOP -.delete.-> TRASH
+  TB -.delete.-> TRASH
+  FI -.delete.-> TRASH
+  POL -.delete.-> TRASH
+  CON -.delete.-> TRASH
+  WB -.delete.-> TRASH
+
+  AI["AI Agents / Autopilot"]:::part -.operate over.-> BO
+  AI -.operate over.-> NO
+  APM["AI Performance Manager"]:::plan -.evaluates.-> KRA
+  APM -.ranks.-> USR
+  AUTO["Automation Hub"]:::plan -.event triggers.-> BO
+
+  FIN["Finance (off-rail)"]:::off
+    </pre>
+  </div>
+  <div class="note">Solid arrows = composition / data flow. Dotted = governance, guarding, or planned wiring. The <b>EntityLink</b> graph and the <b>Access resolver</b> are the two horizontal layers every primitive plugs into. The <b>Trash</b> is the new horizontal safety net under every deletable document.</div>
+</section>
+
+<section id="matrix">
+  <h2>📊 Feature inventory &amp; status</h2>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--done)"></i> working</span>
+    <span><i class="dot" style="background:var(--part)"></i> partial/deploy</span>
+    <span><i class="dot" style="background:var(--scaf)"></i> scaffold</span>
+    <span><i class="dot" style="background:var(--plan)"></i> planned</span>
+    <span><i class="dot" style="background:var(--off)"></i> off-rail</span>
+  </div>
+  <div class="panel">
+  <table>
+    <thead><tr><th>Feature</th><th>Status</th><th>Works with</th></tr></thead>
+    <tbody>
+
+    <tr><td colspan="3" class="domain">Work Management — the “Lego” primitives</td></tr>
+    <tr><td class="feat">Spaces</td><td><span class="pill s-done">working</span></td><td class="with">Container for Boards / Folders / Notes / Whiteboards / Tables / Files; wizard + presets (Sales, Support, CS…); members &amp; sharing; access-gated.</td></tr>
+    <tr><td class="feat">Boards</td><td><span class="pill s-done">working</span></td><td class="with">Table / Kanban / List / Calendar / Gallery views; custom fields; lives in a Space; holds Tasks.</td></tr>
+    <tr><td class="feat">Tasks / Items</td><td><span class="pill s-done">working</span></td><td class="with">Detail drawer + full page; subtasks, checklists, custom fields, item types, time tracking, comments/activity; links to Notes/SOPs/Files.</td></tr>
+    <tr><td class="feat">Notes (Docs)</td><td><span class="pill s-done">working</span></td><td class="with">BlockNote editor (shared with SOPs &amp; Contracts), versions, favorites, templates, right-click → Trash.</td></tr>
+    <tr><td class="feat">Whiteboards</td><td><span class="pill s-done">working</span></td><td class="with">Excalidraw scenes; Space-scoped; → Trash on delete.</td></tr>
+    <tr><td class="feat">Tables / Databases</td><td><span class="pill s-done">working</span></td><td class="with">Stackby-style: formulas, link/lookup/rollup, person/attachment cells, saved views, CSV import; → Trash.</td></tr>
+    <tr><td class="feat">Files / Library</td><td><span class="pill s-done">working</span></td><td class="with">Upload (S3 or local), folders, Space-scoping, star/download; blob freed on permanent purge.</td></tr>
+    <tr><td class="feat">Forms</td><td><span class="pill s-part">partial</span></td><td class="with">Data-collection primitive; composes into Spaces.</td></tr>
+    <tr><td class="feat">Templates / Template Center</td><td><span class="pill s-part">deploy</span></td><td class="with">Unified Template model (Task/List/Space…), apply + save-as; migration applied local, <b>prod pending</b>.</td></tr>
+    <tr><td class="feat">Calendar</td><td><span class="pill s-done">working</span></td><td class="with">Items + Weekly Reviews + SOP assignments; Mine/Team scope.</td></tr>
+
+    <tr><td colspan="3" class="domain">Alignment &amp; Governance</td></tr>
+    <tr><td class="feat">KRAs</td><td><span class="pill s-done">working</span></td><td class="with">Scoped assignment; feeds KPIs + OKRs + Reviews; can gate task work.</td></tr>
+    <tr><td class="feat">KPIs</td><td><span class="pill s-done">working</span></td><td class="with">Manager-approval loop, scoring, reminder cron; rolls into OKRs &amp; reviews.</td></tr>
+    <tr><td class="feat">OKRs</td><td><span class="pill s-done">working</span></td><td class="with">Linked to KRAs/KPIs.</td></tr>
+    <tr><td class="feat">SOPs</td><td><span class="pill s-done">working</span></td><td class="with">Written/checklist/video; runnable process-runs; assignments + acknowledgement; compliance dashboard; right-click → Trash.</td></tr>
+    <tr><td class="feat">Policies</td><td><span class="pill s-done">working</span></td><td class="with">Version-pinned + hashed + attested acks; re-ack toggle; per-policy <b>audit ledger + CSV export</b>; risk-framed compliance dashboard; due dates + folders.</td></tr>
+    <tr><td class="feat">Contracts / e-sign</td><td><span class="pill s-done">working</span></td><td class="with">BreezeDoc-style: write (BlockNote) or upload PDF; 3-pane drag-drop fields (signature/initials/text/email/checkbox/date/dropdown) per party; multi-page PDF; send → public /sign/[token]; templates + folders; → Trash.</td></tr>
+    <tr><td class="feat">Reviews (weekly)</td><td><span class="pill s-done">working</span></td><td class="with">IC submit → manager approve → director rollup; surfaces on /today + calendar.</td></tr>
+
+    <tr><td colspan="3" class="domain">People &amp; HR</td></tr>
+    <tr><td class="feat">Teams / People / Org chart</td><td><span class="pill s-done">working</span></td><td class="with">Hierarchy, departments, offices; drives KRA/KPI assignment, reviews, onboarding.</td></tr>
+    <tr><td class="feat">Onboarding</td><td><span class="pill s-done">working</span></td><td class="with">Templates + progress; tied to People + SOPs/Policies.</td></tr>
+    <tr><td class="feat">Recruiting / Talent / Skills</td><td><span class="pill s-part">partial</span></td><td class="with">Interviews, talent assessment, skills; feeds People.</td></tr>
+    <tr><td class="feat">Time-off · Timesheets · Clock</td><td><span class="pill s-done">working</span></td><td class="with">Policies, entries, approvals; ties to People + Calendar.</td></tr>
+    <tr><td class="feat">Engagement (Kudos · Candor · Surveys · Announce)</td><td><span class="pill s-done">working</span></td><td class="with">Topbar popovers; pulse surveys; org announcements.</td></tr>
+    <tr><td class="feat">Benefits · Payroll · Comp</td><td><span class="pill s-part">partial</span></td><td class="with">Enrollments, pay-runs, payslips, comp-cycles — partner-oriented; off the trimmed rail.</td></tr>
+
+    <tr><td colspan="3" class="domain">AI</td></tr>
+    <tr><td class="feat">AI workspace · Agents · Autopilot · Sidekick</td><td><span class="pill s-part">partial</span></td><td class="with">Agent runtime operating over Boards/Notes/work; foundation for the Performance Manager.</td></tr>
+    <tr><td class="feat">Notetaker / Meetings</td><td><span class="pill s-part">partial</span></td><td class="with">Meeting capture → notes.</td></tr>
+    <tr><td class="feat">AI Performance Manager</td><td><span class="pill s-plan">planned</span></td><td class="with">Per-person agent evaluating KRA/KPI/Goal delivery + monthly org ranking. Plan: <code>docs/plans/ai-performance-manager.md</code>.</td></tr>
+
+    <tr><td colspan="3" class="domain">Platform &amp; Admin</td></tr>
+    <tr><td class="feat">Settings (members · permissions · hierarchy · task-types)</td><td><span class="pill s-done">working</span></td><td class="with">Full-screen takeover shell; role-gated.</td></tr>
+    <tr><td class="feat">Access resolver</td><td><span class="pill s-done">working</span></td><td class="with">Single <code>resolveAccess(viewer, resource)</code> for module/space/board/item/user/review/kra.</td></tr>
+    <tr><td class="feat">System-wide Trash</td><td><span class="pill s-done">working</span></td><td class="with">One bin: SOPs/Tables/Files/Policies (snapshot) + Notes/Whiteboards/Contracts (archive); 60-day auto-purge; restore; rail entry; frees file storage on purge.</td></tr>
+    <tr><td class="feat">Automation Hub / Workflows</td><td><span class="pill s-plan">deferred</span></td><td class="with">Event-driven engine <i>designed</i>; build after modules emit events. Plan: <code>docs/plans/automation-hub.md</code>.</td></tr>
+    <tr><td class="feat">Integrations · Webhooks · SCIM · Identity</td><td><span class="pill s-part">partial</span></td><td class="with">Outbound webhooks, SCIM provisioning, SSO providers.</td></tr>
+    <tr><td class="feat">Billing · Marketplace · Build</td><td><span class="pill s-part">partial</span></td><td class="with">Billing/plan, app store, low-code build surface.</td></tr>
+    <tr><td class="feat">Tools · Assets</td><td><span class="pill s-done">working</span></td><td class="with">Per-employee provisioning (kept as PPMS-core).</td></tr>
+    <tr><td class="feat">CI/CD + Deploy</td><td><span class="pill s-done">working</span></td><td class="with">GitHub Actions (prisma validate) + SSH deploy to aaPanel (pm2 <code>workwrk</code>).</td></tr>
+
+    <tr><td colspan="3" class="domain">Finance — descoped (code retained, off rail)</td></tr>
+    <tr><td class="feat">GL · Journal · Invoices · Budgets · Reports · Vendors · POs · Expenses</td><td><span class="pill s-off">off-rail</span></td><td class="with">Routes + models on disk; removed from the rail in the PPMS scope trim. Reinstate later if needed.</td></tr>
+
+    </tbody>
+  </table>
+  </div>
+  <div class="note">“Working” = built, typechecks, migrations applied. It does <b>not</b> claim exhaustive runtime QA — each should still get a click-through before launch.</div>
+</section>
+
+<section id="focus">
+  <h2>🎯 What to focus on next (one by one)</h2>
+  <div class="panel">
+    <p class="note" style="margin-top:0">Ordered roughly by leverage. Pick top-down.</p>
+    <ul class="focus">
+      <li><span class="pill s-part">deploy</span> &nbsp;<b>Ship pending prod migrations</b> — Template Center, Task Types, DataTable views, + this session's 5 (policy-ack, agreement templates/category, agreement archive, trash_item). Deploy + verify on aaPanel.</li>
+      <li><span class="pill s-done">verify</span> &nbsp;<b>Runtime QA pass</b> of this session's work: Policies audit ledger + CSV, Contracts e-sign end-to-end (PDF + write), Trash restore/purge across all types.</li>
+      <li><span class="pill s-plan">build</span> &nbsp;<b>Trash → Boards &amp; Spaces</b> — route their Archive/delete into the one central Trash for full consistency (already offered).</li>
+      <li><span class="pill s-plan">build</span> &nbsp;<b>AI Performance Manager</b> — per-person evaluation + monthly ranking on the existing agent runtime. Plan exists.</li>
+      <li><span class="pill s-plan">build</span> &nbsp;<b>Automation Hub</b> — once modules emit events; “lay pipes as you go” via <code>dispatchEvent</code>.</li>
+      <li><span class="pill s-part">polish</span> &nbsp;<b>Forms, Recruiting/Talent, AI agents, Notetaker</b> — mature the partials into shippable.</li>
+      <li><span class="pill s-part">decide</span> &nbsp;<b>HRIS (Benefits/Payroll/Comp)</b> &amp; <b>Finance</b> — confirm partner vs build vs keep-descoped.</li>
+    </ul>
+  </div>
+</section>
+
+<div class="note" style="text-align:center; opacity:.7">Generated as a living snapshot — edit this file as the system evolves. Diagrams render via Mermaid (needs internet for the CDN on first open).</div>
+
+</main>
+<script>mermaid.initialize({ startOnLoad:true, theme:"dark", mindmap:{padding:8}, flowchart:{curve:"basis"} });</script>
+</body>
+</html>

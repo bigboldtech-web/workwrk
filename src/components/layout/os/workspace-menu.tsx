@@ -175,7 +175,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
     <>
       <div
         ref={popoverRef}
-        className="absolute left-3 top-[52px] w-[360px] bg-white rounded-lg shadow-xl border border-zinc-200 z-50"
+        className="absolute right-full mr-1 top-2 w-[360px] bg-white rounded-lg shadow-xl border border-zinc-200 z-50"
         role="menu"
       >
         {/* Header */}
