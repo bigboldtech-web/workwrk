@@ -5,23 +5,17 @@ import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSucces
 
 function token() { return crypto.randomBytes(16).toString("hex"); }
 
-// GET: list contracts. ?view=templates | trash (default = live contracts).
-// Manager-gated. Lazily purges trash items older than 60 days.
+// GET: list contracts. ?view=templates (default = live contracts).
+// Manager-gated. Archived (deleted) contracts live in the central /trash.
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const sp = new URL(req.url).searchParams;
-  const view = sp.get("view") === "templates" ? "templates" : sp.get("view") === "trash" ? "trash" : "live";
-
-  // Auto-purge: archived > 60 days ago is permanently deleted.
-  const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-  await prisma.agreement.deleteMany({ where: { organizationId: orgId, archivedAt: { lt: cutoff } } });
+  const view = new URL(req.url).searchParams.get("view") === "templates" ? "templates" : "live";
 
   const where =
-    view === "trash" ? { organizationId: orgId, archivedAt: { not: null } } :
     view === "templates" ? { organizationId: orgId, isTemplate: true, archivedAt: null } :
     { organizationId: orgId, isTemplate: false, archivedAt: null };
 

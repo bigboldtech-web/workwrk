@@ -27,6 +27,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     await prisma.whiteboard.update({ where: { id: wbId }, data: { archivedAt: null } });
     return jsonSuccess({ restored: true });
   }
+  if (id.startsWith("agr:")) {
+    const agrId = id.slice(4);
+    const found = await prisma.agreement.findFirst({ where: { id: agrId, organizationId: orgId }, select: { id: true } });
+    if (!found) return jsonError("Not found", 404);
+    await prisma.agreement.update({ where: { id: agrId }, data: { archivedAt: null } });
+    return jsonSuccess({ restored: true });
+  }
 
   const item = await prisma.trashItem.findFirst({
     where: { id, organizationId: orgId },

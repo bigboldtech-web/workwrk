@@ -65,7 +65,6 @@ export default function SopsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | SopStatus>("ALL");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [menu, setMenu] = useState<{ s: ApiSop; x: number; y: number } | null>(null);
   const { rowVersion } = useOsShell();
@@ -104,7 +103,7 @@ export default function SopsPage() {
 
   const filtered = useMemo(() => {
     let list = rows ?? [];
-    if (!showArchived) list = list.filter((s) => s.status !== "ARCHIVED");
+    list = list.filter((s) => s.status !== "ARCHIVED");
     if (statusFilter !== "ALL") list = list.filter((s) => s.status === statusFilter);
     if (activeCategory) list = list.filter((s) => (s.category ?? "Uncategorized") === activeCategory);
     const q = search.trim().toLowerCase();
@@ -113,17 +112,17 @@ export default function SopsPage() {
       (s.description ?? "").toLowerCase().includes(q) ||
       (s.tags ?? []).some((t) => t.toLowerCase().includes(q)));
     return list;
-  }, [rows, search, statusFilter, activeCategory, showArchived]);
+  }, [rows, search, statusFilter, activeCategory]);
 
   const categories = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of rows ?? []) {
-      if (!showArchived && s.status === "ARCHIVED") continue;
+      if (s.status === "ARCHIVED") continue;
       const cat = s.category ?? "Uncategorized";
       m.set(cat, (m.get(cat) ?? 0) + 1);
     }
     return Array.from(m.entries()).sort(([, a], [, b]) => b - a);
-  }, [rows, showArchived]);
+  }, [rows]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, ApiSop[]>();
@@ -209,18 +208,6 @@ export default function SopsPage() {
               <ListIcon className="h-4 w-4" />
             </button>
           </div>
-
-          {/* Archived toggle */}
-          <button
-            type="button"
-            onClick={() => setShowArchived((x) => !x)}
-            title={showArchived ? "Showing archived SOPs" : "Show archived SOPs"}
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] transition-colors ${
-              showArchived ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
-            }`}
-          >
-            <Archive className="h-3.5 w-3.5" /> Archived{showArchived ? " ✓" : ""}
-          </button>
         </div>
 
         {/* Status filter — own row. Inline styles so the global

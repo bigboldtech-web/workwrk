@@ -27,6 +27,7 @@ const TYPE_META: Record<string, { label: string; Icon: typeof FileText }> = {
   file: { label: "File", Icon: Paperclip },
   policy: { label: "Policy", Icon: ShieldCheck },
   contract: { label: "Contract", Icon: FileSignature },
+  template: { label: "Contract template", Icon: FileSignature },
 };
 
 function daysLeft(deletedAt: string): number {

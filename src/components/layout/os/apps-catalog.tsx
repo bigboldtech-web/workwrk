@@ -1413,6 +1413,12 @@ export const APPS: AppEntry[] = [
       { href: "/settings",         label: "Workspace settings", Icon: SettingsIcon },
       { href: "/account/security", label: "Account · Security", Icon: ShieldCheck },
     ]) },
+  // Org-wide recycle bin — one place to recover anything deleted (60-day window).
+  { key: "trash", label: "Trash", Icon: Trash2, defaultHref: "/trash",
+    matchPaths: ["/trash"], category: "Workspace", requiredAccess: "hr-admin", defaultPinned: true,
+    Sidebar: linksSidebar([
+      { href: "/trash", label: "All deleted items", Icon: Trash2 },
+    ]) },
 ];
 
 /** Apps to render in the rail when the user hasn't customised yet. */

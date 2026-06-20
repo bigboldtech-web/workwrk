@@ -14,14 +14,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   FileSignature, Plus, Loader2, Users, CheckCircle2, PenLine, Upload, LayoutTemplate,
-  X, Folder, Trash2, Archive, RotateCcw, FolderInput, MoreHorizontal, Pencil,
+  X, Folder, Trash2, FolderInput, MoreHorizontal, Pencil,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type Row = { id: string; title: string; status: string; category: string | null; isTemplate: boolean; archivedAt: string | null; updatedAt: string; partyCount: number; signedCount: number };
-type View = "live" | "templates" | "trash";
+type View = "live" | "templates";
 
 const STATUS_STYLE: Record<string, string> = {
   DRAFT: "bg-zinc-100 text-zinc-600",
@@ -32,17 +32,11 @@ const STATUS_STYLE: Record<string, string> = {
 };
 const CATEGORY_OPTIONS = ["SLA", "NDA", "Vendor", "Employment", "Partner", "Sales", "Service", "Other"];
 
-function daysLeft(archivedAt: string | null): number {
-  if (!archivedAt) return 60;
-  const elapsed = (Date.now() - new Date(archivedAt).getTime()) / 86_400_000;
-  return Math.max(0, Math.ceil(60 - elapsed));
-}
-
 export default function AgreementsPage() {
   const router = useRouter();
   const search = useSearchParams();
   const { toast } = useOsToast();
-  const view: View = search?.get("view") === "templates" ? "templates" : search?.get("view") === "trash" ? "trash" : "live";
+  const view: View = search?.get("view") === "templates" ? "templates" : "live";
 
   const [rows, setRows] = useState<Row[] | null>(null);
   const [showNew, setShowNew] = useState(false);
@@ -55,7 +49,7 @@ export default function AgreementsPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const newHandled = useRef(false);
 
-  const qs = view === "templates" ? "?view=templates" : view === "trash" ? "?view=trash" : "";
+  const qs = view === "templates" ? "?view=templates" : "";
 
   const load = useCallback(async () => {
     try {
@@ -116,10 +110,6 @@ export default function AgreementsPage() {
     const res = await fetch(`/api/agreements/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (res.ok) { toast(ok); await load(); } else toast("Couldn't update");
   }
-  async function deleteForever(id: string) {
-    const res = await fetch(`/api/agreements/${id}`, { method: "DELETE" });
-    if (res.ok) { toast("Deleted permanently"); await load(); } else toast("Couldn't delete");
-  }
   async function renameFolder(items: Row[], category: string | null) {
     await Promise.allSettled(items.map((r) => fetch(`/api/agreements/${r.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category }) })));
     toast("Folder updated"); await load();
@@ -128,10 +118,9 @@ export default function AgreementsPage() {
 
   const noun = view === "templates" ? "template" : "contract";
 
-  // Group live/template rows into folders by category. Trash is flat.
+  // Group rows into folders by category.
   const groups = (() => {
     const list = rows ?? [];
-    if (view === "trash") return [{ name: "Trash", items: list }];
     const m = new Map<string, Row[]>();
     for (const r of list) { const c = r.category || "Uncategorized"; (m.get(c) ?? m.set(c, []).get(c)!).push(r); }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, items]) => ({ name, items }));
@@ -140,17 +129,16 @@ export default function AgreementsPage() {
   return (
     <>
       <OsTitleBar
-        title={view === "templates" ? "Contract templates" : view === "trash" ? "Trash" : "Contracts"}
-        Icon={view === "templates" ? Folder : view === "trash" ? Trash2 : FileSignature}
+        title={view === "templates" ? "Contract templates" : "Contracts"}
+        Icon={view === "templates" ? Folder : FileSignature}
         iconGradient={GRAD.indigoBlue}
         showStandardActions={false}
-        description={rows === null ? "Loading…" : view === "trash" ? `${rows.length} item${rows.length === 1 ? "" : "s"} · auto-deleted after 60 days` : `${rows.length} ${noun}${rows.length === 1 ? "" : "s"}`}
+        description={rows === null ? "Loading…" : `${rows.length} ${noun}${rows.length === 1 ? "" : "s"}`}
         actions={
           <div className="flex items-center gap-2">
             <Link href="/agreements" className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${view === "live" ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}><FileSignature className="h-3.5 w-3.5" /> Contracts</Link>
             <Link href="/agreements?view=templates" className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${view === "templates" ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}><Folder className="h-3.5 w-3.5" /> Templates</Link>
-            <Link href="/agreements?view=trash" className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${view === "trash" ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}><Trash2 className="h-3.5 w-3.5" /> Trash</Link>
-            {view === "trash" ? null : view === "templates" ? (
+            {view === "templates" ? (
               <button type="button" onClick={newTemplate} disabled={busy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
                 {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} New template
               </button>
@@ -167,18 +155,16 @@ export default function AgreementsPage() {
           <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
         ) : rows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center">
-            {view === "trash" ? <Trash2 className="mx-auto h-8 w-8 text-zinc-300" /> : <FileSignature className="mx-auto h-8 w-8 text-zinc-300" />}
-            <div className="mt-3 text-sm font-medium text-zinc-700">{view === "trash" ? "Trash is empty" : view === "templates" ? "No templates yet" : "No contracts yet"}</div>
-            <div className="mt-1 text-[13px] text-zinc-500">{view === "trash" ? "Archived contracts and templates appear here and are auto-deleted after 60 days." : view === "templates" ? "Create a template, or open a contract and choose “Save as template”." : "Write or upload a document, add signers, place fields, and send it."}</div>
-            {view !== "trash" && (
-              <button type="button" onClick={view === "templates" ? newTemplate : openNew} disabled={busy} className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"><Plus className="h-4 w-4" /> {view === "templates" ? "New template" : "New contract"}</button>
-            )}
+            <FileSignature className="mx-auto h-8 w-8 text-zinc-300" />
+            <div className="mt-3 text-sm font-medium text-zinc-700">{view === "templates" ? "No templates yet" : "No contracts yet"}</div>
+            <div className="mt-1 text-[13px] text-zinc-500">{view === "templates" ? "Create a template, or open a contract and choose “Save as template”." : "Write or upload a document, add signers, place fields, and send it."}</div>
+            <button type="button" onClick={view === "templates" ? newTemplate : openNew} disabled={busy} className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"><Plus className="h-4 w-4" /> {view === "templates" ? "New template" : "New contract"}</button>
           </div>
         ) : (
           <div className="space-y-7">
             {groups.map((g) => (
               <section key={g.name}>
-                {view !== "trash" && (
+                {(
                   <header className="group/h mb-2.5 flex items-center gap-2"
                     onContextMenu={(e) => { e.preventDefault(); setFolderEdit({ items: g.items, value: g.name === "Uncategorized" ? "" : g.name }); }}>
                     <Folder className="h-3.5 w-3.5 text-zinc-400" />
@@ -198,17 +184,15 @@ export default function AgreementsPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">{r.title}</div>
                         <div className="flex shrink-0 items-center gap-1.5">
-                          {view === "trash"
-                            ? <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">{daysLeft(r.archivedAt)}d left</span>
-                            : r.isTemplate
-                              ? <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700">template</span>
-                              : <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium capitalize ${STATUS_STYLE[r.status] ?? "bg-zinc-100 text-zinc-600"}`}>{r.status.replace(/_/g, " ").toLowerCase()}</span>}
+                          {r.isTemplate
+                            ? <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700">template</span>
+                            : <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium capitalize ${STATUS_STYLE[r.status] ?? "bg-zinc-100 text-zinc-600"}`}>{r.status.replace(/_/g, " ").toLowerCase()}</span>}
                           <button type="button" onClick={(e) => openMenu(e, r)} className="rounded p-1 text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-700 group-hover:opacity-100" title="More"><MoreHorizontal className="h-4 w-4" /></button>
                         </div>
                       </div>
                       <div className="mt-3 flex items-center gap-3 text-[12px] text-zinc-400">
                         <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {r.partyCount} part{r.partyCount === 1 ? "y" : "ies"}</span>
-                        {!r.isTemplate && view !== "trash" && <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> {r.signedCount} signed</span>}
+                        {!r.isTemplate && <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> {r.signedCount} signed</span>}
                         <span className="ml-auto">{new Date(r.updatedAt).toLocaleDateString()}</span>
                       </div>
                     </div>
@@ -226,19 +210,10 @@ export default function AgreementsPage() {
           <div className="fixed inset-0 z-[140]" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
           <div className="fixed z-[141] w-44 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-xl"
             style={{ left: Math.min(menu.x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 184), top: menu.y }}>
-            {menu.row.archivedAt ? (
-              <>
-                <MenuItem Icon={RotateCcw} label="Restore" onClick={() => { const r = menu.row; setMenu(null); void patchRow(r.id, { archived: false }, "Restored"); }} />
-                <MenuItem Icon={Trash2} label="Delete forever" danger onClick={() => { const r = menu.row; setMenu(null); if (confirm(`Permanently delete “${r.title}”? This cannot be undone.`)) void deleteForever(r.id); }} />
-              </>
-            ) : (
-              <>
-                <MenuItem Icon={FileSignature} label="Open" onClick={() => { const r = menu.row; setMenu(null); router.push(`/agreements/${r.id}`); }} />
-                <MenuItem Icon={Pencil} label="Rename" onClick={() => { const r = menu.row; setMenu(null); setEdit({ row: r, mode: "rename", value: r.title }); }} />
-                <MenuItem Icon={FolderInput} label="Move to folder" onClick={() => { const r = menu.row; setMenu(null); setEdit({ row: r, mode: "folder", value: r.category ?? "" }); }} />
-                <MenuItem Icon={Archive} label="Archive" onClick={() => { const r = menu.row; setMenu(null); void patchRow(r.id, { archived: true }, "Moved to Trash"); }} />
-              </>
-            )}
+            <MenuItem Icon={FileSignature} label="Open" onClick={() => { const r = menu.row; setMenu(null); router.push(`/agreements/${r.id}`); }} />
+            <MenuItem Icon={Pencil} label="Rename" onClick={() => { const r = menu.row; setMenu(null); setEdit({ row: r, mode: "rename", value: r.title }); }} />
+            <MenuItem Icon={FolderInput} label="Move to folder" onClick={() => { const r = menu.row; setMenu(null); setEdit({ row: r, mode: "folder", value: r.category ?? "" }); }} />
+            <MenuItem Icon={Trash2} label="Delete" danger onClick={() => { const r = menu.row; setMenu(null); void patchRow(r.id, { archived: true }, "Moved to Trash"); }} />
           </div>
         </>
       ) : null}
