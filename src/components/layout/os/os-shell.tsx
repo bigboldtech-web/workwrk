@@ -27,6 +27,7 @@ import { CustomizePanel } from "./customize-panel";
 import { ThemeApplier } from "./theme-applier";
 import { ClickAppRail } from "./click-app-rail";
 import { ClickSidebar } from "./click-sidebar";
+import { ClickTopbar } from "./click-topbar";
 import { AppsMorePopover } from "./apps-more-popover";
 import { OsSidekickPanel } from "./sidekick-panel";
 import { SetStatusModal } from "./set-status-modal";
@@ -76,17 +77,16 @@ export function OsShell({ children }: { children: React.ReactNode }) {
             {children}
           </div>
         ) : (
-          <div className="workwrk-os h-screen overflow-hidden bg-zinc-100 text-zinc-900">
-            {/* ClickUp-style: contextual sidebar (left) · content · app rail (right).
-                No top bar — its controls now live in the right rail. */}
-            <div className="h-full flex min-h-0 relative gap-1.5 p-1.5 overflow-hidden">
+          <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5 overflow-hidden">
+            <ClickTopbar />
+            <div className="flex-1 flex min-h-0 relative gap-1.5 overflow-hidden">
+              <ClickAppRail />
               <ClickSidebar />
+              <AppsMorePopover />
               <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-white rounded-xl border border-zinc-200">
                 {children}
               </main>
               <OsSidekickPanel />
-              <ClickAppRail />
-              <AppsMorePopover />
             </div>
             <OsCommandPalette />
             <OsItemDrawer />

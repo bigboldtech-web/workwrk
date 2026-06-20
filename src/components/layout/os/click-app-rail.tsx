@@ -12,15 +12,11 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { UserPlus, ExternalLink, PinOff, Sparkles, Search, Inbox, Settings as SettingsIcon, Plus, Zap } from "lucide-react";
+import { UserPlus, ArrowUpCircle, LayoutGrid, ExternalLink, PinOff, Sparkles } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { MenuItem, MenuList } from "@/components/ui/menu";
 import { APPS, canAccessApp, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
 import { useOsShell } from "./shell-context";
-import { WorkspaceMenu } from "./workspace-menu";
-import { ProfileMenu } from "./profile-menu";
-import { ActiveTimerPill } from "./active-timer-pill";
-import { QuickToolsPanel } from "./quick-tools-panel";
 
 const HOVER_OPEN_MS = 180;
 const HOVER_CLOSE_MS = 120;
@@ -49,18 +45,11 @@ export function ClickAppRail() {
     activeAppKey, setActiveApp, sidebarCollapsed,
     pinnedAppKeys, openAppsGrid, appsGridOpen,
     togglePinned, movePinned, pushRecentApp, iconsOnly,
-    openPalette, presenceStatus, mutedNotifications,
   } = useOsShell();
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ key: string; x: number; y: number } | null>(null);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [quickOpen, setQuickOpen] = useState(false);
-  const wsRef = useRef<HTMLButtonElement>(null);
-  const profileRef = useRef<HTMLButtonElement>(null);
-  const quickRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -179,32 +168,7 @@ export function ClickAppRail() {
       className="w-[60px] flex-shrink-0 h-full flex flex-col relative transition-colors rounded-xl overflow-hidden"
       onMouseLeave={scheduleClose}
     >
-      {/* Top: workspace switcher + search (moved from the old top bar) */}
-      <div className="flex flex-col items-center gap-1 px-1 pt-2 pb-1.5 border-b border-white/15">
-        <button
-          ref={wsRef}
-          type="button"
-          onClick={() => setWorkspaceOpen((v) => !v)}
-          title="Switch workspace"
-          aria-haspopup="menu"
-          aria-expanded={workspaceOpen}
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/95 text-[12px] font-bold"
-          style={{ color: "var(--os-brand-rail)" }}
-        >
-          K
-        </button>
-        <button
-          type="button"
-          onClick={openPalette}
-          title="Search  ⌘K"
-          aria-label="Search"
-          className={`flex h-8 w-8 items-center justify-center rounded-lg ${railTextColor} ${railHoverBg}`}
-        >
-          <Search className="h-[16px] w-[16px]" />
-        </button>
-      </div>
-
-      <nav className="flex-1 pt-2 pb-2 overflow-y-auto overflow-x-visible os-no-scrollbar">
+      <nav className="flex-1 pt-3 pb-2 overflow-y-auto overflow-x-visible os-no-scrollbar">
         {pinnedApps.map((app, idx) => {
           const active = highlightedKey === app.key && !sidebarCollapsed;
           const isHovered = hoverKey === app.key;
@@ -282,7 +246,7 @@ export function ClickAppRail() {
           <button
             type="button"
             onClick={openAppsGrid}
-            title="Add or remove apps"
+            title="Add apps, customize navigation"
             className={`group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 transition-colors ${
               appsGridOpen ? "text-white" : `${railTextColor} hover:text-white`
             }`}
@@ -298,58 +262,31 @@ export function ClickAppRail() {
                 color: "var(--os-brand-rail)",
               } : undefined}
             >
-              <Plus className="w-[17px] h-[17px]" />
+              <LayoutGrid className="w-[16px] h-[16px]" />
             </span>
-            {iconsOnly ? null : <RailLabel>Add</RailLabel>}
+            {iconsOnly ? null : <RailLabel>More</RailLabel>}
           </button>
         </div>
       </nav>
 
-      <div className="flex flex-col items-center gap-0.5 px-1 pb-2 pt-1.5 border-t border-white/20">
-        <div className="flex w-full items-center justify-center py-0.5"><ActiveTimerPill /></div>
-        <Link href="/inbox" title="Inbox" className={`flex h-8 w-8 items-center justify-center rounded-lg ${railTextColor} ${railHoverBg}`}>
-          <Inbox className="h-[16px] w-[16px]" />
+      <div className="pb-2 pt-1 border-t border-white/20">
+        <Link
+          href="/people"
+          title="Invite teammates"
+          className="w-full flex flex-col items-center gap-0.5 py-1.5 text-white hover:bg-white/15"
+        >
+          <UserPlus className="w-[16px] h-[16px]" />
+          {iconsOnly ? null : <RailLabel>Invite</RailLabel>}
         </Link>
-        <Link href="/people" title="Invite teammates" className={`flex h-8 w-8 items-center justify-center rounded-lg ${railTextColor} ${railHoverBg}`}>
-          <UserPlus className="h-[16px] w-[16px]" />
+        <Link
+          href="/settings"
+          title="Upgrade workspace"
+          className="w-full flex flex-col items-center gap-0.5 py-1.5 text-white hover:bg-white/15"
+        >
+          <ArrowUpCircle className="w-[16px] h-[16px]" />
+          {iconsOnly ? null : <RailLabel>Upgrade</RailLabel>}
         </Link>
-        <div className="relative">
-          <button
-            ref={quickRef}
-            type="button"
-            onClick={() => setQuickOpen((v) => !v)}
-            title="Quick tools"
-            aria-haspopup="menu"
-            aria-expanded={quickOpen}
-            className={`flex h-8 w-8 items-center justify-center rounded-lg ${quickOpen ? "bg-white/20" : ""} ${railTextColor} ${railHoverBg}`}
-          >
-            <Zap className="h-[16px] w-[16px]" />
-          </button>
-          <QuickToolsPanel open={quickOpen} onClose={() => setQuickOpen(false)} anchorRef={quickRef} />
-        </div>
-        <Link href="/settings" title="Settings" className={`flex h-8 w-8 items-center justify-center rounded-lg ${railTextColor} ${railHoverBg}`}>
-          <SettingsIcon className="h-[16px] w-[16px]" />
-        </Link>
-        <div className="relative mt-0.5">
-          <button
-            ref={profileRef}
-            type="button"
-            onClick={() => setProfileOpen((v) => !v)}
-            className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-            style={{ background: "var(--os-brand)" }}
-            aria-label="Your profile"
-            aria-haspopup="menu"
-            aria-expanded={profileOpen}
-            title={`${presenceStatus.label}${mutedNotifications ? " · muted" : ""}`}
-          >
-            IS
-          </button>
-          <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 border border-white" />
-        </div>
       </div>
-
-      <WorkspaceMenu open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} anchorRef={wsRef} />
-      <ProfileMenu open={profileOpen} onClose={() => setProfileOpen(false)} anchorRef={profileRef} />
 
       {ctxMenu ? (
         <RailContextMenu
@@ -374,7 +311,7 @@ export function ClickAppRail() {
 
 function AppRailHoverPreview({ app }: { app: AppEntry }) {
   return (
-    <div className="absolute right-full top-0 mr-1 z-40 pointer-events-auto">
+    <div className="absolute left-full top-0 ml-1 z-40 pointer-events-auto">
       <div className="w-[240px] max-h-[480px] overflow-y-auto bg-white rounded-lg shadow-lg border border-zinc-200 py-1.5">
         <div className="px-3 pt-1 pb-2 flex items-center gap-2 border-b border-zinc-100 mb-1.5">
           <app.Icon className="w-3.5 h-3.5 text-zinc-500" />

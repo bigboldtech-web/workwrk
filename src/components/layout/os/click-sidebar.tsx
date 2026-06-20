@@ -11,7 +11,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ChevronsLeft,
-  ChevronsRight,
   ChevronDown,
   Plus,
   Search,
@@ -34,54 +33,13 @@ function clampSidebarWidth(width: number) {
 }
 
 export function ClickSidebar() {
-  const { sidebarCollapsed, toggleSidebar } = useOsShell();
-  const [peek, setPeek] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { sidebarCollapsed } = useOsShell();
+  if (sidebarCollapsed) return null;
 
-  if (!sidebarCollapsed) {
-    return (
-      <SidebarSearchProvider>
-        <ClickSidebarBody />
-      </SidebarSearchProvider>
-    );
-  }
-
-  const openPeek = () => {
-    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
-    setPeek(true);
-  };
-  const closePeek = () => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setPeek(false), 140);
-  };
-
-  // Collapsed → a thin strip on the far left. Hover slides the full sidebar
-  // open as an overlay (over content, doesn't push it); click pins it open.
   return (
-    <div className="relative h-full flex-shrink-0">
-      <button
-        type="button"
-        onMouseEnter={openPeek}
-        onMouseLeave={closePeek}
-        onClick={toggleSidebar}
-        title="Open sidebar"
-        aria-label="Open sidebar"
-        className="group/peek flex h-full w-2.5 items-center justify-center rounded-full bg-zinc-200/70 transition-colors hover:bg-zinc-300"
-      >
-        <ChevronsRight className="h-3 w-3 text-zinc-400 opacity-0 transition-opacity group-hover/peek:opacity-100" />
-      </button>
-      {peek ? (
-        <div
-          onMouseEnter={openPeek}
-          onMouseLeave={closePeek}
-          className="absolute left-0 top-0 bottom-0 z-50 rounded-[14px] shadow-2xl"
-        >
-          <SidebarSearchProvider>
-            <ClickSidebarBody />
-          </SidebarSearchProvider>
-        </div>
-      ) : null}
-    </div>
+    <SidebarSearchProvider>
+      <ClickSidebarBody />
+    </SidebarSearchProvider>
   );
 }
 
