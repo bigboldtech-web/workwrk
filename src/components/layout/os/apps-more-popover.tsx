@@ -169,7 +169,7 @@ export function AppsMorePopover() {
     // view while the user picks what to pin.
     <div
       ref={panelRef}
-      className="absolute left-[60px] bottom-2 z-50 w-[380px] max-h-[560px] bg-white rounded-xl shadow-xl border border-zinc-200 flex flex-col"
+      className="absolute right-[66px] top-2 z-50 w-[380px] max-h-[560px] bg-white rounded-xl shadow-xl border border-zinc-200 flex flex-col"
       role="dialog"
       aria-label="Add apps to sidebar"
     >

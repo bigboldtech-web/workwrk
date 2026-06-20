@@ -12,7 +12,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { UserPlus, ExternalLink, PinOff, Sparkles, Search, Inbox, Settings as SettingsIcon, Plus } from "lucide-react";
+import { UserPlus, ExternalLink, PinOff, Sparkles, Search, Inbox, Settings as SettingsIcon, Plus, Zap } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { MenuItem, MenuList } from "@/components/ui/menu";
 import { APPS, canAccessApp, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
@@ -20,6 +20,7 @@ import { useOsShell } from "./shell-context";
 import { WorkspaceMenu } from "./workspace-menu";
 import { ProfileMenu } from "./profile-menu";
 import { ActiveTimerPill } from "./active-timer-pill";
+import { QuickToolsPanel } from "./quick-tools-panel";
 
 const HOVER_OPEN_MS = 180;
 const HOVER_CLOSE_MS = 120;
@@ -56,8 +57,10 @@ export function ClickAppRail() {
   const [ctxMenu, setCtxMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   const wsRef = useRef<HTMLButtonElement>(null);
   const profileRef = useRef<HTMLButtonElement>(null);
+  const quickRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -310,6 +313,20 @@ export function ClickAppRail() {
         <Link href="/people" title="Invite teammates" className={`flex h-8 w-8 items-center justify-center rounded-lg ${railTextColor} ${railHoverBg}`}>
           <UserPlus className="h-[16px] w-[16px]" />
         </Link>
+        <div className="relative">
+          <button
+            ref={quickRef}
+            type="button"
+            onClick={() => setQuickOpen((v) => !v)}
+            title="Quick tools"
+            aria-haspopup="menu"
+            aria-expanded={quickOpen}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg ${quickOpen ? "bg-white/20" : ""} ${railTextColor} ${railHoverBg}`}
+          >
+            <Zap className="h-[16px] w-[16px]" />
+          </button>
+          <QuickToolsPanel open={quickOpen} onClose={() => setQuickOpen(false)} anchorRef={quickRef} />
+        </div>
         <Link href="/settings" title="Settings" className={`flex h-8 w-8 items-center justify-center rounded-lg ${railTextColor} ${railHoverBg}`}>
           <SettingsIcon className="h-[16px] w-[16px]" />
         </Link>
