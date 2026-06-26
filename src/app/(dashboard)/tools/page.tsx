@@ -11,7 +11,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Wrench, Plus, Search, Hash, ChevronRight, ExternalLink, Lock, Users,
-  Layers, Activity, Globe,
+  Layers, Activity, Globe, Copy, Eye, EyeOff, X, KeyRound, User as UserIcon, StickyNote, Check,
+  Pencil, Loader2,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -19,6 +20,7 @@ import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
+type ToolCredentials = { username?: string; password?: string; apiKey?: string; notes?: string } & Record<string, string | undefined>;
 type ApiTool = {
   id: string;
   name: string;
@@ -26,6 +28,7 @@ type ApiTool = {
   url: string;
   icon?: string | null;
   category?: string | null;
+  credentials?: ToolCredentials | null;
   shares?: Array<{ userId: string; sharedAt: string }>;
   sharedAt?: string;
   createdAt?: string;
@@ -54,6 +57,7 @@ export default function ToolsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [openTool, setOpenTool] = useState<ApiTool | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -209,19 +213,34 @@ export default function ToolsPage() {
                 {g.items.map((t) => {
                   const sharedCount = t.shares?.length ?? 0;
                   const isShared = !!t.sharedAt;
+                  const hasCreds = !!t.credentials && Object.values(t.credentials).some((v) => v && String(v).trim());
                   return (
-                    <a key={t.id} href={t.url} target="_blank" rel="noopener noreferrer" className="tls__tool" style={{ ["--t-c" as unknown as string]: g.color }}>
+                    <div
+                      key={t.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setOpenTool(t)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenTool(t); } }}
+                      className="tls__tool"
+                      style={{ ["--t-c" as unknown as string]: g.color, cursor: "pointer" }}
+                    >
                       <header className="tls__tool-head">
                         <span className="tls__tool-icon"><Globe /></span>
                         <div className="tls__tool-id">
                           <h3>{t.name}</h3>
                           <span>{getDomain(t.url)}</span>
                         </div>
-                        <ExternalLink className="tls__tool-ext" />
+                        {t.url ? (
+                          <a href={t.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title="Open website" className="tls__tool-ext">
+                            <ExternalLink />
+                          </a>
+                        ) : null}
                       </header>
                       {t.description && <p className="tls__tool-desc">{t.description.length > 120 ? t.description.slice(0, 120) + "…" : t.description}</p>}
                       <footer className="tls__tool-foot">
-                        {isShared ? (
+                        {hasCreds ? (
+                          <span className="tls__tool-team"><KeyRound /> Credentials</span>
+                        ) : isShared ? (
                           <span className="tls__tool-shared"><Lock /> Shared with you</span>
                         ) : sharedCount > 0 ? (
                           <span className="tls__tool-team"><Users /> {sharedCount} member{sharedCount === 1 ? "" : "s"}</span>
@@ -230,7 +249,7 @@ export default function ToolsPage() {
                         )}
                         <ChevronRight />
                       </footer>
-                    </a>
+                    </div>
                   );
                 })}
               </div>
@@ -238,7 +257,148 @@ export default function ToolsPage() {
           ))
         )}
       </div>
+
+      {openTool ? <ToolDetailModal tool={openTool} onClose={() => setOpenTool(null)} onChanged={load} /> : null}
     </>
+  );
+}
+
+function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose: () => void; onChanged: () => void }) {
+  const [creds, setCreds] = useState<ToolCredentials>(tool.credentials ?? {});
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [draft, setDraft] = useState({
+    username: tool.credentials?.username ?? "",
+    password: tool.credentials?.password ?? "",
+    apiKey: tool.credentials?.apiKey ?? "",
+    notes: tool.credentials?.notes ?? "",
+  });
+
+  const fields = ([
+    { key: "username", label: "Username / Email", Icon: UserIcon, secret: false },
+    { key: "password", label: "Password", Icon: Lock, secret: true },
+    { key: "apiKey", label: "API key", Icon: KeyRound, secret: true },
+  ] as const).filter((f) => creds[f.key] && String(creds[f.key]).trim());
+  const notes = (creds.notes ?? "").trim();
+  const hasAny = fields.length > 0 || notes.length > 0;
+
+  async function save() {
+    setSaving(true); setErr(null);
+    const next: ToolCredentials = {};
+    if (draft.username.trim()) next.username = draft.username.trim();
+    if (draft.password) next.password = draft.password;
+    if (draft.apiKey.trim()) next.apiKey = draft.apiKey.trim();
+    if (draft.notes.trim()) next.notes = draft.notes.trim();
+    try {
+      const res = await fetch(`/api/tools/${tool.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credentials: next }),
+      });
+      if (!res.ok) { setErr(res.status === 403 ? "Manager access required to edit credentials." : "Couldn't save."); return; }
+      setCreds(next);
+      setEditing(false);
+      onChanged();
+    } catch { setErr("Couldn't save."); } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-3 border-b border-zinc-100 px-4 py-3.5">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-500"><Globe className="h-5 w-5" /></span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[15px] font-semibold text-zinc-900">{tool.name}</div>
+            {tool.url ? <div className="truncate text-[12px] text-zinc-400">{getDomain(tool.url)}</div> : null}
+          </div>
+          {!editing ? (
+            <button type="button" onClick={() => setEditing(true)} title="Edit credentials" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><Pencil className="h-4 w-4" /></button>
+          ) : null}
+          <button type="button" onClick={onClose} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="space-y-3 px-4 py-4">
+          {tool.description ? <p className="text-[13px] text-zinc-600">{tool.description}</p> : null}
+          {tool.category ? <div className="text-[12px] text-zinc-400">Category · <span className="text-zinc-600">{tool.category}</span></div> : null}
+
+          <div className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Credentials</div>
+
+          {editing ? (
+            <div className="space-y-2.5">
+              <Field label="Username / Email" value={draft.username} onChange={(v) => setDraft((d) => ({ ...d, username: v }))} placeholder="name@company.com" />
+              <Field label="Password" value={draft.password} onChange={(v) => setDraft((d) => ({ ...d, password: v }))} placeholder="••••••••" type="password" />
+              <Field label="API key" value={draft.apiKey} onChange={(v) => setDraft((d) => ({ ...d, apiKey: v }))} placeholder="optional" />
+              <div>
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">Notes</div>
+                <textarea value={draft.notes} onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))} rows={2} placeholder="2FA, seat owner, plan…" className="w-full rounded-md border border-zinc-200 px-2.5 py-1.5 text-[13px] outline-none focus:border-zinc-300" />
+              </div>
+              {err ? <div className="text-[12px] text-red-600">{err}</div> : null}
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => { setEditing(false); setErr(null); }} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">Cancel</button>
+                <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
+                </button>
+              </div>
+            </div>
+          ) : hasAny ? (
+            <div className="space-y-2">
+              {fields.map((f) => <CredRow key={f.key} label={f.label} value={String(creds[f.key])} Icon={f.Icon} secret={f.secret} />)}
+              {notes ? (
+                <div className="rounded-lg border border-zinc-200 px-3 py-2">
+                  <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400"><StickyNote className="h-3 w-3" /> Notes</div>
+                  <p className="whitespace-pre-wrap text-[13px] text-zinc-700">{notes}</p>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <button type="button" onClick={() => setEditing(true)} className="w-full rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-[12.5px] text-zinc-500 hover:border-violet-300 hover:bg-violet-50/40">
+              No credentials yet — click to add an ID &amp; password.
+            </button>
+          )}
+        </div>
+
+        {tool.url ? (
+          <div className="border-t border-zinc-100 px-4 py-3">
+            <a href={tool.url} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-zinc-900 text-[13px] font-medium text-white hover:bg-zinc-800">
+              <ExternalLink className="h-3.5 w-3.5" /> Open website
+            </a>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string }) {
+  return (
+    <div>
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">{label}</div>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-9 w-full rounded-md border border-zinc-200 px-2.5 text-[13px] outline-none focus:border-zinc-300" />
+    </div>
+  );
+}
+
+function CredRow({ label, value, Icon, secret }: { label: string; value: string; Icon: typeof Lock; secret: boolean }) {
+  const [show, setShow] = useState(!secret);
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }).catch(() => {});
+  };
+  return (
+    <div className="rounded-lg border border-zinc-200 px-3 py-2">
+      <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400"><Icon className="h-3 w-3" /> {label}</div>
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-zinc-800">{show ? value : "•".repeat(Math.min(value.length || 8, 16))}</span>
+        {secret ? (
+          <button type="button" onClick={() => setShow((s) => !s)} title={show ? "Hide" : "Show"} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
+            {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </button>
+        ) : null}
+        <button type="button" onClick={copy} title="Copy" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
+          {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+    </div>
   );
 }
 
