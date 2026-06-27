@@ -22,16 +22,16 @@ import {
 
 interface DepartmentOption { id: string; label: string; description: string; Icon: LucideIcon; gradient: string }
 const DEPARTMENTS: DepartmentOption[] = [
-  { id: "hr",          label: "People & HR",       description: "Hiring, onboarding, reviews, time-off",        Icon: Users,      gradient: "linear-gradient(135deg,#ec4899,#a855f7)" },
+  { id: "hr",          label: "People & HR",       description: "Hiring, onboarding, reviews, time-off",        Icon: Users,      gradient: "linear-gradient(135deg,#FF158A,#FF3D57)" },
   { id: "sales",       label: "Sales & Customers", description: "Pipelines, deals, renewals, contracts",        Icon: BarChart3,  gradient: "linear-gradient(135deg,#22c55e,#14b8a6)" },
   { id: "operations",  label: "Operations",        description: "Tools, assets, SOPs, forms",                   Icon: Boxes,      gradient: "linear-gradient(135deg,#b45309,#f59e0b)" },
   { id: "finance",     label: "Finance",           description: "Dashboards, contracts, expense tracking",      Icon: Calculator, gradient: "linear-gradient(135deg,#0f766e,#22c55e)" },
-  { id: "it",          label: "IT",                description: "Tools, assets, access policies, SOPs",         Icon: Wrench,     gradient: "linear-gradient(135deg,#3b82f6,#a855f7)" },
+  { id: "it",          label: "IT",                description: "Tools, assets, access policies, SOPs",         Icon: Wrench,     gradient: "linear-gradient(135deg,#0073EA,#579BFC)" },
   { id: "marketing",   label: "Marketing",         description: "Content, forms, clips, dashboards",            Icon: Megaphone,  gradient: "linear-gradient(135deg,#f59e0b,#ec4899)" },
-  { id: "engineering", label: "Engineering",       description: "Goals, docs, SOPs, dashboards",                Icon: Code2,      gradient: "linear-gradient(135deg,#6366f1,#3b82f6)" },
-  { id: "legal",       label: "Legal",             description: "Contracts, policies, SOPs, docs",              Icon: Scale,      gradient: "linear-gradient(135deg,#a855f7,#6366f1)" },
+  { id: "engineering", label: "Engineering",       description: "Goals, docs, SOPs, dashboards",                Icon: Code2,      gradient: "linear-gradient(135deg,#0073EA,#579BFC)" },
+  { id: "legal",       label: "Legal",             description: "Contracts, policies, SOPs, docs",              Icon: Scale,      gradient: "linear-gradient(135deg,#334155,#64748b)" },
   { id: "support",     label: "Customer Support",  description: "SOPs, forms, docs, recognition",               Icon: Headphones, gradient: "linear-gradient(135deg,#f59e0b,#ec4899)" },
-  { id: "all-in-one",  label: "The whole company", description: "Workday-style all-in-one — give me everything",Icon: Sparkles,   gradient: "linear-gradient(135deg,#ec4899,#a855f7,#3b82f6)" },
+  { id: "all-in-one",  label: "The whole company", description: "Workday-style all-in-one — give me everything",Icon: Sparkles,   gradient: "linear-gradient(135deg,#0073EA,#00C875)" },
 ];
 
 const DEPT_RECS: Record<string, string[]> = {
@@ -59,23 +59,23 @@ const TAGLINES: Record<string, string> = {
 };
 
 const CATEGORY_GRADIENT: Record<string, string> = {
-  Core: "linear-gradient(135deg,#3b82f6,#6366f1)",
-  People: "linear-gradient(135deg,#ec4899,#a855f7)",
+  Core: "linear-gradient(135deg,#0073EA,#3b82f6)",
+  People: "linear-gradient(135deg,#FF158A,#FF3D57)",
   "Time & Pay": "linear-gradient(135deg,#0f766e,#22c55e)",
   Knowledge: "linear-gradient(135deg,#f59e0b,#ec4899)",
-  "Build & Extend": "linear-gradient(135deg,#6366f1,#a855f7)",
+  "Build & Extend": "linear-gradient(135deg,#0073EA,#579BFC)",
   Sales: "linear-gradient(135deg,#22c55e,#14b8a6)",
   Marketing: "linear-gradient(135deg,#f59e0b,#ec4899)",
   Service: "linear-gradient(135deg,#f59e0b,#ef4444)",
   Finance: "linear-gradient(135deg,#0f766e,#22c55e)",
-  Dev: "linear-gradient(135deg,#6366f1,#3b82f6)",
+  Dev: "linear-gradient(135deg,#0073EA,#579BFC)",
   Workspace: "linear-gradient(135deg,#3f3f46,#71717a)",
 };
 
 const ONBOARD_EXCLUDE = new Set(["settings", "trash", "store"]);
 const STEPS = ["welcome", "department", "apps", "ready"];
-// Match the app's ClickUp/Monday brand accent (violet --os-brand).
-const CTA = "#7c3aed";
+// Official brand accent: Monday blue (the os-brand token).
+const CTA = "#0073EA";
 
 export default function OnboardPage() {
   const router = useRouter();
@@ -143,18 +143,18 @@ export default function OnboardPage() {
       {/* Progress */}
       <div className="mb-9 flex shrink-0 justify-center gap-2" aria-label={`Step ${step + 1} of ${STEPS.length}`}>
         {STEPS.map((s, i) => (
-          <span key={s} className={`h-2 rounded-full transition-all duration-300 ${i === step ? "w-9 bg-violet-600" : i < step ? "w-2 bg-emerald-500" : "w-2 bg-zinc-200"}`} />
+          <span key={s} className={`h-2 rounded-full transition-all duration-300 ${i === step ? "w-9 bg-[#0073EA]" : i < step ? "w-2 bg-emerald-500" : "w-2 bg-zinc-200"}`} />
         ))}
       </div>
 
       {/* Step 0 — Welcome */}
       {step === 0 && (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
-          <span className="mb-5 inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-[12px] font-bold uppercase tracking-wide text-violet-600">
+          <span className="mb-5 inline-flex items-center gap-1.5 rounded-full bg-[#E6F1FB] px-3 py-1 text-[12px] font-bold uppercase tracking-wide text-[#0073EA]">
             <Sparkles className="h-3.5 w-3.5" /> Welcome to WorkwrK
           </span>
           <h1 className="text-[40px] font-extrabold leading-[1.05] tracking-tight text-zinc-900 sm:text-[52px]">
-            Your modular <span className="text-violet-600">Work OS</span>.
+            Your modular <span className="text-[#0073EA]">Work OS</span>.
           </h1>
           <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-zinc-500">
             Pick the apps that match how your team works. Every app comes with boards, AI agents, automations, and templates ready to go — add or remove any time.
@@ -193,12 +193,12 @@ export default function OnboardPage() {
           </div>
 
           {department ? (
-            <div className="mb-5 flex items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/60 px-4 py-3">
+            <div className="mb-5 flex items-center gap-3 rounded-xl border border-[#0073EA]/15 bg-[#0073EA]/5 px-4 py-3">
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white" style={{ background: selectedDept?.gradient ?? CTA }}>
                 {selectedDept ? <selectedDept.Icon className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
               </span>
               <p className="flex-1 text-[13px] text-zinc-600">Pre-selected for <strong className="font-semibold text-zinc-900">{deptLabel}</strong> — the core apps everyone gets, plus what your team typically needs day-one.</p>
-              <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[12px] font-semibold text-violet-600 shadow-sm">{selected.size} selected</span>
+              <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[12px] font-semibold text-[#0073EA] shadow-sm">{selected.size} selected</span>
             </div>
           ) : null}
 
@@ -240,7 +240,7 @@ export default function OnboardPage() {
       {/* Step 3 — Ready */}
       {step === 3 && (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
-          <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)" }}>
+          <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "linear-gradient(135deg,#0073EA,#3b9aef)" }}>
             <Sparkles className="h-8 w-8" />
           </span>
           <span className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-bold uppercase tracking-wide text-emerald-600">
@@ -275,7 +275,7 @@ function Card({ selected, onClick, icon, gradient, title, desc, badge }: {
       type="button"
       onClick={onClick}
       className={`group relative flex items-start gap-3 rounded-2xl border-2 p-4 text-left transition ${
-        selected ? "border-violet-500 bg-violet-50/50 ring-4 ring-violet-100" : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-[0_4px_16px_-8px_rgba(0,0,0,0.18)]"
+        selected ? "border-[#0073EA] bg-[#0073EA]/5 ring-4 ring-[#0073EA]/15" : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-[0_4px_16px_-8px_rgba(0,0,0,0.18)]"
       }`}
     >
       {badge ? (
@@ -286,7 +286,7 @@ function Card({ selected, onClick, icon, gradient, title, desc, badge }: {
         <span className="block text-[14.5px] font-semibold leading-tight tracking-tight text-zinc-900">{title}</span>
         <span className="mt-0.5 block text-[12.5px] leading-snug text-zinc-500">{desc}</span>
       </span>
-      <span className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition ${selected ? "border-violet-500 bg-violet-500 text-white" : "border-zinc-200 bg-white text-transparent"}`}>
+      <span className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition ${selected ? "border-[#0073EA] bg-[#E6F1FB]0 text-white" : "border-zinc-200 bg-white text-transparent"}`}>
         <Check className="h-3 w-3" strokeWidth={3} />
       </span>
     </button>
