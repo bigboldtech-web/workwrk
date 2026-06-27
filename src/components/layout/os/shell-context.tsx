@@ -197,7 +197,9 @@ const SIDEBAR_COLLAPSED_KEY = "workwrk:os:sidebar-collapsed";
 const PINNED_APPS_KEY = "workwrk:os:pinned-apps";
 const RECENT_APPS_KEY = "workwrk:os:recent-apps";
 const ICONS_ONLY_KEY = "workwrk:os:icons-only";
-const PROFILE_TOOL_PINS_KEY = "workwrk:os:profile-tool-pins";
+// v2: the quick-tools bar replaced the old nav-link tool set, so reset cached
+// pins to the new functional default.
+const PROFILE_TOOL_PINS_KEY = "workwrk:os:profile-tool-pins:v2";
 const PRESENCE_KEY = "workwrk:os:presence";
 const MUTED_NOTIFS_KEY = "workwrk:os:muted-notifs";
 const MAX_RECENTS = 6;
