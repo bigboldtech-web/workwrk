@@ -22,16 +22,16 @@ import {
 
 interface DepartmentOption { id: string; label: string; description: string; Icon: LucideIcon; gradient: string }
 const DEPARTMENTS: DepartmentOption[] = [
-  { id: "hr",          label: "People & HR",       description: "Hiring, onboarding, reviews, time-off",        Icon: Users,      gradient: "linear-gradient(135deg,#FF158A,#FF3D57)" },
-  { id: "sales",       label: "Sales & Customers", description: "Pipelines, deals, renewals, contracts",        Icon: BarChart3,  gradient: "linear-gradient(135deg,#22c55e,#14b8a6)" },
-  { id: "operations",  label: "Operations",        description: "Tools, assets, SOPs, forms",                   Icon: Boxes,      gradient: "linear-gradient(135deg,#b45309,#f59e0b)" },
-  { id: "finance",     label: "Finance",           description: "Dashboards, contracts, expense tracking",      Icon: Calculator, gradient: "linear-gradient(135deg,#0f766e,#22c55e)" },
-  { id: "it",          label: "IT",                description: "Tools, assets, access policies, SOPs",         Icon: Wrench,     gradient: "linear-gradient(135deg,#0073EA,#579BFC)" },
-  { id: "marketing",   label: "Marketing",         description: "Content, forms, clips, dashboards",            Icon: Megaphone,  gradient: "linear-gradient(135deg,#f59e0b,#ec4899)" },
-  { id: "engineering", label: "Engineering",       description: "Goals, docs, SOPs, dashboards",                Icon: Code2,      gradient: "linear-gradient(135deg,#0073EA,#579BFC)" },
-  { id: "legal",       label: "Legal",             description: "Contracts, policies, SOPs, docs",              Icon: Scale,      gradient: "linear-gradient(135deg,#334155,#64748b)" },
-  { id: "support",     label: "Customer Support",  description: "SOPs, forms, docs, recognition",               Icon: Headphones, gradient: "linear-gradient(135deg,#f59e0b,#ec4899)" },
-  { id: "all-in-one",  label: "The whole company", description: "Workday-style all-in-one. Give me everything",Icon: Sparkles,   gradient: "linear-gradient(135deg,#0073EA,#00C875)" },
+  { id: "hr",          label: "People & HR",       description: "Hiring, onboarding, reviews, time-off",        Icon: Users,      gradient: "#FF158A" },
+  { id: "sales",       label: "Sales & Customers", description: "Pipelines, deals, renewals, contracts",        Icon: BarChart3,  gradient: "#00C875" },
+  { id: "operations",  label: "Operations",        description: "Tools, assets, SOPs, forms",                   Icon: Boxes,      gradient: "#E8920C" },
+  { id: "finance",     label: "Finance",           description: "Dashboards, contracts, expense tracking",      Icon: Calculator, gradient: "#14787E" },
+  { id: "it",          label: "IT",                description: "Tools, assets, access policies, SOPs",         Icon: Wrench,     gradient: "#0073EA" },
+  { id: "marketing",   label: "Marketing",         description: "Content, forms, clips, dashboards",            Icon: Megaphone,  gradient: "#FF7A59" },
+  { id: "engineering", label: "Engineering",       description: "Goals, docs, SOPs, dashboards",                Icon: Code2,      gradient: "#5B7FFF" },
+  { id: "legal",       label: "Legal",             description: "Contracts, policies, SOPs, docs",              Icon: Scale,      gradient: "#475569" },
+  { id: "support",     label: "Customer Support",  description: "SOPs, forms, docs, recognition",               Icon: Headphones, gradient: "#00B2A9" },
+  { id: "all-in-one",  label: "The whole company", description: "Workday-style all-in-one. Give me everything",Icon: Sparkles,   gradient: "#0073EA" },
 ];
 
 const DEPT_RECS: Record<string, string[]> = {
@@ -59,17 +59,17 @@ const TAGLINES: Record<string, string> = {
 };
 
 const CATEGORY_GRADIENT: Record<string, string> = {
-  Core: "linear-gradient(135deg,#0073EA,#3b82f6)",
-  People: "linear-gradient(135deg,#FF158A,#FF3D57)",
-  "Time & Pay": "linear-gradient(135deg,#0f766e,#22c55e)",
-  Knowledge: "linear-gradient(135deg,#f59e0b,#ec4899)",
-  "Build & Extend": "linear-gradient(135deg,#0073EA,#579BFC)",
-  Sales: "linear-gradient(135deg,#22c55e,#14b8a6)",
-  Marketing: "linear-gradient(135deg,#f59e0b,#ec4899)",
-  Service: "linear-gradient(135deg,#f59e0b,#ef4444)",
-  Finance: "linear-gradient(135deg,#0f766e,#22c55e)",
-  Dev: "linear-gradient(135deg,#0073EA,#579BFC)",
-  Workspace: "linear-gradient(135deg,#3f3f46,#71717a)",
+  Core: "#0073EA",
+  People: "#FF158A",
+  "Time & Pay": "#14787E",
+  Knowledge: "#E8920C",
+  "Build & Extend": "#5B7FFF",
+  Sales: "#00C875",
+  Marketing: "#FF7A59",
+  Service: "#E2445C",
+  Finance: "#14787E",
+  Dev: "#5B7FFF",
+  Workspace: "#5A6472",
 };
 
 const ONBOARD_EXCLUDE = new Set(["settings", "trash", "store"]);
@@ -240,7 +240,7 @@ export default function OnboardPage() {
       {/* Step 3. Ready */}
       {step === 3 && (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
-          <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "linear-gradient(135deg,#0073EA,#3b9aef)" }}>
+          <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "#0073EA" }}>
             <Sparkles className="h-8 w-8" />
           </span>
           <span className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-bold uppercase tracking-wide text-emerald-600">

@@ -33,10 +33,7 @@ export default function OnboardLayout({ children }: { children: React.ReactNode 
       className="min-h-screen text-zinc-900 antialiased"
       style={{
         colorScheme: "light",
-        background:
-          "radial-gradient(1100px 520px at 12% -8%, rgba(124,58,237,0.07), transparent 60%)," +
-          "radial-gradient(1000px 520px at 90% 110%, rgba(236,72,153,0.07), transparent 60%)," +
-          "#ffffff",
+        background: "#FBFBFC",
         fontFamily: "Figtree, ui-sans-serif, system-ui, -apple-system, sans-serif",
       }}
     >
