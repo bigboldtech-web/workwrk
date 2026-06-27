@@ -335,3 +335,84 @@ export function AppGlyph({ appKey, size = 18 }: { appKey: string; size?: number 
   const Comp = APP_GLYPHS[appKey];
   return Comp ? <Comp size={size} /> : null;
 }
+
+/* ── Quick-tool glyphs (topbar right cluster) ── */
+
+const CreateTask: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <rect x="4" y="4" width="16" height="16" rx="3.6" fill={W} stroke={B} strokeWidth="1.8" />
+    <path d="M8 12 l2.6 2.6 l5.3 -5.7" stroke={G} strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+const MyWork: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M8.5 7.5 V6.2 a1.7 1.7 0 0 1 1.7 -1.7 H13.8 a1.7 1.7 0 0 1 1.7 1.7 V7.5" fill="none" stroke={B} strokeWidth="1.8" strokeLinecap="round" />
+    <rect x="3" y="7.5" width="18" height="12" rx="2.4" fill={B} />
+    <rect x="3" y="11.2" width="18" height="2.3" fill={INK} opacity="0.18" />
+    <rect x="10.4" y="11" width="3.2" height="2.6" rx="0.7" fill={Y} />
+  </Svg>
+);
+
+const Reminder: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <circle cx="6" cy="4.8" r="1.7" fill={R} />
+    <circle cx="18" cy="4.8" r="1.7" fill={R} />
+    <path d="M4.6 6.2 L7.6 8.6 M19.4 6.2 L16.4 8.6" stroke={R} strokeWidth="2" strokeLinecap="round" />
+    <circle cx="12" cy="13.2" r="7" fill={W} stroke={B} strokeWidth="1.7" />
+    <path d="M12 13.2 V9.2" stroke={INK} strokeWidth="1.6" strokeLinecap="round" />
+    <path d="M12 13.2 L15 14.7" stroke={R} strokeWidth="1.6" strokeLinecap="round" />
+  </Svg>
+);
+
+const Notepad: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <rect x="5" y="4.5" width="14" height="16.5" rx="2" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <rect x="8" y="2.6" width="1.7" height="4" rx="0.85" fill={SL} />
+    <rect x="14.4" y="2.6" width="1.7" height="4" rx="0.85" fill={SL} />
+    <rect x="7.5" y="9" width="9" height="1.6" rx="0.8" fill={B} />
+    <rect x="7.5" y="12.5" width="9" height="1.6" rx="0.8" fill={Y} />
+    <rect x="7.5" y="16" width="6" height="1.6" rx="0.8" fill={G} />
+  </Svg>
+);
+
+const Whiteboard: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <rect x="3" y="4.5" width="18" height="12" rx="2" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <path d="M6.5 12.5 q2 -4.5 4 -1.5 t4 -1.5" stroke={B} strokeWidth="1.7" fill="none" strokeLinecap="round" />
+    <path d="M12 16.5 V20" stroke={SL} strokeWidth="1.8" strokeLinecap="round" />
+    <circle cx="17.4" cy="8.4" r="1.4" fill={R} />
+  </Svg>
+);
+
+const InboxTray: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M4 6 a1.4 1.4 0 0 1 1.4 -1.4 H16.6 A1.4 1.4 0 0 1 18 6 V14 H4 Z" fill={W} stroke={B} strokeWidth="1.6" />
+    <path d="M3.2 13.5 H8 l1.5 2.3 h5 L16 13.5 H20.8 V16.6 a2 2 0 0 1 -2 2 H5.2 a2 2 0 0 1 -2 -2 Z" fill={B} />
+    <circle cx="18.5" cy="6.5" r="2.4" fill={R} />
+  </Svg>
+);
+
+export const TOOL_GLYPHS: Record<string, FC<P>> = {
+  "create-task": CreateTask,
+  "my-work": MyWork,
+  "track-time": Timesheets,
+  "notepad": Notepad,
+  "record-clip": Clips,
+  "create-reminder": Reminder,
+  "create-doc": Notes,
+  "create-whiteboard": Whiteboard,
+  "view-people": Teams,
+  "create-dashboard": Dashboards,
+  "ai-notetaker": AI,
+  "inbox": InboxTray,
+};
+
+export function hasToolGlyph(key: string): boolean {
+  return key in TOOL_GLYPHS;
+}
+
+export function ToolGlyph({ toolKey, size = 18 }: { toolKey: string; size?: number }) {
+  const Comp = TOOL_GLYPHS[toolKey];
+  return Comp ? <Comp size={size} /> : null;
+}

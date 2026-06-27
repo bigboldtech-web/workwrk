@@ -17,8 +17,9 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useOsShell } from "./shell-context";
-import { ChevronDown, Search, Inbox } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { WorkspaceMenu } from "./workspace-menu";
+import { ToolGlyph, hasToolGlyph } from "@/components/brand/app-glyphs";
 import { AskAiButton } from "./ask-ai-button";
 import { ProfileMenu } from "./profile-menu";
 import { PROFILE_TOOL_MAP } from "./profile-tools";
@@ -126,7 +127,7 @@ export function ClickTopbar() {
               aria-label={tool.label}
               title={tool.tooltip ?? tool.label}
             >
-              <tool.Icon className="w-[14px] h-[14px]" />
+              {hasToolGlyph(tool.key) ? <ToolGlyph toolKey={tool.key} size={17} /> : <tool.Icon className="w-[14px] h-[14px]" />}
             </Link>
           ))}
           {pinnedTools.length > 0 ? (
@@ -136,9 +137,9 @@ export function ClickTopbar() {
             href="/inbox"
             aria-label="Inbox"
             title="Inbox"
-            className="p-1 rounded-md hover:bg-zinc-100 text-zinc-500 hover:text-zinc-800 inline-flex items-center justify-center"
+            className="p-1 rounded-md hover:bg-zinc-100 inline-flex items-center justify-center"
           >
-            <Inbox className="w-[14px] h-[14px]" />
+            <ToolGlyph toolKey="inbox" size={17} />
           </Link>
         </div>
         <div className="relative ml-1">
