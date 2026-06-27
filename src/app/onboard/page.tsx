@@ -1,22 +1,17 @@
 "use client";
 
-/* New-user onboarding wizard — 4 steps:
- *   0. Welcome
- *   1. "What brings you here?" → use-case router
- *   2. "Pick your apps" → the REAL apps from apps-catalog (the same ones the
- *      rail uses), pre-checked from the use case. Selecting pins them.
- *   3. Ready → "Go to my workspace"
- *
- * On finish: POST /api/setup marks onboarding complete (+ installs the
- * department's product modules), and PATCH /api/preferences pins the chosen
- * apps to the rail. Visuals come from os.css (.workwrk-os scope, light-pinned).
+/* New-user onboarding wizard (self-contained light theme — explicit Tailwind,
+ * no os.css token dependency).
+ *   0. Welcome  ·  1. Use case  ·  2. Pick apps (real apps-catalog)  ·  3. Ready
+ * On finish: POST /api/setup (marks complete) + PATCH /api/preferences pins the
+ * chosen apps to the rail.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  ArrowRight, ArrowLeft, Check, Sparkles, Users, BarChart3,
+  ArrowRight, ArrowLeft, Check, Sparkles, Loader2, Users, BarChart3,
   Headphones, Megaphone, Calculator, Code2, Scale, Boxes, Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -25,22 +20,20 @@ import {
   canAccessApp, type AppEntry,
 } from "@/components/layout/os/apps-catalog";
 
-// ─── Use-case router ────────────────────────────────────────
 interface DepartmentOption { id: string; label: string; description: string; Icon: LucideIcon; gradient: string }
 const DEPARTMENTS: DepartmentOption[] = [
-  { id: "hr",          label: "People & HR",      description: "Hiring, onboarding, reviews, time-off",       Icon: Users,      gradient: "linear-gradient(135deg, #FF158A, #A25DDC)" },
-  { id: "sales",       label: "Sales & Customers",description: "Pipelines, deals, renewals, contracts",       Icon: BarChart3,  gradient: "linear-gradient(135deg, #00C875, #66CCC2)" },
-  { id: "operations",  label: "Operations",       description: "Tools, assets, SOPs, forms",                  Icon: Boxes,      gradient: "linear-gradient(135deg, #7F5347, #FDAB3D)" },
-  { id: "finance",     label: "Finance",          description: "Dashboards, contracts, expenses tracking",    Icon: Calculator, gradient: "linear-gradient(135deg, #14787E, #00C875)" },
-  { id: "it",          label: "IT",               description: "Tools, assets, access policies, SOPs",        Icon: Wrench,     gradient: "linear-gradient(135deg, #579BFC, #A25DDC)" },
-  { id: "marketing",   label: "Marketing",        description: "Content, forms, clips, dashboards",           Icon: Megaphone,  gradient: "linear-gradient(135deg, #FDAB3D, #FF158A)" },
-  { id: "engineering", label: "Engineering",      description: "Goals, docs, SOPs, dashboards",               Icon: Code2,      gradient: "linear-gradient(135deg, #5559DF, #579BFC)" },
-  { id: "legal",       label: "Legal",            description: "Contracts, policies, SOPs, docs",             Icon: Scale,      gradient: "linear-gradient(135deg, #A25DDC, #5559DF)" },
-  { id: "support",     label: "Customer Support", description: "SOPs, forms, docs, recognition",              Icon: Headphones, gradient: "linear-gradient(135deg, #FDAB3D, #FF158A)" },
-  { id: "all-in-one",  label: "The whole company",description: "Workday-style all-in-one — give me everything",Icon: Sparkles,  gradient: "linear-gradient(135deg, #FF158A, #A25DDC, #579BFC)" },
+  { id: "hr",          label: "People & HR",       description: "Hiring, onboarding, reviews, time-off",        Icon: Users,      gradient: "linear-gradient(135deg,#ec4899,#a855f7)" },
+  { id: "sales",       label: "Sales & Customers", description: "Pipelines, deals, renewals, contracts",        Icon: BarChart3,  gradient: "linear-gradient(135deg,#22c55e,#14b8a6)" },
+  { id: "operations",  label: "Operations",        description: "Tools, assets, SOPs, forms",                   Icon: Boxes,      gradient: "linear-gradient(135deg,#b45309,#f59e0b)" },
+  { id: "finance",     label: "Finance",           description: "Dashboards, contracts, expense tracking",      Icon: Calculator, gradient: "linear-gradient(135deg,#0f766e,#22c55e)" },
+  { id: "it",          label: "IT",                description: "Tools, assets, access policies, SOPs",         Icon: Wrench,     gradient: "linear-gradient(135deg,#3b82f6,#a855f7)" },
+  { id: "marketing",   label: "Marketing",         description: "Content, forms, clips, dashboards",            Icon: Megaphone,  gradient: "linear-gradient(135deg,#f59e0b,#ec4899)" },
+  { id: "engineering", label: "Engineering",       description: "Goals, docs, SOPs, dashboards",                Icon: Code2,      gradient: "linear-gradient(135deg,#6366f1,#3b82f6)" },
+  { id: "legal",       label: "Legal",             description: "Contracts, policies, SOPs, docs",              Icon: Scale,      gradient: "linear-gradient(135deg,#a855f7,#6366f1)" },
+  { id: "support",     label: "Customer Support",  description: "SOPs, forms, docs, recognition",               Icon: Headphones, gradient: "linear-gradient(135deg,#f59e0b,#ec4899)" },
+  { id: "all-in-one",  label: "The whole company", description: "Workday-style all-in-one — give me everything",Icon: Sparkles,   gradient: "linear-gradient(135deg,#ec4899,#a855f7,#3b82f6)" },
 ];
 
-// Per-use-case recommended app keys (real apps-catalog keys).
 const DEPT_RECS: Record<string, string[]> = {
   hr:          ["teams", "recruiting", "onboarding", "reviews", "time-off", "timesheets", "learning", "kudos", "candor", "surveys", "announcements", "policies", "sops"],
   sales:       ["goals", "dashboards", "docs", "forms", "agreements"],
@@ -53,7 +46,6 @@ const DEPT_RECS: Record<string, string[]> = {
   support:     ["sops", "forms", "docs", "kudos"],
 };
 
-// Short taglines for the picker cards (keyed by app key).
 const TAGLINES: Record<string, string> = {
   home: "Your daily home base", planner: "Calendar & scheduling", ai: "AI workspace & agents",
   teams: "People & org chart", docs: "Notes & docs", dashboards: "Dashboards & reports",
@@ -66,30 +58,23 @@ const TAGLINES: Record<string, string> = {
   learning: "Courses & training", build: "Low-code app builder",
 };
 
-// Icon gradient per category — keeps the picker colorful + on-brand.
 const CATEGORY_GRADIENT: Record<string, string> = {
-  Core: "linear-gradient(135deg, #0073EA, #5559DF)",
-  People: "linear-gradient(135deg, #FF158A, #A25DDC)",
-  "Time & Pay": "linear-gradient(135deg, #14787E, #00C875)",
-  Knowledge: "linear-gradient(135deg, #FDAB3D, #FF158A)",
-  "Build & Extend": "linear-gradient(135deg, #5559DF, #A25DDC)",
-  Sales: "linear-gradient(135deg, #00C875, #66CCC2)",
-  Marketing: "linear-gradient(135deg, #FDAB3D, #FF158A)",
-  Service: "linear-gradient(135deg, #FDAB3D, #E2445C)",
-  Finance: "linear-gradient(135deg, #14787E, #00C875)",
-  Dev: "linear-gradient(135deg, #5559DF, #579BFC)",
-  Workspace: "linear-gradient(135deg, #323338, #676879)",
+  Core: "linear-gradient(135deg,#3b82f6,#6366f1)",
+  People: "linear-gradient(135deg,#ec4899,#a855f7)",
+  "Time & Pay": "linear-gradient(135deg,#0f766e,#22c55e)",
+  Knowledge: "linear-gradient(135deg,#f59e0b,#ec4899)",
+  "Build & Extend": "linear-gradient(135deg,#6366f1,#a855f7)",
+  Sales: "linear-gradient(135deg,#22c55e,#14b8a6)",
+  Marketing: "linear-gradient(135deg,#f59e0b,#ec4899)",
+  Service: "linear-gradient(135deg,#f59e0b,#ef4444)",
+  Finance: "linear-gradient(135deg,#0f766e,#22c55e)",
+  Dev: "linear-gradient(135deg,#6366f1,#3b82f6)",
+  Workspace: "linear-gradient(135deg,#3f3f46,#71717a)",
 };
 
-// Apps that aren't user-pickable in onboarding (always-available utilities).
 const ONBOARD_EXCLUDE = new Set(["settings", "trash", "store"]);
-
-const STEPS = [
-  { id: "welcome",    label: "Welcome" },
-  { id: "department", label: "What brings you here?" },
-  { id: "apps",       label: "Pick your apps" },
-  { id: "ready",      label: "Ready" },
-];
+const STEPS = ["welcome", "department", "apps", "ready"];
+const CTA = "linear-gradient(135deg,#ec4899,#a855f7)";
 
 export default function OnboardPage() {
   const router = useRouter();
@@ -98,27 +83,20 @@ export default function OnboardPage() {
 
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [department, setDepartment] = useState<string>("");
+  const [department, setDepartment] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Redirect if already onboarded.
   useEffect(() => {
     fetch("/api/setup").then((r) => r.json()).then((d) => { if (d.setupCompleted) router.push("/today"); }).catch(() => {});
   }, [router]);
 
-  // The real apps the user can access, in catalog order.
   const apps = useMemo<AppEntry[]>(
     () => CATALOG_APPS.filter((a) => !ONBOARD_EXCLUDE.has(a.key) && canAccessApp(a, accessLevel)),
     [accessLevel],
   );
-
-  const recommended = useMemo(() => {
-    if (department === "all-in-one") return apps.map((a) => a.key);
-    return DEPT_RECS[department] ?? [];
-  }, [department, apps]);
+  const recommended = useMemo(() => (department === "all-in-one" ? apps.map((a) => a.key) : DEPT_RECS[department] ?? []), [department, apps]);
   const recommendedSet = useMemo(() => new Set(recommended), [recommended]);
 
-  // Pre-select: always-pinned + default-pinned + Core category + use-case recs.
   useEffect(() => {
     if (!department) return;
     const core = apps.filter((a) => a.category === "Core").map((a) => a.key);
@@ -126,22 +104,13 @@ export default function OnboardPage() {
   }, [department, recommended, apps]);
 
   function toggleApp(key: string) {
-    if (ALWAYS_PINNED_KEYS.includes(key)) return; // Home etc. can't be unpinned
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
+    if (ALWAYS_PINNED_KEYS.includes(key)) return;
+    setSelected((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   }
 
-  // Group the accessible apps by category, in CATEGORY_ORDER.
   const grouped = useMemo(() => {
     const m = new Map<string, AppEntry[]>();
-    for (const a of apps) {
-      const c = a.category ?? "Workspace";
-      if (!m.has(c)) m.set(c, []);
-      m.get(c)!.push(a);
-    }
+    for (const a of apps) { const c = a.category ?? "Workspace"; (m.get(c) ?? m.set(c, []).get(c)!).push(a); }
     const order = [...CATEGORY_ORDER, ...[...m.keys()].filter((c) => !CATEGORY_ORDER.includes(c))];
     return order.filter((c) => m.has(c)).map((c) => ({ category: c, items: m.get(c)! }));
   }, [apps]);
@@ -149,7 +118,6 @@ export default function OnboardPage() {
   async function handleComplete() {
     setSaving(true);
     try {
-      // Always-pinned must be included in the rail.
       const pinned = Array.from(new Set([...ALWAYS_PINNED_KEYS, ...selected]));
       const res = await fetch("/api/setup", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -161,17 +129,9 @@ export default function OnboardPage() {
         }),
       });
       if (!res.ok) throw new Error(await res.text());
-      // Pin the chosen apps to the rail.
-      await fetch("/api/preferences", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sidebar: { pinned } }),
-      }).catch(() => {});
+      await fetch("/api/preferences", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sidebar: { pinned } }) }).catch(() => {});
       setStep(3);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
+    } catch (err) { console.error(err); } finally { setSaving(false); }
   }
 
   const deptLabel = DEPARTMENTS.find((d) => d.id === department)?.label ?? "";
@@ -179,143 +139,170 @@ export default function OnboardPage() {
 
   return (
     <>
-      <div className="os-onboard__progress" aria-label={`Step ${step + 1} of ${STEPS.length}`}>
+      {/* Progress */}
+      <div className="mb-9 flex shrink-0 justify-center gap-2" aria-label={`Step ${step + 1} of ${STEPS.length}`}>
         {STEPS.map((s, i) => (
-          <span key={s.id} className={`os-onboard__progress-dot ${i === step ? "is-active" : i < step ? "is-done" : ""}`} style={{ width: i === step ? 36 : 8 }} />
+          <span key={s} className={`h-2 rounded-full transition-all duration-300 ${i === step ? "w-9 bg-gradient-to-r from-blue-500 to-violet-500" : i < step ? "w-2 bg-emerald-500" : "w-2 bg-zinc-200"}`} />
         ))}
       </div>
 
-      {/* ─── Step 0 · Welcome ─── */}
+      {/* Step 0 — Welcome */}
       {step === 0 && (
-        <div className="os-onboard__step">
-          <div className="os-onboard__hero">
-            <span className="os-onboard__eyebrow"><Sparkles /> Welcome to WorkwrK</span>
-            <h1 className="os-onboard__title">Your modular <em>Work OS</em>.</h1>
-            <p className="os-onboard__sub">
-              Pick the apps that match how your team works. Every app comes with boards,
-              AI agents, automations, and templates ready to go. Add or remove apps any time.
-            </p>
-          </div>
-          <div style={{ textAlign: "center", marginTop: 40 }}>
-            <button type="button" className="os-onboard__btn-cta" onClick={() => setStep(1)}>
-              <span>Get started</span><ArrowRight />
-            </button>
-          </div>
+        <div className="flex flex-1 flex-col items-center justify-center text-center">
+          <span className="mb-5 inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-[12px] font-bold uppercase tracking-wide text-violet-600">
+            <Sparkles className="h-3.5 w-3.5" /> Welcome to WorkwrK
+          </span>
+          <h1 className="text-[40px] font-extrabold leading-[1.05] tracking-tight text-zinc-900 sm:text-[52px]">
+            Your modular <span className="bg-gradient-to-r from-pink-500 to-violet-500 bg-clip-text text-transparent">Work OS</span>.
+          </h1>
+          <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-zinc-500">
+            Pick the apps that match how your team works. Every app comes with boards, AI agents, automations, and templates ready to go — add or remove any time.
+          </p>
+          <button type="button" onClick={() => setStep(1)} className="mt-9 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
+            Get started <ArrowRight className="h-4 w-4" />
+          </button>
         </div>
       )}
 
-      {/* ─── Step 1 · Use-case router ─── */}
+      {/* Step 1 — Use case */}
       {step === 1 && (
-        <div className="os-onboard__step">
-          <div className="os-onboard__hero">
-            <h1 className="os-onboard__title" style={{ fontSize: 36 }}>What brings you to WorkwrK?</h1>
-            <p className="os-onboard__sub">Pick your primary use case. We'll pre-select the right apps — you can adjust on the next step.</p>
+        <div className="flex flex-1 flex-col">
+          <div className="mb-8 text-center">
+            <h1 className="text-[32px] font-extrabold tracking-tight text-zinc-900">What brings you to WorkwrK?</h1>
+            <p className="mx-auto mt-2 max-w-lg text-[15px] text-zinc-500">Pick your primary use case. We&apos;ll pre-select the right apps — you can adjust on the next step.</p>
           </div>
-          <div className="os-onboard__grid">
-            {DEPARTMENTS.map((d) => {
-              const Icon = d.Icon;
-              return (
-                <button key={d.id} type="button" className={`os-onb-card ${department === d.id ? "is-selected" : ""}`} onClick={() => setDepartment(d.id)}>
-                  <div className="os-onb-card__icon" style={{ background: d.gradient }}><Icon /></div>
-                  <div className="os-onb-card__body">
-                    <div className="os-onb-card__title">{d.label}</div>
-                    <div className="os-onb-card__desc">{d.description}</div>
-                  </div>
-                  <div className="os-onb-card__check"><Check /></div>
-                </button>
-              );
-            })}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {DEPARTMENTS.map((d) => (
+              <Card key={d.id} selected={department === d.id} onClick={() => setDepartment(d.id)} icon={<d.Icon className="h-5 w-5" />} gradient={d.gradient} title={d.label} desc={d.description} />
+            ))}
           </div>
-          <div className="os-onboard__actions">
-            <button type="button" className="os-onboard__btn-back" onClick={() => setStep(0)}><ArrowLeft /> Back</button>
-            <button type="button" className="os-onboard__btn-next" onClick={() => setStep(2)} disabled={!department}><span>Continue</span><ArrowRight /></button>
+          <div className="mt-9 flex items-center justify-between border-t border-zinc-100 pt-5">
+            <BackBtn onClick={() => setStep(0)} />
+            <NextBtn disabled={!department} onClick={() => setStep(2)}>Continue</NextBtn>
           </div>
         </div>
       )}
 
-      {/* ─── Step 2 · App picker (real apps) ─── */}
+      {/* Step 2 — Pick apps */}
       {step === 2 && (
-        <div className="os-onboard__step">
-          <div className="os-onboard__hero">
-            <h1 className="os-onboard__title" style={{ fontSize: 36 }}>Pick your apps</h1>
-            <p className="os-onboard__sub">We pre-selected the essentials for your team. Add or remove freely — you can change this any time from the rail.</p>
+        <div className="flex flex-1 flex-col">
+          <div className="mb-6 text-center">
+            <h1 className="text-[32px] font-extrabold tracking-tight text-zinc-900">Pick your apps</h1>
+            <p className="mx-auto mt-2 max-w-lg text-[15px] text-zinc-500">We pre-selected the essentials for your team. Add or remove freely — change it any time from the rail.</p>
           </div>
 
           {department ? (
-            <div className="os-onboard__rec">
-              <div className="os-onboard__rec-icon">{selectedDept ? <selectedDept.Icon /> : <Sparkles />}</div>
-              <div className="os-onboard__rec-text">Pre-selected for <strong>{deptLabel}</strong> — the core apps everyone gets, plus what your team typically needs day-one.</div>
-              <span className="os-onboard__rec-count">{selected.size} selected</span>
+            <div className="mb-5 flex items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/60 px-4 py-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white" style={{ background: selectedDept?.gradient ?? CTA }}>
+                {selectedDept ? <selectedDept.Icon className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+              </span>
+              <p className="flex-1 text-[13px] text-zinc-600">Pre-selected for <strong className="font-semibold text-zinc-900">{deptLabel}</strong> — the core apps everyone gets, plus what your team typically needs day-one.</p>
+              <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[12px] font-semibold text-violet-600 shadow-sm">{selected.size} selected</span>
             </div>
           ) : null}
 
-          {grouped.map((g) => (
-            <div key={g.category}>
-              <div className="os-onboard__suite-title">
-                <span>{g.category === "Core" ? "Core (recommended for everyone)" : g.category}</span>
-                <span className="os-onboard__suite-title-line" />
-                <span style={{ fontSize: 10.5, color: "var(--os-ink-3)" }}>{g.items.filter((a) => selected.has(a.key)).length} / {g.items.length}</span>
-              </div>
-              <div className="os-onboard__grid">
-                {g.items.map((a) => {
-                  const isSelected = selected.has(a.key);
-                  const isRec = recommendedSet.has(a.key);
-                  const isCore = a.category === "Core";
-                  return (
-                    <button key={a.key} type="button" className={`os-onb-card ${isSelected ? "is-selected" : ""}`} onClick={() => toggleApp(a.key)}>
-                      {isCore ? <span className="os-onb-product__tier os-onb-product__tier--core">Core</span> : null}
-                      <div className="os-onb-card__icon" style={{ background: CATEGORY_GRADIENT[a.category ?? "Workspace"] ?? CATEGORY_GRADIENT.Core }}>
-                        <a.Icon />
-                      </div>
-                      <div className="os-onb-card__body">
-                        <div className="os-onb-card__title">
-                          {a.label}
-                          {isRec && !isCore ? (
-                            <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--os-c-pink)", marginLeft: 6, padding: "1px 5px", borderRadius: 4, background: "rgba(255, 21, 138, 0.12)" }}>Recommended</span>
-                          ) : null}
-                        </div>
-                        <div className="os-onb-card__desc">{TAGLINES[a.key] ?? a.category}</div>
-                      </div>
-                      <div className="os-onb-card__check"><Check /></div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+          <div className="space-y-6">
+            {grouped.map((g) => (
+              <section key={g.category}>
+                <div className="mb-2.5 flex items-center gap-2">
+                  <h2 className="text-[12px] font-bold uppercase tracking-wide text-zinc-500">{g.category === "Core" ? "Core · recommended for everyone" : g.category}</h2>
+                  <span className="h-px flex-1 bg-zinc-100" />
+                  <span className="text-[11px] tabular-nums text-zinc-400">{g.items.filter((a) => selected.has(a.key)).length}/{g.items.length}</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {g.items.map((a) => (
+                    <Card
+                      key={a.key}
+                      selected={selected.has(a.key)}
+                      onClick={() => toggleApp(a.key)}
+                      icon={<a.Icon className="h-[18px] w-[18px]" />}
+                      gradient={CATEGORY_GRADIENT[a.category ?? "Workspace"] ?? CATEGORY_GRADIENT.Core}
+                      title={a.label}
+                      desc={TAGLINES[a.key] ?? a.category ?? ""}
+                      badge={a.category === "Core" ? "Core" : recommendedSet.has(a.key) ? "Recommended" : undefined}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
 
-          <div className="os-onboard__actions">
-            <button type="button" className="os-onboard__btn-back" onClick={() => setStep(1)}><ArrowLeft /> Back</button>
-            <button type="button" className="os-onboard__btn-next" onClick={() => void handleComplete()} disabled={saving || selected.size === 0}>
-              <span>{saving ? "Setting up…" : "Set up my workspace"}</span>{!saving ? <ArrowRight /> : null}
-            </button>
+          <div className="mt-9 flex items-center justify-between border-t border-zinc-100 pt-5">
+            <BackBtn onClick={() => setStep(1)} />
+            <NextBtn disabled={saving || selected.size === 0} onClick={() => void handleComplete()}>
+              {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting up…</> : <>Set up my workspace <ArrowRight className="h-4 w-4" /></>}
+            </NextBtn>
           </div>
         </div>
       )}
 
-      {/* ─── Step 3 · Ready ─── */}
+      {/* Step 3 — Ready */}
       {step === 3 && (
-        <div className="os-onboard__step">
-          <div className="os-onboard__ready">
-            <div className="os-onboard__ready-art"><Sparkles /></div>
-            <span className="os-onboard__eyebrow"><Check /> All set</span>
-            <h1 className="os-onboard__title" style={{ marginTop: 16 }}>Your workspace is ready.</h1>
-            <p className="os-onboard__sub">We've pinned {selected.size} apps to your rail and pre-configured them for {deptLabel}. Sidekick is online and ready to draft work for you.</p>
-            <div className="os-onboard__ready-summary">
-              <strong>What's set up:</strong>
-              <ul>
-                <li><Check /> {selected.size} apps pinned to your rail</li>
-                <li><Check /> Core workspace (Tasks, Notes, SOPs, Goals)</li>
-                <li><Check /> Sidekick AI assistant online</li>
-                <li><Check /> Pre-built agents for {deptLabel}</li>
-              </ul>
-            </div>
-            <button type="button" className="os-onboard__btn-cta" onClick={() => router.push("/today")}>
-              <span>Go to my workspace</span><ArrowRight />
-            </button>
+        <div className="flex flex-1 flex-col items-center justify-center text-center">
+          <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "linear-gradient(135deg,#ec4899,#a855f7,#3b82f6)" }}>
+            <Sparkles className="h-8 w-8" />
+          </span>
+          <span className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-bold uppercase tracking-wide text-emerald-600">
+            <Check className="h-3.5 w-3.5" /> All set
+          </span>
+          <h1 className="mt-4 text-[40px] font-extrabold tracking-tight text-zinc-900">Your workspace is ready.</h1>
+          <p className="mt-3 max-w-md text-[15px] leading-relaxed text-zinc-500">
+            We&apos;ve pinned {selected.size} apps to your rail and pre-configured them for {deptLabel}. Sidekick is online and ready to draft work for you.
+          </p>
+          <div className="mt-6 w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm">
+            <div className="mb-2 text-[13px] font-semibold text-zinc-900">What&apos;s set up</div>
+            <ul className="space-y-1.5 text-[13px] text-zinc-600">
+              {[`${selected.size} apps pinned to your rail`, "Core workspace (Tasks, Notes, SOPs, Goals)", "Sidekick AI assistant online", `Pre-built agents for ${deptLabel}`].map((t) => (
+                <li key={t} className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-emerald-500" /> {t}</li>
+              ))}
+            </ul>
           </div>
+          <button type="button" onClick={() => router.push("/today")} className="mt-7 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
+            Go to my workspace <ArrowRight className="h-4 w-4" />
+          </button>
         </div>
       )}
     </>
+  );
+}
+
+function Card({ selected, onClick, icon, gradient, title, desc, badge }: {
+  selected: boolean; onClick: () => void; icon: React.ReactNode; gradient: string; title: string; desc: string; badge?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group relative flex items-start gap-3 rounded-2xl border-2 p-4 text-left transition ${
+        selected ? "border-violet-500 bg-violet-50/50 ring-4 ring-violet-100" : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-[0_4px_16px_-8px_rgba(0,0,0,0.18)]"
+      }`}
+    >
+      {badge ? (
+        <span className={`absolute right-3 top-3 rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${badge === "Core" ? "bg-zinc-100 text-zinc-500" : "bg-pink-50 text-pink-600"}`}>{badge}</span>
+      ) : null}
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white" style={{ background: gradient }}>{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14.5px] font-semibold leading-tight tracking-tight text-zinc-900">{title}</span>
+        <span className="mt-0.5 block text-[12.5px] leading-snug text-zinc-500">{desc}</span>
+      </span>
+      <span className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition ${selected ? "border-violet-500 bg-violet-500 text-white" : "border-zinc-200 bg-white text-transparent"}`}>
+        <Check className="h-3 w-3" strokeWidth={3} />
+      </span>
+    </button>
+  );
+}
+
+function BackBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[14px] font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
+      <ArrowLeft className="h-4 w-4" /> Back
+    </button>
+  );
+}
+function NextBtn({ children, disabled, onClick }: { children: React.ReactNode; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick} className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40">
+      {children}
+    </button>
   );
 }

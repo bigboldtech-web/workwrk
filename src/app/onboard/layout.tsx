@@ -1,19 +1,16 @@
 "use client";
 
+// Onboarding shell — self-contained light theme (explicit Tailwind, no
+// dependency on the .workwrk-os / os.css tokens, which inherit the app's dark
+// default and were rendering the wizard dark + unreadable).
+
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-// Reuse the dashboard's OS design tokens. Importing the stylesheet
-// brings in every `.workwrk-os` / `.os-*` class — we wrap the page in
-// `.workwrk-os` below to scope them.
-import "@/app/(dashboard)/os.css";
+import { Loader2 } from "lucide-react";
 
-export default function OnboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function OnboardLayout({ children }: { children: React.ReactNode }) {
   const { status } = useSession();
   const router = useRouter();
 
@@ -23,41 +20,46 @@ export default function OnboardLayout({
 
   if (status === "loading") {
     return (
-      <div
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          minHeight: "100vh", gap: 10,
-          background: "#FFFFFF", color: "#676879", fontFamily: "Figtree, sans-serif", fontSize: 13,
-        }}
-      >
-        <span style={{ width: 8, height: 8, borderRadius: 999, background: "#0073EA", animation: "osPulse 1.2s ease-in-out infinite" }} />
-        <span>Loading…</span>
-        <style>{`@keyframes osPulse { 0%,100% { opacity: 0.3; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }`}</style>
+      <div className="flex min-h-screen items-center justify-center bg-white text-zinc-400">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading…
       </div>
     );
   }
-
   if (status === "unauthenticated") return null;
 
   return (
-    <div className="workwrk-os">
-      <div className="os-onboard">
-        <header className="os-onboard__nav">
-          <div className="os-onboard__nav-inner">
-            <Link href="/today" className="os-onboard__logo">
-              <span className="os-onboard__logo-mark" aria-hidden>w</span>
-              <span>workwrk</span>
-            </Link>
-            <Link href="/today" className="os-onboard__nav-skip">
-              Skip for now
-            </Link>
-          </div>
-        </header>
+    <div
+      className="min-h-screen text-zinc-900 antialiased"
+      style={{
+        colorScheme: "light",
+        background:
+          "radial-gradient(1100px 520px at 12% -8%, rgba(124,58,237,0.07), transparent 60%)," +
+          "radial-gradient(1000px 520px at 90% 110%, rgba(236,72,153,0.07), transparent 60%)," +
+          "#ffffff",
+        fontFamily: "Figtree, ui-sans-serif, system-ui, -apple-system, sans-serif",
+      }}
+    >
+      <header className="sticky top-0 z-10 border-b border-zinc-100 bg-white/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-3.5">
+          <Link href="/today" className="flex items-center gap-2.5 text-[17px] font-extrabold tracking-tight text-zinc-900">
+            <span
+              className="grid h-7 w-7 place-items-center rounded-lg text-[14px] font-black text-white"
+              style={{ background: "linear-gradient(135deg,#f59e0b,#ec4899,#a855f7)", boxShadow: "0 4px 12px rgba(236,72,153,0.25)" }}
+              aria-hidden
+            >
+              w
+            </span>
+            <span>workwrk</span>
+          </Link>
+          <Link href="/today" className="ml-auto rounded-md px-3 py-1.5 text-[13px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
+            Skip for now
+          </Link>
+        </div>
+      </header>
 
-        <main className="os-onboard__main">
-          {children}
-        </main>
-      </div>
+      <main className="mx-auto flex min-h-[calc(100vh-57px)] w-full max-w-5xl flex-col px-6 py-10">
+        {children}
+      </main>
     </div>
   );
 }
