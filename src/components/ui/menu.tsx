@@ -35,7 +35,7 @@ export function MenuList({
     <div
       role="menu"
       className={cn(
-        "bg-white rounded-xl border border-zinc-200 shadow-2xl py-1.5",
+        "bg-white dark:bg-[#1B1F26] rounded-xl border border-zinc-200 dark:border-[#2A2F38] shadow-2xl py-1.5",
         className,
       )}
       {...rest}
@@ -46,7 +46,7 @@ export function MenuList({
 }
 
 export function MenuSeparator({ className }: { className?: string }) {
-  return <div role="separator" className={cn("h-px bg-zinc-100 my-1", className)} />;
+  return <div role="separator" className={cn("h-px bg-zinc-100 dark:bg-[#2A2F38] my-1", className)} />;
 }
 
 export function MenuSectionLabel({
@@ -59,7 +59,7 @@ export function MenuSectionLabel({
   return (
     <div
       className={cn(
-        "px-3 pt-1 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400",
+        "px-3 pt-1 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500",
         className,
       )}
     >
@@ -79,14 +79,14 @@ const rowVariants = cva(
         inset: "gap-2 rounded-lg px-2 py-1.5 min-h-9 text-[13px]",
       },
       tone: {
-        default: "text-zinc-800",
-        destructive: "text-red-600",
-        disabled: "text-zinc-400 cursor-not-allowed",
+        default: "text-zinc-800 dark:text-zinc-200",
+        destructive: "text-red-600 dark:text-red-400",
+        disabled: "text-zinc-400 dark:text-zinc-500 cursor-not-allowed",
       },
     },
     compoundVariants: [
-      { tone: "default", class: "hover:bg-zinc-50" },
-      { tone: "destructive", class: "hover:bg-red-50" },
+      { tone: "default", class: "hover:bg-zinc-50 dark:hover:bg-white/10" },
+      { tone: "destructive", class: "hover:bg-red-50 dark:hover:bg-red-500/15" },
     ],
     defaultVariants: { variant: "flush", tone: "default" },
   },
@@ -165,12 +165,12 @@ export function MenuItem({
               "shrink-0",
               iconClassName ??
                 (disabled
-                  ? "text-zinc-300"
+                  ? "text-zinc-300 dark:text-zinc-600"
                   : destructive
                     ? "text-red-500"
                     : iconFilled
                       ? "text-amber-400"
-                      : "text-zinc-500"),
+                      : "text-zinc-500 dark:text-zinc-400"),
             ),
             style: iconFilled ? { fill: "currentColor" } : undefined,
           })
@@ -179,7 +179,7 @@ export function MenuItem({
   const labelBlock = description ? (
     <span className="min-w-0 flex-1">
       <span className="block truncate font-medium">{label}</span>
-      <span className="block truncate text-[12px] font-normal text-zinc-500">{description}</span>
+      <span className="block truncate text-[12px] font-normal text-zinc-500 dark:text-zinc-400">{description}</span>
     </span>
   ) : (
     <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -188,18 +188,18 @@ export function MenuItem({
   const trailingNode = (
     <>
       {badge}
-      {shortcut ? <span className="text-[12px] text-zinc-400">{shortcut}</span> : null}
+      {shortcut ? <span className="text-[12px] text-zinc-400 dark:text-zinc-500">{shortcut}</span> : null}
       {trailing}
-      {selected ? <Check className="h-3.5 w-3.5 text-zinc-900 shrink-0" /> : null}
-      {submenu ? <ChevronRight className="h-3 w-3 text-zinc-400 shrink-0" /> : null}
-      {busy ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400 shrink-0" /> : null}
+      {selected ? <Check className="h-3.5 w-3.5 text-zinc-900 dark:text-zinc-100 shrink-0" /> : null}
+      {submenu ? <ChevronRight className="h-3 w-3 text-zinc-400 dark:text-zinc-500 shrink-0" /> : null}
+      {busy ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400 dark:text-zinc-500 shrink-0" /> : null}
     </>
   );
   const hasTrailing = badge || shortcut || trailing || selected || submenu || busy;
 
   const rowClass = cn(
     rowVariants({ variant: v, tone }),
-    active ? "bg-zinc-100" : null,
+    active ? "bg-zinc-100 dark:bg-white/10" : null,
     className,
   );
 
