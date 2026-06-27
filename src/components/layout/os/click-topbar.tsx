@@ -15,18 +15,43 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { useOsShell } from "./shell-context";
-import {
-  Calendar, ChevronDown, Search, Inbox,
-} from "lucide-react";
+import { ChevronDown, Search, Inbox } from "lucide-react";
 import { WorkspaceMenu } from "./workspace-menu";
 import { AskAiButton } from "./ask-ai-button";
 import { ProfileMenu } from "./profile-menu";
 import { PROFILE_TOOL_MAP } from "./profile-tools";
 import { ActiveTimerPill } from "./active-timer-pill";
 
+// Initials for the active workspace badge, e.g. "Test 2" -> "T2".
+function orgInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+// Colorful, slightly 3D calendar icon (flat fills + a soft drop shadow, no
+// gradients). Red header with binder rings, white body, YBRG event dots.
+function CalendarGlyph({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden style={{ filter: "drop-shadow(0 1px 1.5px rgba(20,24,40,0.28))" }}>
+      <rect x="3" y="5.5" width="18" height="15.5" rx="3.2" fill="#FFFFFF" stroke="#E2E5EC" strokeWidth="1" />
+      <path d="M3 9.2a3.2 3.2 0 0 1 3.2-3.2h11.6A3.2 3.2 0 0 1 21 9.2v.6H3z" fill="#FF3D57" />
+      <rect x="7.3" y="3" width="2.1" height="4.4" rx="1.05" fill="#0B1324" />
+      <rect x="14.6" y="3" width="2.1" height="4.4" rx="1.05" fill="#0B1324" />
+      <rect x="6.4" y="12" width="3.1" height="3.1" rx="0.9" fill="#0073EA" />
+      <rect x="10.9" y="12" width="3.1" height="3.1" rx="0.9" fill="#FFCB00" />
+      <rect x="15.4" y="12" width="2.4" height="3.1" rx="0.9" fill="#00C875" />
+      <rect x="6.4" y="16.4" width="3.1" height="2.6" rx="0.9" fill="#E6E9EF" />
+      <rect x="10.9" y="16.4" width="3.1" height="2.6" rx="0.9" fill="#0073EA" />
+    </svg>
+  );
+}
+
 export function ClickTopbar() {
   const { openPalette, openSidekick, profileToolPins, presenceStatus, mutedNotifications } = useOsShell();
+  const { data: session } = useSession();
+  const orgName = session?.user?.organizationName ?? "Workspace";
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const switcherRef = useRef<HTMLButtonElement>(null);
@@ -47,19 +72,11 @@ export function ClickTopbar() {
           aria-expanded={menuOpen}
         >
           <span className="w-5 h-5 rounded-md bg-zinc-900 text-white flex items-center justify-center text-[10px] font-bold">
-            K
+            {orgInitials(orgName)}
           </span>
-          <span className="text-[13px] font-medium text-zinc-900 leading-none">Cashkr Team</span>
+          <span className="text-[13px] font-medium text-zinc-900 leading-none max-w-[160px] truncate">{orgName}</span>
           <ChevronDown className="w-3 h-3 text-zinc-500" />
         </button>
-        <Link
-          href="/calendar"
-          aria-label="Calendar"
-          title="Calendar"
-          className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100"
-        >
-          <Calendar className="w-[14px] h-[14px]" />
-        </Link>
         <WorkspaceMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={switcherRef} />
       </div>
 
@@ -107,6 +124,14 @@ export function ClickTopbar() {
           {pinnedTools.length > 0 ? (
             <span aria-hidden className="w-px h-3.5 bg-zinc-200 mx-0.5" />
           ) : null}
+          <Link
+            href="/calendar"
+            aria-label="Calendar"
+            title="Calendar"
+            className="p-1 rounded-md hover:bg-zinc-100 inline-flex items-center justify-center"
+          >
+            <CalendarGlyph size={18} />
+          </Link>
           <Link
             href="/inbox"
             aria-label="Inbox"
