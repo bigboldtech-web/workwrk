@@ -22,16 +22,18 @@ export function DotsLoader({
   className?: string;
   style?: CSSProperties;
 }) {
-  const scale = size / 44;
+  const vars = {
+    "--wwk-dot": `${(size * 0.22).toFixed(2)}px`,
+    "--wwk-gap": `${(size * 0.16).toFixed(2)}px`,
+    "--wwk-jump": `${(size * 0.28).toFixed(2)}px`,
+  } as CSSProperties;
   return (
     <span className={`wwk-dots${className ? ` ${className}` : ""}`} role="status" aria-label={label ?? "Loading"} style={style}>
-      <span className="wwk-dots__box" style={{ width: size, height: size }}>
-        <span className="wwk-dots__stage" style={{ transform: `scale(${scale})` }}>
-          <span className="wwk-dots__dot"><span className="wwk-dots__pip" /></span>
-          <span className="wwk-dots__dot"><span className="wwk-dots__pip" /></span>
-          <span className="wwk-dots__dot"><span className="wwk-dots__pip" /></span>
-          <span className="wwk-dots__dot"><span className="wwk-dots__pip" /></span>
-        </span>
+      <span className="wwk-dots__row" style={vars}>
+        <span className="wwk-dots__pip" />
+        <span className="wwk-dots__pip" />
+        <span className="wwk-dots__pip" />
+        <span className="wwk-dots__pip" />
       </span>
       {label ? <span className="wwk-dots__label">{label}</span> : null}
     </span>

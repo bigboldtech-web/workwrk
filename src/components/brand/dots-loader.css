@@ -1,8 +1,6 @@
 /* WorkwrK four-dot brand loader (YBRG).
-   Per loop: a staggered up/down bounce in a row, then the dots converge and
-   orbit once as a circle (blooming slightly bigger), then expand back to the
-   row. Position runs on .wwk-dots__dot; the synced scale "bloom" runs on the
-   inner .wwk-dots__pip so the two never fight over `transform`. */
+   Four dots in a row (yellow, blue, red, green) doing a staggered up/down
+   bounce wave, on a loop. Sizing scales off CSS vars set by the component. */
 
 .wwk-dots {
   display: inline-flex;
@@ -11,50 +9,26 @@
   gap: 16px;
 }
 
-.wwk-dots__box {
-  position: relative;
-}
-
-.wwk-dots__stage {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 44px;
-  height: 44px;
-  transform-origin: top left;
-}
-
-/* The dot is a moving point; the visible circle is the pip inside it. */
-.wwk-dots__dot {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  animation: 2.3s cubic-bezier(0.66, 0, 0.34, 1) infinite;
-  will-change: transform;
+.wwk-dots__row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wwk-gap, 7px);
 }
 
 .wwk-dots__pip {
-  position: absolute;
-  width: 9.5px;
-  height: 9.5px;
-  margin: -4.75px 0 0 -4.75px;
+  width: var(--wwk-dot, 10px);
+  height: var(--wwk-dot, 10px);
   border-radius: 50%;
-  box-shadow: 0 1px 4px rgba(20, 24, 40, 0.18);
-  animation: wwk-pulse 2.3s ease-in-out infinite;
+  box-shadow: 0 1px 4px rgba(20, 24, 40, 0.16);
+  animation: wwk-bounce 1.1s ease-in-out infinite;
   will-change: transform;
 }
 
-/* Sequence: yellow, blue, red, green. */
-.wwk-dots__dot:nth-child(1) { animation-name: wwk-d0; }
-.wwk-dots__dot:nth-child(2) { animation-name: wwk-d1; }
-.wwk-dots__dot:nth-child(3) { animation-name: wwk-d2; }
-.wwk-dots__dot:nth-child(4) { animation-name: wwk-d3; }
-.wwk-dots__dot:nth-child(1) .wwk-dots__pip { background: #FFCB00; }
-.wwk-dots__dot:nth-child(2) .wwk-dots__pip { background: #0073EA; }
-.wwk-dots__dot:nth-child(3) .wwk-dots__pip { background: #FF3D57; }
-.wwk-dots__dot:nth-child(4) .wwk-dots__pip { background: #00C875; }
+/* Sequence: yellow, blue, red, green, each a beat behind the last. */
+.wwk-dots__pip:nth-child(1) { background: #FFCB00; animation-delay: 0s; }
+.wwk-dots__pip:nth-child(2) { background: #0073EA; animation-delay: 0.12s; }
+.wwk-dots__pip:nth-child(3) { background: #FF3D57; animation-delay: 0.24s; }
+.wwk-dots__pip:nth-child(4) { background: #00C875; animation-delay: 0.36s; }
 
 .wwk-dots__label {
   font-size: 13px;
@@ -63,90 +37,11 @@
   color: #9699a6;
 }
 
-/* Shared bloom: small in the row, larger while orbiting as a circle. */
-@keyframes wwk-pulse {
-  0%, 28%   { transform: scale(1); }
-  40%, 72%  { transform: scale(1.22); }
-  84%, 100% { transform: scale(1); }
-}
-
-/* Yellow, row x = -16.5, circle start = top */
-@keyframes wwk-d0 {
-  0%   { transform: translate(-16.5px, 0); }
-  6%   { transform: translate(-16.5px, -11px); }
-  12%  { transform: translate(-16.5px, 0); }
-  28%  { transform: translate(-16.5px, 0); }
-  40%  { transform: translate(0, -13px); }
-  44%  { transform: translate(9px, -9px); }
-  48%  { transform: translate(13px, 0); }
-  52%  { transform: translate(9px, 9px); }
-  56%  { transform: translate(0, 13px); }
-  60%  { transform: translate(-9px, 9px); }
-  64%  { transform: translate(-13px, 0); }
-  68%  { transform: translate(-9px, -9px); }
-  72%  { transform: translate(0, -13px); }
-  84%  { transform: translate(-16.5px, 0); }
-  100% { transform: translate(-16.5px, 0); }
-}
-
-/* Blue, row x = -5.5, circle start = right */
-@keyframes wwk-d1 {
-  0%   { transform: translate(-5.5px, 0); }
-  10%  { transform: translate(-5.5px, -11px); }
-  16%  { transform: translate(-5.5px, 0); }
-  28%  { transform: translate(-5.5px, 0); }
-  40%  { transform: translate(13px, 0); }
-  44%  { transform: translate(9px, 9px); }
-  48%  { transform: translate(0, 13px); }
-  52%  { transform: translate(-9px, 9px); }
-  56%  { transform: translate(-13px, 0); }
-  60%  { transform: translate(-9px, -9px); }
-  64%  { transform: translate(0, -13px); }
-  68%  { transform: translate(9px, -9px); }
-  72%  { transform: translate(13px, 0); }
-  84%  { transform: translate(-5.5px, 0); }
-  100% { transform: translate(-5.5px, 0); }
-}
-
-/* Red, row x = 5.5, circle start = bottom */
-@keyframes wwk-d2 {
-  0%   { transform: translate(5.5px, 0); }
-  14%  { transform: translate(5.5px, -11px); }
-  20%  { transform: translate(5.5px, 0); }
-  28%  { transform: translate(5.5px, 0); }
-  40%  { transform: translate(0, 13px); }
-  44%  { transform: translate(-9px, 9px); }
-  48%  { transform: translate(-13px, 0); }
-  52%  { transform: translate(-9px, -9px); }
-  56%  { transform: translate(0, -13px); }
-  60%  { transform: translate(9px, -9px); }
-  64%  { transform: translate(13px, 0); }
-  68%  { transform: translate(9px, 9px); }
-  72%  { transform: translate(0, 13px); }
-  84%  { transform: translate(5.5px, 0); }
-  100% { transform: translate(5.5px, 0); }
-}
-
-/* Green, row x = 16.5, circle start = left */
-@keyframes wwk-d3 {
-  0%   { transform: translate(16.5px, 0); }
-  18%  { transform: translate(16.5px, -11px); }
-  24%  { transform: translate(16.5px, 0); }
-  28%  { transform: translate(16.5px, 0); }
-  40%  { transform: translate(-13px, 0); }
-  44%  { transform: translate(-9px, -9px); }
-  48%  { transform: translate(0, -13px); }
-  52%  { transform: translate(9px, -9px); }
-  56%  { transform: translate(13px, 0); }
-  60%  { transform: translate(9px, 9px); }
-  64%  { transform: translate(0, 13px); }
-  68%  { transform: translate(-9px, 9px); }
-  72%  { transform: translate(-13px, 0); }
-  84%  { transform: translate(16.5px, 0); }
-  100% { transform: translate(16.5px, 0); }
+@keyframes wwk-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30%          { transform: translateY(calc(-1 * var(--wwk-jump, 12px))); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wwk-dots__dot,
-  .wwk-dots__pip { animation-duration: 4.6s; }
+  .wwk-dots__pip { animation-duration: 2.2s; }
 }
