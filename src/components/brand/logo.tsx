@@ -1,23 +1,27 @@
 import type { CSSProperties } from "react";
 
-// workwrk logo — monday-style "three colored dots over the wordmark."
-//
-// The mark is three small circles in our brand triad — pink-red, blue,
-// yellow — sitting just above the "wrk" letters. The wordmark is a
-// rounded, tightly-tracked sans serif. The three dots are the brand;
-// the wordmark is the name.
+// workwrk logo. The brand palette is "Workwrk YBRG": four Monday dots
+// sequenced yellow, blue, red, green, sitting just above the wordmark
+// (tucked into the gap between the two "k" letters of "workwrk"). Blue
+// is the primary colour; the others are accents used per surface. The
+// dots are the brand; the wordmark is the name.
 //
 // Variants
-//   default — colored dots + dark wordmark, for light surfaces
-//   mono    — single-color rendering (use `color`), for dark surfaces,
+//   default - colored dots + dark wordmark, for light surfaces
+//   mono    - single-color rendering (use `color`), for dark surfaces,
 //             favicons, embossed contexts
 
-const BRAND_RED    = "#FF3D57";
-const BRAND_BLUE   = "#0073EA";
-const BRAND_YELLOW = "#FFCB00";
+// Workwrk YBRG palette. Blue is primary.
+export const BRAND_YELLOW = "#FFCB00";
+export const BRAND_BLUE   = "#0073EA";
+export const BRAND_RED    = "#FF3D57";
+export const BRAND_GREEN  = "#00C875";
 
-// LogoMark — the dots-only variant. Use when you need a square icon
-// (favicon, app icon, isolated brand bug).
+// The required dot sequence: yellow, blue, red, green.
+const DOT_SEQUENCE = [BRAND_YELLOW, BRAND_BLUE, BRAND_RED, BRAND_GREEN] as const;
+
+// LogoMark, the dots-only variant. Use when you need a square icon
+// (favicon, app icon, isolated brand bug). Four dots in a row.
 export function LogoMark({
   size = 32,
   color,
@@ -31,7 +35,10 @@ export function LogoMark({
   title?: string;
   style?: CSSProperties;
 }) {
-  // Mono mode: single fill, three dots in a row inside a rounded square.
+  // Even spacing of four dots across the 48-unit canvas.
+  const xs = [9.6, 19.2, 28.8, 38.4];
+
+  // Mono mode: single fill, four dots inside a rounded square.
   if (color) {
     return (
       <svg
@@ -46,15 +53,14 @@ export function LogoMark({
         style={style}
       >
         <rect x="0" y="0" width="48" height="48" rx="12" fill={color} />
-        <circle cx="12" cy="24" r="5" fill="white" />
-        <circle cx="24" cy="24" r="5" fill="white" />
-        <circle cx="36" cy="24" r="5" fill="white" />
+        {xs.map((cx) => (
+          <circle key={cx} cx={cx} cy="24" r="4" fill="white" />
+        ))}
       </svg>
     );
   }
 
-  // Default mode: three colored dots on transparent, sized to fit the
-  // canvas. No background square — the dots are the mark.
+  // Default mode: four colored dots on transparent, no background square.
   return (
     <svg
       width={size}
@@ -67,19 +73,20 @@ export function LogoMark({
       aria-hidden={title ? undefined : true}
       style={style}
     >
-      <circle cx="12" cy="24" r="7" fill={BRAND_RED} />
-      <circle cx="24" cy="24" r="7" fill={BRAND_BLUE} />
-      <circle cx="36" cy="24" r="7" fill={BRAND_YELLOW} />
+      {xs.map((cx, i) => (
+        <circle key={cx} cx={cx} cy="24" r="5.2" fill={DOT_SEQUENCE[i]} />
+      ))}
     </svg>
   );
 }
 
-// LogoLockup — the workhorse for headers and footers. Wordmark with
-// three small colored dots floating just above the "wrk" stem.
+// LogoLockup, the workhorse for headers and footers. Wordmark with the
+// four brand dots floating just above, centered in the gap between the
+// two "k" letters of "workwrk".
 //
 // Layout:
-//   ·  ·  ·     ← three brand dots, anchored to the right half
-//   workwrk     ← wordmark, rounded sans, tightly tracked
+//   . . . .     (yellow, blue, red, green, anchored between the two k's)
+//   workwrk     (wordmark, rounded sans, tightly tracked)
 export function LogoLockup({
   size = 22,
   textColor,
@@ -97,9 +104,11 @@ export function LogoLockup({
   mono?: boolean;
 }) {
   const wordmarkColor = textColor ?? "var(--m-text, #181B34)";
-  const dotSize = Math.max(4, Math.round(size * 0.22));
-  const dotGap = Math.max(2, Math.round(size * 0.12));
-  const stemOffset = Math.round(size * 1.85); // pushes dots over the "wrk"
+  // Small dots, snug spacing, so all four sit in the narrow gap between
+  // the two "k" letters rather than spilling over them.
+  const dotSize = Math.max(3, Math.round(size * 0.17));
+  const dotGap = Math.max(2, Math.round(size * 0.08));
+  const stemOffset = Math.round(size * 1.78); // centers the row between the two k's
 
   return (
     <span
@@ -118,13 +127,13 @@ export function LogoLockup({
           display: "inline-flex",
           gap: dotGap,
           marginLeft: stemOffset,
-          marginBottom: Math.max(2, Math.round(size * 0.12)),
+          marginBottom: Math.max(2, Math.round(size * 0.1)),
         }}
         aria-hidden
       >
-        <Dot size={dotSize} color={mono ? wordmarkColor : BRAND_RED} />
-        <Dot size={dotSize} color={mono ? wordmarkColor : BRAND_BLUE} />
-        <Dot size={dotSize} color={mono ? wordmarkColor : BRAND_YELLOW} />
+        {DOT_SEQUENCE.map((c, i) => (
+          <Dot key={i} size={dotSize} color={mono ? wordmarkColor : c} />
+        ))}
       </span>
       {/* Wordmark */}
       <span
