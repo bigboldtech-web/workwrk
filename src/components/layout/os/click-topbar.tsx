@@ -78,7 +78,7 @@ export function ClickTopbar() {
       case "notepad": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "notepad" })); break;
       case "reminder": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "reminder" })); break;
       case "doc": void createQuickDoc(); break;
-      case "voice": toast("Voice to text is coming soon"); break;
+      case "voice": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "voice" })); break;
     }
   }
   const [profileOpen, setProfileOpen] = useState(false);

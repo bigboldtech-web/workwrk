@@ -36,6 +36,7 @@ import { MyWorkPanel } from "./my-work-panel";
 import { NotepadPanel } from "./notepad-panel";
 import { ReminderPopover } from "./reminder-popover";
 import { ReminderTicker } from "./reminder-ticker";
+import { VoiceCapturePopover } from "./voice-capture-popover";
 import { CreateListModal } from "./create-list-modal";
 import { TemplateCenter } from "@/components/templates/template-center";
 
@@ -103,6 +104,7 @@ export function OsShell({ children }: { children: React.ReactNode }) {
             <NotepadPanel />
             <ReminderPopover />
             <ReminderTicker />
+            <VoiceCapturePopover />
             <TemplateCenterMount />
           </div>
         )}
