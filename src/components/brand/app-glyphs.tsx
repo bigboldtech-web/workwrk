@@ -464,6 +464,20 @@ const Whiteboard: FC<P> = ({ size }) => {
   );
 };
 
+const Microphone: FC<P> = ({ size }) => {
+  const { s, t } = HUE.red;
+  return (
+    <Svg size={size}>
+      <rect x="9" y="3" width="6" height="11" rx="3" fill={t} />
+      <path d="M6.5 11 a5.5 5.5 0 0 0 11 0" fill="none" stroke={s} strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M12 16.5 V20" stroke={s} strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M9 20 H15" stroke={s} strokeWidth="1.8" strokeLinecap="round" />
+      <rect x="10.6" y="6" width="2.8" height="1.4" rx="0.7" fill={s} />
+      <rect x="10.6" y="8.6" width="2.8" height="1.4" rx="0.7" fill={s} />
+    </Svg>
+  );
+};
+
 const InboxTray: FC<P> = ({ size }) => {
   const { s, t } = HUE.blue;
   return (
@@ -487,6 +501,7 @@ export const TOOL_GLYPHS: Record<string, FC<P>> = {
   "create-dashboard": Dashboards,
   "ai-notetaker": AI,
   "inbox": InboxTray,
+  "voice": Microphone,
 };
 
 export function hasToolGlyph(key: string): boolean {

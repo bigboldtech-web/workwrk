@@ -22,7 +22,8 @@ import { WorkspaceMenu } from "./workspace-menu";
 import { ToolGlyph, hasToolGlyph } from "@/components/brand/app-glyphs";
 import { AskAiButton } from "./ask-ai-button";
 import { ProfileMenu } from "./profile-menu";
-import { PROFILE_TOOL_MAP } from "./profile-tools";
+import { PROFILE_TOOL_MAP, type ToolAction } from "./profile-tools";
+import { useOsToast } from "./toast";
 import { ActiveTimerPill } from "./active-timer-pill";
 
 // Initials for the active workspace badge, e.g. "Test 2" -> "T2".
@@ -50,10 +51,22 @@ function CalendarGlyph({ size = 18 }: { size?: number }) {
 }
 
 export function ClickTopbar() {
-  const { openPalette, openSidekick, profileToolPins, presenceStatus, mutedNotifications } = useOsShell();
+  const { openPalette, openSidekick, openCreateTask, profileToolPins, presenceStatus, mutedNotifications } = useOsShell();
+  const { toast } = useOsToast();
   const { data: session } = useSession();
   const orgName = session?.user?.organizationName ?? "Workspace";
   const [menuOpen, setMenuOpen] = useState(false);
+
+  function runTool(action: ToolAction) {
+    switch (action) {
+      case "create-task": openCreateTask(); break;
+      case "my-work": toast("My Work panel is coming soon"); break;
+      case "notepad": toast("Notepad is coming soon"); break;
+      case "reminder": toast("Reminders are coming soon"); break;
+      case "doc": toast("Quick doc is coming soon"); break;
+      case "voice": toast("Voice to text is coming soon"); break;
+    }
+  }
   const [profileOpen, setProfileOpen] = useState(false);
   const switcherRef = useRef<HTMLButtonElement>(null);
   const profileBtnRef = useRef<HTMLButtonElement>(null);
@@ -119,17 +132,22 @@ export function ClickTopbar() {
       <div className="h-full flex items-center gap-0.5 bg-white rounded-lg border border-zinc-200 px-1">
         <ActiveTimerPill />
         <div className="flex items-center gap-0.5">
-          {pinnedTools.map((tool) => (
-            <Link
-              key={tool.key}
-              href={tool.href ?? "#"}
-              className="p-1 rounded-md hover:bg-zinc-100 text-zinc-500 hover:text-zinc-800"
-              aria-label={tool.label}
-              title={tool.tooltip ?? tool.label}
-            >
-              {hasToolGlyph(tool.key) ? <ToolGlyph toolKey={tool.key} size={17} /> : <tool.Icon className="w-[14px] h-[14px]" />}
-            </Link>
-          ))}
+          {pinnedTools.map((tool) => {
+            const inner = hasToolGlyph(tool.key) ? <ToolGlyph toolKey={tool.key} size={17} /> : <tool.Icon className="w-[14px] h-[14px]" />;
+            const cls = "p-1 rounded-md hover:bg-zinc-100 inline-flex items-center justify-center";
+            if (tool.action) {
+              return (
+                <button key={tool.key} type="button" onClick={() => runTool(tool.action!)} className={cls} aria-label={tool.label} title={tool.tooltip ?? tool.label}>
+                  {inner}
+                </button>
+              );
+            }
+            return (
+              <Link key={tool.key} href={tool.href ?? "#"} className={`${cls} text-zinc-500 hover:text-zinc-800`} aria-label={tool.label} title={tool.tooltip ?? tool.label}>
+                {inner}
+              </Link>
+            );
+          })}
           {pinnedTools.length > 0 ? (
             <span aria-hidden className="w-px h-3.5 bg-zinc-200 mx-0.5" />
           ) : null}

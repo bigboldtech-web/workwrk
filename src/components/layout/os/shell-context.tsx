@@ -59,9 +59,9 @@ export const DEFAULT_PROFILE_TOOL_PINS: string[] = [
   "create-task",
   "my-work",
   "notepad",
-  "record-clip",
   "create-reminder",
   "create-doc",
+  "voice",
 ];
 
 export type OpenItem = {
@@ -470,6 +470,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       } else if (meta && e.key.toLowerCase() === "j") {
         e.preventDefault();
         setSidekickOpen((v) => !v);
+      } else if (meta && e.key.toLowerCase() === "t") {
+        // Cmd/Ctrl+T → quick task (some browsers reserve this for a new tab).
+        e.preventDefault();
+        setCreateTaskPreselect(null);
+        setCreateTaskOpen(true);
       } else if (meta && e.key.toLowerCase() === "b") {
         // Cmd+B → toggle secondary sidebar (matches common app shortcuts).
         e.preventDefault();
