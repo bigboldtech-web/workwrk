@@ -8,10 +8,10 @@
 //
 // Views: Month · Week · People (team only). Flat colors, no gradients.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2,
+  Calendar as CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, Check, Loader2,
   User as UserIcon, Users as UsersIcon, Clock, CircleDot,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
@@ -194,6 +194,11 @@ export default function CalendarPage() {
             ) : null}
           </Segmented>
 
+          {/* Person filter (team grid views) */}
+          {calendar === "team" && view !== "people" && data && data.people.length > 1 ? (
+            <PersonFilter people={data.people} activeId={activePersonId} onChange={setActivePersonId} />
+          ) : null}
+
           <div className="flex-1" />
 
           {/* Period nav */}
@@ -209,18 +214,6 @@ export default function CalendarPage() {
           <div className="text-[14px] font-semibold text-zinc-900 min-w-[150px] text-right">{label}</div>
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : null}
         </div>
-
-        {/* Person chips (team, grid views) */}
-        {calendar === "team" && view !== "people" && data && data.people.length > 1 ? (
-          <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-            <Chip active={activePersonId === null} onClick={() => setActivePersonId(null)}>Everyone ({data.people.length})</Chip>
-            {data.people.map((p) => (
-              <Chip key={p.id} active={activePersonId === p.id} color={colorForId(p.id)} onClick={() => setActivePersonId(activePersonId === p.id ? null : p.id)}>
-                {p.name}
-              </Chip>
-            ))}
-          </div>
-        ) : null}
       </div>
 
       {/* Body */}
@@ -451,20 +444,75 @@ function Seg({ active, onClick, icon, children }: { active: boolean; onClick: ()
     </button>
   );
 }
-function Chip({ active, color, onClick, children }: { active: boolean; color?: string; onClick: () => void; children: React.ReactNode }) {
+function PersonFilter({ people, activeId, onChange }: { people: Person[]; activeId: string | null; onChange: (id: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const active = people.find((p) => p.id === activeId) ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  function pick(id: string | null) { onChange(id); setOpen(false); }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="h-7 pl-2 pr-1.5 inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-700 hover:bg-zinc-50"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        {active ? (
+          <>
+            <span className="h-2 w-2 rounded-full" style={{ background: colorForId(active.id) }} />
+            <span className="max-w-[130px] truncate font-medium">{active.name}</span>
+          </>
+        ) : (
+          <>
+            <UsersIcon className="h-3 w-3 text-zinc-500" />
+            <span className="font-medium">Everyone ({people.length})</span>
+          </>
+        )}
+        <ChevronDown className="h-3 w-3 text-zinc-400" />
+      </button>
+
+      {open ? (
+        <div className="absolute left-0 top-[34px] z-50 w-[230px] max-h-[320px] overflow-y-auto rounded-lg border border-zinc-200 bg-white shadow-xl py-1" role="listbox">
+          <FilterRow selected={activeId === null} onClick={() => pick(null)}>
+            <UsersIcon className="h-3.5 w-3.5 text-zinc-500" />
+            <span className="flex-1">Everyone</span>
+            <span className="text-[11px] text-zinc-400">{people.length}</span>
+          </FilterRow>
+          <div className="my-1 border-t border-zinc-100" />
+          {people.map((p) => (
+            <FilterRow key={p.id} selected={activeId === p.id} onClick={() => pick(p.id)}>
+              <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: colorForId(p.id) }} />
+              <span className="flex-1 truncate">{p.name}</span>
+            </FilterRow>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+function FilterRow({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="text-[11.5px] px-2 py-1 rounded-full border transition inline-flex items-center gap-1.5"
-      style={{
-        backgroundColor: active ? (color ?? "#18181b") : "white",
-        borderColor: active ? (color ?? "#18181b") : "rgb(228 228 231)",
-        color: active ? "white" : "rgb(82 82 91)",
-      }}
+      className={`w-full px-2.5 py-1.5 flex items-center gap-2 text-[12.5px] text-left hover:bg-zinc-50 ${selected ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+      role="option"
+      aria-selected={selected}
     >
-      {color ? <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: active ? "white" : color }} /> : null}
       {children}
+      {selected ? <Check className="h-3.5 w-3.5 text-[#0073EA] shrink-0" /> : <span className="w-3.5 shrink-0" />}
     </button>
   );
 }
