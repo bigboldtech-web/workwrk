@@ -1,6 +1,6 @@
 "use client";
 
-/* New-user onboarding wizard (self-contained light theme — explicit Tailwind,
+/* New-user onboarding wizard (self-contained light theme, explicit Tailwind,
  * no os.css token dependency).
  *   0. Welcome  ·  1. Use case  ·  2. Pick apps (real apps-catalog)  ·  3. Ready
  * On finish: POST /api/setup (marks complete) + PATCH /api/preferences pins the
@@ -31,7 +31,7 @@ const DEPARTMENTS: DepartmentOption[] = [
   { id: "engineering", label: "Engineering",       description: "Goals, docs, SOPs, dashboards",                Icon: Code2,      gradient: "linear-gradient(135deg,#0073EA,#579BFC)" },
   { id: "legal",       label: "Legal",             description: "Contracts, policies, SOPs, docs",              Icon: Scale,      gradient: "linear-gradient(135deg,#334155,#64748b)" },
   { id: "support",     label: "Customer Support",  description: "SOPs, forms, docs, recognition",               Icon: Headphones, gradient: "linear-gradient(135deg,#f59e0b,#ec4899)" },
-  { id: "all-in-one",  label: "The whole company", description: "Workday-style all-in-one — give me everything",Icon: Sparkles,   gradient: "linear-gradient(135deg,#0073EA,#00C875)" },
+  { id: "all-in-one",  label: "The whole company", description: "Workday-style all-in-one. Give me everything",Icon: Sparkles,   gradient: "linear-gradient(135deg,#0073EA,#00C875)" },
 ];
 
 const DEPT_RECS: Record<string, string[]> = {
@@ -147,7 +147,7 @@ export default function OnboardPage() {
         ))}
       </div>
 
-      {/* Step 0 — Welcome */}
+      {/* Step 0. Welcome */}
       {step === 0 && (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
           <span className="mb-5 inline-flex items-center gap-1.5 rounded-full bg-[#E6F1FB] px-3 py-1 text-[12px] font-bold uppercase tracking-wide text-[#0073EA]">
@@ -157,7 +157,7 @@ export default function OnboardPage() {
             Your modular <span className="text-[#0073EA]">Work OS</span>.
           </h1>
           <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-zinc-500">
-            Pick the apps that match how your team works. Every app comes with boards, AI agents, automations, and templates ready to go — add or remove any time.
+            Pick the apps that match how your team works. Every app comes with boards, AI agents, automations, and templates ready to go. Add or remove any time.
           </p>
           <button type="button" onClick={() => setStep(1)} className="mt-9 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
             Get started <ArrowRight className="h-4 w-4" />
@@ -165,12 +165,12 @@ export default function OnboardPage() {
         </div>
       )}
 
-      {/* Step 1 — Use case */}
+      {/* Step 1. Use case */}
       {step === 1 && (
         <div className="flex flex-1 flex-col">
           <div className="mb-8 text-center">
             <h1 className="text-[32px] font-extrabold tracking-tight text-zinc-900">What brings you to WorkwrK?</h1>
-            <p className="mx-auto mt-2 max-w-lg text-[15px] text-zinc-500">Pick your primary use case. We&apos;ll pre-select the right apps — you can adjust on the next step.</p>
+            <p className="mx-auto mt-2 max-w-lg text-[15px] text-zinc-500">Pick your primary use case. We&apos;ll pre-select the right apps. You can adjust on the next step.</p>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {DEPARTMENTS.map((d) => (
@@ -184,12 +184,12 @@ export default function OnboardPage() {
         </div>
       )}
 
-      {/* Step 2 — Pick apps */}
+      {/* Step 2. Pick apps */}
       {step === 2 && (
         <div className="flex flex-1 flex-col">
           <div className="mb-6 text-center">
             <h1 className="text-[32px] font-extrabold tracking-tight text-zinc-900">Pick your apps</h1>
-            <p className="mx-auto mt-2 max-w-lg text-[15px] text-zinc-500">We pre-selected the essentials for your team. Add or remove freely — change it any time from the rail.</p>
+            <p className="mx-auto mt-2 max-w-lg text-[15px] text-zinc-500">We pre-selected the essentials for your team. Add or remove freely. Change it any time from the rail.</p>
           </div>
 
           {department ? (
@@ -197,7 +197,7 @@ export default function OnboardPage() {
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white" style={{ background: selectedDept?.gradient ?? CTA }}>
                 {selectedDept ? <selectedDept.Icon className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
               </span>
-              <p className="flex-1 text-[13px] text-zinc-600">Pre-selected for <strong className="font-semibold text-zinc-900">{deptLabel}</strong> — the core apps everyone gets, plus what your team typically needs day-one.</p>
+              <p className="flex-1 text-[13px] text-zinc-600">Pre-selected for <strong className="font-semibold text-zinc-900">{deptLabel}</strong>. The core apps everyone gets, plus what your team typically needs day-one.</p>
               <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[12px] font-semibold text-[#0073EA] shadow-sm">{selected.size} selected</span>
             </div>
           ) : null}
@@ -237,7 +237,7 @@ export default function OnboardPage() {
         </div>
       )}
 
-      {/* Step 3 — Ready */}
+      {/* Step 3. Ready */}
       {step === 3 && (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
           <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "linear-gradient(135deg,#0073EA,#3b9aef)" }}>
@@ -274,20 +274,33 @@ function Card({ selected, onClick, icon, gradient, title, desc, badge }: {
     <button
       type="button"
       onClick={onClick}
-      className={`group relative flex items-start gap-3 rounded-2xl border-2 p-4 text-left transition ${
-        selected ? "border-[#0073EA] bg-[#0073EA]/5 ring-4 ring-[#0073EA]/15" : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-[0_4px_16px_-8px_rgba(0,0,0,0.18)]"
-      }`}
+      className="group relative flex items-start gap-3 rounded-2xl border p-4 pr-10 text-left transition-all hover:-translate-y-px hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)]"
+      style={{
+        borderColor: selected ? "#0073EA" : "#e6e6ec",
+        background: selected ? "rgba(0,115,234,0.05)" : "#fff",
+        boxShadow: selected ? "0 0 0 3px rgba(0,115,234,0.15)" : undefined,
+      }}
     >
-      {badge ? (
-        <span className={`absolute right-3 top-3 rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${badge === "Core" ? "bg-zinc-100 text-zinc-500" : "bg-pink-50 text-pink-600"}`}>{badge}</span>
-      ) : null}
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white" style={{ background: gradient }}>{icon}</span>
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white shadow-sm" style={{ background: gradient }}>{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[14.5px] font-semibold leading-tight tracking-tight text-zinc-900">{title}</span>
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[14.5px] font-semibold leading-tight tracking-tight text-zinc-900">{title}</span>
+          {badge ? (
+            <span
+              className="rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide"
+              style={badge === "Core" ? { background: "#f4f4f5", color: "#71717a" } : { background: "rgba(0,115,234,0.1)", color: "#0073EA" }}
+            >
+              {badge}
+            </span>
+          ) : null}
+        </span>
         <span className="mt-0.5 block text-[12.5px] leading-snug text-zinc-500">{desc}</span>
       </span>
-      <span className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition ${selected ? "border-[#0073EA] bg-[#E6F1FB]0 text-white" : "border-zinc-200 bg-white text-transparent"}`}>
-        <Check className="h-3 w-3" strokeWidth={3} />
+      <span
+        className="absolute right-3.5 top-1/2 grid h-[22px] w-[22px] -translate-y-1/2 place-items-center rounded-full transition-all"
+        style={{ background: selected ? "#0073EA" : "#fff", border: `2px solid ${selected ? "#0073EA" : "#d4d4d8"}` }}
+      >
+        <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} style={{ opacity: selected ? 1 : 0 }} />
       </span>
     </button>
   );
