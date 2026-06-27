@@ -76,7 +76,7 @@ export function ClickTopbar() {
       case "create-task": openCreateTask(); break;
       case "my-work": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "my-work" })); break;
       case "notepad": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "notepad" })); break;
-      case "reminder": toast("Reminders are coming soon"); break;
+      case "reminder": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "reminder" })); break;
       case "doc": void createQuickDoc(); break;
       case "voice": toast("Voice to text is coming soon"); break;
     }

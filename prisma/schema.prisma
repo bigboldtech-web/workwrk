@@ -1802,6 +1802,32 @@ model Notification {
   @@index([userId, snoozedUntil])
 }
 
+enum ReminderStatus {
+  PENDING
+  FIRED
+  DISMISSED
+}
+
+// Personal quick reminder created from the topbar quick-tools. Fires as an
+// in-app Notification (+ optional email) at remindAt via /api/reminders/tick
+// (while the app is open) or /api/cron/reminders (scheduled).
+model Reminder {
+  id             String         @id @default(cuid())
+  organizationId String
+  userId         String
+  title          String
+  body           String?
+  remindAt       DateTime
+  status         ReminderStatus @default(PENDING)
+  notifyEmail    Boolean        @default(false)
+  firedAt        DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([userId, status, remindAt])
+  @@index([status, remindAt])
+}
+
 // ==========================================
 // MODULE 9: ONBOARDING & TRAINING
 // ==========================================

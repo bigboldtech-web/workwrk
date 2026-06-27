@@ -34,6 +34,8 @@ import { SetStatusModal } from "./set-status-modal";
 import { CreateTaskModal } from "./create-task-modal";
 import { MyWorkPanel } from "./my-work-panel";
 import { NotepadPanel } from "./notepad-panel";
+import { ReminderPopover } from "./reminder-popover";
+import { ReminderTicker } from "./reminder-ticker";
 import { CreateListModal } from "./create-list-modal";
 import { TemplateCenter } from "@/components/templates/template-center";
 
@@ -99,6 +101,8 @@ export function OsShell({ children }: { children: React.ReactNode }) {
             <CreateListModal />
             <MyWorkPanel />
             <NotepadPanel />
+            <ReminderPopover />
+            <ReminderTicker />
             <TemplateCenterMount />
           </div>
         )}
