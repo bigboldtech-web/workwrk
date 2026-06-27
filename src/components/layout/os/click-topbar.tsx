@@ -60,7 +60,7 @@ export function ClickTopbar() {
   function runTool(action: ToolAction) {
     switch (action) {
       case "create-task": openCreateTask(); break;
-      case "my-work": toast("My Work panel is coming soon"); break;
+      case "my-work": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "my-work" })); break;
       case "notepad": toast("Notepad is coming soon"); break;
       case "reminder": toast("Reminders are coming soon"); break;
       case "doc": toast("Quick doc is coming soon"); break;
