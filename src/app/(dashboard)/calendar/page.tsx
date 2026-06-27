@@ -9,7 +9,7 @@
 // Views: Month · Week · People (team only). Flat colors, no gradients.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, Check, Loader2,
   User as UserIcon, Users as UsersIcon, Clock, CircleDot,
@@ -87,7 +87,8 @@ const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function CalendarPage() {
   const router = useRouter();
-  const [calendar, setCalendar] = useState<CalKind>("my");
+  const searchParams = useSearchParams();
+  const [calendar, setCalendar] = useState<CalKind>(() => (searchParams.get("calendar") === "team" ? "team" : "my"));
   const [view, setView] = useState<ViewMode>("month");
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [activePersonId, setActivePersonId] = useState<string | null>(null);

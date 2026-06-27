@@ -774,9 +774,9 @@ function CalendarSidebar() {
   return (
     <>
       <ul>
-        <NavItem href="/calendar" Icon={Calendar} label="Month view" />
-        <NavItem href="/calendar?scope=mine" Icon={Calendar} label="My schedule" />
-        <NavItem href="/calendar?scope=team" Icon={Calendar} label="Team schedule" />
+        <NavItem href="/calendar?calendar=my" Icon={Calendar} label="My Calendar" />
+        <NavItem href="/calendar?calendar=team" Icon={Calendar} label="Team Calendar" />
+        <NavItem href="/timesheets" Icon={Calendar} label="Timesheets" />
       </ul>
       <SectionLabel>Integrations</SectionLabel>
       <div className="px-2 pt-1 pb-2 space-y-1.5">
