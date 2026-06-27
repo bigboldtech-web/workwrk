@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
+import { logTimerToTimesheet } from "@/lib/timesheet";
 import { z } from "zod";
 
 const bodySchema = z.object({
@@ -38,6 +39,25 @@ export async function POST(req: Request) {
     where: { id: active.id },
     data: { stoppedAt: now, durationMs },
   });
+
+  // Bridge: tracked time on a Kanban card flows into the user's weekly
+  // timesheet, linked back to the card. Best-effort; never blocks the stop.
+  if (active.entityType === "BOARD_ITEM" && durationMs > 0) {
+    try {
+      const item = await prisma.item.findUnique({
+        where: { id: active.entityId },
+        select: { id: true, title: true, organizationId: true },
+      });
+      if (item && item.organizationId === ctx.orgId) {
+        await logTimerToTimesheet({
+          orgId: ctx.orgId, userId: ctx.userId, itemId: item.id,
+          title: item.title, durationMs, when: now,
+        });
+      }
+    } catch (err) {
+      console.error("timer→timesheet bridge failed", err);
+    }
+  }
 
   return NextResponse.json({ session });
 }

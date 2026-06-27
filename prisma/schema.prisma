@@ -3353,6 +3353,11 @@ model TimeEntry {
   taskId String?
   task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
+  // Optional link to a Kanban card (Item). Set when the entry is seeded
+  // from a board-card timer — the "what was I working on" for board work.
+  itemId String?
+  item   Item?   @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -3363,6 +3368,7 @@ model TimeEntry {
   // every page load by the topbar's active-punch widget.
   @@index([userId, clockedOutAt])
   @@index([taskId])
+  @@index([itemId])
 }
 
 enum TimesheetStatus {
@@ -3378,6 +3384,7 @@ enum TimeEntrySource {
   MOBILE
   KIOSK
   IMPORT
+  TIMER
 }
 
 // ==========================================
@@ -5021,6 +5028,7 @@ model Item {
   parentItemId   String?
   parentItem     Item?        @relation("ItemSubtasks", fields: [parentItemId], references: [id], onDelete: Cascade)
   childItems     Item[]       @relation("ItemSubtasks")
+  timeEntries    TimeEntry[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
