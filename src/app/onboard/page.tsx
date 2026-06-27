@@ -74,7 +74,8 @@ const CATEGORY_GRADIENT: Record<string, string> = {
 
 const ONBOARD_EXCLUDE = new Set(["settings", "trash", "store"]);
 const STEPS = ["welcome", "department", "apps", "ready"];
-const CTA = "linear-gradient(135deg,#ec4899,#a855f7)";
+// Match the app's ClickUp/Monday brand accent (violet --os-brand).
+const CTA = "#7c3aed";
 
 export default function OnboardPage() {
   const router = useRouter();
@@ -142,7 +143,7 @@ export default function OnboardPage() {
       {/* Progress */}
       <div className="mb-9 flex shrink-0 justify-center gap-2" aria-label={`Step ${step + 1} of ${STEPS.length}`}>
         {STEPS.map((s, i) => (
-          <span key={s} className={`h-2 rounded-full transition-all duration-300 ${i === step ? "w-9 bg-gradient-to-r from-blue-500 to-violet-500" : i < step ? "w-2 bg-emerald-500" : "w-2 bg-zinc-200"}`} />
+          <span key={s} className={`h-2 rounded-full transition-all duration-300 ${i === step ? "w-9 bg-violet-600" : i < step ? "w-2 bg-emerald-500" : "w-2 bg-zinc-200"}`} />
         ))}
       </div>
 
@@ -153,7 +154,7 @@ export default function OnboardPage() {
             <Sparkles className="h-3.5 w-3.5" /> Welcome to WorkwrK
           </span>
           <h1 className="text-[40px] font-extrabold leading-[1.05] tracking-tight text-zinc-900 sm:text-[52px]">
-            Your modular <span className="bg-gradient-to-r from-pink-500 to-violet-500 bg-clip-text text-transparent">Work OS</span>.
+            Your modular <span className="text-violet-600">Work OS</span>.
           </h1>
           <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-zinc-500">
             Pick the apps that match how your team works. Every app comes with boards, AI agents, automations, and templates ready to go — add or remove any time.
@@ -239,7 +240,7 @@ export default function OnboardPage() {
       {/* Step 3 — Ready */}
       {step === 3 && (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
-          <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "linear-gradient(135deg,#ec4899,#a855f7,#3b82f6)" }}>
+          <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)" }}>
             <Sparkles className="h-8 w-8" />
           </span>
           <span className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-bold uppercase tracking-wide text-emerald-600">

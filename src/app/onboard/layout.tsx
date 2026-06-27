@@ -9,6 +9,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
+import { LogoLockup } from "@/components/brand/logo";
 
 export default function OnboardLayout({ children }: { children: React.ReactNode }) {
   const { status } = useSession();
@@ -41,15 +42,8 @@ export default function OnboardLayout({ children }: { children: React.ReactNode 
     >
       <header className="sticky top-0 z-10 border-b border-zinc-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-3.5">
-          <Link href="/today" className="flex items-center gap-2.5 text-[17px] font-extrabold tracking-tight text-zinc-900">
-            <span
-              className="grid h-7 w-7 place-items-center rounded-lg text-[14px] font-black text-white"
-              style={{ background: "linear-gradient(135deg,#f59e0b,#ec4899,#a855f7)", boxShadow: "0 4px 12px rgba(236,72,153,0.25)" }}
-              aria-hidden
-            >
-              w
-            </span>
-            <span>workwrk</span>
+          <Link href="/today" aria-label="WorkwrK home" className="flex items-center">
+            <LogoLockup size={19} textColor="#181B34" />
           </Link>
           <Link href="/today" className="ml-auto rounded-md px-3 py-1.5 text-[13px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
             Skip for now
