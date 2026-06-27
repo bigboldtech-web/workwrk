@@ -104,47 +104,53 @@ export function LogoLockup({
   mono?: boolean;
 }) {
   const wordmarkColor = textColor ?? "var(--m-text, #181B34)";
-  // Small dots, snug spacing, so all four sit in the narrow gap between
-  // the two "k" letters rather than spilling over them.
-  const dotSize = Math.max(3, Math.round(size * 0.17));
-  const dotGap = Math.max(2, Math.round(size * 0.08));
-  const stemOffset = Math.round(size * 1.78); // centers the row between the two k's
+  const dotSize = Math.max(3, Math.round(size * 0.16));
+  const dotGap = Math.max(1, Math.round(size * 0.07));
+  // Reserve room above the wordmark for the dots row.
+  const topPad = dotSize + Math.max(2, Math.round(size * 0.16));
+  const liftPx = Math.max(1, Math.round(size * 0.05));
 
+  // The dots, centered over whatever they are anchored to.
+  const dots = (
+    <span
+      aria-hidden
+      style={{
+        position: "absolute",
+        left: "50%",
+        bottom: `calc(100% + ${liftPx}px)`,
+        transform: "translateX(-50%)",
+        display: "inline-flex",
+        gap: dotGap,
+      }}
+    >
+      {DOT_SEQUENCE.map((c, i) => (
+        <Dot key={i} size={dotSize} color={mono ? wordmarkColor : c} />
+      ))}
+    </span>
+  );
+
+  // Split "workwrk" into work + wr + k so the dots can anchor exactly over
+  // the middle "wr" (the gap between the two "k" letters), font-width
+  // independent. The dots float above that span.
   return (
     <span
       className={className}
-      style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "flex-start",
-        lineHeight: 1,
-        ...style,
-      }}
+      style={{ display: "inline-block", paddingTop: topPad, lineHeight: 1, ...style }}
     >
-      {/* Dots row */}
-      <span
-        style={{
-          display: "inline-flex",
-          gap: dotGap,
-          marginLeft: stemOffset,
-          marginBottom: Math.max(2, Math.round(size * 0.1)),
-        }}
-        aria-hidden
-      >
-        {DOT_SEQUENCE.map((c, i) => (
-          <Dot key={i} size={dotSize} color={mono ? wordmarkColor : c} />
-        ))}
-      </span>
-      {/* Wordmark */}
       <span
         style={{
           fontWeight: 800,
           letterSpacing: "-0.045em",
           fontSize: size,
           color: wordmarkColor,
+          whiteSpace: "nowrap",
         }}
       >
-        workwrk
+        work
+        <span style={{ position: "relative" }}>
+          wr{dots}
+        </span>
+        k
       </span>
     </span>
   );
