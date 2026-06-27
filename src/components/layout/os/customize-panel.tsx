@@ -153,8 +153,8 @@ function CheckRow({
       <span
         className={`inline-flex items-center justify-center w-[16px] h-[16px] rounded border-[1.5px] transition-colors ${
           checked
-            ? "bg-[var(--os-brand)] border-[var(--os-brand)] text-white"
-            : "bg-white border-zinc-300 text-transparent"
+            ? "bg-zinc-900 border-zinc-900 text-white"
+            : "bg-white border-zinc-400 text-transparent"
         }`}
         aria-hidden
       >
@@ -537,7 +537,10 @@ export function CustomizePanel({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[440px] p-0 gap-0 overflow-hidden rounded-xl shadow-xl [&>button:has(>span.sr-only)]:hidden">
+      <DialogContent
+        className="max-w-[440px] p-0 gap-0 overflow-hidden rounded-xl shadow-xl [&>button:has(>span.sr-only)]:hidden"
+        style={{ ["--os-brand" as string]: "#0073EA", ["--os-brand-rail" as string]: "#2B2233" }}
+      >
         {/* Header with X close button. The default DialogContent ships
             its own Close button — ours sits in the same spot but uses the
             larger ClickUp-style chip, so we hide the built-in one via the
