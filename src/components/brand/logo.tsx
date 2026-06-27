@@ -104,11 +104,12 @@ export function LogoLockup({
   mono?: boolean;
 }) {
   const wordmarkColor = textColor ?? "var(--m-text, #181B34)";
-  const dotSize = Math.max(3, Math.round(size * 0.16));
-  const dotGap = Math.max(1, Math.round(size * 0.07));
+  const dotSize = Math.max(4, Math.round(size * 0.26));
+  const dotGap = Math.max(2, Math.round(size * 0.075));
+  // Drop the dots down so they sit just above the middle "wr".
+  const dropPx = Math.round(size * 0.16);
   // Reserve room above the wordmark for the dots row.
-  const topPad = dotSize + Math.max(2, Math.round(size * 0.16));
-  const liftPx = Math.max(1, Math.round(size * 0.05));
+  const topPad = dotSize + Math.max(2, Math.round(size * 0.04));
 
   // The dots, centered over whatever they are anchored to.
   const dots = (
@@ -117,7 +118,7 @@ export function LogoLockup({
       style={{
         position: "absolute",
         left: "50%",
-        bottom: `calc(100% + ${liftPx}px)`,
+        bottom: `calc(100% - ${dropPx}px)`,
         transform: "translateX(-50%)",
         display: "inline-flex",
         gap: dotGap,
