@@ -1,27 +1,27 @@
-// /api/calendar — unified work-schedule feed.
+// /api/calendar — unified work-schedule + time feed.
 //
-// GET ?from=YYYY-MM-DD&to=YYYY-MM-DD&scope=mine|team&userId=...&spaceId=...
+// GET ?from=ISO&to=ISO&calendar=my|team&userId=...&spaceId=...
 //
-// Returns scheduled work events the viewer can see, scoped by hierarchy:
-//   mine — only events owned by the viewer
-//   team — viewer + recursive direct reports (default for managers)
-//   all  — admin-only: any user in the org
+//   my   — the viewer's own scheduled work + time
+//   team — manager-only: the viewer's report tree (their reportings), so a
+//          manager can see what each report is working on and how long they
+//          spent. Non-managers always fall back to "my".
 //
-// Sources (in priority order):
-//   1. Item with metadata.dueDate set      → kind: TASK
-//   2. WeeklyReview.periodStart            → kind: WEEKLY_REVIEW
-//   3. SOPAssignment with dueDate          → kind: SOP_ASSIGNMENT
+// Sources:
+//   1. Item.dueAt / startAt in range            → kind TASK
+//   2. WeeklyReview.periodStart in range        → kind WEEKLY_REVIEW
+//   3. SOPAssignment.dueDate in range           → kind SOP_ASSIGNMENT
+//   4. TimerSession (logged time) in range      → per-day + per-task totals
 //
-// Items are filtered in app code on `metadata.dueDate` (JSONB) — fine for
-// MVP, swap to an indexed dueAt column when scale demands it.
+// Backward compatible: still returns { events, scope, range, people } and
+// adds { calendar, canTeam, timeByUserDay, taskTime, activeByUser }.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getTeamUserIds } from "@/lib/team";
+import { getEffectiveReportTree } from "@/lib/reporting-line";
 
-const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 const MANAGER_LEVELS = new Set([
   "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR",
   "MANAGER", "TEAM_LEAD",
@@ -30,22 +30,22 @@ const MANAGER_LEVELS = new Set([
 interface CalendarEvent {
   id: string;
   title: string;
-  start: string; // ISO
+  start: string;      // ISO
   end?: string | null;
   kind: "TASK" | "WEEKLY_REVIEW" | "SOP_ASSIGNMENT";
   ownerId: string | null;
   ownerName: string | null;
+  status?: string | null;
+  priority?: string | null;
+  loggedMs?: number;  // time tracked on this item (by its owner) in range
   spaceId?: string | null;
   url: string;
 }
 
 async function ctx() {
   const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
-  if (!u.id || !u.organizationId) {
+  const u = session?.user as { id?: string; accessLevel?: string; organizationId?: string } | undefined;
+  if (!u?.id || !u.organizationId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
   return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
@@ -57,116 +57,111 @@ function parseDate(input: string | null): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+function dayKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
 export async function GET(req: Request) {
   const c = await ctx();
   if ("error" in c) return c.error;
 
   const url = new URL(req.url);
   const now = new Date();
-  const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1);
-  const defaultTo = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-  const from = parseDate(url.searchParams.get("from")) ?? defaultFrom;
-  const to = parseDate(url.searchParams.get("to")) ?? defaultTo;
-  const requestedScope = url.searchParams.get("scope");
-  const userFilter = url.searchParams.get("userId");
+  const from = parseDate(url.searchParams.get("from")) ?? new Date(now.getFullYear(), now.getMonth(), 1);
+  const to = parseDate(url.searchParams.get("to")) ?? new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
   const spaceFilter = url.searchParams.get("spaceId");
+  const drillUser = url.searchParams.get("userId");
 
-  const isAdmin = ADMIN_LEVELS.has(c.accessLevel);
-  const isManager = MANAGER_LEVELS.has(c.accessLevel);
+  const canTeam = MANAGER_LEVELS.has(c.accessLevel);
+  let calendar = (url.searchParams.get("calendar") ?? url.searchParams.get("scope") ?? "my").toLowerCase();
+  if (calendar === "mine") calendar = "my";
+  if (calendar !== "team") calendar = "my";
+  if (calendar === "team" && !canTeam) calendar = "my";
 
-  // Resolve effective scope. Non-managers are pinned to "mine" — they
-  // can never see other people's work via this endpoint regardless of
-  // what scope they request.
-  const effectiveScope = !isManager
-    ? "mine"
-    : (requestedScope === "all" && isAdmin
-        ? "all"
-        : requestedScope === "mine"
-          ? "mine"
-          : "team");
-
-  let userIds: string[] | null = null;
-  if (effectiveScope === "mine") {
+  // Resolve which users' work is in scope.
+  let userIds: string[];
+  if (calendar === "team") {
+    const tree = await getEffectiveReportTree(c.userId); // self + transitive reports
+    userIds = tree.filter((id) => id !== c.userId);      // team = the reportings only
+  } else {
     userIds = [c.userId];
-  } else if (effectiveScope === "team") {
-    userIds = await getTeamUserIds(c.organizationId, c.userId);
-  } else if (effectiveScope === "all") {
-    userIds = null; // any user in org
   }
+  // Optional drill-down to one person (must be inside scope).
+  if (drillUser) userIds = userIds.includes(drillUser) ? [drillUser] : [];
 
-  // Optional single-user filter (must intersect with scope).
-  if (userFilter) {
-    if (userIds === null) userIds = [userFilter];
-    else if (userIds.includes(userFilter)) userIds = [userFilter];
-    else userIds = [];
-  }
+  const emptyBody = {
+    calendar, canTeam, scope: calendar === "team" ? "team" : "mine",
+    range: { from: from.toISOString(), to: to.toISOString() },
+    events: [], people: [], timeByUserDay: [], taskTime: [], activeByUser: [],
+  };
+  if (userIds.length === 0) return NextResponse.json(emptyBody);
 
-  if (userIds && userIds.length === 0) {
-    return NextResponse.json({ events: [], scope: effectiveScope });
-  }
-
-  const userWhere = userIds ? { in: userIds } : undefined;
-
-  // Hydrate names once for all three queries.
+  // ── People in scope (name + avatar + role) ──────────────────────
   const usersInScope = await prisma.user.findMany({
-    where: userIds
-      ? { id: { in: userIds }, organizationId: c.organizationId, deletedAt: null }
-      : { organizationId: c.organizationId, deletedAt: null },
-    select: { id: true, firstName: true, lastName: true, email: true },
+    where: { id: { in: userIds }, organizationId: c.organizationId, deletedAt: null },
+    select: { id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true },
   });
   const nameById = new Map(
-    usersInScope.map((u) => [
-      u.id,
-      ([u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email) as string,
-    ]),
+    usersInScope.map((u) => [u.id, ([u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email) as string]),
   );
 
-  // ── 1. Items with metadata.dueDate in range ─────────────────────
+  // ── Logged time (TimerSession) ──────────────────────────────────
+  const sessions = await prisma.timerSession.findMany({
+    where: { organizationId: c.organizationId, userId: { in: userIds }, stoppedAt: { not: null }, startedAt: { gte: from, lte: to } },
+    select: { userId: true, entityId: true, durationMs: true, startedAt: true },
+  });
+  const timeByUserDayMap = new Map<string, number>();    // `${userId}|${YYYY-MM-DD}` → ms
+  const userTaskMs = new Map<string, number>();           // `${userId}|${entityId}` → ms
+  for (const s of sessions) {
+    const ms = s.durationMs ?? 0;
+    const dk = `${s.userId}|${dayKey(s.startedAt)}`;
+    timeByUserDayMap.set(dk, (timeByUserDayMap.get(dk) ?? 0) + ms);
+    const tk = `${s.userId}|${s.entityId}`;
+    userTaskMs.set(tk, (userTaskMs.get(tk) ?? 0) + ms);
+  }
+
+  // Currently-running timers (one per user).
+  const active = await prisma.timerSession.findMany({
+    where: { organizationId: c.organizationId, userId: { in: userIds }, stoppedAt: null },
+    select: { userId: true, entityId: true, startedAt: true },
+  });
+
+  // ── 1. Items with a real date in range ──────────────────────────
   const items = await prisma.item.findMany({
     where: {
-      organizationId: c.organizationId,
-      archivedAt: null,
-      ownerId: userWhere,
+      organizationId: c.organizationId, archivedAt: null, ownerId: { in: userIds },
+      OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }],
       ...(spaceFilter ? { board: { spaceId: spaceFilter } } : {}),
     },
     select: {
-      id: true,
-      title: true,
-      ownerId: true,
-      metadata: true,
-      boardId: true,
+      id: true, title: true, ownerId: true, status: true, priority: true,
+      startAt: true, dueAt: true, boardId: true,
       board: { select: { slug: true, spaceId: true } },
     },
+    take: 1500,
   });
-
-  const taskEvents: CalendarEvent[] = [];
-  for (const it of items) {
-    const meta = (it.metadata ?? {}) as Record<string, unknown>;
-    const raw = meta.dueDate ?? meta.due_date ?? meta.due ?? meta.endDate;
-    if (typeof raw !== "string") continue;
-    const dt = new Date(raw);
-    if (isNaN(dt.getTime())) continue;
-    if (dt < from || dt > to) continue;
-    taskEvents.push({
+  const taskEvents: CalendarEvent[] = items.map((it) => {
+    const when = it.dueAt ?? it.startAt!;
+    return {
       id: `task:${it.id}`,
       title: it.title,
-      start: dt.toISOString(),
+      start: when.toISOString(),
+      end: it.dueAt && it.startAt ? it.dueAt.toISOString() : null,
       kind: "TASK",
       ownerId: it.ownerId,
       ownerName: it.ownerId ? nameById.get(it.ownerId) ?? null : null,
+      status: it.status,
+      priority: it.priority,
+      loggedMs: it.ownerId ? userTaskMs.get(`${it.ownerId}|${it.id}`) ?? 0 : 0,
       spaceId: it.board?.spaceId ?? null,
       url: `/boards/${it.board?.slug ?? it.boardId}?item=${it.id}`,
-    });
-  }
+    };
+  });
 
-  // ── 2. WeeklyReview periodStart in range ─────────────────────────
+  // ── 2. Weekly reviews ───────────────────────────────────────────
   const reviews = await prisma.weeklyReview.findMany({
-    where: {
-      organizationId: c.organizationId,
-      userId: userWhere,
-      periodStart: { gte: from, lte: to },
-    },
-    select: { id: true, userId: true, periodStart: true, status: true },
+    where: { organizationId: c.organizationId, userId: { in: userIds }, periodStart: { gte: from, lte: to } },
+    select: { id: true, userId: true, periodStart: true },
   });
   const reviewEvents: CalendarEvent[] = reviews.map((r) => ({
     id: `review:${r.id}`,
@@ -178,20 +173,10 @@ export async function GET(req: Request) {
     url: r.userId === c.userId ? "/me/weekly-review" : `/team/reviews?user=${r.userId}`,
   }));
 
-  // ── 3. SOPAssignment with dueDate in range ───────────────────────
+  // ── 3. SOP assignments ──────────────────────────────────────────
   const sopAssignments = await prisma.sOPAssignment.findMany({
-    where: {
-      sop: { organizationId: c.organizationId },
-      userId: userWhere,
-      dueDate: { gte: from, lte: to },
-      status: { not: "COMPLETED" },
-    },
-    select: {
-      id: true,
-      userId: true,
-      dueDate: true,
-      sop: { select: { id: true, title: true } },
-    },
+    where: { sop: { organizationId: c.organizationId }, userId: { in: userIds }, dueDate: { gte: from, lte: to }, status: { not: "COMPLETED" } },
+    select: { id: true, userId: true, dueDate: true, sop: { select: { id: true, title: true } } },
   });
   const sopEvents: CalendarEvent[] = sopAssignments
     .filter((a) => a.dueDate !== null)
@@ -209,13 +194,50 @@ export async function GET(req: Request) {
     (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
   );
 
+  // ── Resolve titles for tracked entities (for the People view) ───
+  const trackedIds = Array.from(new Set([...sessions.map((s) => s.entityId), ...active.map((a) => a.entityId)]));
+  const titleById = new Map<string, string>();
+  if (trackedIds.length) {
+    const [trackedItems, trackedTasks] = await Promise.all([
+      prisma.item.findMany({ where: { id: { in: trackedIds }, organizationId: c.organizationId }, select: { id: true, title: true } }),
+      prisma.task.findMany({ where: { id: { in: trackedIds }, organizationId: c.organizationId }, select: { id: true, title: true } }),
+    ]);
+    for (const t of trackedItems) titleById.set(t.id, t.title);
+    for (const t of trackedTasks) if (!titleById.has(t.id)) titleById.set(t.id, t.title);
+  }
+
+  // Per-(user, task) tracked totals → array for the People view.
+  const taskTime = Array.from(userTaskMs.entries()).map(([key, ms]) => {
+    const [userId, entityId] = key.split("|");
+    return { userId, entityId, title: titleById.get(entityId) ?? "Tracked work", ms };
+  }).sort((a, b) => b.ms - a.ms);
+
+  const timeByUserDay = Array.from(timeByUserDayMap.entries()).map(([key, ms]) => {
+    const [userId, day] = key.split("|");
+    return { userId, day, ms };
+  });
+
+  const activeByUser = active.map((a) => ({
+    userId: a.userId,
+    entityId: a.entityId,
+    title: titleById.get(a.entityId) ?? "Tracked work",
+    since: a.startedAt.toISOString(),
+  }));
+
   return NextResponse.json({
-    events,
-    scope: effectiveScope,
+    calendar,
+    canTeam,
+    scope: calendar === "team" ? "team" : "mine",
     range: { from: from.toISOString(), to: to.toISOString() },
+    events,
     people: usersInScope.map((u) => ({
       id: u.id,
       name: nameById.get(u.id) ?? u.email,
+      avatar: u.avatar ?? null,
+      role: u.accessLevel ?? null,
     })),
+    timeByUserDay,
+    taskTime,
+    activeByUser,
   });
 }
