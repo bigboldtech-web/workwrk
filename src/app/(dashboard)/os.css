@@ -3979,15 +3979,32 @@ table.os-tbl {
  * Lives outside the dashboard but reuses the .workwrk-os tokens.
  * ════════════════════════════════════════════════════════════════ */
 .os-onboard {
+  /* Onboarding is designed for the bright theme — pin the light tokens so it
+     renders correctly even when the app defaults to dark / night mode
+     (next-themes defaultTheme="dark" + enableSystem). */
+  --os-canvas:      #FFFFFF;
+  --os-surface:     #FFFFFF;
+  --os-surface-1:   #F6F7FB;
+  --os-surface-2:   #ECEEF5;
+  --os-surface-3:   #E6E9EF;
+  --os-line:        #E6E9EF;
+  --os-line-soft:   #F0F2F7;
+  --os-ink:         #323338;
+  --os-ink-2:       #676879;
+  --os-ink-3:       #9699A6;
+  --os-ink-4:       #C4C7D4;
+  color-scheme: light;
   min-height: 100vh;
-  background: var(--os-canvas);
+  display: flex;
+  flex-direction: column;
+  background: #FFFFFF;
   background-image:
-    radial-gradient(circle at 12% -10%, rgba(0, 115, 234, 0.10), transparent 40%),
-    radial-gradient(circle at 88% 110%, rgba(255, 21, 138, 0.10), transparent 50%);
+    radial-gradient(circle at 12% -8%, rgba(0, 115, 234, 0.07), transparent 42%),
+    radial-gradient(circle at 88% 108%, rgba(255, 21, 138, 0.07), transparent 52%);
   position: relative;
   overflow-x: hidden;
   font-family: var(--os-font);
-  color: var(--os-ink);
+  color: #323338;
 }
 .os-onboard__nav {
   position: relative;
@@ -4039,10 +4056,18 @@ table.os-tbl {
 .os-onboard__main {
   position: relative;
   z-index: 1;
+  flex: 1;
+  width: 100%;
   max-width: 1080px;
   margin: 0 auto;
   padding: 48px 32px 96px;
+  display: flex;
+  flex-direction: column;
 }
+/* Center the active step vertically. Auto margins in a flex column collapse
+   to 0 when content overflows, so the long product picker top-aligns + scrolls
+   while short steps (welcome / ready) sit centered. */
+.os-onboard__step { width: 100%; margin: auto 0; }
 
 .os-onboard__progress {
   display: flex;
