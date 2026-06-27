@@ -21,6 +21,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
+import { weekStartUTC } from "@/lib/timesheet";
 
 const MANAGER_LEVELS = new Set([
   "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR",
@@ -40,6 +41,23 @@ interface CalendarEvent {
   loggedMs?: number;  // time tracked on this item (by its owner) in range
   spaceId?: string | null;
   url: string;
+}
+
+interface WorkCard {
+  id: string; title: string; status: string | null;
+  board: string | null; dueAt: string | null; loggedMs: number; url: string;
+}
+interface UserWork {
+  userId: string;
+  inProgress: WorkCard[]; dueSoon: WorkCard[]; overdue: WorkCard[]; doneThisWeek: WorkCard[];
+}
+
+// Free-string board status → coarse bucket.
+function normalizeStatus(s?: string | null): "done" | "in-progress" | "todo" {
+  const t = (s ?? "").toLowerCase();
+  if (/(done|complete|closed|resolved|shipped)/.test(t)) return "done";
+  if (/(progress|doing|active|review|started|working)/.test(t)) return "in-progress";
+  return "todo";
 }
 
 async function ctx() {
@@ -224,6 +242,50 @@ export async function GET(req: Request) {
     since: a.startedAt.toISOString(),
   }));
 
+  // ── Work-by-person buckets (the "By person" view) ───────────────
+  let workByUser: UserWork[] = [];
+  if (calendar === "team") {
+    const weekStart = weekStartUTC(now);
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const soon = new Date(now.getTime() + 7 * 86_400_000);
+    const openItems = await prisma.item.findMany({
+      where: { organizationId: c.organizationId, archivedAt: null, ownerId: { in: userIds } },
+      select: { id: true, title: true, ownerId: true, status: true, dueAt: true, updatedAt: true, boardId: true, board: { select: { slug: true, name: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 1200,
+    });
+    const byUser = new Map<string, Omit<UserWork, "userId">>();
+    for (const id of userIds) byUser.set(id, { inProgress: [], dueSoon: [], overdue: [], doneThisWeek: [] });
+    for (const it of openItems) {
+      if (!it.ownerId) continue;
+      const b = byUser.get(it.ownerId);
+      if (!b) continue;
+      const norm = normalizeStatus(it.status);
+      const card: WorkCard = {
+        id: it.id, title: it.title, status: it.status,
+        board: it.board?.name ?? null,
+        dueAt: it.dueAt ? it.dueAt.toISOString() : null,
+        loggedMs: userTaskMs.get(`${it.ownerId}|${it.id}`) ?? 0,
+        url: `/boards/${it.board?.slug ?? it.boardId}?item=${it.id}`,
+      };
+      if (norm === "done") {
+        if (it.updatedAt >= weekStart) b.doneThisWeek.push(card);
+      } else if (it.dueAt && it.dueAt < todayStart) {
+        b.overdue.push(card);
+      } else if (it.dueAt && it.dueAt <= soon) {
+        b.dueSoon.push(card);
+      } else if (norm === "in-progress") {
+        b.inProgress.push(card);
+      }
+      // Open todo items with no date are left out to keep the view focused.
+    }
+    const cap = (a: WorkCard[]) => a.slice(0, 8);
+    workByUser = userIds.map((id) => {
+      const b = byUser.get(id)!;
+      return { userId: id, inProgress: cap(b.inProgress), dueSoon: cap(b.dueSoon), overdue: cap(b.overdue), doneThisWeek: cap(b.doneThisWeek) };
+    });
+  }
+
   return NextResponse.json({
     calendar,
     canTeam,
@@ -239,5 +301,6 @@ export async function GET(req: Request) {
     timeByUserDay,
     taskTime,
     activeByUser,
+    workByUser,
   });
 }

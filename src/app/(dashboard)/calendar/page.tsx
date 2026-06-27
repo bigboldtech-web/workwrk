@@ -31,11 +31,14 @@ interface Person { id: string; name: string; avatar?: string | null; role?: stri
 interface TaskTime { userId: string; entityId: string; title: string; ms: number }
 interface DayTime { userId: string; day: string; ms: number }
 interface ActiveWork { userId: string; entityId: string; title: string; since: string }
+interface WorkCard { id: string; title: string; status: string | null; board: string | null; dueAt: string | null; loggedMs: number; url: string }
+interface UserWork { userId: string; inProgress: WorkCard[]; dueSoon: WorkCard[]; overdue: WorkCard[]; doneThisWeek: WorkCard[] }
 interface ApiResponse {
   calendar: CalKind; canTeam: boolean;
   range: { from: string; to: string };
   events: CalendarEvent[]; people: Person[];
   timeByUserDay: DayTime[]; taskTime: TaskTime[]; activeByUser: ActiveWork[];
+  workByUser?: UserWork[];
 }
 
 const PERSON_COLORS = [
@@ -193,7 +196,7 @@ export default function CalendarPage() {
             <Seg active={view === "month"} onClick={() => setView("month")}>Month</Seg>
             <Seg active={view === "week"} onClick={() => setView("week")}>Week</Seg>
             {calendar === "team" ? (
-              <Seg active={view === "people"} onClick={() => setView("people")}>People</Seg>
+              <Seg active={view === "people"} onClick={() => setView("people")}>By person</Seg>
             ) : null}
           </Segmented>
 
@@ -224,7 +227,7 @@ export default function CalendarPage() {
         {calendar === "team" && !canTeam ? (
           <Empty>Team Calendar is available to managers and above.</Empty>
         ) : view === "people" ? (
-          <PeopleView data={data} loading={loading} onOpen={(u) => { setActivePersonId(u); setView("month"); }} />
+          <PeopleView data={data} loading={loading} onPerson={(u) => { setActivePersonId(u); setView("month"); }} onCard={(u) => router.push(u)} />
         ) : view === "week" ? (
           <WeekGrid from={from} calendar={calendar} eventsByDay={eventsByDay} timeByDay={timeByDay} onOpen={(u) => router.push(u)} />
         ) : (
@@ -321,30 +324,42 @@ function WeekGrid({ from, calendar, eventsByDay, timeByDay, onOpen }: {
   );
 }
 
-/* ─────────────────────────── People ─────────────────────────── */
-function PeopleView({ data, loading, onOpen }: { data: ApiResponse | null; loading: boolean; onOpen: (userId: string) => void }) {
+/* ─────────────────────────── By person ─────────────────────────── */
+const BUCKETS: { key: keyof Omit<UserWork, "userId">; label: string; color: string }[] = [
+  { key: "overdue", label: "Overdue", color: "#E2445C" },
+  { key: "inProgress", label: "In progress", color: "#0073EA" },
+  { key: "dueSoon", label: "Due soon", color: "#E8920C" },
+  { key: "doneThisWeek", label: "Done this week", color: "#00B26A" },
+];
+
+function PeopleView({ data, loading, onPerson, onCard }: {
+  data: ApiResponse | null; loading: boolean;
+  onPerson: (userId: string) => void; onCard: (url: string) => void;
+}) {
   if (loading && !data) return <div className="flex justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-zinc-300" /></div>;
   if (!data || data.people.length === 0) return <Empty>You have no direct reports yet. People who report to you will appear here.</Empty>;
 
   const totalByUser = new Map<string, number>();
   for (const t of data.timeByUserDay) totalByUser.set(t.userId, (totalByUser.get(t.userId) ?? 0) + t.ms);
-  const tasksByUser = new Map<string, TaskTime[]>();
-  for (const t of data.taskTime) (tasksByUser.get(t.userId) ?? tasksByUser.set(t.userId, []).get(t.userId)!).push(t);
   const activeByUser = new Map(data.activeByUser.map((a) => [a.userId, a]));
-  const scheduledByUser = new Map<string, number>();
-  for (const e of data.events) if (e.ownerId) scheduledByUser.set(e.ownerId, (scheduledByUser.get(e.ownerId) ?? 0) + 1);
+  const workByUser = new Map((data.workByUser ?? []).map((w) => [w.userId, w]));
 
-  // Most time logged first.
-  const people = [...data.people].sort((a, b) => (totalByUser.get(b.id) ?? 0) - (totalByUser.get(a.id) ?? 0));
+  // Busiest first (active timer, then most open work, then most logged).
+  const workCount = (w?: UserWork) => w ? w.overdue.length + w.inProgress.length + w.dueSoon.length + w.doneThisWeek.length : 0;
+  const people = [...data.people].sort((a, b) => {
+    const av = (activeByUser.has(a.id) ? 1e9 : 0) + workCount(workByUser.get(a.id)) * 1000 + (totalByUser.get(a.id) ?? 0);
+    const bv = (activeByUser.has(b.id) ? 1e9 : 0) + workCount(workByUser.get(b.id)) * 1000 + (totalByUser.get(b.id) ?? 0);
+    return bv - av;
+  });
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {people.map((p) => {
         const total = totalByUser.get(p.id) ?? 0;
-        const tasks = (tasksByUser.get(p.id) ?? []).slice(0, 6);
-        const maxMs = Math.max(1, ...tasks.map((t) => t.ms));
         const active = activeByUser.get(p.id);
+        const work = workByUser.get(p.id);
         const color = colorForId(p.id);
+        const hasWork = workCount(work) > 0;
         return (
           <div key={p.id} className="rounded-xl border border-zinc-200 bg-white p-4">
             <div className="flex items-center gap-3">
@@ -353,10 +368,12 @@ function PeopleView({ data, loading, onOpen }: { data: ApiResponse | null; loadi
                 <div className="text-[14px] font-semibold text-zinc-900 truncate">{p.name}</div>
                 <div className="text-[12px] text-zinc-500 truncate">{roleLabel(p.role) || "Team member"}</div>
               </div>
-              <div className="text-right">
-                <div className="text-[15px] font-bold text-zinc-900 tabular-nums">{fmtMs(total)}</div>
-                <div className="text-[10.5px] text-zinc-400 uppercase tracking-wide">logged</div>
-              </div>
+              {total > 0 ? (
+                <div className="text-right">
+                  <div className="text-[15px] font-bold text-zinc-900 tabular-nums">{fmtMs(total)}</div>
+                  <div className="text-[10.5px] text-zinc-400 uppercase tracking-wide">logged</div>
+                </div>
+              ) : null}
             </div>
 
             {active ? (
@@ -367,39 +384,51 @@ function PeopleView({ data, loading, onOpen }: { data: ApiResponse | null; loadi
               </div>
             ) : null}
 
-            <div className="mt-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] uppercase tracking-wide text-zinc-400 font-semibold">What they worked on</span>
-                <span className="text-[11px] text-zinc-400">{scheduledByUser.get(p.id) ?? 0} scheduled</span>
-              </div>
-              {tasks.length === 0 ? (
-                <div className="text-[12px] text-zinc-400 py-2">No time tracked this period.</div>
+            <div className="mt-3 space-y-3">
+              {!hasWork ? (
+                <div className="text-[12px] text-zinc-400 py-2">No active work right now.</div>
               ) : (
-                <ul className="space-y-1.5">
-                  {tasks.map((t) => (
-                    <li key={t.entityId}>
-                      <div className="flex items-center justify-between gap-2 mb-0.5">
-                        <span className="text-[12.5px] text-zinc-700 truncate flex items-center gap-1.5">
-                          <CircleDot className="h-3 w-3 shrink-0" style={{ color }} />{t.title}
-                        </span>
-                        <span className="text-[12px] font-semibold text-zinc-600 tabular-nums shrink-0">{fmtMs(t.ms)}</span>
+                BUCKETS.map((bk) => {
+                  const cards = work?.[bk.key] ?? [];
+                  if (cards.length === 0) return null;
+                  return (
+                    <div key={bk.key}>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: bk.color }} />
+                        <span className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: bk.color }}>{bk.label}</span>
+                        <span className="text-[11px] text-zinc-400">{cards.length}</span>
                       </div>
-                      <div className="h-1.5 rounded-full bg-zinc-100 overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${(t.ms / maxMs) * 100}%`, background: color }} />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                      <ul className="space-y-1">
+                        {cards.map((card) => <WorkRow key={card.id} card={card} onCard={onCard} />)}
+                      </ul>
+                    </div>
+                  );
+                })
               )}
             </div>
 
-            <button type="button" onClick={() => onOpen(p.id)} className="mt-3 text-[12px] font-medium text-[#0073EA] hover:underline">
+            <button type="button" onClick={() => onPerson(p.id)} className="mt-3 text-[12px] font-medium text-[#0073EA] hover:underline">
               View {p.name.split(" ")[0]}&apos;s calendar →
             </button>
           </div>
         );
       })}
     </div>
+  );
+}
+
+function WorkRow({ card, onCard }: { card: WorkCard; onCard: (url: string) => void }) {
+  const due = card.dueAt ? new Date(card.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+  return (
+    <li>
+      <button type="button" onClick={() => onCard(card.url)} className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-zinc-50">
+        <CircleDot className="h-3 w-3 shrink-0 text-zinc-400" />
+        <span className="text-[12.5px] text-zinc-700 truncate flex-1">{card.title}</span>
+        {card.board ? <span className="text-[11px] text-zinc-400 truncate max-w-[90px] hidden sm:inline">{card.board}</span> : null}
+        {due ? <span className="text-[11px] text-zinc-400 shrink-0">{due}</span> : null}
+        {card.loggedMs > 0 ? <span className="text-[10.5px] font-semibold text-[#0073EA] bg-[#0073EA]/8 rounded px-1 shrink-0 inline-flex items-center gap-0.5"><Clock className="h-2.5 w-2.5" />{fmtMs(card.loggedMs)}</span> : null}
+      </button>
+    </li>
   );
 }
 
