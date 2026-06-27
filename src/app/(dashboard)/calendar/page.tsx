@@ -105,16 +105,19 @@ export default function CalendarPage() {
     return { from: gs, to: addDays(gs, 41) };
   }, [anchor, view]);
 
+  // The People view always shows the whole team — a single-person filter only
+  // applies to the Month/Week grids.
+  const personParam = activePersonId && view !== "people" ? activePersonId : "";
   const fetchKey = useMemo(
-    () => `${calendar}_${from.toISOString()}_${to.toISOString()}_${activePersonId ?? ""}`,
-    [calendar, from, to, activePersonId],
+    () => `${calendar}_${view}_${from.toISOString()}_${to.toISOString()}_${personParam}`,
+    [calendar, view, from, to, personParam],
   );
   const loading = loadedKey !== fetchKey;
 
   useEffect(() => {
     let active = true;
     const params = new URLSearchParams({ calendar, from: from.toISOString(), to: to.toISOString() });
-    if (activePersonId) params.set("userId", activePersonId);
+    if (personParam) params.set("userId", personParam);
     fetch(`/api/calendar?${params}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((res: ApiResponse | null) => {
@@ -124,7 +127,7 @@ export default function CalendarPage() {
       })
       .catch(() => { if (active) setLoadedKey(fetchKey); });
     return () => { active = false; };
-  }, [fetchKey, calendar, from, to, activePersonId]);
+  }, [fetchKey, calendar, from, to, personParam]);
 
   // Switching to My calendar can't stay in People view.
   function selectCalendar(next: CalKind) {
@@ -221,7 +224,7 @@ export default function CalendarPage() {
         {calendar === "team" && !canTeam ? (
           <Empty>Team Calendar is available to managers and above.</Empty>
         ) : view === "people" ? (
-          <PeopleView data={data} loading={loading} onOpen={(u) => setActivePersonId(u)} />
+          <PeopleView data={data} loading={loading} onOpen={(u) => { setActivePersonId(u); setView("month"); }} />
         ) : view === "week" ? (
           <WeekGrid from={from} calendar={calendar} eventsByDay={eventsByDay} timeByDay={timeByDay} onOpen={(u) => router.push(u)} />
         ) : (
