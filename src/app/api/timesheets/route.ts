@@ -22,6 +22,7 @@ import {
 } from "@/lib/api-helpers";
 import { weekStartUTC } from "@/lib/timesheet-week";
 import { tagFilterIds } from "@/lib/tag-filter";
+import { getEffectiveReportTree } from "@/lib/reporting-line";
 
 const MAX_LIMIT = 100;
 
@@ -43,11 +44,9 @@ export async function GET(req: NextRequest) {
     where.OR = [{ approverId: userId }, { approverId: null }];
   } else if (scope === "team") {
     if (!isManager(session)) return jsonError("Forbidden", 403);
-    const directReports = await prisma.user.findMany({
-      where: { managerId: userId },
-      select: { id: true },
-    });
-    where.userId = { in: directReports.map((r) => r.id) };
+    // Full report tree (direct + indirect), matching the Team Calendar.
+    const tree = await getEffectiveReportTree(userId);
+    where.userId = { in: tree.filter((id) => id !== userId) };
   } else if (scope === "all") {
     if (!isManager(session)) return jsonError("Forbidden", 403);
   } else {
@@ -71,10 +70,17 @@ export async function GET(req: NextRequest) {
       user: { select: { id: true, firstName: true, lastName: true } },
       approver: { select: { id: true, firstName: true, lastName: true } },
       _count: { select: { entries: true } },
+      entries: { select: { hours: true } },
     },
   });
 
-  return jsonSuccess(timesheets);
+  // Sum entry hours → totalMinutes so the list shows real logged time.
+  const withTotals = timesheets.map(({ entries, ...rest }) => ({
+    ...rest,
+    totalMinutes: Math.round(entries.reduce((s, e) => s + (e.hours ? Number(e.hours) : 0), 0) * 60),
+  }));
+
+  return jsonSuccess(withTotals);
 }
 
 export async function POST(req: NextRequest) {

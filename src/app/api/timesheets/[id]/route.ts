@@ -33,6 +33,7 @@ export async function GET(
         orderBy: { day: "asc" },
         include: {
           task: { select: { id: true, title: true } },
+          item: { select: { id: true, title: true, board: { select: { slug: true } } } },
         },
       },
     },

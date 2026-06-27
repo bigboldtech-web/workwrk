@@ -33,6 +33,13 @@ type ApiTimesheet = {
   _count?: { entries?: number };
 };
 
+type DetailEntry = {
+  id: string; day: string; hours: number | null; description?: string | null; source: string;
+  item?: { id: string; title: string; board?: { slug: string } | null } | null;
+  task?: { id: string; title: string } | null;
+};
+type SheetDetail = { id: string; entries: DetailEntry[] };
+
 const STATUS_LABELS: Record<TsStatus, string> = { DRAFT: "Draft", SUBMITTED: "Submitted", APPROVED: "Approved", REJECTED: "Rejected" };
 const STATUS_COLORS: Record<TsStatus, string> = { DRAFT: C.indigo, SUBMITTED: C.yellow, APPROVED: C.green, REJECTED: C.red };
 
@@ -52,6 +59,24 @@ export default function TimesheetsPage() {
   const [scope, setScope] = useState<Scope>("mine");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, SheetDetail | "loading">>({});
+
+  async function toggleDetail(id: string) {
+    if (openId === id) { setOpenId(null); return; }
+    setOpenId(id);
+    if (!details[id]) {
+      setDetails((d) => ({ ...d, [id]: "loading" }));
+      try {
+        const res = await fetch(`/api/timesheets/${id}`);
+        const data = await res.json();
+        setDetails((d) => ({ ...d, [id]: (data.data ?? data) as SheetDetail }));
+      } catch {
+        setDetails((d) => { const c = { ...d }; delete c[id]; return c; });
+        setOpenId(null);
+      }
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -152,10 +177,11 @@ export default function TimesheetsPage() {
               const canRetract = t.status === "SUBMITTED";
               const canDecide = t.status === "SUBMITTED" && scope === "approve";
               return (
-                <article key={t.id} className="tsh__row" style={{ ["--row-c" as unknown as string]: statusColor }}>
+                <div key={t.id}>
+                <article className="tsh__row" style={{ ["--row-c" as unknown as string]: statusColor }}>
                   <span className="tsh__row-accent" aria-hidden="true" />
                   {av && <span className="tsh__row-av" style={{ background: av.color }}>{av.initials}</span>}
-                  <div className="tsh__row-main">
+                  <div className="tsh__row-main" onClick={() => toggleDetail(t.id)} style={{ cursor: "pointer" }}>
                     <div className="tsh__row-head">
                       <span className={`tsh__row-status tsh__row-status--${t.status.toLowerCase()}`}>{STATUS_LABELS[t.status]}</span>
                       <span className="tsh__row-week"><CalendarIcon /> {weekLabel(t.weekStartDate)}</span>
@@ -177,14 +203,62 @@ export default function TimesheetsPage() {
                       </>
                     )}
                   </div>
-                  <ChevronRight className="tsh__row-arrow" />
+                  <ChevronRight className="tsh__row-arrow" style={{ transform: openId === t.id ? "rotate(90deg)" : undefined }} />
                 </article>
+                {openId === t.id ? <SheetDetailPanel detail={details[t.id]} /> : null}
+                </div>
               );
             })}
           </div>
         )}
       </div>
     </>
+  );
+}
+
+function SheetDetailPanel({ detail }: { detail: SheetDetail | "loading" | undefined }) {
+  if (!detail || detail === "loading") {
+    return <div className="px-4 py-3 text-[12.5px] text-zinc-400">Loading entries…</div>;
+  }
+  if (!detail.entries || detail.entries.length === 0) {
+    return <div className="px-4 py-3 text-[12.5px] text-zinc-400">No entries yet. Track time on a card and it lands here.</div>;
+  }
+  const byDay = new Map<string, DetailEntry[]>();
+  for (const e of detail.entries) {
+    const k = e.day.slice(0, 10);
+    (byDay.get(k) ?? byDay.set(k, []).get(k)!).push(e);
+  }
+  const days = [...byDay.keys()].sort();
+  return (
+    <div className="mx-3 mb-2 rounded-lg border border-zinc-200 bg-zinc-50/60 overflow-hidden">
+      {days.map((d) => {
+        const entries = byDay.get(d)!;
+        const dayTotal = entries.reduce((s, e) => s + (e.hours ?? 0), 0);
+        return (
+          <div key={d} className="border-b border-zinc-100 last:border-b-0">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-white">
+              <span className="text-[11.5px] font-semibold text-zinc-600">
+                {new Date(d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+              </span>
+              <span className="text-[11.5px] font-semibold text-zinc-500 tabular-nums">{dayTotal.toFixed(2)}h</span>
+            </div>
+            <ul>
+              {entries.map((e) => {
+                const title = e.item?.title ?? e.task?.title ?? e.description ?? "Time entry";
+                return (
+                  <li key={e.id} className="flex items-center gap-2 px-3 py-1.5 text-[12.5px]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#0073EA] shrink-0" />
+                    <span className="text-zinc-700 truncate flex-1">{title}</span>
+                    {e.source === "TIMER" ? <span className="text-[10px] text-zinc-400 shrink-0">from timer</span> : null}
+                    <span className="font-semibold text-zinc-600 tabular-nums shrink-0">{(e.hours ?? 0).toFixed(2)}h</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
