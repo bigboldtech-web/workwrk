@@ -1,0 +1,128 @@
+/* WorkwrK four-dot brand loader (YBRG).
+   Sequence per loop: a staggered up/down bounce in a row, then the dots
+   converge and orbit once as a circle, then expand back to the row. */
+
+.wwk-dots {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.wwk-dots__box {
+  position: relative;
+}
+
+.wwk-dots__stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 44px;
+  height: 44px;
+  transform-origin: top left;
+}
+
+.wwk-dots__dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  animation: 2.4s linear infinite;
+  will-change: transform;
+}
+
+/* Sequence: yellow, blue, red, green. */
+.wwk-dots__dot:nth-child(1) { background: #FFCB00; animation-name: wwk-d0; }
+.wwk-dots__dot:nth-child(2) { background: #0073EA; animation-name: wwk-d1; }
+.wwk-dots__dot:nth-child(3) { background: #FF3D57; animation-name: wwk-d2; }
+.wwk-dots__dot:nth-child(4) { background: #00C875; animation-name: wwk-d3; }
+
+.wwk-dots__label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: #9699a6;
+}
+
+/* Yellow, row x = -16.5, circle start = top */
+@keyframes wwk-d0 {
+  0%   { transform: translate(-16.5px, 0); }
+  6%   { transform: translate(-16.5px, -10px); }
+  12%  { transform: translate(-16.5px, 0); }
+  28%  { transform: translate(-16.5px, 0); }
+  40%  { transform: translate(0, -13px); }
+  44%  { transform: translate(9px, -9px); }
+  48%  { transform: translate(13px, 0); }
+  52%  { transform: translate(9px, 9px); }
+  56%  { transform: translate(0, 13px); }
+  60%  { transform: translate(-9px, 9px); }
+  64%  { transform: translate(-13px, 0); }
+  68%  { transform: translate(-9px, -9px); }
+  72%  { transform: translate(0, -13px); }
+  84%  { transform: translate(-16.5px, 0); }
+  100% { transform: translate(-16.5px, 0); }
+}
+
+/* Blue, row x = -5.5, circle start = right */
+@keyframes wwk-d1 {
+  0%   { transform: translate(-5.5px, 0); }
+  10%  { transform: translate(-5.5px, -10px); }
+  16%  { transform: translate(-5.5px, 0); }
+  28%  { transform: translate(-5.5px, 0); }
+  40%  { transform: translate(13px, 0); }
+  44%  { transform: translate(9px, 9px); }
+  48%  { transform: translate(0, 13px); }
+  52%  { transform: translate(-9px, 9px); }
+  56%  { transform: translate(-13px, 0); }
+  60%  { transform: translate(-9px, -9px); }
+  64%  { transform: translate(0, -13px); }
+  68%  { transform: translate(9px, -9px); }
+  72%  { transform: translate(13px, 0); }
+  84%  { transform: translate(-5.5px, 0); }
+  100% { transform: translate(-5.5px, 0); }
+}
+
+/* Red, row x = 5.5, circle start = bottom */
+@keyframes wwk-d2 {
+  0%   { transform: translate(5.5px, 0); }
+  14%  { transform: translate(5.5px, -10px); }
+  20%  { transform: translate(5.5px, 0); }
+  28%  { transform: translate(5.5px, 0); }
+  40%  { transform: translate(0, 13px); }
+  44%  { transform: translate(-9px, 9px); }
+  48%  { transform: translate(-13px, 0); }
+  52%  { transform: translate(-9px, -9px); }
+  56%  { transform: translate(0, -13px); }
+  60%  { transform: translate(9px, -9px); }
+  64%  { transform: translate(13px, 0); }
+  68%  { transform: translate(9px, 9px); }
+  72%  { transform: translate(0, 13px); }
+  84%  { transform: translate(5.5px, 0); }
+  100% { transform: translate(5.5px, 0); }
+}
+
+/* Green, row x = 16.5, circle start = left */
+@keyframes wwk-d3 {
+  0%   { transform: translate(16.5px, 0); }
+  18%  { transform: translate(16.5px, -10px); }
+  24%  { transform: translate(16.5px, 0); }
+  28%  { transform: translate(16.5px, 0); }
+  40%  { transform: translate(-13px, 0); }
+  44%  { transform: translate(-9px, -9px); }
+  48%  { transform: translate(0, -13px); }
+  52%  { transform: translate(9px, -9px); }
+  56%  { transform: translate(13px, 0); }
+  60%  { transform: translate(9px, 9px); }
+  64%  { transform: translate(0, 13px); }
+  68%  { transform: translate(-9px, 9px); }
+  72%  { transform: translate(-13px, 0); }
+  84%  { transform: translate(16.5px, 0); }
+  100% { transform: translate(16.5px, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wwk-dots__dot { animation-duration: 4.8s; }
+}

@@ -9,6 +9,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { applyDensity, getInitialDensity } from "@/lib/density";
+import { DotsLoaderScreen } from "@/components/brand/dots-loader";
 import "./os.css";
 
 export default function DashboardLayout({
@@ -49,33 +50,7 @@ export default function DashboardLayout({
   }, []);
 
   if (status === "loading" || (status === "authenticated" && !setupChecked)) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: "100vh",
-          gap: 10,
-          background: "#FBFAF7",
-          color: "#52525B",
-          fontFamily: "var(--font-geist), sans-serif",
-          fontSize: 13,
-        }}
-      >
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 999,
-            background: "#C8451F",
-            animation: "osPulse 1.2s ease-in-out infinite",
-          }}
-        />
-        <span>Loading workspace…</span>
-        <style>{`@keyframes osPulse { 0%,100% { opacity: 0.3; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }`}</style>
-      </div>
-    );
+    return <DotsLoaderScreen label="Loading workspace" background="#FBFAF7" />;
   }
 
   if (status === "unauthenticated") return null;

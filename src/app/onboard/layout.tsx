@@ -8,8 +8,8 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Loader2 } from "lucide-react";
 import { LogoLockup } from "@/components/brand/logo";
+import { DotsLoaderScreen } from "@/components/brand/dots-loader";
 
 export default function OnboardLayout({ children }: { children: React.ReactNode }) {
   const { status } = useSession();
@@ -20,11 +20,7 @@ export default function OnboardLayout({ children }: { children: React.ReactNode 
   }, [status, router]);
 
   if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white text-zinc-400">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading…
-      </div>
-    );
+    return <DotsLoaderScreen label="Loading" background="#FBFBFC" />;
   }
   if (status === "unauthenticated") return null;
 

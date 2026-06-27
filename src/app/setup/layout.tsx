@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { DotsLoaderScreen } from "@/components/brand/dots-loader";
 import "@/app/(dashboard)/app-shell.css";
 
 export default function SetupLayout({
@@ -25,12 +26,7 @@ export default function SetupLayout({
   }, []);
 
   if (status === "loading") {
-    return (
-      <div className="app-loader">
-        <span className="app-loader-dot" aria-hidden />
-        <span className="app-loader-text">Loading workspace</span>
-      </div>
-    );
+    return <DotsLoaderScreen label="Loading workspace" background="#0B0E15" />;
   }
 
   if (status === "unauthenticated") return null;
