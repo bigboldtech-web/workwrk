@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { BulkApproveBar } from "@/components/ui/bulk-approve-bar";
 import {
   Clock,
@@ -145,6 +146,7 @@ function MyWeek({
   onChange: () => void;
   toast: ReturnType<typeof useToast>["toast"];
 }) {
+  const confirm = useConfirm();
   const [data, setData] = useState<TimesheetData>(initial);
   const [active, setActive] = useState<ActivePunch | null>(activePunch);
   const [busy, setBusy] = useState(false);
@@ -269,7 +271,7 @@ function MyWeek({
   }
 
   async function submitWeek() {
-    if (!confirm(`Submit this week (${totalWeekHours.toFixed(2)}h) for approval?`)) return;
+    if (!(await confirm({ title: "Submit week", description: `Submit this week (${totalWeekHours.toFixed(2)}h) for approval?`, confirmLabel: "Submit" }))) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/timesheets/${data.id}`, {
@@ -436,6 +438,7 @@ function DayRow({
   onAdd: (hours: number, description: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const confirm = useConfirm();
   const [adding, setAdding] = useState(false);
   const [hours, setHours] = useState("");
   const [description, setDescription] = useState("");
@@ -476,8 +479,8 @@ function DayRow({
               {!locked && (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm("Delete this entry?")) onDelete(e.id);
+                  onClick={async () => {
+                    if (await confirm({ title: "Delete entry", description: "Delete this entry?", destructive: true, confirmLabel: "Delete" })) onDelete(e.id);
                   }}
                   className="text-muted hover:text-red-400"
                   aria-label="Delete entry"
@@ -535,6 +538,7 @@ function ApprovalQueue({
 }: {
   toast: ReturnType<typeof useToast>["toast"];
 }) {
+  const promptDialog = usePrompt();
   type Row = {
     id: string;
     weekStartDate: string;
@@ -584,7 +588,7 @@ function ApprovalQueue({
   async function decide(id: string, decision: "APPROVE" | "REJECT") {
     let note: string | null = null;
     if (decision === "REJECT") {
-      const reason = prompt("Reason for rejection?");
+      const reason = await promptDialog({ title: "Reason for rejection?" });
       if (reason === null) return;
       note = reason;
     }

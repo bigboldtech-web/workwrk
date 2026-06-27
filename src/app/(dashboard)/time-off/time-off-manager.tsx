@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import {
   Plus,
   CheckCircle2,
@@ -336,6 +337,8 @@ function RequestsTable({
   onToggleSelected: (id: string) => void;
   onToggleAll: (allSelected: boolean) => void;
 }) {
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
   const pendingRows = rows.filter((r) => r.status === "PENDING");
   const allChecked = showApprovalActions && pendingRows.length > 0
     && pendingRows.every((r) => selectedIds.has(r.id));
@@ -423,8 +426,8 @@ function RequestsTable({
                           size="sm"
                           variant="outline"
                           className="h-7 text-xs text-red-400"
-                          onClick={() => {
-                            const note = prompt("Reason for rejection?") ?? undefined;
+                          onClick={async () => {
+                            const note = (await promptDialog({ title: "Reason for rejection?" })) ?? undefined;
                             if (note !== undefined) onDecide(r.id, "REJECT", note);
                           }}
                         >
@@ -438,8 +441,8 @@ function RequestsTable({
                           size="sm"
                           variant="outline"
                           className="h-7 text-xs"
-                          onClick={() => {
-                            if (confirm("Cancel this request?")) onCancel(r.id);
+                          onClick={async () => {
+                            if (await confirm({ title: "Cancel request", description: "Cancel this request?", destructive: true, confirmLabel: "Cancel request" })) onCancel(r.id);
                           }}
                         >
                           Cancel

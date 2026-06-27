@@ -13,6 +13,7 @@ import Link from "next/link";
 import { Table as TableIcon, Plus, Rows, ChevronRight, Sparkles, Loader2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiTable = {
   id: string; name: string; description?: string | null;
@@ -26,6 +27,7 @@ export default function TablesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -42,7 +44,7 @@ export default function TablesPage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function quickAdd() {
-    const name = window.prompt("Table name?")?.trim();
+    const name = (await promptDialog({ title: "Table name?" }))?.trim();
     if (!name) return;
     try {
       const res = await fetch("/api/tables", {

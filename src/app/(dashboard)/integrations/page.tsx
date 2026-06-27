@@ -12,6 +12,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Category = "messaging" | "code" | "storage" | "finance" | "analytics" | "ats" | "sso";
 
@@ -60,6 +61,7 @@ export default function IntegrationsPage() {
   const [activeCategory, setActiveCategory] = useState<Category | "all">("all");
   const [installed, setInstalled] = useState<Set<string>>(new Set(INTEGRATIONS.filter((i) => i.installed).map((i) => i.id)));
   const { toast } = useOsToast();
+  const confirm = useConfirm();
 
   const stats = useMemo(() => ({
     total: INTEGRATIONS.length,
@@ -75,9 +77,9 @@ export default function IntegrationsPage() {
     return list;
   }, [search, activeCategory]);
 
-  function toggle(id: string, current: boolean) {
+  async function toggle(id: string, current: boolean) {
     if (current) {
-      if (!window.confirm("Disconnect this integration?")) return;
+      if (!(await confirm({ title: "Disconnect integration?", description: "Disconnect this integration?", destructive: true, confirmLabel: "Disconnect" }))) return;
       setInstalled((s) => { const n = new Set(s); n.delete(id); return n; });
       toast("Disconnected");
     } else {

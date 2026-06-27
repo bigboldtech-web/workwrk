@@ -21,6 +21,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Extracted = {
   title?: string;
@@ -71,6 +72,7 @@ export default function NotetakerPage() {
   const [recents, setRecents] = useState<ApiMeeting[] | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
 
   const loadRecents = useCallback(async () => {
     try {
@@ -131,9 +133,9 @@ export default function NotetakerPage() {
     setExtracted(null);
   }
 
-  function clearAll() {
+  async function clearAll() {
     if (transcript.length === 0 && !extracted) return;
-    if (!confirm("Clear the transcript and result?")) return;
+    if (!(await confirm({ title: "Clear transcript?", description: "Clear the transcript and result?", destructive: true, confirmLabel: "Clear" }))) return;
     setTranscript(""); setExtracted(null);
   }
 

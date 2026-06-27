@@ -21,6 +21,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type ApiPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 type ApiStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETED";
@@ -76,6 +77,7 @@ export default function BacklogPage() {
   const [adding, setAdding] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     try {
@@ -183,7 +185,7 @@ export default function BacklogPage() {
     setSelected(new Set());
   }
   async function bulkArchive() {
-    if (!confirm(`Archive ${selected.size} item${selected.size === 1 ? "" : "s"}?`)) return;
+    if (!(await confirm({ title: "Archive items", description: `Archive ${selected.size} item${selected.size === 1 ? "" : "s"}?`, destructive: true, confirmLabel: "Archive" }))) return;
     const ids = Array.from(selected);
     for (const id of ids) await patch(id, { status: "COMPLETED" });
     setSelected(new Set());

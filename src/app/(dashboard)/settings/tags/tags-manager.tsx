@@ -32,6 +32,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import {
   Plus,
   MoreHorizontal,
@@ -88,6 +89,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
   const [editing, setEditing] = useState<TagRow | null>(null);
   const [creatingType, setCreatingType] = useState<string | null>(null);
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const visible = tags.filter((t) => showArchived || !t.archived);
 
@@ -149,9 +151,12 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
 
   async function deleteTag(id: string, count: number) {
     if (count > 0) {
-      const ok = confirm(
-        `This tag is applied to ${count} record${count === 1 ? "" : "s"}. Deleting will remove it everywhere. Archive instead?\n\nClick OK to delete anyway, Cancel to back out.`,
-      );
+      const ok = await confirm({
+        title: "Delete tag",
+        description: `This tag is applied to ${count} record${count === 1 ? "" : "s"}. Deleting will remove it everywhere. Archive instead?`,
+        destructive: true,
+        confirmLabel: "Delete anyway",
+      });
       if (!ok) return;
     }
     const res = await fetch(`/api/tags/${id}`, { method: "DELETE" });

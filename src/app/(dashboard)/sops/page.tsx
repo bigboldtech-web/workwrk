@@ -20,6 +20,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type SopStatus = "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
 
@@ -69,6 +70,7 @@ export default function SopsPage() {
   const [menu, setMenu] = useState<{ s: ApiSop; x: number; y: number } | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     try {
@@ -88,7 +90,7 @@ export default function SopsPage() {
 
   function openMenu(e: React.MouseEvent, s: ApiSop) { e.preventDefault(); e.stopPropagation(); setMenu({ s, x: e.clientX, y: e.clientY }); }
   async function deleteSop(s: ApiSop) {
-    if (!confirm(`Move "${s.title}" to Trash? It will be auto-deleted after 60 days.`)) return;
+    if (!(await confirm({ title: "Move to Trash?", description: `Move "${s.title}" to Trash? It will be auto-deleted after 60 days.`, destructive: true, confirmLabel: "Move to Trash" }))) return;
     const res = await fetch(`/api/sops/${s.id}`, { method: "DELETE" });
     if (res.ok) { toast("Moved to Trash"); void load(); } else toast(res.status === 403 ? "No permission" : "Couldn't delete");
   }

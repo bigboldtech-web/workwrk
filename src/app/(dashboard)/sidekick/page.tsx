@@ -9,6 +9,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { OsMarkdown } from "@/components/layout/os/markdown";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Session = {
   id: string;
@@ -65,6 +66,7 @@ function groupByDay(sessions: Session[]) {
 
 export default function SidekickPage() {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -133,7 +135,7 @@ export default function SidekickPage() {
 
   async function deleteSession(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm("Delete this chat?")) return;
+    if (!(await confirm({ title: "Delete chat?", description: "Delete this chat?", destructive: true, confirmLabel: "Delete" }))) return;
     await fetch(`/api/sidekick/sessions/${id}`, { method: "DELETE" });
     if (activeId === id) {
       setActiveId(null);

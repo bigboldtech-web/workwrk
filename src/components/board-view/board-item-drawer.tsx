@@ -19,6 +19,7 @@ import Link from "next/link";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { BoardItemDetail, type DetailPatch } from "./board-item-detail";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardItemDrawerProps {
   itemId: string | null;
@@ -50,6 +51,7 @@ export function BoardItemDrawer({
   onItemArchived,
   onOpenItem,
 }: BoardItemDrawerProps) {
+  const confirm = useConfirm();
   const customFields: FieldDef[] = fields ?? [];
   const statusOptions: StatusOption[] = statuses ?? [...DEFAULT_STATUS_OPTIONS];
   const [item, setItem] = useState<BoardItemRow | null>(null);
@@ -126,7 +128,7 @@ export function BoardItemDrawer({
 
   const archive = useCallback(async () => {
     if (!item) return;
-    if (!confirm("Archive this row? You can restore from Trash.")) return;
+    if (!(await confirm({ title: "Archive row", description: "Archive this row? You can restore from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
     try {
       const res = await fetch(`/api/items/${item.id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -139,7 +141,7 @@ export function BoardItemDrawer({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to archive");
     }
-  }, [item, onClose, onItemArchived]);
+  }, [item, onClose, onItemArchived, confirm]);
 
   const open = !!itemId;
 

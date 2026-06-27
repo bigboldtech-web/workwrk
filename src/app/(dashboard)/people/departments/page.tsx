@@ -24,6 +24,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiDept = {
   id: string;
@@ -56,6 +57,7 @@ export default function DepartmentsPage() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +75,7 @@ export default function DepartmentsPage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function quickAdd() {
-    const name = (typeof window !== "undefined" ? window.prompt("Department name?") : "")?.trim();
+    const name = (await promptDialog({ title: "Department name?" }))?.trim();
     if (!name) return;
     try {
       const res = await fetch("/api/departments", {

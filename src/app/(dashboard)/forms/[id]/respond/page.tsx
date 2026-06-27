@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FormInput, CheckCircle2, Loader2 } from "lucide-react";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type FieldType = "short_text" | "long_text" | "number" | "email" | "url" | "date" | "select" | "multi_select" | "checkbox";
 type Field = { id: string; type: FieldType; label: string; required: boolean; options?: string[]; placeholder?: string };
@@ -17,6 +18,7 @@ type ApiForm = { id: string; name: string; description?: string | null; fields: 
 
 export default function FormResponder({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [id, setId] = useState<string | null>(null);
   const [form, setForm] = useState<ApiForm | null>(null);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
@@ -53,7 +55,7 @@ export default function FormResponder({ params }: { params: Promise<{ id: string
         const v = answers[f.id];
         const empty = v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
         if (empty) {
-          alert(`"${f.label}" is required`);
+          await confirm({ title: `"${f.label}" is required`, confirmLabel: "OK" });
           return;
         }
       }
@@ -67,7 +69,7 @@ export default function FormResponder({ params }: { params: Promise<{ id: string
       if (!res.ok) throw new Error(`POST ${res.status}`);
       setSubmitted(true);
     } catch {
-      alert("Couldn't submit. Try again.");
+      await confirm({ title: "Couldn't submit. Try again.", confirmLabel: "OK" });
     }
     setSubmitting(false);
   }

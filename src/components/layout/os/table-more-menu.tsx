@@ -14,6 +14,7 @@ import { MoreHorizontal, Edit2, Trash2, Loader2 } from "lucide-react";
 import { useOsToast } from "./toast";
 import { MorePortal } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface TableRowLike {
   id: string;
@@ -90,6 +91,7 @@ function TableMoreMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(table.name);
   const [busy, setBusy] = useState<string | null>(null);
@@ -116,7 +118,7 @@ function TableMoreMenu({
   };
 
   const remove = async () => {
-    if (!window.confirm(`Delete "${table.name}"? Rows will be deleted permanently.`)) return;
+    if (!(await confirm({ title: "Delete table", description: `Delete "${table.name}"? Rows will be deleted permanently.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBusy("delete");
     try {
       const res = await fetch(`/api/tables/${table.id}`, { method: "DELETE" });

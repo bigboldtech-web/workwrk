@@ -17,6 +17,7 @@ import {
   Zap,
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type FieldType = "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX" | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL";
 
@@ -47,6 +48,7 @@ interface AppRecord {
 export default function BuildAppPage() {
   const params = useParams<{ slug: string }>();
   const router = useRouter();
+  const confirm = useConfirm();
   const [app, setApp] = useState<AppRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [showNewRow, setShowNewRow] = useState(false);
@@ -89,7 +91,7 @@ export default function BuildAppPage() {
 
   async function deleteRow(index: number) {
     if (!app) return;
-    if (!confirm("Delete this row?")) return;
+    if (!(await confirm({ title: "Delete row", description: "Delete this row?", destructive: true, confirmLabel: "Delete" }))) return;
     const res = await fetch(`/api/build/apps/${app.slug}/rows`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -105,7 +107,7 @@ export default function BuildAppPage() {
 
   async function deleteApp() {
     if (!app) return;
-    if (!confirm(`Archive "${app.name}"? Rows will be preserved but the app will be hidden.`)) return;
+    if (!(await confirm({ title: "Archive app", description: `Archive "${app.name}"? Rows will be preserved but the app will be hidden.`, destructive: true, confirmLabel: "Archive" }))) return;
     const res = await fetch(`/api/build/apps/${app.slug}`, { method: "DELETE" });
     if (res.ok) router.push("/build");
   }

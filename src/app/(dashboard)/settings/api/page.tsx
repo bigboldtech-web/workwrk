@@ -12,6 +12,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 
 type Scope = "read" | "write" | "admin";
 type ApiKey = {
@@ -47,6 +48,8 @@ export default function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKey[]>(SAMPLE_KEYS);
   const [search, setSearch] = useState("");
   const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
 
   const stats = useMemo(() => {
     const active = keys.filter((k) => k.lastUsedAt && Date.now() - new Date(k.lastUsedAt).getTime() < 7 * 86_400_000).length;
@@ -61,8 +64,8 @@ export default function ApiKeysPage() {
     return keys.filter((k) => k.name.toLowerCase().includes(q) || k.prefix.toLowerCase().includes(q));
   }, [keys, search]);
 
-  function generate() {
-    const name = window.prompt("Name this key — what's it for?")?.trim();
+  async function generate() {
+    const name = (await promptDialog({ title: "Name this key — what's it for?" }))?.trim();
     if (!name) return;
     const prefix = "wk_live_" + Math.random().toString(36).slice(2, 6);
     const full = prefix + Math.random().toString(36).slice(2, 24);
@@ -75,8 +78,8 @@ export default function ApiKeysPage() {
     }
   }
 
-  function revoke(id: string) {
-    if (!window.confirm("Revoke this key? Any service using it will stop working.")) return;
+  async function revoke(id: string) {
+    if (!(await confirm({ title: "Revoke key", description: "Revoke this key? Any service using it will stop working.", destructive: true, confirmLabel: "Revoke" }))) return;
     setKeys((k) => k.filter((x) => x.id !== id));
     toast("Key revoked");
   }

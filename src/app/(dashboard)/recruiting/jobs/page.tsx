@@ -14,6 +14,7 @@ import Link from "next/link";
 import { Briefcase, MapPin, Users as UsersIcon, Plus, Globe2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type JobStatus = "DRAFT" | "OPEN" | "ON_HOLD" | "CLOSED" | "FILLED";
 type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN" | "TEMPORARY";
@@ -66,6 +67,7 @@ export default function RecruitingJobsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -94,7 +96,7 @@ export default function RecruitingJobsPage() {
   const totalApps = (jobs ?? []).reduce((acc, j) => acc + (j._count?.applications ?? 0), 0);
 
   async function quickCreate() {
-    const title = window.prompt("Job title?")?.trim();
+    const title = (await promptDialog({ title: "Job title?" }))?.trim();
     if (!title) return;
     try {
       const res = await fetch("/api/recruiting/jobs", {

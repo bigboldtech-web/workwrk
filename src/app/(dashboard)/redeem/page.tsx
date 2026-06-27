@@ -11,6 +11,7 @@ import {
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Reward = {
   id: string;
@@ -70,6 +71,7 @@ export default function RedeemPage() {
   const [redemptions, setRedemptions] = useState<Redemption[]>(SAMPLE_HISTORY);
   const [activeCategory, setActiveCategory] = useState<Reward["category"] | "all">("all");
   const { toast } = useOsToast();
+  const confirm = useConfirm();
 
   const stats = useMemo(() => ({
     balance,
@@ -83,9 +85,9 @@ export default function RedeemPage() {
     [activeCategory]
   );
 
-  function redeem(r: Reward) {
+  async function redeem(r: Reward) {
     if (balance < r.cost) { toast(`You need ${r.cost - balance} more points`); return; }
-    if (!window.confirm(`Redeem ${r.name} for ${r.cost} points?`)) return;
+    if (!(await confirm({ title: "Redeem reward?", description: `Redeem ${r.name} for ${r.cost} points?`, confirmLabel: "Redeem" }))) return;
     setBalance((b) => b - r.cost);
     setRedemptions((rs) => [
       { id: Math.random().toString(36).slice(2, 8), rewardId: r.id, rewardName: r.name, cost: r.cost, status: "PENDING", createdAt: new Date().toISOString() },

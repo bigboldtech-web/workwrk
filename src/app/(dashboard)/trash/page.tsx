@@ -16,6 +16,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Item = { id: string; entityType: string; entityId: string; label: string; deletedByName: string | null; deletedAt: string };
 
@@ -37,6 +38,7 @@ function daysLeft(deletedAt: string): number {
 
 export default function TrashPage() {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [items, setItems] = useState<Item[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -62,7 +64,7 @@ export default function TrashPage() {
     } catch { toast("Couldn't restore"); } finally { setBusy(null); }
   }
   async function deleteForever(it: Item) {
-    if (!confirm(`Permanently delete “${it.label}”? This cannot be undone.`)) return;
+    if (!(await confirm({ title: "Delete permanently", description: `Permanently delete “${it.label}”? This cannot be undone.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBusy(it.id);
     try {
       const res = await fetch(`/api/trash/${encodeURIComponent(it.id)}`, { method: "DELETE" });

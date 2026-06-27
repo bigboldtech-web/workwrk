@@ -21,6 +21,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -503,6 +504,7 @@ function ApplyCandidateDialog({ candidate, onClose, onCreated }: { candidate: Ca
 
 export function PipelineTab() {
   const { toast } = useToast();
+  const promptDialog = usePrompt();
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -533,7 +535,7 @@ export function PipelineTab() {
   async function move(appId: string, stage: Application["stage"]) {
     let body: Record<string, unknown> = { stage };
     if (stage === "REJECTED") {
-      const reason = prompt("Reason for rejection?");
+      const reason = await promptDialog({ title: "Reason for rejection?" });
       if (reason === null) return;
       body = { ...body, rejectionReason: reason };
     }
@@ -695,6 +697,8 @@ const INTERVIEW_TYPE_LABEL: Record<string, string> = {
 
 export function InterviewsTab() {
   const { toast } = useToast();
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
   const [scope, setScope] = useState<"mine" | "upcoming" | "all">("mine");
   const [rows, setRows] = useState<Interview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -788,12 +792,12 @@ export function InterviewsTab() {
                                 <>
                                   <Button
                                     size="sm" variant="outline" className="h-7 text-xs"
-                                    onClick={() => {
-                                      const score = prompt("Score 1-5?");
+                                    onClick={async () => {
+                                      const score = await promptDialog({ title: "Score 1-5?" });
                                       if (score === null) return;
                                       const s = Number(score);
                                       if (!Number.isFinite(s) || s < 1 || s > 5) return;
-                                      const notes = prompt("Notes (optional)?") ?? null;
+                                      const notes = (await promptDialog({ title: "Notes (optional)?" })) ?? null;
                                       patch(iv.id, { status: "COMPLETED", score: s, notes });
                                     }}
                                   >Mark complete</Button>
@@ -802,7 +806,7 @@ export function InterviewsTab() {
                               )}
                               <Button
                                 size="sm" variant="outline" className="h-7 text-xs text-red-400"
-                                onClick={() => { if (confirm("Cancel this interview?")) patch(iv.id, { status: "CANCELLED" }); }}
+                                onClick={async () => { if (await confirm({ title: "Cancel interview", description: "Cancel this interview?", destructive: true, confirmLabel: "Cancel interview" })) patch(iv.id, { status: "CANCELLED" }); }}
                               >Cancel</Button>
                             </>
                           )}

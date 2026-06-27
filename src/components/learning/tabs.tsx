@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { GraduationCap, Plus, CheckCircle2, Clock, BookOpen } from "lucide-react";
@@ -216,6 +217,7 @@ export function CatalogTab() {
 
 export function ManageTab() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -231,7 +233,7 @@ export function ManageTab() {
   useEffect(() => { load(); }, [load]);
 
   async function deleteCourse(id: string, title: string) {
-    if (!confirm(`Delete "${title}"? This will fail if anyone is enrolled.`)) return;
+    if (!(await confirm({ title: "Delete course", description: `Delete "${title}"? This will fail if anyone is enrolled.`, destructive: true, confirmLabel: "Delete" }))) return;
     const res = await fetch(`/api/courses/${id}`, { method: "DELETE" });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));

@@ -10,6 +10,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { ArrowLeft, Trash2, Loader2 } from "lucide-react";
 import { BoardItemDetail, type DetailPatch } from "@/components/board-view/board-item-detail";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 
@@ -20,6 +21,7 @@ export default function ItemDetailPage() {
   const id = params?.id;
   const router = useRouter();
   const { data: session } = useSession();
+  const confirm = useConfirm();
   const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
   const [item, setItem] = useState<BoardItemRow | null>(null);
@@ -64,10 +66,10 @@ export default function ItemDetailPage() {
   }, [item, load]);
 
   const archive = useCallback(async () => {
-    if (!item || !window.confirm("Archive this task? You can restore from Trash.")) return;
+    if (!item || !(await confirm({ title: "Archive task", description: "Archive this task? You can restore from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
     const res = await fetch(`/api/items/${item.id}`, { method: "DELETE" });
     if (res.ok) router.push(board ? `/boards/${board.slug}` : "/home");
-  }, [item, board, router]);
+  }, [item, board, router, confirm]);
 
   const statuses = board?.statuses?.length ? board.statuses : [...DEFAULT_STATUS_OPTIONS];
 

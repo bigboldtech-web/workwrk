@@ -23,6 +23,7 @@ import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface FolderRowLike {
   id: string;
@@ -97,6 +98,7 @@ function FolderMoreMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const { openTemplateCenter } = useOsShell();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(folder.name);
@@ -169,7 +171,7 @@ function FolderMoreMenu({
   };
 
   const archive = async () => {
-    if (!window.confirm(`Archive "${folder.name}"? Boards inside stay accessible.`)) return;
+    if (!(await confirm({ title: "Archive folder", description: `Archive "${folder.name}"? Boards inside stay accessible.`, destructive: true, confirmLabel: "Archive" }))) return;
     setBusy("archive");
     try {
       const res = await fetch(`/api/folders/${folder.id}`, { method: "DELETE" });

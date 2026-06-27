@@ -26,6 +26,7 @@ import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface SpaceRowLike {
   id: string;
@@ -113,6 +114,7 @@ function SpaceMoreMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const { openTemplateCenter } = useOsShell();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(space.name);
@@ -205,7 +207,7 @@ function SpaceMoreMenu({
   };
 
   const archive = async () => {
-    if (!window.confirm(`Archive "${space.name}"? You can restore it later.`)) return;
+    if (!(await confirm({ title: "Archive Space", description: `Archive "${space.name}"? You can restore it later.`, destructive: true, confirmLabel: "Archive" }))) return;
     setBusy("archive");
     try {
       const res = await fetch(`/api/spaces/${space.id}`, { method: "DELETE" });

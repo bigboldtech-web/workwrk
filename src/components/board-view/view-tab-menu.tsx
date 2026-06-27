@@ -15,6 +15,7 @@ import {
 import type { ViewType } from "@/generated/prisma";
 import { useOsToast } from "@/components/layout/os/toast";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface ViewLike {
   id: string;
@@ -92,6 +93,7 @@ function ViewMenuPanel({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(view.name);
   const [busy, setBusy] = useState<string | null>(null);
@@ -143,7 +145,7 @@ function ViewMenuPanel({
   };
 
   const remove = async () => {
-    if (!window.confirm(`Delete the "${view.name}" view?`)) return;
+    if (!(await confirm({ title: "Delete view", description: `Delete the "${view.name}" view?`, destructive: true, confirmLabel: "Delete" }))) return;
     setBusy("del");
     try {
       const res = await fetch(`/api/boards/${boardId}/views/${view.id}`, { method: "DELETE" });

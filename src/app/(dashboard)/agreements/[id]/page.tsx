@@ -17,6 +17,7 @@ import { FileSignature, ArrowLeft, Loader2, Send, Link2, Pencil, Check, LayoutTe
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
 import { AgreementFieldBuilder, ordinal, type PlacedField, type BuilderParty } from "@/components/agreements/field-builder";
 
@@ -30,6 +31,7 @@ export default function AgreementEditorPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id;
   const { toast } = useOsToast();
+  const confirm = useConfirm();
 
   const [ag, setAg] = useState<Agreement | null>(null);
   const [loadErr, setLoadErr] = useState(false);
@@ -133,7 +135,7 @@ export default function AgreementEditorPage() {
   }
   async function archive() {
     if (!ag) return;
-    if (!confirm("Move this to Trash? It will be auto-deleted after 60 days.")) return;
+    if (!(await confirm({ title: "Move to Trash", description: "Move this to Trash? It will be auto-deleted after 60 days.", destructive: true, confirmLabel: "Move to Trash" }))) return;
     const res = await fetch(`/api/agreements/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: true }) });
     if (res.ok) { toast("Moved to Trash"); window.location.href = ag.isTemplate ? "/agreements?view=templates" : "/agreements"; }
     else toast("Couldn't archive");

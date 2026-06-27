@@ -24,6 +24,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type Level = "EMPLOYEE" | "TEAM_LEAD" | "MANAGER" | "DIRECTOR" | "VP" | "C_LEVEL" | "HR" | "COMPANY_ADMIN" | "SUPER_ADMIN";
 
@@ -70,6 +71,7 @@ export default function RolesPage() {
   const [showUnfilledOnly, setShowUnfilledOnly] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -87,7 +89,7 @@ export default function RolesPage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function quickAdd() {
-    const title = (typeof window !== "undefined" ? window.prompt("Role title?") : "")?.trim();
+    const title = (await promptDialog({ title: "Role title?" }))?.trim();
     if (!title) return;
     try {
       const res = await fetch("/api/roles", {

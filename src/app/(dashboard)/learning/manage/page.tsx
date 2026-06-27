@@ -17,6 +17,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiCourse = {
   id: string; title: string; description?: string | null;
@@ -44,6 +45,8 @@ export default function LearningManagePage() {
   const [search, setSearch] = useState("");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -68,10 +71,10 @@ export default function LearningManagePage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function quickAdd() {
-    const title = window.prompt("Course title?")?.trim();
+    const title = (await promptDialog({ title: "Course title?" }))?.trim();
     if (!title) return;
-    const cat = window.prompt("Category? (optional)")?.trim() || undefined;
-    const mand = window.confirm("Mandatory for all employees?");
+    const cat = (await promptDialog({ title: "Category? (optional)" }))?.trim() || undefined;
+    const mand = await confirm({ title: "Mandatory for all employees?", confirmLabel: "Yes" });
     try {
       const res = await fetch("/api/courses", {
         method: "POST", headers: { "Content-Type": "application/json" },

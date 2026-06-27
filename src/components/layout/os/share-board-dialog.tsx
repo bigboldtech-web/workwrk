@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Search, X, Lock, Globe, Users as UsersIcon, Loader2, Plus, Info } from "lucide-react";
 import { useOsToast } from "./toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Visibility = "PRIVATE" | "WORKSPACE" | "ORG";
 type BoardRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
@@ -80,6 +81,7 @@ export function ShareBoardDialog({
   onChanged,
 }: Props) {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [visibility, setVisibility] = useState<Visibility>(initialVisibility);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -225,7 +227,7 @@ export function ShareBoardDialog({
 
   const removeMember = async (m: Member) => {
     if (!boardId) return;
-    if (!window.confirm(`Remove ${displayName(m.user)} from this board?`)) return;
+    if (!(await confirm({ title: "Remove member", description: `Remove ${displayName(m.user)} from this board?`, destructive: true, confirmLabel: "Remove" }))) return;
     setBusyRemoveId(m.user.id);
     try {
       const res = await fetch(`/api/boards/${boardId}/members?userId=${m.user.id}`, {

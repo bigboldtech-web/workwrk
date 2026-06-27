@@ -11,6 +11,7 @@
 
 import { useState } from "react";
 import { useToast } from "@/components/ui/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { BulkActionsBar, type BulkAction } from "@/components/ui/bulk-actions-bar";
 
@@ -34,6 +35,7 @@ export function BulkApproveBar({
   onDone: () => void;
 }) {
   const { toast } = useToast();
+  const promptDialog = usePrompt();
   // Per-decision "doing" label is fed into BulkActionsBar via busyLabel;
   // we don't need to track separately here.
   const [, setActiveDecision] = useState<"APPROVE" | "REJECT" | null>(null);
@@ -41,7 +43,7 @@ export function BulkApproveBar({
   async function decide(decision: "APPROVE" | "REJECT") {
     let note: string | null = null;
     if (decision === "REJECT") {
-      const reason = prompt(`Reason for rejecting ${selectedIds.length} item(s)?`);
+      const reason = await promptDialog({ title: `Reason for rejecting ${selectedIds.length} item(s)?` });
       if (reason === null) return;
       note = reason;
     }

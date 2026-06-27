@@ -19,6 +19,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type ToolCredentials = { username?: string; password?: string; apiKey?: string; notes?: string } & Record<string, string | undefined>;
 type ApiTool = {
@@ -60,6 +61,7 @@ export default function ToolsPage() {
   const [openTool, setOpenTool] = useState<ApiTool | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -77,9 +79,9 @@ export default function ToolsPage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function quickAdd() {
-    const name = window.prompt("Tool name?")?.trim();
+    const name = (await promptDialog({ title: "Tool name?" }))?.trim();
     if (!name) return;
-    const url = window.prompt("URL?")?.trim();
+    const url = (await promptDialog({ title: "URL?" }))?.trim();
     if (!url) return;
     try {
       const res = await fetch("/api/tools", {

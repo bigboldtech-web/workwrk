@@ -29,6 +29,7 @@ import { TagPicker } from "./tag-picker";
 import { useItemTypes, type ItemTypeLite } from "./use-item-types";
 import { itemTypeIcon } from "@/lib/item-type-icons";
 import type { FieldChoice } from "@/lib/field-catalog";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardTableViewProps {
   boardId: string;
@@ -62,6 +63,7 @@ interface BoardTableViewProps {
 type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags">> & { tagIds?: string[] };
 
 export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
+  const confirm = useConfirm();
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
   const { byId: itemTypeMap } = useItemTypes();
@@ -336,7 +338,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // state update + clear selection on success.
   const bulkArchive = useCallback(async () => {
     if (selected.size === 0) return;
-    if (!confirm(`Archive ${selected.size} row${selected.size === 1 ? "" : "s"}?`)) return;
+    if (!(await confirm({ title: "Archive rows", description: `Archive ${selected.size} row${selected.size === 1 ? "" : "s"}?`, destructive: true, confirmLabel: "Archive" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
     const results = await Promise.allSettled(
@@ -348,7 +350,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     setItems((prev) => prev.filter((r) => !selected.has(r.id)));
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected]);
+  }, [selected, confirm]);
 
   // Drag-to-reorder. Computes fractional midpoint position so we never
   // renumber the whole list — Linear/Folder pattern. Optimistic local
@@ -492,7 +494,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
   const handleArchive = useCallback(async (id: string) => {
     if (!canEdit) return;
-    if (!confirm("Archive this row? You can restore it later from Trash.")) return;
+    if (!(await confirm({ title: "Archive row", description: "Archive this row? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
     setItems((prev) => prev.filter((r) => r.id !== id));
     try {
       const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
@@ -504,7 +506,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to archive");
     }
-  }, [boardId, canEdit]);
+  }, [boardId, canEdit, confirm]);
 
   // select + name + status + created + actions (5 fixed) + optional
   // owner/priority/type/tags + custom fields.

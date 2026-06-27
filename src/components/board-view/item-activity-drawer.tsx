@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface UpdateRow {
   id: string;
@@ -50,6 +51,7 @@ type Tab = "updates" | "files" | "activity";
 export function ItemActivityDrawer(props: Props) {
   const { open, onClose, entityType, entityId, title } = props;
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [tab, setTab] = useState<Tab>("updates");
   const [updates, setUpdates] = useState<UpdateRow[]>([]);
@@ -118,7 +120,7 @@ export function ItemActivityDrawer(props: Props) {
   }, [composer, entityType, entityId, loadUpdates, toast]);
 
   const deleteUpdate = useCallback(async (id: string) => {
-    if (!confirm("Archive this update? It will be hidden but kept in history.")) return;
+    if (!(await confirm({ title: "Archive update", description: "Archive this update? It will be hidden but kept in history.", destructive: true, confirmLabel: "Archive" }))) return;
     try {
       const res = await fetch(`/api/item-updates/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
@@ -126,7 +128,7 @@ export function ItemActivityDrawer(props: Props) {
     } catch {
       toast.error("Couldn't archive");
     }
-  }, [loadUpdates, toast]);
+  }, [loadUpdates, toast, confirm]);
 
   if (!open) return null;
 

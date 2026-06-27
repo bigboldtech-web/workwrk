@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Search, X, Lock, Globe, Users as UsersIcon, Loader2, Plus, Building2, MapPin, UserPlus, Mail, Copy, Check, Send, Trash2 } from "lucide-react";
 import { useOsToast } from "./toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Visibility = "PRIVATE" | "WORKSPACE" | "ORG";
 type SpaceRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
@@ -87,6 +88,7 @@ export function ShareSpaceDialog({
   onChanged,
 }: Props) {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [visibility, setVisibility] = useState<Visibility>(initialVisibility);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -334,7 +336,7 @@ export function ShareSpaceDialog({
 
   const removeMember = async (m: Member) => {
     if (!spaceId) return;
-    if (!window.confirm(`Remove ${displayName(m.user)} from this Space?`)) return;
+    if (!(await confirm({ title: "Remove member", description: `Remove ${displayName(m.user)} from this Space?`, destructive: true, confirmLabel: "Remove" }))) return;
     setBusyRemoveId(m.user.id);
     try {
       const res = await fetch(`/api/spaces/${spaceId}/members?userId=${m.user.id}`, {
@@ -576,6 +578,7 @@ function relTime(iso: string): string {
 
 function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<SpaceRole>("MEMBER");
   const [busy, setBusy] = useState(false);
@@ -672,7 +675,7 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
 
   const revoke = async (invite: PendingInvite) => {
     if (!spaceId) return;
-    if (!window.confirm(`Revoke the invitation to ${invite.email}?`)) return;
+    if (!(await confirm({ title: "Revoke invitation", description: `Revoke the invitation to ${invite.email}?`, destructive: true, confirmLabel: "Revoke" }))) return;
     setBusyInviteId(invite.id);
     setPending((prev) => (prev ?? []).filter((p) => p.id !== invite.id));
     try {

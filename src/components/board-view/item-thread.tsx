@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Send, Trash2 } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { DEFAULT_STATUS_OPTIONS, type StatusOption } from "@/lib/board-items-shared";
 import type { ThreadActivity, ThreadUpdate } from "@/lib/item-thread";
 
@@ -33,6 +34,7 @@ interface ItemThreadProps {
 }
 
 export function ItemThread({ itemId, canEdit, currentUserId, statuses }: ItemThreadProps) {
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>("comments");
   const [updates, setUpdates] = useState<ThreadUpdate[]>([]);
   const [activity, setActivity] = useState<ThreadActivity[]>([]);
@@ -88,7 +90,7 @@ export function ItemThread({ itemId, canEdit, currentUserId, statuses }: ItemThr
   }, [itemId, draft]);
 
   const deleteComment = useCallback(async (updateId: string) => {
-    if (!confirm("Delete this comment?")) return;
+    if (!(await confirm({ title: "Delete comment", description: "Delete this comment?", destructive: true, confirmLabel: "Delete" }))) return;
     try {
       const res = await fetch(`/api/items/${itemId}/updates/${updateId}`, { method: "DELETE" });
       if (!res.ok) {
@@ -100,7 +102,7 @@ export function ItemThread({ itemId, canEdit, currentUserId, statuses }: ItemThr
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to delete");
     }
-  }, [itemId]);
+  }, [itemId, confirm]);
 
   return (
     <div>

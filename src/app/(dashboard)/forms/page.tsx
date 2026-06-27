@@ -13,6 +13,7 @@ import Link from "next/link";
 import { FormInput, Plus, Globe, Lock, Inbox, ChevronRight, Sparkles, Loader2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiForm = {
   id: string; name: string; description?: string | null;
@@ -27,6 +28,7 @@ export default function FormsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -43,7 +45,7 @@ export default function FormsPage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function quickAdd() {
-    const name = window.prompt("Form name?")?.trim();
+    const name = (await promptDialog({ title: "Form name?" }))?.trim();
     if (!name) return;
     try {
       const res = await fetch("/api/forms", {
@@ -59,7 +61,7 @@ export default function FormsPage() {
 
   const [generating, setGenerating] = useState(false);
   async function aiGenerate() {
-    const prompt = window.prompt("Describe the form you want (e.g. 'Customer support ticket', 'Event RSVP', 'Vendor onboarding'):")?.trim();
+    const prompt = (await promptDialog({ title: "Describe the form you want (e.g. 'Customer support ticket', 'Event RSVP', 'Vendor onboarding'):" }))?.trim();
     if (!prompt) return;
     setGenerating(true);
     try {

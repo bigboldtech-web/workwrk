@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, Plus, Search, Trash2, X } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import {
   FIELD_CATALOG,
   type FieldChoice,
@@ -65,6 +66,7 @@ interface FieldShelfProps {
 type Tab = "create" | "existing";
 
 export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onToggleHidden, onClose, onFieldsChanged }: FieldShelfProps) {
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>("create");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -145,7 +147,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
 
   const removeField = async (key: string) => {
     if (!canEdit) return;
-    if (!confirm("Remove this field? Existing values stay in metadata but won't be shown.")) return;
+    if (!(await confirm({ title: "Remove field", description: "Remove this field? Existing values stay in metadata but won't be shown.", destructive: true, confirmLabel: "Remove" }))) return;
     try {
       const res = await fetch(`/api/boards/${boardId}/fields/${key}`, { method: "DELETE" });
       if (!res.ok) {
@@ -599,6 +601,7 @@ function ChoiceEditor({
   canEdit: boolean;
   onChange: (choices: FieldChoice[]) => void;
 }) {
+  const confirm = useConfirm();
   const [draft, setDraft] = useState("");
   const [colorFor, setColorFor] = useState<string | null>(null);
 
@@ -642,8 +645,8 @@ function ChoiceEditor({
           {canEdit ? (
             <button
               type="button"
-              onClick={() => {
-                if (!confirm(`Delete option “${c.label}”? Rows keep the raw value but lose the pill.`)) return;
+              onClick={async () => {
+                if (!(await confirm({ title: "Delete option", description: `Delete option “${c.label}”? Rows keep the raw value but lose the pill.`, destructive: true, confirmLabel: "Delete" }))) return;
                 onChange(choices.filter((x) => x.value !== c.value));
               }}
               className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:text-red-500 hover:bg-red-500/10"

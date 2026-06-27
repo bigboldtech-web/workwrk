@@ -34,6 +34,7 @@ import {
   ArrowUpDown,
   Plus,
 } from "lucide-react";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 
 export type BoardFieldType =
   | "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX"
@@ -156,6 +157,8 @@ type SavedTab = {
 };
 
 export function BoardView<T>(props: Props<T>) {
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
   const storageKey = `boardview:${props.boardKey}`;
   const tabsKey = `boardtabs:${props.boardKey}`;
   const [view, setView] = useState<BoardViewType>(props.defaultView ?? "table");
@@ -283,8 +286,8 @@ export function BoardView<T>(props: Props<T>) {
     setSortDir(tab.sortDir ?? "asc");
   }, [storageKey]);
 
-  const addTab = useCallback(() => {
-    const label = window.prompt("Tab name?", `View ${tabs.length}`);
+  const addTab = useCallback(async () => {
+    const label = await promptDialog({ title: "Tab name?", defaultValue: `View ${tabs.length}` });
     if (!label) return;
     const tab: SavedTab = {
       id: `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -299,7 +302,7 @@ export function BoardView<T>(props: Props<T>) {
     };
     persistTabs([...tabs, tab]);
     setActiveTabId(tab.id);
-  }, [tabs, view, query, filters, sortField, sortDir, persistTabs]);
+  }, [tabs, view, query, filters, sortField, sortDir, persistTabs, promptDialog]);
 
   const saveTabFromCurrent = useCallback((tabId: string) => {
     const next = tabs.map((t) => t.id === tabId ? {
@@ -322,9 +325,9 @@ export function BoardView<T>(props: Props<T>) {
     setRenamingTabId(null);
   }, [tabs, persistTabs]);
 
-  const deleteTab = useCallback((tabId: string) => {
+  const deleteTab = useCallback(async (tabId: string) => {
     if (tabId === "main") return;
-    if (!window.confirm("Delete this tab? Saved view will be lost.")) return;
+    if (!(await confirm({ title: "Delete tab", description: "Delete this tab? Saved view will be lost.", destructive: true, confirmLabel: "Delete" }))) return;
     const next = tabs.filter((t) => t.id !== tabId);
     persistTabs(next);
     if (activeTabId === tabId) {
@@ -332,7 +335,7 @@ export function BoardView<T>(props: Props<T>) {
       const main = next.find((t) => t.id === "main");
       if (main) applyTab(main);
     }
-  }, [tabs, activeTabId, applyTab, persistTabs]);
+  }, [tabs, activeTabId, applyTab, persistTabs, confirm]);
 
   const cycleSort = useCallback((fieldKey: string) => {
     setSortField((prevField) => {
@@ -416,7 +419,7 @@ export function BoardView<T>(props: Props<T>) {
   async function runBulkDelete() {
     if (!props.onBulkDelete || selectedIds.size === 0) return;
     const count = selectedIds.size;
-    if (!confirm(`Delete ${count} row${count === 1 ? "" : "s"}? This can't be undone.`)) return;
+    if (!(await confirm({ title: "Delete rows", description: `Delete ${count} row${count === 1 ? "" : "s"}? This can't be undone.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBulking(true);
     setBulkError(null);
     try {

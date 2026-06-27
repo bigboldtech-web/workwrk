@@ -23,6 +23,7 @@ import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardRowLike {
   id: string;
@@ -106,6 +107,7 @@ function BoardMoreMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const { openTemplateCenter } = useOsShell();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(board.name);
@@ -203,7 +205,7 @@ function BoardMoreMenu({
   };
 
   const archive = async () => {
-    if (!window.confirm(`Archive "${board.name}"? You can restore it later.`)) return;
+    if (!(await confirm({ title: "Archive board", description: `Archive "${board.name}"? You can restore it later.`, destructive: true, confirmLabel: "Archive" }))) return;
     setBusy("archive");
     try {
       const res = await fetch(`/api/boards/${board.id}`, { method: "DELETE" });

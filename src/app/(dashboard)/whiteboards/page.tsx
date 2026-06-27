@@ -25,6 +25,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiWhiteboard = {
   id: string;
@@ -68,6 +69,7 @@ export default function WhiteboardsPage() {
   const [creating, setCreating] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -85,7 +87,7 @@ export default function WhiteboardsPage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function createBoard() {
-    const name = window.prompt("Whiteboard name?", "Untitled whiteboard")?.trim();
+    const name = (await promptDialog({ title: "Whiteboard name?", defaultValue: "Untitled whiteboard" }))?.trim();
     if (!name) return;
     setCreating(true);
     try {

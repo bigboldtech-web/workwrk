@@ -16,6 +16,7 @@ import {
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { DocFavoriteButton } from "@/components/docs/doc-favorite-button";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 import { WhiteboardFavoriteButton } from "@/components/board-view/whiteboard-favorite-button";
@@ -302,6 +303,7 @@ function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
 function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
   const [rows, setRows] = useState<ApiWhiteboard[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [activeSpaceId, setActiveSpaceId] = useState<string | "all" | "unscoped">("all");
@@ -321,7 +323,7 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
   useEffect(() => { load(); }, [load]);
 
   const newBoard = async () => {
-    const name = window.prompt("Whiteboard name?", "Untitled whiteboard")?.trim();
+    const name = (await promptDialog({ title: "Whiteboard name?", defaultValue: "Untitled whiteboard" }))?.trim();
     if (!name) return;
     setCreating(true);
     try {
@@ -473,6 +475,7 @@ function MimeIcon({ mimeType, className }: { mimeType: string; className?: strin
 
 function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [rows, setRows] = useState<ApiFile[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -558,7 +561,7 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
   };
 
   const remove = async (file: ApiFile) => {
-    if (!window.confirm(`Delete ${file.name}? This cannot be undone.`)) return;
+    if (!(await confirm({ title: "Delete file", description: `Delete ${file.name}? This cannot be undone.`, destructive: true, confirmLabel: "Delete" }))) return;
     setRows((prev) => (prev ?? []).filter((f) => f.id !== file.id));
     try {
       await fetch(`/api/files/${file.id}`, { method: "DELETE" });

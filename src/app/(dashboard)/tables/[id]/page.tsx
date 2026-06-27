@@ -17,6 +17,7 @@ import {
   Globe, Lock, Sigma, DollarSign, Percent, Star, Link2, Check, Paperclip, Users,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { makeFormulaEngine, columnLetter } from "@/lib/sheet-formula";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
@@ -89,6 +90,8 @@ const STICKY_TH: React.CSSProperties = { position: "sticky", top: 0, zIndex: 3, 
 export default function TableEditorPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
   const [tableId, setTableId] = useState<string | null>(null);
   const [table, setTable] = useState<ApiTable | null>(null);
   const [rows, setRows] = useState<ApiRow[] | null>(null);
@@ -220,22 +223,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const updateActiveView = useCallback((patch: Partial<SavedView>) => {
     persistViews(views.map((v) => v.id === activeViewId ? { ...v, ...patch, config: { ...v.config, ...patch.config } } : v));
   }, [views, activeViewId, persistViews]);
-  const addView = () => {
-    const name = window.prompt("View name:", "New view")?.trim();
+  const addView = async () => {
+    const name = (await promptDialog({ title: "View name:", defaultValue: "New view" }))?.trim();
     if (!name) return;
     const id = Math.random().toString(36).slice(2, 9);
     persistViews([...views, { id, name, type: "grid" }]);
     setActiveViewId(id);
   };
-  const renameView = (id: string) => {
+  const renameView = async (id: string) => {
     const cur = views.find((v) => v.id === id);
-    const name = window.prompt("Rename view:", cur?.name ?? "")?.trim();
+    const name = (await promptDialog({ title: "Rename view:", defaultValue: cur?.name ?? "" }))?.trim();
     if (!name) return;
     persistViews(views.map((v) => v.id === id ? { ...v, name } : v));
   };
-  const deleteView = (id: string) => {
+  const deleteView = async (id: string) => {
     if (views.length <= 1) { toast("A table needs at least one view"); return; }
-    if (!window.confirm("Delete this view?")) return;
+    if (!(await confirm({ title: "Delete view", description: "Delete this view?", destructive: true, confirmLabel: "Delete" }))) return;
     const next = views.filter((v) => v.id !== id);
     persistViews(next);
     if (activeViewId === id) setActiveViewId(next[0].id);
@@ -250,11 +253,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setCalCol(v.config?.calCol ?? "");
   }, [activeViewId, views]);
 
-  function addColumn(type: ColType) {
+  async function addColumn(type: ColType) {
     if (!table) return;
     let formula: string | undefined;
     if (type === "formula") {
-      const f = window.prompt("Formula (e.g. =A+B, =SUM(C), =A1+B2):", "=");
+      const f = await promptDialog({ title: "Formula (e.g. =A+B, =SUM(C), =A1+B2):", defaultValue: "=" });
       if (f == null) return; // cancelled
       formula = f.trim();
     }
@@ -278,11 +281,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setConfigColId(null);
   }
 
-  function editFormula(colId: string) {
+  async function editFormula(colId: string) {
     if (!table) return;
     const col = table.columns.find((c) => c.id === colId);
     if (!col) return;
-    const f = window.prompt("Edit formula:", col.formula ?? "=");
+    const f = await promptDialog({ title: "Edit formula:", defaultValue: col.formula ?? "=" });
     if (f == null) return;
     const cols = table.columns.map((c) => c.id === colId ? { ...c, formula: f.trim() } : c);
     setTable({ ...table, columns: cols });
@@ -296,9 +299,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     void persistColumns(cols);
   }
 
-  function deleteColumn(colId: string) {
+  async function deleteColumn(colId: string) {
     if (!table) return;
-    if (!confirm("Delete this column? Existing cell values for it will be lost.")) return;
+    if (!(await confirm({ title: "Delete column", description: "Delete this column? Existing cell values for it will be lost.", destructive: true, confirmLabel: "Delete" }))) return;
     const cols = table.columns.filter((c) => c.id !== colId);
     setTable({ ...table, columns: cols });
     void persistColumns(cols);
@@ -368,7 +371,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   async function deleteRow(rowId: string) {
     if (!tableId) return;
-    if (!confirm("Delete this row?")) return;
+    if (!(await confirm({ title: "Delete row", description: "Delete this row?", destructive: true, confirmLabel: "Delete" }))) return;
     setRows((prev) => prev ? prev.filter((r) => r.id !== rowId) : prev);
     try {
       await fetch(`/api/tables/${tableId}/rows`, {

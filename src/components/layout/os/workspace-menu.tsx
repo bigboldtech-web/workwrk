@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { MenuItem } from "@/components/ui/menu";
 import { useToast } from "@/components/ui/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 import { useRole } from "@/hooks/use-role";
 
 interface WorkspaceMenuProps {
@@ -75,6 +76,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const promptDialog = usePrompt();
 
   // Pull real data each time the menu opens (cheap, and keeps the member
   // count / plan fresh after edits elsewhere).
@@ -170,7 +172,13 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
 
   const createWorkspace = useCallback(async () => {
     if (creating) return;
-    const name = window.prompt("Name your new workspace")?.trim();
+    const name = (await promptDialog({
+      title: "Create workspace",
+      description: "Give your new workspace a name.",
+      placeholder: "e.g. Acme HQ",
+      submitLabel: "Create workspace",
+      required: true,
+    }))?.trim();
     if (!name) return;
     setCreating(true);
     try {
@@ -200,7 +208,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
       toast.error("Couldn't create workspace", "Network error. Please try again.");
       setCreating(false);
     }
-  }, [creating, toast, update]);
+  }, [creating, toast, update, promptDialog]);
 
   if (!open) return null;
 

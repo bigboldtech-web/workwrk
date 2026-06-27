@@ -30,6 +30,7 @@ import dynamic from "next/dynamic";
 import { BlockNoteCanvas } from "./blocknote-canvas";
 import type { PartialBlock } from "@blocknote/core";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
@@ -121,6 +122,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   // Peek picker — popover state + fetched recent docs for the picker list.
   const [peekPickerOpen, setPeekPickerOpen] = useState(false);
   const [peekQuery, setPeekQuery] = useState("");
@@ -505,7 +507,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
   // Soft-archive (DELETE = move to Trash; the row + versions persist).
   async function trashDoc() {
-    if (!confirm("Move this note to Trash? You can restore it later.")) return;
+    if (!(await confirm({ title: "Move to Trash", description: "Move this note to Trash? You can restore it later.", destructive: true, confirmLabel: "Move to Trash" }))) return;
     try {
       const res = await fetch(`/api/docs/${docId}`, { method: "DELETE" });
       if (!res.ok) { toast("Couldn't move to Trash"); return; }
@@ -537,7 +539,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
   const [extracting, setExtracting] = useState(false);
   async function extractTable() {
-    if (!confirm("Use AI to extract a table from this doc? A new table will be created in your org.")) return;
+    if (!(await confirm({ title: "Extract table with AI", description: "Use AI to extract a table from this doc? A new table will be created in your org.", confirmLabel: "Extract" }))) return;
     setExtracting(true);
     try {
       const res = await fetch(`/api/docs/${docId}/extract-table`, { method: "POST" });
@@ -952,6 +954,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 // mirrors Notion's avatar + input + attach/mention/send layout.
 function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser | null; open: boolean; onClose: () => void }) {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [thread, setThread] = useState<Comment[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1025,7 +1028,7 @@ function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser 
   }
 
   async function deleteComment(id: string) {
-    if (!confirm("Delete this comment?")) return;
+    if (!(await confirm({ title: "Delete comment", description: "Delete this comment?", destructive: true, confirmLabel: "Delete" }))) return;
     const res = await fetch(`/api/item-updates/${id}`, { method: "DELETE" });
     if (res.ok) await refresh();
   }
@@ -1573,6 +1576,7 @@ function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadCha
   onClose: () => void;
   onThreadChanged: () => void;
 }) {
+  const confirm = useConfirm();
   const [thread, setThread] = useState<Comment[]>(initialThread);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1641,7 +1645,7 @@ function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadCha
   }
 
   async function deleteComment(id: string) {
-    if (!confirm("Delete this comment?")) return;
+    if (!(await confirm({ title: "Delete comment", description: "Delete this comment?", destructive: true, confirmLabel: "Delete" }))) return;
     const res = await fetch(`/api/item-updates/${id}`, { method: "DELETE" });
     if (res.ok) {
       await refresh();
@@ -1745,6 +1749,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
   onRestore: (blocks: Block[], meta: DocMeta, title: string) => void;
 }) {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [versions, setVersions] = useState<VersionMeta[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ blocks: Block[] | null; meta: DocMeta; title: string } | null>(null);
@@ -1795,7 +1800,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
 
   async function restore() {
     if (!selectedId || !preview?.blocks) return;
-    if (!confirm("Restore this version? Your current content will be saved as a new version, and the restored version will become the live content.")) return;
+    if (!(await confirm({ title: "Restore version", description: "Restore this version? Your current content will be saved as a new version, and the restored version will become the live content.", confirmLabel: "Restore" }))) return;
     setRestoring(true);
     try {
       const res = await fetch(`/api/docs/${docId}/versions/${selectedId}`, { method: "POST" });

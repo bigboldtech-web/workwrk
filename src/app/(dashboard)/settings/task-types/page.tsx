@@ -16,6 +16,7 @@ import { Shapes, Plus, Search, Settings as SettingsIcon, Trash2, Star, Check, X,
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { itemTypeIcon, ITEM_TYPE_ICON_NAMES } from "@/lib/item-type-icons";
 
 type ApiType = {
@@ -26,6 +27,7 @@ type Recommended = { singular: string; plural: string; icon: string; description
 
 export default function TaskTypesPage() {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const [types, setTypes] = useState<ApiType[] | null>(null);
   const [recommended, setRecommended] = useState<Recommended[]>([]);
   const [usage, setUsage] = useState<{ used: number; limit: number }>({ used: 0, limit: 20 });
@@ -57,7 +59,7 @@ export default function TaskTypesPage() {
   }, [load, toast]);
 
   const remove = useCallback(async (t: ApiType) => {
-    if (!window.confirm(`Delete the "${t.singular}" type? Tasks of this type fall back to the default.`)) return;
+    if (!(await confirm({ title: "Delete task type", description: `Delete the "${t.singular}" type? Tasks of this type fall back to the default.`, destructive: true, confirmLabel: "Delete" }))) return;
     setTypes((prev) => (prev ?? []).filter((x) => x.id !== t.id));
     try {
       const res = await fetch(`/api/item-types/${t.id}`, { method: "DELETE" });
@@ -65,7 +67,7 @@ export default function TaskTypesPage() {
       toast("Type deleted");
       void load();
     } catch { toast("Couldn't delete type"); void load(); }
-  }, [load, toast]);
+  }, [load, toast, confirm]);
 
   const addRecommended = useCallback(async (r: Recommended) => {
     setAdding(r.singular);

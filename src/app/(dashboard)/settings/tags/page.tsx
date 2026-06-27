@@ -16,6 +16,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiTag = { id: string; name: string; category: string; color?: string | null; archived?: boolean; usageCount?: number };
 
@@ -44,6 +45,8 @@ export default function TagManagerPage() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -57,9 +60,9 @@ export default function TagManagerPage() {
   useEffect(() => { void load(); }, [load]);
 
   async function quickAdd() {
-    const name = window.prompt("Tag name?")?.trim();
+    const name = (await promptDialog({ title: "Tag name?" }))?.trim();
     if (!name) return;
-    const category = window.prompt("Category? (Department / Cost Center / Project / Region)")?.trim() || "Uncategorized";
+    const category = (await promptDialog({ title: "Category? (Department / Cost Center / Project / Region)" }))?.trim() || "Uncategorized";
     try {
       const res = await fetch("/api/tags", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -79,7 +82,7 @@ export default function TagManagerPage() {
   }
 
   async function remove(id: string) {
-    if (!window.confirm("Delete this tag? Existing items keep it as a string but lose the chip.")) return;
+    if (!(await confirm({ title: "Delete tag", description: "Delete this tag? Existing items keep it as a string but lose the chip.", destructive: true, confirmLabel: "Delete" }))) return;
     setTags((t) => (t ?? []).filter((x) => x.id !== id));
     toast("Tag deleted");
   }

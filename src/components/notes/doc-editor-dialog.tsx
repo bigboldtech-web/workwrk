@@ -14,6 +14,7 @@ import {
   X, Sparkles, Link as LinkIcon, MessageCircle, Plus,
   ChevronLeft, Bold, Italic, List, ListOrdered, Heading1, Heading2, Quote, Loader2,
 } from "lucide-react";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 export interface DocEditorDialogProps {
   open: boolean;
@@ -49,6 +50,7 @@ export function DocEditorDialog({
   onOpenSidekick,
   readOnly = false,
 }: DocEditorDialogProps) {
+  const promptDialog = usePrompt();
   const [localTitle, setLocalTitle] = useState(title);
   const [localBody, setLocalBody] = useState(body);
   const [saving, setSaving] = useState(false);
@@ -100,7 +102,7 @@ export function DocEditorDialog({
     } catch {
       // Clipboard can fail in non-secure contexts — fall back to a prompt
       // so the user can still grab the URL.
-      window.prompt("Copy link", shareUrl);
+      await promptDialog({ title: "Copy link", defaultValue: shareUrl });
     }
   };
 

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { FileText, Plus, Search, Calendar, ExternalLink, Globe } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type Type =
   | "BLOG_POST" | "SOCIAL_POST" | "VIDEO" | "PODCAST" | "EMAIL"
@@ -45,6 +46,7 @@ export default function ContentLibrary() {
   const [activeType, setActiveType] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -61,7 +63,7 @@ export default function ContentLibrary() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function quickAdd() {
-    const title = window.prompt("Content title?")?.trim();
+    const title = (await promptDialog({ title: "Content title?" }))?.trim();
     if (!title) return;
     try {
       const res = await fetch("/api/marketing/content", {

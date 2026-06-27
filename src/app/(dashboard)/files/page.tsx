@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiFolder = {
   id: string; name: string; parentId: string | null;
@@ -76,6 +77,8 @@ export default function FilesPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
 
   const loadFolders = useCallback(async () => {
     try {
@@ -141,7 +144,7 @@ export default function FilesPage() {
   }, [view, folders]);
 
   async function createFolder() {
-    const name = window.prompt("Folder name?")?.trim();
+    const name = (await promptDialog({ title: "Folder name?" }))?.trim();
     if (!name) return;
     const parentId = view.kind === "folder" ? view.id : null;
     try {
@@ -206,7 +209,7 @@ export default function FilesPage() {
     finally { setSummarizing((prev) => { const next = new Set(prev); next.delete(id); return next; }); }
   }
   async function rename(file: ApiFile) {
-    const name = window.prompt("New name?", file.name)?.trim();
+    const name = (await promptDialog({ title: "New name?", defaultValue: file.name }))?.trim();
     if (!name || name === file.name) return;
     setFiles((prev) => prev?.map((f) => f.id === file.id ? { ...f, name } : f) ?? prev);
     try {
@@ -217,7 +220,7 @@ export default function FilesPage() {
     } catch { toast("Couldn't rename"); void loadFiles(); }
   }
   async function remove(id: string) {
-    if (!window.confirm("Delete this file? This cannot be undone.")) return;
+    if (!(await confirm({ title: "Delete file", description: "Delete this file? This cannot be undone.", destructive: true, confirmLabel: "Delete" }))) return;
     setFiles((prev) => prev?.filter((f) => f.id !== id) ?? prev);
     try {
       const res = await fetch(`/api/files/${id}`, { method: "DELETE" });
@@ -233,7 +236,7 @@ export default function FilesPage() {
 
   async function bulkDelete() {
     if (selected.size === 0) return;
-    if (!window.confirm(`Delete ${selected.size} file${selected.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    if (!(await confirm({ title: "Delete files", description: `Delete ${selected.size} file${selected.size === 1 ? "" : "s"}? This cannot be undone.`, destructive: true, confirmLabel: "Delete" }))) return;
     const ids = Array.from(selected);
     setFiles((prev) => prev?.filter((f) => !selected.has(f.id)) ?? prev);
     clearSelection();

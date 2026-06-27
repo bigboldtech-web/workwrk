@@ -16,6 +16,7 @@ import Link from "next/link";
 import { Users, Search, Mail, Phone, Plus, FileText, BadgeCheck } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiCandidate = {
   id: string;
@@ -40,6 +41,7 @@ export default function CandidatesPage() {
   const [showHired, setShowHired] = useState(true);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -81,11 +83,11 @@ export default function CandidatesPage() {
   }, [filtered]);
 
   async function quickAdd() {
-    const first = window.prompt("Candidate first name?")?.trim();
+    const first = (await promptDialog({ title: "Candidate first name?" }))?.trim();
     if (!first) return;
-    const last = window.prompt("Last name?")?.trim();
+    const last = (await promptDialog({ title: "Last name?" }))?.trim();
     if (!last) return;
-    const email = window.prompt("Email?")?.trim();
+    const email = (await promptDialog({ title: "Email?" }))?.trim();
     if (!email || !email.includes("@")) { toast("Valid email required"); return; }
     try {
       const res = await fetch("/api/recruiting/candidates", {

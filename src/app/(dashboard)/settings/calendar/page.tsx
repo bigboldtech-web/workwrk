@@ -11,6 +11,7 @@ import {
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Provider = "google" | "outlook" | "icloud" | "fastmail" | "ics";
 
@@ -60,6 +61,7 @@ export default function CalendarSettingsPage() {
   const [conns, setConns] = useState<Connection[]>(SAMPLE);
   const [busy, setBusy] = useState<Provider | null>(null);
   const { toast } = useOsToast();
+  const confirm = useConfirm();
 
   async function connect(p: Provider) {
     setBusy(p);
@@ -69,8 +71,8 @@ export default function CalendarSettingsPage() {
     }, 500);
   }
 
-  function disconnect(id: string) {
-    if (!window.confirm("Disconnect this calendar? Existing events stay; new events stop syncing.")) return;
+  async function disconnect(id: string) {
+    if (!(await confirm({ title: "Disconnect calendar", description: "Disconnect this calendar? Existing events stay; new events stop syncing.", destructive: true, confirmLabel: "Disconnect" }))) return;
     setConns((c) => c.filter((x) => x.id !== id));
     toast("Disconnected");
   }

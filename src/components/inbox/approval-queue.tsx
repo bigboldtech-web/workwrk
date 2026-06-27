@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { Check, X, CheckSquare, Square, Loader2, Filter, DollarSign, ShoppingCart, Receipt, CalendarOff, Clock, Sparkles } from "lucide-react";
 
 interface AiSuggestion {
@@ -128,6 +129,7 @@ function readSavedFilters(): Set<ApprovalKind> {
 export function InboxApprovalQueue({ items }: Props) {
   const router = useRouter();
   const { success: toastSuccess, error: toastError } = useToast();
+  const confirm = useConfirm();
 
   // Active filter chips. Empty set = "show all" (default).
   // Saved-filters: persist the user's last filter choice in localStorage
@@ -258,7 +260,12 @@ export function InboxApprovalQueue({ items }: Props) {
   async function bulkDecide(decision: "APPROVE" | "REJECT") {
     const selected = filteredItems.filter((it) => selectedIds.has(it.id));
     if (selected.length === 0) return;
-    if (!confirm(`${decision === "APPROVE" ? "Approve" : "Reject"} ${selected.length} item${selected.length === 1 ? "" : "s"}?`)) return;
+    if (!(await confirm({
+      title: decision === "APPROVE" ? "Approve items" : "Reject items",
+      description: `${decision === "APPROVE" ? "Approve" : "Reject"} ${selected.length} item${selected.length === 1 ? "" : "s"}?`,
+      destructive: decision === "REJECT",
+      confirmLabel: decision === "APPROVE" ? "Approve" : "Reject",
+    }))) return;
 
     setBulkActioning(true);
     let ok = 0;

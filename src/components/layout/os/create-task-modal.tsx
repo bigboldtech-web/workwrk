@@ -37,6 +37,7 @@ import {
   FileText,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
+import { usePrompt } from "@/components/ui/dialog-provider";
 import { useRouter } from "next/navigation";
 import { Chip, StatusChip } from "@/components/ui/chip";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -218,6 +219,7 @@ function PeoplePicker({
 
 export function CreateTaskModal() {
   const { createTaskOpen, closeCreateTask, createTaskPreselect } = useOsShell();
+  const promptDialog = usePrompt();
   const router = useRouter();
   const { data: session } = useSession();
   const me: Person | null = useMemo(() => {
@@ -526,12 +528,12 @@ export function CreateTaskModal() {
       // Open a blank Google Doc; the user pastes its share link back.
       if (typeof window !== "undefined") window.open("https://docs.new", "_blank", "noopener,noreferrer");
     }
-    const raw = window.prompt(`Paste the ${provider} share link:`);
+    const raw = await promptDialog({ title: `Paste the ${provider} share link:` });
     const url = raw?.trim() ?? "";
     if (!url) return;
     if (!/^https?:\/\//i.test(url)) { setNotice("Enter a valid https link"); return; }
     const guess = (() => { try { return decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() || provider); } catch { return provider; } })();
-    const name = (window.prompt("Attachment name:", guess) ?? guess).trim() || url;
+    const name = ((await promptDialog({ title: "Attachment name:", defaultValue: guess })) ?? guess).trim() || url;
     setUploading((n) => n + 1);
     try {
       const entry = await fetch("/api/files", {

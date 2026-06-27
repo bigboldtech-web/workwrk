@@ -19,6 +19,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Copy, Link2, Star, Trash2, ExternalLink, FileText } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 export type NoteTarget = { id: string; title: string; favorite?: boolean };
 
@@ -52,6 +53,7 @@ export function NoteActionMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const ref = useRef<HTMLDivElement | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(target.title);
@@ -126,7 +128,7 @@ export function NoteActionMenu({
   }
 
   async function trash() {
-    if (!confirm(`Move "${target.title || "Untitled note"}" to Trash?`)) return;
+    if (!(await confirm({ title: "Move to Trash", description: `Move "${target.title || "Untitled note"}" to Trash?`, destructive: true, confirmLabel: "Move to Trash" }))) return;
     const res = await fetch(`/api/docs/${target.id}`, { method: "DELETE" });
     if (res.ok) { toast("Moved to Trash"); onChanged?.("trashed"); dispatchDocsChanged(); }
     else toast("Couldn't move to Trash");

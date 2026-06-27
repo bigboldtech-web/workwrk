@@ -23,6 +23,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useOsToast } from "@/components/layout/os/toast";
 
 type ApiUser = {
   id: string;
@@ -91,6 +92,7 @@ export default function PeopleDirectoryPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const { rowVersion } = useOsShell();
+  const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
@@ -179,7 +181,7 @@ export default function PeopleDirectoryPage() {
             <Link href="/people/departments" className="ppl__nav-link"><Network /> Org chart</Link>
             <Link href="/people/roles" className="ppl__nav-link"><Briefcase /> Roles</Link>
             <Link href="/people/skills" className="ppl__nav-link"><GraduationCap /> Skills</Link>
-            <button type="button" className="ppl__btn-primary" onClick={() => alert("Invite people via Workspace settings.")}>
+            <button type="button" className="ppl__btn-primary" onClick={() => toast("Invite people via Workspace settings.")}>
               <UserPlus /> Invite
             </button>
           </div>
