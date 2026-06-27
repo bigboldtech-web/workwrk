@@ -15,6 +15,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useOsShell } from "./shell-context";
 import { ChevronDown, Search } from "lucide-react";
@@ -53,17 +54,30 @@ function CalendarGlyph({ size = 18 }: { size?: number }) {
 export function ClickTopbar() {
   const { openPalette, openSidekick, openCreateTask, profileToolPins, presenceStatus, mutedNotifications } = useOsShell();
   const { toast } = useOsToast();
+  const router = useRouter();
   const { data: session } = useSession();
   const orgName = session?.user?.organizationName ?? "Workspace";
   const [menuOpen, setMenuOpen] = useState(false);
+
+  async function createQuickDoc() {
+    try {
+      const res = await fetch("/api/docs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Untitled doc", content: { type: "doc", content: [{ type: "paragraph" }] } }),
+      });
+      if (!res.ok) { toast("Couldn't create doc"); return; }
+      const d = await res.json();
+      router.push(`/docs/${d.doc.id}`);
+    } catch { toast("Couldn't create doc"); }
+  }
 
   function runTool(action: ToolAction) {
     switch (action) {
       case "create-task": openCreateTask(); break;
       case "my-work": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "my-work" })); break;
-      case "notepad": toast("Notepad is coming soon"); break;
+      case "notepad": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "notepad" })); break;
       case "reminder": toast("Reminders are coming soon"); break;
-      case "doc": toast("Quick doc is coming soon"); break;
+      case "doc": void createQuickDoc(); break;
       case "voice": toast("Voice to text is coming soon"); break;
     }
   }

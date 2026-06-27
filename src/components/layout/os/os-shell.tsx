@@ -33,6 +33,7 @@ import { OsSidekickPanel } from "./sidekick-panel";
 import { SetStatusModal } from "./set-status-modal";
 import { CreateTaskModal } from "./create-task-modal";
 import { MyWorkPanel } from "./my-work-panel";
+import { NotepadPanel } from "./notepad-panel";
 import { CreateListModal } from "./create-list-modal";
 import { TemplateCenter } from "@/components/templates/template-center";
 
@@ -97,6 +98,7 @@ export function OsShell({ children }: { children: React.ReactNode }) {
             <CreateTaskModal />
             <CreateListModal />
             <MyWorkPanel />
+            <NotepadPanel />
             <TemplateCenterMount />
           </div>
         )}
