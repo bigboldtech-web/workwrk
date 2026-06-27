@@ -16,6 +16,7 @@ import { UserPlus, ArrowUpCircle, LayoutGrid, ExternalLink, PinOff, Sparkles } f
 import { useSession } from "next-auth/react";
 import { MenuItem, MenuList } from "@/components/ui/menu";
 import { APPS, canAccessApp, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
+import { AppGlyph, hasAppGlyph } from "@/components/brand/app-glyphs";
 import { useOsShell } from "./shell-context";
 
 const HOVER_OPEN_MS = 180;
@@ -208,7 +209,7 @@ export function ClickAppRail() {
                     color: "var(--os-brand-rail)",
                   } : undefined}
                 >
-                  <app.Icon className="w-[16px] h-[16px]" />
+                  {hasAppGlyph(app.key) ? <AppGlyph appKey={app.key} size={20} /> : <app.Icon className="w-[16px] h-[16px]" />}
                 </span>
                 {iconsOnly ? null : <RailLabel>{app.label}</RailLabel>}
               </button>
@@ -234,7 +235,7 @@ export function ClickAppRail() {
               className="group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 text-white/70 hover:text-white"
             >
               <span className="flex items-center justify-center w-[26px] h-[26px] rounded-md border border-dashed border-white/40 group-hover:bg-white/10">
-                <ghostApp.Icon className="w-[16px] h-[16px]" />
+                {hasAppGlyph(ghostApp.key) ? <AppGlyph appKey={ghostApp.key} size={20} /> : <ghostApp.Icon className="w-[16px] h-[16px]" />}
               </span>
               {iconsOnly ? null : <RailLabel italic>{ghostApp.label}</RailLabel>}
             </button>
