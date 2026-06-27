@@ -74,6 +74,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
   const [memberCount, setMemberCount] = useState<number | null>(null);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   // Pull real data each time the menu opens (cheap, and keeps the member
   // count / plan fresh after edits elsewhere).
@@ -166,6 +167,40 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
       toast.info(what, "This part of the workspace menu isn't available yet — coming soon."),
     [toast],
   );
+
+  const createWorkspace = useCallback(async () => {
+    if (creating) return;
+    const name = window.prompt("Name your new workspace")?.trim();
+    if (!name) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/organizations/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error("Couldn't create workspace", body?.error ?? "Please try again.");
+        setCreating(false);
+        return;
+      }
+      const newId = body?.data?.organization?.id ?? body?.organization?.id;
+      if (newId) {
+        // Switch into the new workspace, refresh the JWT, then hard-navigate.
+        const sw = await fetch("/api/me/switch-org", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ organizationId: newId }),
+        });
+        if (sw.ok) { await update?.(); window.location.href = "/today"; return; }
+      }
+      window.location.reload();
+    } catch {
+      toast.error("Couldn't create workspace", "Network error. Please try again.");
+      setCreating(false);
+    }
+  }, [creating, toast, update]);
 
   if (!open) return null;
 
@@ -298,11 +333,12 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
             <div className="px-3 pb-3 pt-1">
               <button
                 type="button"
-                onClick={() => comingSoon("Create workspace")}
-                className="w-full flex items-center justify-center gap-1.5 h-9 rounded-md border border-zinc-200 hover:bg-zinc-50 text-sm text-zinc-700"
+                onClick={createWorkspace}
+                disabled={creating}
+                className="w-full flex items-center justify-center gap-1.5 h-9 rounded-md border border-zinc-200 hover:bg-zinc-50 text-sm text-zinc-700 disabled:opacity-60"
               >
                 <Plus className="w-3.5 h-3.5" />
-                Create Workspace
+                {creating ? "Creating…" : "Create Workspace"}
               </button>
             </div>
 
