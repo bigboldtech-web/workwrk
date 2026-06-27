@@ -147,7 +147,7 @@ function CheckRow({
   return (
     <label
       className={`group flex items-center gap-2 px-2 py-0.5 rounded-md transition-colors ${
-        disabled || locked ? "opacity-60 cursor-not-allowed" : "hover:bg-zinc-50 cursor-pointer"
+        disabled || locked ? "opacity-60 cursor-not-allowed" : "hover:bg-zinc-50 dark:hover:bg-white/10 cursor-pointer"
       }`}
     >
       <span
@@ -160,10 +160,10 @@ function CheckRow({
       >
         <Check className="w-2.5 h-2.5" strokeWidth={3.5} />
       </span>
-      <Icon className="w-[14px] h-[14px] text-zinc-500" />
-      <span className="text-[12px] text-zinc-800 flex-1">{label}</span>
+      <Icon className="w-[14px] h-[14px] text-zinc-500 dark:text-zinc-400" />
+      <span className="text-[12px] text-zinc-800 dark:text-zinc-200 flex-1">{label}</span>
       {locked ? (
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">Locked</span>
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Locked</span>
       ) : null}
       <input
         type="checkbox"
@@ -269,11 +269,11 @@ function AppearanceToggle({
             className={`p-2 rounded-lg border-[1.5px] text-left transition-all ${
               active
                 ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]"
-                : "border-zinc-200 hover:border-zinc-300"
+                : "border-zinc-200 dark:border-[#2A2F38] hover:border-zinc-300"
             } ${locked ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <AppearancePreview iconsOnly={opt.value} />
-            <div className="text-[12px] mt-1.5 font-medium text-zinc-800">{opt.label}</div>
+            <div className="text-[12px] mt-1.5 font-medium text-zinc-800 dark:text-zinc-200">{opt.label}</div>
           </button>
         );
       })}
@@ -374,11 +374,11 @@ function ThemeAppearancePicker({
             className={`p-1.5 rounded-lg border text-left transition-all ${
               active
                 ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]"
-                : "border-zinc-200 hover:border-zinc-300"
+                : "border-zinc-200 dark:border-[#2A2F38] hover:border-zinc-300"
             } ${locked ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <ShellPreview mode={opt.value as "LIGHT" | "DARK" | "AUTO"} />
-            <div className="text-[12px] mt-1.5 font-medium text-zinc-800">{opt.label}</div>
+            <div className="text-[12px] mt-1.5 font-medium text-zinc-800 dark:text-zinc-200">{opt.label}</div>
           </button>
         );
       })}
@@ -408,7 +408,7 @@ function AccentPicker({
             className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition-colors ${
               active
                 ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
-                : "border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300"
+                : "border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/10 hover:border-zinc-300"
             } ${locked ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             {/* Active: small accent chip with the check inside (ClickUp
@@ -426,7 +426,7 @@ function AccentPicker({
                 style={{ background: a.swatch }}
               />
             )}
-            <span className="text-[12.5px] text-zinc-800 font-medium truncate">{a.label}</span>
+            <span className="text-[12.5px] text-zinc-800 dark:text-zinc-200 font-medium truncate">{a.label}</span>
           </button>
         );
       })}
@@ -462,20 +462,20 @@ function SectionRow({
       onDragOver={(e) => { e.preventDefault(); onDragOver(e); }}
       onDrop={(e) => { e.preventDefault(); onDrop(); }}
       onDragEnd={onDragEnd}
-      className={`relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md border bg-white mb-1.5 transition ${
-        dragging ? "opacity-40" : "border-zinc-200 hover:border-zinc-300"
+      className={`relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md border bg-white dark:bg-[#1B1F26] mb-1.5 transition ${
+        dragging ? "opacity-40" : "border-zinc-200 dark:border-[#2A2F38] hover:border-zinc-300"
       } cursor-grab active:cursor-grabbing`}
     >
       {dropIndicator ? (
         <div aria-hidden className="absolute -top-1 left-2 right-2 h-0.5 rounded bg-[var(--os-brand)]" />
       ) : null}
-      <GripVertical className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
-      <Icon className="w-4 h-4 text-zinc-500 flex-shrink-0" />
-      <span className="text-[12.5px] flex-1 text-zinc-800">{label}</span>
+      <GripVertical className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400 flex-shrink-0" />
+      <Icon className="w-4 h-4 text-zinc-500 dark:text-zinc-400 flex-shrink-0" />
+      <span className="text-[12.5px] flex-1 text-zinc-800 dark:text-zinc-200">{label}</span>
       <button
         type="button"
         onClick={onHide}
-        className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+        className="p-1 rounded text-zinc-400 dark:text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-white/10"
         aria-label={`Hide ${label}`}
         title={`Hide ${label}`}
       >
@@ -495,13 +495,13 @@ function HiddenSectionRow({
   onShow: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md bg-zinc-50 mb-1.5">
-      <Icon className="w-4 h-4 text-zinc-400 flex-shrink-0" />
-      <span className="text-[12px] flex-1 text-zinc-500">{label}</span>
+    <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md bg-zinc-50 dark:bg-white/5 mb-1.5">
+      <Icon className="w-4 h-4 text-zinc-400 dark:text-zinc-400 flex-shrink-0" />
+      <span className="text-[12px] flex-1 text-zinc-500 dark:text-zinc-400">{label}</span>
       <button
         type="button"
         onClick={onShow}
-        className="text-[11px] font-medium px-2 py-0.5 rounded text-zinc-700 hover:bg-zinc-200"
+        className="text-[11px] font-medium px-2 py-0.5 rounded text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-white/10"
       >
         <span className="flex items-center gap-1">
           <Eye className="w-3 h-3" />
@@ -538,7 +538,7 @@ export function CustomizePanel({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-[440px] p-0 gap-0 overflow-hidden rounded-xl shadow-xl [&>button:has(>span.sr-only)]:hidden"
+        className="max-w-[440px] p-0 gap-0 overflow-hidden rounded-xl shadow-xl dark:bg-[#181C22] dark:border-[#2A2F38] [&>button:has(>span.sr-only)]:hidden"
         style={{ ["--os-brand" as string]: "#0073EA", ["--os-brand-rail" as string]: "#2B2233" }}
       >
         {/* Header with X close button. The default DialogContent ships
@@ -546,14 +546,14 @@ export function CustomizePanel({
             larger ClickUp-style chip, so we hide the built-in one via the
             wrapper's CSS (Radix's Close still works through Escape). */}
         <div className="px-4 pt-3 pb-2 relative">
-          <DialogTitle className="text-[14px] font-semibold text-zinc-900 leading-tight">Customize</DialogTitle>
-          <DialogDescription className="text-[11.5px] text-zinc-500 mt-0.5">
+          <DialogTitle className="text-[14px] font-semibold text-zinc-900 dark:text-zinc-100 leading-tight">Customize</DialogTitle>
+          <DialogDescription className="text-[11.5px] text-zinc-500 dark:text-zinc-400 mt-0.5">
             Personalize and organize your WorkwrK interface
           </DialogDescription>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="absolute top-2.5 right-3 w-5 h-5 rounded-full bg-zinc-100 hover:bg-zinc-200 flex items-center justify-center text-zinc-600 transition-colors"
+            className="absolute top-2.5 right-3 w-5 h-5 rounded-full bg-zinc-100 dark:bg-white/10 hover:bg-zinc-200 dark:hover:bg-white/10 flex items-center justify-center text-zinc-600 dark:text-zinc-300 transition-colors"
             aria-label="Close"
           >
             <X className="w-3 h-3" />
@@ -563,11 +563,11 @@ export function CustomizePanel({
         <Tabs defaultValue="navigation" className="w-full">
           {/* Pill-style segmented tabs (matches ClickUp ref) */}
           <div className="px-4 pb-2">
-            <TabsList className="w-full bg-zinc-100 p-0.5 rounded-lg h-7">
-              <TabsTrigger value="navigation" className="flex-1 rounded-md text-[11.5px] font-medium data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 text-zinc-600">Navigation</TabsTrigger>
-              <TabsTrigger value="home" className="flex-1 rounded-md text-[11.5px] font-medium data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 text-zinc-600">Home</TabsTrigger>
-              <TabsTrigger value="sections" className="flex-1 rounded-md text-[11.5px] font-medium data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 text-zinc-600">Sections</TabsTrigger>
-              <TabsTrigger value="themes" className="flex-1 rounded-md text-[11.5px] font-medium data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 text-zinc-600">Themes</TabsTrigger>
+            <TabsList className="w-full bg-zinc-100 dark:bg-white/5 p-0.5 rounded-lg h-7">
+              <TabsTrigger value="navigation" className="flex-1 rounded-md text-[11.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Navigation</TabsTrigger>
+              <TabsTrigger value="home" className="flex-1 rounded-md text-[11.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Home</TabsTrigger>
+              <TabsTrigger value="sections" className="flex-1 rounded-md text-[11.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Sections</TabsTrigger>
+              <TabsTrigger value="themes" className="flex-1 rounded-md text-[11.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Themes</TabsTrigger>
             </TabsList>
           </div>
 
@@ -578,9 +578,9 @@ export function CustomizePanel({
               catalog if the user wants to pin one of the extras. */}
           <TabsContent value="navigation" className="px-3 pb-3 max-h-[66vh] overflow-y-auto">
             <NavigationList />
-            <div className="border-t border-zinc-200 my-3 mx-2" />
+            <div className="border-t border-zinc-200 dark:border-[#2A2F38] my-3 mx-2" />
             <div className="px-2">
-              <h3 className="text-[12px] font-medium text-zinc-600 mb-2">Appearance</h3>
+              <h3 className="text-[12px] font-medium text-zinc-600 dark:text-zinc-300 mb-2">Appearance</h3>
               <AppearanceToggle
                 iconsOnly={railIconsOnly}
                 onChange={(v) => {
@@ -597,7 +597,7 @@ export function CustomizePanel({
               inline notice if the fetch is still pending or failed. */}
           <TabsContent value="home" className="px-3 pb-3 max-h-[66vh] overflow-y-auto">
             {loading ? (
-              <div className="px-2 py-4 text-sm text-zinc-500">Loading…</div>
+              <div className="px-2 py-4 text-sm text-zinc-500 dark:text-zinc-400">Loading…</div>
             ) : !effective ? (
               <PrefsUnavailable />
             ) : (
@@ -627,7 +627,7 @@ export function CustomizePanel({
 
           <TabsContent value="sections" className="px-4 pb-3 max-h-[66vh] overflow-y-auto">
             {loading ? (
-              <div className="px-2 py-4 text-sm text-zinc-500">Loading…</div>
+              <div className="px-2 py-4 text-sm text-zinc-500 dark:text-zinc-400">Loading…</div>
             ) : !effective ? (
               <PrefsUnavailable />
             ) : (
@@ -685,7 +685,7 @@ export function CustomizePanel({
                   type="button"
                   disabled
                   title="Custom sections coming soon"
-                  className="w-full flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-md border border-dashed border-zinc-300 text-[12px] text-zinc-500 hover:bg-zinc-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-md border border-dashed border-zinc-300 dark:border-[#2A2F38] text-[12px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   Create section
@@ -697,11 +697,11 @@ export function CustomizePanel({
                   );
                   return (
                     <>
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 mt-5 mb-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mt-5 mb-2">
                         Hidden sections
                       </div>
                       {hidden.length === 0 ? (
-                        <div className="text-[12px] text-zinc-400 px-2">All sections shown</div>
+                        <div className="text-[12px] text-zinc-400 dark:text-zinc-400 px-2">All sections shown</div>
                       ) : (
                         hidden.map((s) => (
                           <HiddenSectionRow
@@ -724,19 +724,19 @@ export function CustomizePanel({
 
           <TabsContent value="themes" className="px-4 pb-3 max-h-[66vh] overflow-y-auto">
             {loading ? (
-              <div className="px-2 py-4 text-sm text-zinc-500">Loading…</div>
+              <div className="px-2 py-4 text-sm text-zinc-500 dark:text-zinc-400">Loading…</div>
             ) : !effective ? (
               <PrefsUnavailable />
             ) : (
               <>
-                <h3 className="text-[12px] font-medium text-zinc-600 mb-2">Appearance</h3>
+                <h3 className="text-[12px] font-medium text-zinc-600 dark:text-zinc-300 mb-2">Appearance</h3>
                 <ThemeAppearancePicker
                   value={effective.theme.appearance}
                   locked={lockedSet.has("theme.appearance")}
                   onChange={(v) => void patch({ theme: { appearance: v } })}
                 />
                 <div className="h-3" />
-                <h3 className="text-[12px] font-medium text-zinc-600 mb-2">WorkwrK theme</h3>
+                <h3 className="text-[12px] font-medium text-zinc-600 dark:text-zinc-300 mb-2">WorkwrK theme</h3>
                 <AccentPicker
                   value={effective.theme.accent}
                   locked={lockedSet.has("theme.accent")}
@@ -781,7 +781,7 @@ function NavigationList() {
         <button
           type="button"
           onClick={() => setShowAll((v) => !v)}
-          className="mt-1 px-2 py-1.5 text-[12px] font-medium text-left text-zinc-500 hover:text-zinc-800"
+          className="mt-1 px-2 py-1.5 text-[12px] font-medium text-left text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
         >
           {showAll ? "Show fewer" : `Show ${extras.length} more apps`}
         </button>
@@ -792,7 +792,7 @@ function NavigationList() {
 
 function PrefsUnavailable() {
   return (
-    <div className="px-3 py-6 text-xs text-zinc-500 leading-relaxed">
+    <div className="px-3 py-6 text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
       Couldn&apos;t load your saved preferences from the server. The Navigation
       tab still works — your pin changes save locally. Try reloading the
       page if this persists.

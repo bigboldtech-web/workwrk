@@ -512,7 +512,7 @@ export function OsCommandPalette() {
       onClick={onClick}
       onMouseEnter={onMouseEnter}
 	      className={`group w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-        isActive ? "bg-zinc-50" : "hover:bg-zinc-50"
+        isActive ? "bg-zinc-50 dark:bg-white/10" : "hover:bg-zinc-50 dark:hover:bg-white/10"
       }`}
     >
       {children}
@@ -522,11 +522,11 @@ export function OsCommandPalette() {
   const TrailingChips = ({ isActive, isCommand }: { isActive: boolean; isCommand: boolean }) => (
     <span className={`flex items-center gap-1 transition-opacity ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
       {!isCommand ? (
-        <span className="flex items-center justify-center w-6 h-6 rounded-md border border-zinc-200 bg-white text-zinc-500" title="Open in new tab">
+        <span className="flex items-center justify-center w-6 h-6 rounded-md border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1F26] text-zinc-500 dark:text-zinc-400" title="Open in new tab">
           <ExternalLinkIcon className="w-3 h-3" />
         </span>
       ) : null}
-      <span className="flex items-center justify-center w-6 h-6 rounded-md border border-zinc-200 bg-white text-zinc-500" title="Open">
+      <span className="flex items-center justify-center w-6 h-6 rounded-md border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1F26] text-zinc-500 dark:text-zinc-400" title="Open">
         <CornerDownLeft className="w-3 h-3" />
       </span>
     </span>
@@ -539,18 +539,18 @@ export function OsCommandPalette() {
     const tone = STATUS_TONE[it.status];
     return (
       <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg border border-zinc-200 bg-white flex-shrink-0">
-          <CheckSquare className="w-3.5 h-3.5 text-zinc-500" />
+        <span className="flex items-center justify-center w-7 h-7 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1F26] flex-shrink-0">
+          <CheckSquare className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 truncate font-medium">{it.label}</span>
+          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
           <span className="flex items-center gap-2 mt-0.5">
-            <span className="flex items-center gap-1 text-[11px] text-zinc-500">
+            <span className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
               <span className="w-2 h-2 rounded-full" style={{ background: tone.dot }} />
               <span>{tone.label}</span>
             </span>
             {it.due ? (
-              <span className="text-[11px] text-zinc-500">· due {it.due}</span>
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-400">· due {it.due}</span>
             ) : null}
           </span>
         </span>
@@ -574,8 +574,8 @@ export function OsCommandPalette() {
           <Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 truncate font-medium">{it.label}</span>
-          <span className="text-[11px] text-zinc-500 mt-0.5 block">
+          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">
             {it.editor ? `${it.editor} · ` : ""}edited {it.editedAt}
           </span>
         </span>
@@ -594,11 +594,11 @@ export function OsCommandPalette() {
           {it.initials}
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 truncate font-medium">
+          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">
             {it.label}
-            {it.isAgent ? <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600 font-medium">AGENT</span> : null}
+            {it.isAgent ? <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 font-medium">AGENT</span> : null}
           </span>
-          <span className="text-[11px] text-zinc-500 mt-0.5 block">{it.role}</span>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.role}</span>
         </span>
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -615,8 +615,8 @@ export function OsCommandPalette() {
           <it.Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 truncate font-medium">{it.label} space</span>
-          <span className="text-[11px] text-zinc-500 mt-0.5 block">{it.members} members</span>
+          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label} space</span>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.members} members</span>
         </span>
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -633,11 +633,11 @@ export function OsCommandPalette() {
           <it.Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 truncate font-medium">{it.label}</span>
-          {it.hint ? <span className="text-[11px] text-zinc-500 mt-0.5 block">{it.hint}</span> : null}
+          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
+          {it.hint ? <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.hint}</span> : null}
         </span>
         {it.shortcut && !isActive ? (
-          <span className="text-[10.5px] text-zinc-500 font-mono">{it.shortcut}</span>
+          <span className="text-[10.5px] text-zinc-500 dark:text-zinc-400 font-mono">{it.shortcut}</span>
         ) : null}
         <TrailingChips isActive={isActive} isCommand={true} />
       </Row>
@@ -654,10 +654,10 @@ export function OsCommandPalette() {
           <it.Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 truncate font-medium">{it.label}</span>
+          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
         </span>
         {it.shortcut && !isActive ? (
-          <span className="text-[10.5px] text-zinc-500 font-mono">{it.shortcut}</span>
+          <span className="text-[10.5px] text-zinc-500 dark:text-zinc-400 font-mono">{it.shortcut}</span>
         ) : null}
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -670,16 +670,16 @@ export function OsCommandPalette() {
     const isActive = idx === active;
     return (
       <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 bg-zinc-100 text-zinc-600">
+        <span className="flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 bg-zinc-100 dark:bg-white/5 text-zinc-600 dark:text-zinc-300">
           <it.Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0 flex items-center gap-2">
-          <span className="text-[13.5px] text-zinc-800 truncate font-medium">{it.label}</span>
+          <span className="text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
           {it.alias ? (
-            <span className="text-[11px] text-zinc-400">·</span>
+            <span className="text-[11px] text-zinc-400 dark:text-zinc-400">·</span>
           ) : null}
           {it.alias ? (
-            <span className="text-[11px] text-zinc-500 font-mono">{it.alias}</span>
+            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">{it.alias}</span>
           ) : null}
         </span>
         <TrailingChips isActive={isActive} isCommand={true} />
@@ -710,7 +710,7 @@ export function OsCommandPalette() {
       }}
     >
 	      <div
-	        className="workwrk-os w-full max-w-[700px] mx-4 bg-white rounded-xl shadow-xl border border-zinc-200 flex flex-col overflow-hidden"
+	        className="workwrk-os w-full max-w-[700px] mx-4 bg-white dark:bg-[#1B1F26] rounded-xl shadow-xl border border-zinc-200 dark:border-[#2A2F38] flex flex-col overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label="Search"
@@ -718,7 +718,7 @@ export function OsCommandPalette() {
         {/* Header: search input + Ask AI pill (hands the current query off
             to the Brain panel as the initial prompt). */}
 	        <div className="flex items-center gap-2.5 px-4 pt-3 pb-3">
-	          <Search className="w-4 h-4 text-zinc-400 flex-shrink-0" />
+	          <Search className="w-4 h-4 text-zinc-400 dark:text-zinc-400 flex-shrink-0" />
           <input
             ref={inputRef}
             data-palette-search
@@ -727,10 +727,10 @@ export function OsCommandPalette() {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActive(0); }}
             autoComplete="off"
-	            className="flex-1 bg-transparent text-[14px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
+	            className="flex-1 bg-transparent text-[14px] text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none"
           />
           <AskAiButton onClick={() => { openSidekick(query.trim() || undefined); closePalette(); }} title="Ask the Brain" />
-          <span className="text-[10.5px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 font-mono">ESC</span>
+          <span className="text-[10.5px] text-zinc-500 dark:text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-[#2A2F38] font-mono">ESC</span>
         </div>
 
         {/* Source tabs — flat row, real breathing room between providers.
@@ -761,10 +761,10 @@ export function OsCommandPalette() {
                 }}
 	                className={`relative flex items-center gap-1.5 h-7 text-[12px] font-medium flex-shrink-0 transition-colors ${
                   isUnconnected
-                    ? "text-zinc-500 hover:text-zinc-400"
+                    ? "text-zinc-500 dark:text-zinc-400 hover:text-zinc-400 dark:hover:text-zinc-300"
                     : sourceKey === s.key
-                    ? "text-zinc-900"
-                    : "text-zinc-500 hover:text-zinc-900"
+                    ? "text-zinc-900 dark:text-zinc-100"
+                    : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
                 }`}
                 title={s.connectable ? `Connect ${s.label}` : s.label}
               >
@@ -809,7 +809,7 @@ export function OsCommandPalette() {
         {/* Filter chips (primary + "···" overflow) + Filter + Sort. The
             overflow popover hosts chips that don't fit inline; toggling
             a chip from there moves it visually to the active set. */}
-	        <div className="relative flex items-center gap-2 px-4 py-2 border-b border-zinc-100">
+	        <div className="relative flex items-center gap-2 px-4 py-2 border-b border-zinc-100 dark:border-[#2A2F38]">
           {TYPE_FILTERS.filter((f) => f.primary).map((f) => {
             const on = typeFilters.has(f.key);
             return (
@@ -820,7 +820,7 @@ export function OsCommandPalette() {
 	                className={`flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[11.5px] font-medium border transition-colors ${
                   on
                     ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)]"
-                    : "border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                    : "border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                 }`}
                 aria-pressed={on}
               >
@@ -848,7 +848,7 @@ export function OsCommandPalette() {
             <button
               type="button"
               onClick={() => { setMoreOpen((v) => !v); setFilterOpen(false); setSortOpen(false); }}
-	              className="flex items-center justify-center h-6 w-6 rounded-full border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+	              className="flex items-center justify-center h-6 w-6 rounded-full border border-zinc-200 dark:border-[#2A2F38] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/10"
               aria-label="More type filters"
               aria-expanded={moreOpen}
             >
@@ -856,7 +856,7 @@ export function OsCommandPalette() {
             </button>
             {moreOpen ? (
               <div
-	                className="absolute left-0 top-8 z-10 w-52 bg-white border border-zinc-200 rounded-lg shadow-lg py-1"
+	                className="absolute left-0 top-8 z-10 w-52 bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] rounded-lg shadow-lg py-1"
                 onMouseLeave={() => setMoreOpen(false)}
               >
                 {TYPE_FILTERS.filter((f) => !f.primary).map((f) => {
@@ -866,9 +866,9 @@ export function OsCommandPalette() {
                       key={f.key}
                       type="button"
                       onClick={() => toggleType(f.key)}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                     >
-                      <f.Icon className="w-3.5 h-3.5 text-zinc-500" />
+                      <f.Icon className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
                       <span className="flex-1">{f.label}</span>
                       {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
                     </button>
@@ -888,7 +888,7 @@ export function OsCommandPalette() {
 	              className={`flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium transition-colors ${
                 filterKey !== "any"
                   ? "text-[var(--os-brand-deep)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
-                  : "text-zinc-700 hover:bg-zinc-50"
+                  : "text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
               }`}
               aria-expanded={filterOpen}
             >
@@ -898,7 +898,7 @@ export function OsCommandPalette() {
             </button>
             {filterOpen ? (
               <div
-	                className="absolute right-0 top-8 z-10 w-56 bg-white border border-zinc-200 rounded-lg shadow-lg py-1"
+	                className="absolute right-0 top-8 z-10 w-56 bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] rounded-lg shadow-lg py-1"
                 onMouseLeave={() => setFilterOpen(false)}
               >
                 {FILTERS.map((f) => {
@@ -908,10 +908,10 @@ export function OsCommandPalette() {
                       key={f.key}
                       type="button"
                       onClick={() => { setFilterKey(f.key); setFilterOpen(false); }}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                     >
                       <span className="flex-1">{f.label}</span>
-                      {f.hint ? <span className="text-[10.5px] text-zinc-400">{f.hint}</span> : null}
+                      {f.hint ? <span className="text-[10.5px] text-zinc-400 dark:text-zinc-400">{f.hint}</span> : null}
                       {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
                     </button>
                   );
@@ -925,7 +925,7 @@ export function OsCommandPalette() {
             <button
               type="button"
               onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setMoreOpen(false); }}
-	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10 transition-colors"
               aria-expanded={sortOpen}
             >
               <ArrowUpDown className="w-3.5 h-3.5" />
@@ -933,7 +933,7 @@ export function OsCommandPalette() {
             </button>
             {sortOpen ? (
               <div
-	                className="absolute right-0 top-8 z-10 w-52 bg-white border border-zinc-200 rounded-lg shadow-lg py-1"
+	                className="absolute right-0 top-8 z-10 w-52 bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] rounded-lg shadow-lg py-1"
                 onMouseLeave={() => setSortOpen(false)}
               >
                 {SORTS.map((s) => {
@@ -943,7 +943,7 @@ export function OsCommandPalette() {
                       key={s.key}
                       type="button"
                       onClick={() => { setSortKey(s.key); setSortOpen(false); }}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                     >
                       <span className="flex-1">{s.label}</span>
                       {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
@@ -962,11 +962,11 @@ export function OsCommandPalette() {
 	        <div className="flex-1 max-h-[400px] overflow-y-auto px-2.5 py-2.5">
           {flatItems.length === 0 ? (
             <div className="px-4 py-14 text-center">
-              <Search className="w-7 h-7 mx-auto text-zinc-300 mb-3" />
-              <div className="text-[13px] text-zinc-700 font-medium">
+              <Search className="w-7 h-7 mx-auto text-zinc-300 dark:text-zinc-400 mb-3" />
+              <div className="text-[13px] text-zinc-700 dark:text-zinc-200 font-medium">
                 {query ? `No matches for "${query}"` : "Nothing matches the active filters"}
               </div>
-              <div className="text-[12px] text-zinc-500 mt-1">
+              <div className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-1">
                 {query ? "Try a different query, or clear the type filters." : "Clear a filter to see results."}
               </div>
             </div>
@@ -978,26 +978,26 @@ export function OsCommandPalette() {
         </div>
 
         {/* Footer */}
-	        <div className="flex items-center gap-2.5 px-3 py-2 border-t border-zinc-100 text-[11px] text-zinc-500 bg-zinc-50/50">
+	        <div className="flex items-center gap-2.5 px-3 py-2 border-t border-zinc-100 dark:border-[#2A2F38] text-[11px] text-zinc-500 dark:text-zinc-400 bg-zinc-50/50 dark:bg-white/5">
           <div className="flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-zinc-200 bg-white">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10">
               <ChevronLeft className="w-3 h-3" />
             </span>
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-zinc-200 bg-white">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10">
               <ChevronRight className="w-3 h-3" />
             </span>
           </div>
           <span className="flex items-center gap-1.5">
             <span>Press</span>
-            <span className="inline-flex items-center justify-center min-w-[20px] px-1.5 h-5 rounded border border-zinc-200 bg-white font-mono text-[10px]">/</span>
+            <span className="inline-flex items-center justify-center min-w-[20px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[10px]">/</span>
             <span>for commands ·</span>
-            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 bg-white font-mono text-[10px]">Tab</span>
+            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[10px]">Tab</span>
             <span>for actions ·</span>
-            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 bg-white font-mono text-[10px]">Esc</span>
+            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[10px]">Esc</span>
             <span>to close</span>
           </span>
           <span className="flex-1" />
-          <button type="button" className="p-1 rounded hover:bg-zinc-200" aria-label="Search settings">
+          <button type="button" className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-white/10" aria-label="Search settings">
             <Settings className="w-3.5 h-3.5" />
           </button>
         </div>
