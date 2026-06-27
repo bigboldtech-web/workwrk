@@ -154,6 +154,147 @@ const Trash: FC<P> = ({ size }) => (
   </Svg>
 );
 
+const Recruiting: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <circle cx="9.5" cy="8" r="3.2" fill={B} />
+    <path d="M3.6 20 c0-3.2 2.6-5 5.9-5 1.4 0 2.7 .3 3.7 .9 H3.6 Z" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <circle cx="16.6" cy="16" r="4.4" fill={G} />
+    <path d="M16.6 13.6 V18.4 M14.2 16 H19" stroke={W} strokeWidth="1.7" strokeLinecap="round" />
+  </Svg>
+);
+
+const Onboarding: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <rect x="8.5" y="3.5" width="10" height="17" rx="1.6" fill={W} stroke={B} strokeWidth="1.7" />
+    <circle cx="15.5" cy="12" r="1.05" fill={B} />
+    <path d="M2.6 12 H7.4 M5 9.6 L7.6 12 L5 14.4" stroke={G} strokeWidth="1.9" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+const Reviews: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <rect x="4" y="4" width="16" height="16" rx="2.6" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <path d="M12 7 l1.6 3.5 l3.8 .4 l-2.9 2.6 l.9 3.7 l-3.4 -2 l-3.4 2 l.9 -3.7 l-2.9 -2.6 l3.8 -.4 Z" fill={Y} />
+  </Svg>
+);
+
+const Candor: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M3 7.5 a2 2 0 0 1 2 -2 H12 a2 2 0 0 1 2 2 V11 a2 2 0 0 1 -2 2 H7.5 L5 15.3 V13 a2 2 0 0 1 -2 -2 Z" fill={B} />
+    <path d="M10 11.5 a2 2 0 0 1 2 -2 H19 a2 2 0 0 1 2 2 V15 a2 2 0 0 1 -2 2 V19.3 L16.5 17 H12 a2 2 0 0 1 -2 -2 Z" fill={G} stroke={OUT} strokeWidth="0.6" />
+  </Svg>
+);
+
+const Announcements: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M3.5 10.5 L13 6.5 V17.5 L3.5 13.5 Z" fill={B} />
+    <rect x="12" y="8" width="2.8" height="8" rx="1.4" fill={B} />
+    <path d="M5 13.5 V16.5 a1.6 1.6 0 0 0 3.2 0 V14.8" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <path d="M16.5 9 a4.5 4.5 0 0 1 0 6 M18.5 7 a7.5 7.5 0 0 1 0 10" stroke={Y} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+  </Svg>
+);
+
+const Kudos: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M8.5 3 L11.5 8.5 H6.5 Z" fill={B} />
+    <path d="M15.5 3 L17.5 8.5 H12.5 Z" fill={R} />
+    <circle cx="12" cy="14.5" r="5.7" fill={Y} stroke={OUT} strokeWidth="0.6" />
+    <path d="M12 11.3 l1 2.1 l2.3 .2 l-1.7 1.5 l.5 2.2 l-2.1 -1.2 l-2.1 1.2 l.5 -2.2 l-1.7 -1.5 l2.3 -.2 Z" fill={W} />
+  </Svg>
+);
+
+const Surveys: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <rect x="4" y="4" width="16" height="16" rx="2.6" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <rect x="7" y="7.5" width="10" height="2.3" rx="1.15" fill={B} />
+    <rect x="7" y="11" width="7" height="2.3" rx="1.15" fill={G} />
+    <rect x="7" y="14.5" width="9" height="2.3" rx="1.15" fill={Y} />
+  </Svg>
+);
+
+const TimeOff: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <circle cx="12" cy="9.5" r="3.8" fill={Y} />
+    <g stroke={Y} strokeWidth="1.5" strokeLinecap="round">
+      <path d="M12 2.8 V4.4" /><path d="M5.3 9.5 H6.9" /><path d="M17.1 9.5 H18.7" />
+      <path d="M7.2 4.7 L8.3 5.8" /><path d="M15.7 5.8 L16.8 4.7" />
+      <path d="M7.2 14.3 L8.3 13.2" /><path d="M15.7 13.2 L16.8 14.3" />
+    </g>
+    <path d="M3 18.5 q3 -2.2 6 0 t6 0 t6 0" stroke={B} strokeWidth="1.7" fill="none" strokeLinecap="round" />
+  </Svg>
+);
+
+const Tools: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M16.8 3.6 a3.7 3.7 0 0 0 -4.8 4.8 l-7.3 7.3 a1.9 1.9 0 1 0 2.7 2.7 l7.3 -7.3 a3.7 3.7 0 0 0 4.8 -4.8 l-2.4 2.4 l-2.3 -.6 l-.6 -2.3 Z" fill={B} />
+    <circle cx="6.3" cy="17.7" r="0.9" fill={W} />
+  </Svg>
+);
+
+const Assets: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M12 3.8 L20 7.8 L12 11.8 L4 7.8 Z" fill={Y} />
+    <path d="M4 7.8 L12 11.8 V20 L4 16 Z" fill={B} />
+    <path d="M20 7.8 L12 11.8 V20 L20 16 Z" fill={G} />
+  </Svg>
+);
+
+const Policies: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M12 3 L19 5.6 V11 c0 5 -3.4 8.2 -7 9.6 C8.4 19.2 5 16 5 11 V5.6 Z" fill={B} />
+    <path d="M8.7 11.8 l2.3 2.3 l4.1 -4.4" stroke={W} strokeWidth="2.1" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+const Agreements: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <rect x="5" y="3" width="13" height="18" rx="2" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <rect x="7.6" y="7" width="7.8" height="1.6" rx="0.8" fill={B} />
+    <rect x="7.6" y="10.4" width="7.8" height="1.6" rx="0.8" fill={SL} />
+    <rect x="7.6" y="13.8" width="4.5" height="1.6" rx="0.8" fill={SL} />
+    <path d="M16.4 13.2 l3.4 3.4 l-4.6 4.6 l-3.4 0 l0 -3.4 Z" fill={Y} />
+    <path d="M16.4 13.2 l3.4 3.4" stroke={R} strokeWidth="1.4" strokeLinecap="round" />
+  </Svg>
+);
+
+const Learning: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M7 11 V14.8 C7 16.4 9.2 17.4 12 17.4 S17 16.4 17 14.8 V11" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <path d="M12 5 L22 9 L12 13 L2 9 Z" fill={B} />
+    <path d="M21.5 9.2 V13.6" stroke={Y} strokeWidth="1.3" strokeLinecap="round" />
+    <circle cx="21.5" cy="14.1" r="1.1" fill={Y} />
+  </Svg>
+);
+
+const Build: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <rect x="6.5" y="14.5" width="11" height="5.2" rx="1.1" fill={B} />
+    <rect x="8.2" y="9.3" width="7.6" height="5.2" rx="1.1" fill={G} />
+    <rect x="9.8" y="4.1" width="4.4" height="5.2" rx="1.1" fill={Y} />
+  </Svg>
+);
+
+const Store: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M4 8.5 L5.6 4.5 H18.4 L20 8.5 Z" fill={B} />
+    <g stroke={W} strokeWidth="1" opacity="0.85">
+      <path d="M8 4.7 L7.2 8.3" /><path d="M12 4.7 V8.3" /><path d="M16 4.7 L16.8 8.3" />
+    </g>
+    <rect x="5" y="8.5" width="14" height="11" rx="1.2" fill={W} stroke={OUT} strokeWidth="0.8" />
+    <rect x="10" y="12.6" width="4" height="7" rx="0.5" fill={B} />
+    <rect x="6.8" y="11.5" width="2.6" height="2.6" rx="0.5" fill={Y} />
+    <rect x="14.6" y="11.5" width="2.6" height="2.6" rx="0.5" fill={Y} />
+  </Svg>
+);
+
+const Settings: FC<P> = ({ size }) => (
+  <Svg size={size}>
+    <path d="M12 2.6 l1.5 1 1.8 .25 1.8 -.55 1.35 1.35 -.55 1.8 .25 1.8 1 1.5 0 2 -1 1.5 -.25 1.8 .55 1.8 -1.35 1.35 -1.8 -.55 -1.8 .25 -1.5 1 -2 0 -1.5 -1 -1.8 -.25 -1.8 .55 -1.35 -1.35 .55 -1.8 -.25 -1.8 -1 -1.5 0 -2 1 -1.5 .25 -1.8 -.55 -1.8 1.35 -1.35 1.8 .55 1.8 -.25 1.5 -1 z" fill={B} />
+    <circle cx="12" cy="12" r="3.3" fill={W} />
+    <circle cx="12" cy="12" r="1.55" fill={Y} />
+  </Svg>
+);
+
 export const APP_GLYPHS: Record<string, FC<P>> = {
   home: Home,
   planner: Calendar,
@@ -168,6 +309,22 @@ export const APP_GLYPHS: Record<string, FC<P>> = {
   timesheets: Timesheets,
   sops: Sops,
   trash: Trash,
+  recruiting: Recruiting,
+  onboarding: Onboarding,
+  reviews: Reviews,
+  candor: Candor,
+  announcements: Announcements,
+  kudos: Kudos,
+  surveys: Surveys,
+  "time-off": TimeOff,
+  tools: Tools,
+  assets: Assets,
+  policies: Policies,
+  agreements: Agreements,
+  learning: Learning,
+  build: Build,
+  store: Store,
+  settings: Settings,
 };
 
 export function hasAppGlyph(appKey: string): boolean {
