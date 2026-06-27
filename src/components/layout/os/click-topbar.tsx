@@ -77,6 +77,14 @@ export function ClickTopbar() {
           <span className="text-[13px] font-medium text-zinc-900 leading-none max-w-[160px] truncate">{orgName}</span>
           <ChevronDown className="w-3 h-3 text-zinc-500" />
         </button>
+        <Link
+          href="/calendar"
+          aria-label="Calendar"
+          title="Calendar"
+          className="h-7 w-7 inline-flex items-center justify-center rounded-md hover:bg-zinc-100"
+        >
+          <CalendarGlyph size={18} />
+        </Link>
         <WorkspaceMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={switcherRef} />
       </div>
 
@@ -124,14 +132,6 @@ export function ClickTopbar() {
           {pinnedTools.length > 0 ? (
             <span aria-hidden className="w-px h-3.5 bg-zinc-200 mx-0.5" />
           ) : null}
-          <Link
-            href="/calendar"
-            aria-label="Calendar"
-            title="Calendar"
-            className="p-1 rounded-md hover:bg-zinc-100 inline-flex items-center justify-center"
-          >
-            <CalendarGlyph size={18} />
-          </Link>
           <Link
             href="/inbox"
             aria-label="Inbox"
