@@ -27,10 +27,10 @@ export function DotsLoader({
     <span className={`wwk-dots${className ? ` ${className}` : ""}`} role="status" aria-label={label ?? "Loading"} style={style}>
       <span className="wwk-dots__box" style={{ width: size, height: size }}>
         <span className="wwk-dots__stage" style={{ transform: `scale(${scale})` }}>
-          <span className="wwk-dots__dot" />
-          <span className="wwk-dots__dot" />
-          <span className="wwk-dots__dot" />
-          <span className="wwk-dots__dot" />
+          <span className="wwk-dots__dot"><span className="wwk-dots__pip" /></span>
+          <span className="wwk-dots__dot"><span className="wwk-dots__pip" /></span>
+          <span className="wwk-dots__dot"><span className="wwk-dots__pip" /></span>
+          <span className="wwk-dots__dot"><span className="wwk-dots__pip" /></span>
         </span>
       </span>
       {label ? <span className="wwk-dots__label">{label}</span> : null}
