@@ -13,7 +13,7 @@ import { useState, type DragEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ChevronDown, ChevronRight, Lock, Folder as FolderIcon, Loader2,
+  ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen, Loader2,
   Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, ListChecks,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -244,7 +244,7 @@ export function SpaceTreeRow({
       </div>
 
       {expanded ? (
-        <ul className="ml-[18px] mt-0.5 mb-1 border-l border-zinc-200/70 pl-2">
+        <ul className="ml-[13px] mt-0.5 mb-1 border-l border-zinc-200/70 pl-1.5">
           {loading && data === null ? (
             <li className="px-2 py-1 inline-flex items-center gap-1.5 text-[11.5px] text-zinc-400">
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -324,7 +324,7 @@ function FolderTreeRow({
           const ok = await moveTreeItem(p, folder.id);
           if (ok) { setExpanded(true); onChanged(); }
         }}
-        className={`relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
+        className={`relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
       >
         <button
           type="button"
@@ -334,10 +334,15 @@ function FolderTreeRow({
           aria-expanded={expanded}
           disabled={!hasChildren}
         >
-          <FolderIcon
-            className={`h-4 w-4 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity " : ""}${hasChildren ? "text-amber-500 fill-amber-300" : "text-zinc-400"}`}
-            style={folder.color ? { color: folder.color } : undefined}
-          />
+          {(() => {
+            const FolderGlyph = expanded && hasChildren ? FolderOpen : FolderIcon;
+            return (
+              <FolderGlyph
+                className={`h-4 w-4 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity " : ""}${hasChildren ? "text-amber-500 fill-amber-300" : "text-zinc-400"}`}
+                style={folder.color ? { color: folder.color } : undefined}
+              />
+            );
+          })()}
           {hasChildren ? (
             <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/folderrow:opacity-100 transition-opacity text-zinc-600">
               {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -368,7 +373,7 @@ function FolderTreeRow({
        (folder.boards.length > 0 ||
         folder.docs.length > 0 ||
         folder.childFolders.length > 0) ? (
-        <ul className="ml-[18px] mt-0.5 border-l border-zinc-200/70 pl-2">
+        <ul className="ml-[13px] mt-0.5 border-l border-zinc-200/70 pl-1.5">
           {folder.childFolders.map((cf) => (
             <FolderTreeRow
               key={cf.id}
@@ -403,7 +408,7 @@ function BoardTreeRow({
       <div
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "board", id: board.id })}
-        className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
+        className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
       >
         <button
           type="button"
@@ -438,7 +443,7 @@ function TableTreeRow({
   const router = useRouter();
   return (
     <li className="group/tablerow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
@@ -460,7 +465,7 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
   const router = useRouter();
   return (
     <li className="group/docrow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
@@ -481,7 +486,7 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
   return (
     <li className="group/wbrow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
