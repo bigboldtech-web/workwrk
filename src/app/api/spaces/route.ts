@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { createSpace, listSpacesForUser } from "@/lib/space";
+import { createBoard } from "@/lib/board";
 
 const MANAGER_LEVELS = new Set([
   "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR",
@@ -73,6 +74,18 @@ export async function POST(req: Request) {
       linkedKraIds: parsed.data.linkedKraIds,
       settings: parsed.data.settings,
     });
+    // Seed a starter List so the Space is never empty (ClickUp parity).
+    // Best-effort: a board failure must not fail Space creation.
+    try {
+      await createBoard({
+        organizationId: c.organizationId,
+        userId: c.userId,
+        spaceId: space.id,
+        name: "List",
+      });
+    } catch (boardErr) {
+      console.error("[Spaces POST] default list creation failed", boardErr);
+    }
     return NextResponse.json({ space }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
