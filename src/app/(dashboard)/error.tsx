@@ -37,6 +37,11 @@ export default function DashboardError({
         {error?.digest ? (
           <p className="mt-2 text-[11px] text-zinc-400">Reference: {error.digest}</p>
         ) : null}
+        {process.env.NODE_ENV !== "production" && error?.message ? (
+          <pre className="mt-3 text-left text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-md p-3 overflow-auto max-h-56 whitespace-pre-wrap">
+            {error.message}
+          </pre>
+        ) : null}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           <button
             type="button"
