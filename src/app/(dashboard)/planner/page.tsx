@@ -7,8 +7,9 @@
 // Google push mirrors out). Phase 1 of the Planner.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Loader2, X, Plus } from "lucide-react";
+import { PlannerCommandBar } from "@/components/layout/os/planner-command-bar";
 
 interface PlannerEvent {
   id: string; source: "task" | "item"; external: boolean;
@@ -34,6 +35,8 @@ function eventColor(e: PlannerEvent): string {
 
 export default function PlannerPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialMeet = searchParams.get("meet") === "1";
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [data, setData] = useState<PlannerEvent[] | null>(null);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
@@ -80,7 +83,7 @@ export default function PlannerPage() {
   const label = `${weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${addDays(weekStart, 6).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       <div className="px-6 h-12 flex items-center gap-3 border-b border-zinc-200 dark:border-[#2A2F38] shrink-0">
         <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Planner</div>
         <div className="flex items-center gap-1 ml-2">
@@ -152,6 +155,7 @@ export default function PlannerPage() {
       </div>
 
       {draft ? <CreateEventPopover draft={draft} onClose={() => setDraft(null)} onCreated={() => { setDraft(null); load(); }} /> : null}
+      <PlannerCommandBar onCreated={load} initialMeet={initialMeet} />
     </div>
   );
 }
