@@ -14,7 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, Loader2,
-  Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, List as ListIcon,
+  Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, ListChecks,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceMoreTrigger } from "./space-more-menu";
@@ -205,15 +205,16 @@ export function SpaceTreeRow({
         <button
           type="button"
           onClick={toggle}
-          className="h-4 w-4 inline-flex items-center justify-center text-zinc-500 hover:text-zinc-800 shrink-0"
+          className="relative shrink-0 inline-flex items-center justify-center"
           aria-label={expanded ? "Collapse Space" : "Expand Space"}
           aria-expanded={expanded}
         >
-          {expanded ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
+          <span className="group-hover/space:opacity-0 transition-opacity">
+            <EntityTile size="sm" icon={space.icon} color={space.color} name={space.name} />
+          </span>
+          <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-zinc-600">
+            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </span>
         </button>
         <Link
           href={`/spaces/${space.slug}`}
@@ -221,7 +222,6 @@ export function SpaceTreeRow({
             isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
           }`}
         >
-          <EntityTile size="sm" icon={space.icon} color={space.color} name={space.name} />
           <span className="min-w-0 flex-1 truncate">{space.name}</span>
           {space.visibility === "PRIVATE" ? (
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
@@ -324,21 +324,33 @@ function FolderTreeRow({
           const ok = await moveTreeItem(p, folder.id);
           if (ok) { setExpanded(true); onChanged(); }
         }}
-        className={`relative flex h-7 items-center gap-2 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
+        className={`relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
       >
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="h-4 w-4 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 shrink-0"
+          onClick={() => hasChildren && setExpanded((v) => !v)}
+          className="relative h-4 w-4 shrink-0 inline-flex items-center justify-center"
           aria-label={expanded ? "Collapse folder" : "Expand folder"}
+          aria-expanded={expanded}
           disabled={!hasChildren}
         >
+          <FolderIcon
+            className={`h-4 w-4 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity " : ""}${hasChildren ? "text-amber-500 fill-amber-300" : "text-zinc-400"}`}
+            style={folder.color ? { color: folder.color } : undefined}
+          />
           {hasChildren ? (
-            expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />
+            <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/folderrow:opacity-100 transition-opacity text-zinc-600">
+              {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            </span>
           ) : null}
         </button>
-        <EntityTile size="sm" icon={folder.icon} color={folder.color} name={folder.name} fallbackIcon={FolderIcon} />
-        <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-700">{folder.name}</span>
+        <button
+          type="button"
+          onClick={() => hasChildren && setExpanded((v) => !v)}
+          className="min-w-0 flex-1 truncate text-[12px] text-zinc-700 text-left"
+        >
+          {folder.name}
+        </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/folderrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
@@ -398,7 +410,7 @@ function BoardTreeRow({
           onClick={() => router.push(`/boards/${board.slug}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <EntityTile size="sm" icon={board.icon} color={board.color} name={board.name} fallbackIcon={ListIcon} />
+          <ListChecks className="h-4 w-4 shrink-0" style={{ color: board.color ?? "#10B981" }} />
           <span className="min-w-0 flex-1 truncate">{board.name}</span>
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
@@ -432,7 +444,7 @@ function TableTreeRow({
           onClick={() => router.push(`/tables/${table.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <EntityTile size="sm" color="#0EA5E9" fallbackIcon={TableIcon} name={table.name} />
+          <TableIcon className="h-4 w-4 shrink-0 text-sky-500" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
         </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/tablerow:opacity-100 transition-opacity">
@@ -454,7 +466,7 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
           onClick={() => router.push(`/docs/${doc.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <EntityTile size="sm" color="#3B82F6" fallbackIcon={FileText} name={doc.title} />
+          <FileText className="h-4 w-4 shrink-0 text-blue-500" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
         </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/docrow:opacity-100 transition-opacity">
@@ -475,7 +487,7 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <EntityTile size="sm" color="#F59E0B" fallbackIcon={WhiteboardIcon} name={whiteboard.name} />
+          <WhiteboardIcon className="h-4 w-4 shrink-0 text-amber-500" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled whiteboard"}</span>
         </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/wbrow:opacity-100 transition-opacity">
