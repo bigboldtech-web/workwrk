@@ -774,8 +774,7 @@ function CalendarSidebar() {
   return (
     <>
       <ul>
-        <NavItem href="/calendar?calendar=my" Icon={Calendar} label="My Calendar" />
-        <NavItem href="/calendar?calendar=team" Icon={Calendar} label="Team Calendar" />
+        <NavItem href="/planner" Icon={Calendar} label="Planner" />
         <NavItem href="/timesheets" Icon={Calendar} label="Timesheets" />
       </ul>
       <SectionLabel>Integrations</SectionLabel>
@@ -1267,7 +1266,7 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files"],
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
     newAction: { label: "New Space", event: "home-new-space" } },
-  { key: "planner", label: "Calendar", Icon: Calendar, defaultHref: "/calendar",
+  { key: "planner", label: "Calendar", Icon: Calendar, defaultHref: "/planner",
     matchPaths: ["/calendar", "/planner"], Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true },
   { key: "ai", label: "AI", Icon: BloomMark, defaultHref: "/sidekick",
