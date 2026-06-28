@@ -190,7 +190,7 @@ function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
   const newNote = async () => {
     setCreating(true);
     try {
-      const body: Record<string, unknown> = { title: "Untitled note" };
+      const body: Record<string, unknown> = { title: "New doc" };
       // Notes created from a specific Space chip get tagged to that
       // Space so the chip count stays consistent on next refresh.
       if (activeSpaceId !== "all" && activeSpaceId !== "unscoped") {

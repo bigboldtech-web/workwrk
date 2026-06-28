@@ -9,9 +9,10 @@
 // for management, opening the existing FolderMoreTrigger /
 // BoardMoreTrigger / ShareBoardButton components.
 
-import { useState, type DragEvent } from "react";
+import { useState, useEffect, useRef, type DragEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { refreshSidebar, onSidebarRefresh } from "./sidebar-refresh";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen, Loader2,
   Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, ListChecks,
@@ -184,6 +185,15 @@ export function SpaceTreeRow({
     onReloadSpaces();
   };
 
+  // Re-fetch this Space's children whenever anything in the app signals a
+  // sidebar change (create / rename / move / delete), so the tree stays live
+  // without a page reload. A ref keeps the listener subscribed once.
+  const liveRef = useRef({ expanded, loadChildren });
+  useEffect(() => { liveRef.current = { expanded, loadChildren }; });
+  useEffect(() => onSidebarRefresh(() => {
+    if (liveRef.current.expanded) liveRef.current.loadChildren();
+  }), []);
+
   return (
     <li className="group/space relative">
       <div
@@ -196,7 +206,7 @@ export function SpaceTreeRow({
           const p = readTreeDrag(e);
           if (!p) return;
           const ok = await moveTreeItem(p, null);
-          if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); }
+          if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); refreshSidebar(); }
         }}
         className={`relative flex h-7 items-center gap-2 px-2 rounded-md ${
           rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
@@ -210,10 +220,10 @@ export function SpaceTreeRow({
           aria-expanded={expanded}
         >
           <span className="group-hover/space:opacity-0 transition-opacity">
-            <EntityTile size="sm" icon={space.icon} color={space.color} name={space.name} />
+            <EntityTile size="xs" icon={space.icon} color={space.color} name={space.name} />
           </span>
           <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-zinc-600">
-            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </span>
         </button>
         <Link
@@ -322,14 +332,14 @@ function FolderTreeRow({
           const p = readTreeDrag(e);
           if (!p) return;
           const ok = await moveTreeItem(p, folder.id);
-          if (ok) { setExpanded(true); onChanged(); }
+          if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
         className={`relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
       >
         <button
           type="button"
           onClick={() => hasChildren && setExpanded((v) => !v)}
-          className="relative h-4 w-4 shrink-0 inline-flex items-center justify-center"
+          className="relative h-3.5 w-3.5 shrink-0 inline-flex items-center justify-center"
           aria-label={expanded ? "Collapse folder" : "Expand folder"}
           aria-expanded={expanded}
           disabled={!hasChildren}
@@ -338,7 +348,7 @@ function FolderTreeRow({
             const FolderGlyph = expanded && hasChildren ? FolderOpen : FolderIcon;
             return (
               <FolderGlyph
-                className={`h-4 w-4 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity " : ""}${hasChildren ? "text-amber-500 fill-amber-300" : "text-zinc-400"}`}
+                className={`h-3.5 w-3.5 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity " : ""}${hasChildren ? "text-amber-500 fill-amber-300" : "text-zinc-400"}`}
                 style={folder.color ? { color: folder.color } : undefined}
               />
             );
@@ -415,7 +425,7 @@ function BoardTreeRow({
           onClick={() => router.push(`/boards/${board.slug}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <ListChecks className="h-4 w-4 shrink-0" style={{ color: board.color ?? "#10B981" }} />
+          <ListChecks className="h-3.5 w-3.5 shrink-0" style={{ color: board.color ?? "#10B981" }} />
           <span className="min-w-0 flex-1 truncate">{board.name}</span>
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
@@ -449,7 +459,7 @@ function TableTreeRow({
           onClick={() => router.push(`/tables/${table.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <TableIcon className="h-4 w-4 shrink-0 text-sky-500" />
+          <TableIcon className="h-3.5 w-3.5 shrink-0 text-sky-500" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
         </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/tablerow:opacity-100 transition-opacity">
@@ -471,7 +481,7 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
           onClick={() => router.push(`/docs/${doc.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <FileText className="h-4 w-4 shrink-0 text-blue-500" />
+          <FileText className="h-3.5 w-3.5 shrink-0 text-blue-500" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
         </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/docrow:opacity-100 transition-opacity">
@@ -492,7 +502,7 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <WhiteboardIcon className="h-4 w-4 shrink-0 text-amber-500" />
+          <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-amber-500" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled whiteboard"}</span>
         </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/wbrow:opacity-100 transition-opacity">

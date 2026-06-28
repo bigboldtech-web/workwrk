@@ -178,7 +178,7 @@ export default function NotesPage() {
     try {
       const res = await fetch("/api/docs", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled note", content: { blocks: [] } }),
+        body: JSON.stringify({ title: "New doc", content: { blocks: [] } }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => null);

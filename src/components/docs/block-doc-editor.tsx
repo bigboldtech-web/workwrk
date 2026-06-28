@@ -28,6 +28,7 @@ import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block,
 import { collectLegacyCustomEmbeds, rehydrateMirrorWithLegacyEmbeds } from "./legacy-embed-preserve";
 import dynamic from "next/dynamic";
 import { BlockNoteCanvas } from "./blocknote-canvas";
+import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import type { PartialBlock } from "@blocknote/core";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -292,6 +293,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // the new value; the next PUT carries it back so the server can
   // reject (409) when another writer has moved on without us.
   const lastUpdatedAtRef = useRef<string | null>(null);
+  // Last title we told the sidebar about — so we only re-fetch the tree when the
+  // title actually changes, not on every body-autosave.
+  const lastSyncedTitleRef = useRef<string | null>(null);
   const [conflict, setConflict] = useState(false);
 
   const refetchComments = useCallback(async () => {
@@ -410,6 +414,12 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       // Track the new server-side updatedAt so the next PUT can prove
       // the local view is still in sync.
       if (data?.doc?.updatedAt) lastUpdatedAtRef.current = data.doc.updatedAt;
+      // Keep the sidebar's copy of this doc's name live without a reload.
+      const savedTitle = title.trim() || "Untitled note";
+      if (savedTitle !== lastSyncedTitleRef.current) {
+        lastSyncedTitleRef.current = savedTitle;
+        refreshSidebar();
+      }
     } catch { toast("Couldn't save"); }
     finally {
       saveInFlightRef.current = false;

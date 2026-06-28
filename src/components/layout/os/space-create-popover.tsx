@@ -15,6 +15,7 @@ import {
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
+import { refreshSidebar } from "./sidebar-refresh";
 import { MenuItem, MenuList, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
 
 interface Props {
@@ -87,6 +88,7 @@ export function SpaceCreateTrigger({
           onCreated={() => {
             setOpen(false);
             onCreated?.();
+      refreshSidebar();
           }}
         />
       </MorePortal>
@@ -119,7 +121,7 @@ function SpaceCreateMenu({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "Untitled note",
+          title: "New doc",
           entityType: "SPACE",
           entityId: spaceId,
         }),
@@ -128,6 +130,7 @@ function SpaceCreateMenu({
       const id = data?.doc?.id;
       if (!id) throw new Error();
       onCreated?.();
+      refreshSidebar();
       router.push(`/docs/${id}`);
     } catch {
       toast("Couldn't create doc");
@@ -148,6 +151,7 @@ function SpaceCreateMenu({
       const id = data?.whiteboard?.id;
       if (!id) throw new Error();
       onCreated?.();
+      refreshSidebar();
       router.push(`/whiteboards/${id}`);
     } catch {
       toast("Couldn't create whiteboard");
@@ -168,6 +172,7 @@ function SpaceCreateMenu({
       const id = data?.id ?? data?.data?.id;
       if (!id) throw new Error();
       onCreated?.();
+      refreshSidebar();
       router.push(`/tables/${id}`);
     } catch {
       toast("Couldn't create database");

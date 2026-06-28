@@ -30,6 +30,7 @@ import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { ShareSpaceDialog } from "./share-space-dialog";
 import { SpaceTreeRow } from "./space-tree-row";
+import { onSidebarRefresh, refreshSidebar } from "./sidebar-refresh";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
@@ -407,6 +408,9 @@ function HomeSidebar() {
     reload();
   }, [reload]);
 
+  // Keep the Spaces list live when anything mutates the tree from anywhere.
+  useEffect(() => onSidebarRefresh(reload), [reload]);
+
   // Subscribe to /api/preferences for sectionsOrder. Updates live when
   // CustomizePanel saves (dispatches workwrk:prefs-changed).
   useEffect(() => {
@@ -733,7 +737,7 @@ function HomeSidebar() {
       <NewSpaceDialog
         open={newSpaceOpen}
         onOpenChange={setNewSpaceOpen}
-        onCreated={() => void reload()}
+        onCreated={() => { void reload(); refreshSidebar(); }}
       />
 
       {boardDialogSpaceId ? (
@@ -742,7 +746,7 @@ function HomeSidebar() {
           onOpenChange={(v) => { if (!v) setBoardDialogSpaceId(null); }}
           spaceId={boardDialogSpaceId}
           folderId={null}
-          onCreated={() => { setBoardDialogSpaceId(null); void reload(); }}
+          onCreated={() => { setBoardDialogSpaceId(null); refreshSidebar(); }}
         />
       ) : null}
 
@@ -752,7 +756,7 @@ function HomeSidebar() {
           onOpenChange={(v) => { if (!v) setFolderDialogSpaceId(null); }}
           spaceId={folderDialogSpaceId}
           parentFolderId={null}
-          onCreated={() => { setFolderDialogSpaceId(null); void reload(); }}
+          onCreated={() => { setFolderDialogSpaceId(null); refreshSidebar(); }}
         />
       ) : null}
 
@@ -1275,9 +1279,9 @@ export const APPS: AppEntry[] = [
   { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team/alignment",
     matchPaths: ["/team", "/people", "/organization", "/kra-kpi"],
     Sidebar: TeamsSidebar, category: "Core", defaultPinned: true },
-  { key: "docs", label: "Notes", Icon: FileText, defaultHref: "/docs",
+  { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
     matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
-    newAction: { label: "New note", href: "/docs?new=1" } },
+    newAction: { label: "New doc", href: "/docs?new=1" } },
   { key: "dashboards", label: "Dashboard", Icon: BarChart3, defaultHref: "/dashboards",
     matchPaths: ["/dashboards"], Sidebar: DashboardsSidebar,
     category: "Core", defaultPinned: true,
