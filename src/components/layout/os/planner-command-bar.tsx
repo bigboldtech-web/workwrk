@@ -5,7 +5,7 @@
 // "Meet with" picker that schedules a meeting with anyone in one click.
 
 import { useEffect, useRef, useState } from "react";
-import { Search, Users, Sparkles, Loader2 } from "lucide-react";
+import { Search, Sparkles, Loader2 } from "lucide-react";
 import { useOsShell } from "./shell-context";
 
 interface Person { id: string; firstName?: string | null; lastName?: string | null; email: string; avatar?: string | null }
@@ -94,9 +94,6 @@ export function PlannerCommandBar({ onCreated, initialMeet }: { onCreated: () =>
           placeholder="Search events, teammates, commands…"
           className="flex-1 min-w-0 bg-transparent outline-none text-[13.5px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400"
         />
-        <button type="button" onClick={() => setShowMeet((s) => !s)} className="h-8 px-3 rounded-full text-[12.5px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10 inline-flex items-center gap-1.5 shrink-0">
-          <Users className="w-3.5 h-3.5" /> Meet with
-        </button>
         <button type="button" onClick={runCommand} title="Ask the Brain" className="h-8 w-8 rounded-full bg-[#0073EA] text-white flex items-center justify-center hover:bg-[#0060B9] shrink-0">
           <Sparkles className="w-3.5 h-3.5" />
         </button>

@@ -10,6 +10,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Loader2, X, Plus } from "lucide-react";
 import { PlannerCommandBar } from "@/components/layout/os/planner-command-bar";
+import { PlannerSidePanel } from "@/components/layout/os/planner-side-panel";
+import { PlannerConnectGate } from "@/components/layout/os/planner-connect-gate";
 
 interface PlannerEvent {
   id: string; source: "task" | "item"; external: boolean;
@@ -41,6 +43,7 @@ export default function PlannerPage() {
   const [data, setData] = useState<PlannerEvent[] | null>(null);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ day: Date; hour: number } | null>(null);
+  const [connected, setConnected] = useState<boolean | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const weekStart = useMemo(() => startOfWeek(anchor), [anchor]);
@@ -57,7 +60,15 @@ export default function PlannerPage() {
   }, [weekStart]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 7 * HOUR_PX; }, []);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 7 * HOUR_PX; }, [connected]);
+
+  // The Planner is a calendar view — gate it behind a connected calendar.
+  useEffect(() => {
+    fetch("/api/integrations/google-calendar")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { connected?: boolean } | null) => setConnected(Boolean(d?.connected)))
+      .catch(() => setConnected(false));
+  }, []);
 
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const iv = setInterval(() => setNow(new Date()), 60_000); return () => clearInterval(iv); }, []);
@@ -92,70 +103,84 @@ export default function PlannerPage() {
           <button type="button" onClick={() => setAnchor(addDays(weekStart, 7))} className="h-7 w-7 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center" aria-label="Next week"><ChevronRight className="h-4 w-4 text-zinc-600 dark:text-zinc-300" /></button>
         </div>
         <div className="text-[13.5px] font-medium text-zinc-700 dark:text-zinc-200">{label}</div>
-        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : null}
+        {connected && loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : null}
       </div>
 
-      <div className="flex shrink-0 border-b border-zinc-200 dark:border-[#2A2F38] pr-[14px]">
-        <div className="w-14 shrink-0" />
-        {days.map((d) => {
-          const today = sameDay(d, now);
-          return (
-            <div key={d.toISOString()} className="flex-1 py-2 text-center">
-              <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{DOW[d.getDay()]}</div>
-              <div className={`text-[15px] font-semibold mt-0.5 inline-flex items-center justify-center ${today ? "h-7 w-7 rounded-full bg-[#2F8BF0] text-white" : "text-zinc-800 dark:text-zinc-100"}`}>{d.getDate()}</div>
-            </div>
-          );
-        })}
-      </div>
+      {connected === null ? (
+        <div className="flex-1 flex items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-zinc-300" /></div>
+      ) : connected === false ? (
+        <PlannerConnectGate />
+      ) : (
+        <>
+          <div className="flex flex-1 min-h-0">
+            <PlannerSidePanel onCreated={load} autoFocusMeet={initialMeet} />
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto relative">
-        <div className="flex" style={{ height: DAY_PX }}>
-          <div className="w-14 shrink-0 relative">
-            {Array.from({ length: 24 }, (_, h) => (
-              <div key={h} className="absolute right-2 -translate-y-1/2 text-[10.5px] text-zinc-400 dark:text-zinc-500" style={{ top: h * HOUR_PX }}>{h === 0 ? "" : fmtHour(h)}</div>
-            ))}
-          </div>
-          {days.map((day) => {
-            const events = (byDay.get(day.toDateString()) ?? []).filter((e) => !e.allDay);
-            const isToday = sameDay(day, now);
-            return (
-              <div key={day.toISOString()} className="flex-1 relative border-l border-zinc-100 dark:border-[#23272F] cursor-pointer" onClick={(e) => onColumnClick(day, e)}>
-                {Array.from({ length: 24 }, (_, h) => (
-                  <div key={h} className="absolute left-0 right-0 border-b border-zinc-100 dark:border-[#1F232A]" style={{ top: h * HOUR_PX, height: HOUR_PX, background: h < WORK_START || h >= WORK_END ? "rgba(120,130,150,0.05)" : undefined }} />
-                ))}
-                {isToday ? (
-                  <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: (minutesOfDay(now) / 60) * HOUR_PX }}>
-                    <div className="h-px bg-[#FB5A6F]" />
-                    <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-[#FB5A6F]" />
-                  </div>
-                ) : null}
-                {events.map((e) => {
-                  const s = new Date(e.start), en = new Date(e.end);
-                  const top = (minutesOfDay(s) / 60) * HOUR_PX;
-                  const height = Math.max(20, ((en.getTime() - s.getTime()) / 3_600_000) * HOUR_PX);
-                  const color = eventColor(e);
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="flex shrink-0 border-b border-zinc-200 dark:border-[#2A2F38] pr-[14px]">
+                <div className="w-14 shrink-0" />
+                {days.map((d) => {
+                  const today = sameDay(d, now);
                   return (
-                    <button
-                      key={e.id}
-                      type="button"
-                      onClick={(ev) => { ev.stopPropagation(); openEvent(e); }}
-                      className="absolute left-1 right-1 rounded-md px-1.5 py-0.5 text-left overflow-hidden hover:brightness-95"
-                      style={{ top, height, background: `${color}22`, borderLeft: `3px solid ${color}` }}
-                      title={e.title}
-                    >
-                      <div className="text-[11px] font-medium truncate" style={{ color }}>{e.title}</div>
-                      <div className="text-[10px] truncate" style={{ color: `${color}cc` }}>{s.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
-                    </button>
+                    <div key={d.toISOString()} className="flex-1 py-2 text-center">
+                      <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{DOW[d.getDay()]}</div>
+                      <div className={`text-[15px] font-semibold mt-0.5 inline-flex items-center justify-center ${today ? "h-7 w-7 rounded-full bg-[#2F8BF0] text-white" : "text-zinc-800 dark:text-zinc-100"}`}>{d.getDate()}</div>
+                    </div>
                   );
                 })}
               </div>
-            );
-          })}
-        </div>
-      </div>
 
-      {draft ? <CreateEventPopover draft={draft} onClose={() => setDraft(null)} onCreated={() => { setDraft(null); load(); }} /> : null}
-      <PlannerCommandBar onCreated={load} initialMeet={initialMeet} />
+              <div ref={scrollRef} className="flex-1 overflow-y-auto relative">
+                <div className="flex" style={{ height: DAY_PX }}>
+                  <div className="w-14 shrink-0 relative">
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <div key={h} className="absolute right-2 -translate-y-1/2 text-[10.5px] text-zinc-400 dark:text-zinc-500" style={{ top: h * HOUR_PX }}>{h === 0 ? "" : fmtHour(h)}</div>
+                    ))}
+                  </div>
+                  {days.map((day) => {
+                    const events = (byDay.get(day.toDateString()) ?? []).filter((e) => !e.allDay);
+                    const isToday = sameDay(day, now);
+                    return (
+                      <div key={day.toISOString()} className="flex-1 relative border-l border-zinc-100 dark:border-[#23272F] cursor-pointer" onClick={(e) => onColumnClick(day, e)}>
+                        {Array.from({ length: 24 }, (_, h) => (
+                          <div key={h} className="absolute left-0 right-0 border-b border-zinc-100 dark:border-[#1F232A]" style={{ top: h * HOUR_PX, height: HOUR_PX, background: h < WORK_START || h >= WORK_END ? "rgba(120,130,150,0.05)" : undefined }} />
+                        ))}
+                        {isToday ? (
+                          <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: (minutesOfDay(now) / 60) * HOUR_PX }}>
+                            <div className="h-px bg-[#FB5A6F]" />
+                            <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-[#FB5A6F]" />
+                          </div>
+                        ) : null}
+                        {events.map((e) => {
+                          const s = new Date(e.start), en = new Date(e.end);
+                          const top = (minutesOfDay(s) / 60) * HOUR_PX;
+                          const height = Math.max(20, ((en.getTime() - s.getTime()) / 3_600_000) * HOUR_PX);
+                          const color = eventColor(e);
+                          return (
+                            <button
+                              key={e.id}
+                              type="button"
+                              onClick={(ev) => { ev.stopPropagation(); openEvent(e); }}
+                              className="absolute left-1 right-1 rounded-md px-1.5 py-0.5 text-left overflow-hidden hover:brightness-95"
+                              style={{ top, height, background: `${color}22`, borderLeft: `3px solid ${color}` }}
+                              title={e.title}
+                            >
+                              <div className="text-[11px] font-medium truncate" style={{ color }}>{e.title}</div>
+                              <div className="text-[10px] truncate" style={{ color: `${color}cc` }}>{s.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {draft ? <CreateEventPopover draft={draft} onClose={() => setDraft(null)} onCreated={() => { setDraft(null); load(); }} /> : null}
+          <PlannerCommandBar onCreated={load} initialMeet={false} />
+        </>
+      )}
     </div>
   );
 }

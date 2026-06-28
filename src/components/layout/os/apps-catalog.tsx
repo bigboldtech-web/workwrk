@@ -1270,7 +1270,7 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files"],
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
     newAction: { label: "New Space", event: "home-new-space" } },
-  { key: "planner", label: "Calendar", Icon: Calendar, defaultHref: "/planner",
+  { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner",
     matchPaths: ["/calendar", "/planner"], Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true },
   { key: "ai", label: "AI", Icon: BloomMark, defaultHref: "/sidekick",
