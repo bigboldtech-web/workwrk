@@ -9,7 +9,7 @@
 // for management, opening the existing FolderMoreTrigger /
 // BoardMoreTrigger / ShareBoardButton components.
 
-import { useState } from "react";
+import { useState, type DragEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -23,6 +23,56 @@ import { BoardMoreTrigger } from "./board-more-menu";
 import { FolderMoreTrigger } from "./folder-more-menu";
 import { TableMoreTrigger } from "./table-more-menu";
 import { SidebarQuickStar } from "./sidebar-quick-star";
+
+// ---------------------------------------------------------------------------
+// Drag-and-drop: move sidebar items between folders / to the Space root.
+// Only the entities a folder can physically hold are draggable today: lists
+// (boards) re-parent via board.folderId; folders nest via folder.parentFolderId.
+// Drop targets are folders (drop INTO) and the Space row (drop to root).
+// ---------------------------------------------------------------------------
+const DND_MIME = "application/x-wwrk-tree-item";
+type DragKind = "board" | "folder";
+interface DragPayload { kind: DragKind; id: string }
+
+function startTreeDrag(e: DragEvent, payload: DragPayload) {
+  e.dataTransfer.setData(DND_MIME, JSON.stringify(payload));
+  e.dataTransfer.effectAllowed = "move";
+}
+
+function readTreeDrag(e: DragEvent): DragPayload | null {
+  const raw = e.dataTransfer.getData(DND_MIME);
+  if (!raw) return null;
+  try { return JSON.parse(raw) as DragPayload; } catch { return null; }
+}
+
+// True while a draggable tree item hovers — `types` is readable during dragover
+// even though getData() is not.
+function isTreeDrag(e: DragEvent): boolean {
+  return e.dataTransfer.types.includes(DND_MIME);
+}
+
+// Persist a move. destFolderId === null means the Space root.
+async function moveTreeItem(p: DragPayload, destFolderId: string | null): Promise<boolean> {
+  if (p.kind === "board") {
+    const res = await fetch(`/api/boards/${p.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folderId: destFolderId }),
+    });
+    return res.ok;
+  }
+  if (p.kind === "folder") {
+    // Guard the obvious self-drop; deeper cycles are capped server-side.
+    if (p.id === destFolderId) return false;
+    const res = await fetch(`/api/folders/${p.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ parentFolderId: destFolderId }),
+    });
+    return res.ok;
+  }
+  return false;
+}
 
 interface SpaceRow {
   id: string;
@@ -98,6 +148,7 @@ export function SpaceTreeRow({
   const [expanded, setExpanded] = useState(false);
   const [data, setData] = useState<ChildrenPayload | null>(null);
   const [loading, setLoading] = useState(false);
+  const [rootDragOver, setRootDragOver] = useState(false);
 
   const loadChildren = () => {
     setLoading(true);
@@ -136,8 +187,19 @@ export function SpaceTreeRow({
   return (
     <li className="group/space relative">
       <div
+        onDragOver={(e) => { if (isTreeDrag(e)) { e.preventDefault(); setRootDragOver(true); } }}
+        onDragLeave={() => setRootDragOver(false)}
+        onDrop={async (e) => {
+          if (!isTreeDrag(e)) return;
+          e.preventDefault();
+          setRootDragOver(false);
+          const p = readTreeDrag(e);
+          if (!p) return;
+          const ok = await moveTreeItem(p, null);
+          if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); }
+        }}
         className={`relative flex h-7 items-center gap-2 px-2 rounded-md ${
-          isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
+          rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
         }`}
       >
         <button
@@ -239,6 +301,7 @@ function FolderTreeRow({
   onChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const hasChildren =
     folder.boards.length > 0 ||
     folder.docs.length > 0 ||
@@ -247,7 +310,22 @@ function FolderTreeRow({
 
   return (
     <li className="group/folderrow relative">
-      <div className="relative flex h-7 items-center gap-2 pr-1.5 rounded-md hover:bg-white/80">
+      <div
+        draggable
+        onDragStart={(e) => { e.stopPropagation(); startTreeDrag(e, { kind: "folder", id: folder.id }); }}
+        onDragOver={(e) => { if (isTreeDrag(e)) { e.preventDefault(); e.stopPropagation(); setDragOver(true); } }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={async (e) => {
+          if (!isTreeDrag(e)) return;
+          e.preventDefault(); e.stopPropagation();
+          setDragOver(false);
+          const p = readTreeDrag(e);
+          if (!p) return;
+          const ok = await moveTreeItem(p, folder.id);
+          if (ok) { setExpanded(true); onChanged(); }
+        }}
+        className={`relative flex h-7 items-center gap-2 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
+      >
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -310,7 +388,11 @@ function BoardTreeRow({
   const router = useRouter();
   return (
     <li className="group/boardrow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80">
+      <div
+        draggable
+        onDragStart={(e) => startTreeDrag(e, { kind: "board", id: board.id })}
+        className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
+      >
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
