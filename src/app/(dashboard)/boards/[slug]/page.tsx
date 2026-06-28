@@ -11,66 +11,19 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
   Lock, Share2, Sparkles, ChevronRight,
-  List as ListIcon, LayoutGrid, Calendar as CalIcon, GanttChart, Table2,
-  ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
   ListFilter, Glasses, Zap, Folder as FolderIcon,
-  Activity as ActivityIcon, Grid3X3, ListTree, SquareStack,
-  type LucideIcon,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
-import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
-import type { ViewType } from "@/generated/prisma";
+import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { canEditSpace } from "@/lib/space";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
-import { NewViewTrigger } from "@/components/board-view/view-create-popover";
-import { ViewTabMenu } from "@/components/board-view/view-tab-menu";
 import { BoardFavoriteButton } from "@/components/board-view/board-favorite-button";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { getEffectivePreferences } from "@/lib/preferences";
 
 export const dynamic = "force-dynamic";
-
-const VIEW_ICONS: Record<ViewType, LucideIcon> = {
-  TABLE: ListIcon,
-  KANBAN: LayoutGrid,
-  CALENDAR: CalIcon,
-  GANTT: GanttChart,
-  TIMELINE: AlignLeft,
-  CHART: BarChart3,
-  DOC: FileText,
-  FORM: ClipboardList,
-  DASHBOARD: BarChart3,
-  MAP: MapPin,
-  WORKLOAD: GaugeCircle,
-  WHITEBOARD: Brush,
-  FILE_GALLERY: Table2,
-  CARDS: SquareStack,
-  PIVOT: Grid3X3,
-  HIERARCHY: ListTree,
-  ACTIVITY: ActivityIcon,
-};
-
-const VIEW_COLORS: Record<ViewType, string> = {
-  TABLE: "text-emerald-500",
-  KANBAN: "text-violet-500",
-  CALENDAR: "text-orange-500",
-  GANTT: "text-amber-500",
-  TIMELINE: "text-blue-500",
-  CHART: "text-rose-500",
-  DOC: "text-blue-500",
-  FORM: "text-violet-500",
-  DASHBOARD: "text-rose-500",
-  MAP: "text-red-500",
-  WORKLOAD: "text-cyan-500",
-  WHITEBOARD: "text-cyan-500",
-  FILE_GALLERY: "text-zinc-500",
-  CARDS: "text-indigo-500",
-  PIVOT: "text-emerald-600",
-  HIERARCHY: "text-teal-600",
-  ACTIVITY: "text-sky-500",
-};
 
 export default async function BoardPage(props: {
   params: Promise<{ slug: string }>;
@@ -212,44 +165,13 @@ export default async function BoardPage(props: {
 
       {/* View tabs — clicking switches the active view via ?view=<id>.
           Phase 65: tabs were previously inert (always rendered default). */}
-      <ViewTabStrip className="px-6">
-        {board.views.map((v) => {
-          // Monday-style Table views are TABLE type with config.grid; show
-          // the Table icon to distinguish them from the List tab.
-          const isMondayTable = v.type === "TABLE" && (v.config as { grid?: string } | null)?.grid === "monday";
-          const VIcon = isMondayTable ? Table2 : (VIEW_ICONS[v.type] ?? ListIcon);
-          const color = isMondayTable ? "text-emerald-500" : (VIEW_COLORS[v.type] ?? "text-zinc-600");
-          const active = v.id === activeView?.id;
-          const isDefault = v.id === defaultView?.id;
-          const href = isDefault
-            ? `/boards/${board.slug}`
-            : `/boards/${board.slug}?view=${v.id}`;
-          return (
-            <ViewTab
-              key={v.id}
-              icon={VIcon}
-              iconClassName={color}
-              label={v.name}
-              active={active}
-              href={href}
-              trailing={
-                <span
-                  className="opacity-0 group-hover/view:opacity-100 transition-opacity"
-                  onClick={(e) => {
-                    // Tab body is now a single <Link>; keep menu clicks
-                    // (trigger + panel rows) from navigating the tab.
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                >
-                  <ViewTabMenu boardId={board.id} view={v} />
-                </span>
-              }
-            />
-          );
-        })}
-        <NewViewTrigger boardId={board.id} />
-      </ViewTabStrip>
+      <BoardViewTabs
+        views={board.views}
+        boardId={board.id}
+        boardSlug={board.slug}
+        activeViewId={activeView?.id ?? null}
+        defaultViewId={defaultView?.id ?? null}
+      />
 
       {/* Action row — the functional filter bar lives inside BoardCanvas
           (it owns the items it filters); this row keeps task creation. */}
