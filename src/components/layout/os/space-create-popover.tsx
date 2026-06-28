@@ -179,9 +179,12 @@ function SpaceCreateMenu({
   return (
     <MenuList className="px-1.5">
       <MenuSectionLabel className="px-2">Create</MenuSectionLabel>
+
+      {/* Structural items — the two things you make most, with descriptions. */}
       <MenuItem
         variant="inset"
         icon={ListChecks}
+        iconClassName="text-zinc-700 dark:text-zinc-200"
         label="List"
         description="Track tasks, projects, people & more"
         onClick={onRequestBoard}
@@ -189,13 +192,19 @@ function SpaceCreateMenu({
       <MenuItem
         variant="inset"
         icon={FolderPlus}
+        iconClassName="text-zinc-700 dark:text-zinc-200"
         label="Folder"
         description="Group Lists, Docs & more"
         onClick={onRequestFolder}
       />
+
+      <MenuSeparator />
+
+      {/* Content primitives — single line, one accent color each (no gradients). */}
       <MenuItem
         variant="inset"
         icon={FileText}
+        iconClassName="text-blue-500"
         label="Doc"
         busy={busyKind === "doc"}
         onClick={createDoc}
@@ -203,12 +212,14 @@ function SpaceCreateMenu({
       <MenuItem
         variant="inset"
         icon={BarChart3}
+        iconClassName="text-violet-500"
         label="Dashboard"
         onClick={stub("Dashboard")}
       />
       <MenuItem
         variant="inset"
         icon={Brush}
+        iconClassName="text-amber-500"
         label="Whiteboard"
         busy={busyKind === "whiteboard"}
         onClick={createWhiteboard}
@@ -216,14 +227,15 @@ function SpaceCreateMenu({
       <MenuItem
         variant="inset"
         icon={Database}
+        iconClassName="text-emerald-500"
         label="Database"
-        description="Flexible spreadsheet · CRM, lists, anything"
         busy={busyKind === "database"}
         onClick={createDatabase}
       />
       <MenuItem
         variant="inset"
         icon={ClipboardCheck}
+        iconClassName="text-indigo-500"
         label="Form"
         onClick={stub("Form")}
       />
@@ -233,6 +245,7 @@ function SpaceCreateMenu({
       <MenuItem
         variant="inset"
         icon={Download}
+        iconClassName="text-zinc-500 dark:text-zinc-400"
         label="Imports"
         trailing={<ChevronRight className="h-3.5 w-3.5 text-zinc-400" />}
         onClick={stub("Imports")}
@@ -240,6 +253,7 @@ function SpaceCreateMenu({
       <MenuItem
         variant="inset"
         icon={LayoutTemplate}
+        iconClassName="text-zinc-500 dark:text-zinc-400"
         label="Templates"
         onClick={() => { onCreated?.(); openTemplateCenter({ applyContext: { spaceId } }); }}
       />
