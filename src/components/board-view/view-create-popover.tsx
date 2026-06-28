@@ -260,7 +260,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       {label ? (
-        <div className="text-[10.5px] uppercase tracking-wide text-zinc-400 font-semibold mb-1.5">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">
           {label}
         </div>
       ) : null}
