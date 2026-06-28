@@ -21,7 +21,6 @@ import { SpaceMoreTrigger } from "./space-more-menu";
 import { SpaceCreateTrigger } from "./space-create-popover";
 import { BoardMoreTrigger } from "./board-more-menu";
 import { FolderMoreTrigger } from "./folder-more-menu";
-import { ShareBoardButton } from "./share-board-button";
 import { TableMoreTrigger } from "./table-more-menu";
 import { SidebarQuickStar } from "./sidebar-quick-star";
 
@@ -137,7 +136,7 @@ export function SpaceTreeRow({
   return (
     <li className="group/space relative">
       <div
-        className={`flex h-7 items-center gap-2 px-2 rounded-md ${
+        className={`relative flex h-7 items-center gap-2 px-2 rounded-md ${
           isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
         }`}
       >
@@ -166,7 +165,7 @@ export function SpaceTreeRow({
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
           ) : null}
         </Link>
-        <span className="opacity-0 group-hover/space:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/space:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="space" id={space.id} />
           <SpaceMoreTrigger
             space={space}
@@ -208,7 +207,6 @@ export function SpaceTreeRow({
                 <BoardTreeRow
                   key={b.id}
                   board={b}
-                  spaceName={space.name}
                   onChanged={refresh}
                 />
               ))}
@@ -249,7 +247,7 @@ function FolderTreeRow({
 
   return (
     <li className="group/folderrow relative">
-      <div className="flex h-7 items-center gap-2 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -263,7 +261,7 @@ function FolderTreeRow({
         </button>
         <EntityTile size="sm" icon={folder.icon} color={folder.color} name={folder.name} fallbackIcon={FolderIcon} />
         <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-700">{folder.name}</span>
-        <span className="opacity-0 group-hover/folderrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/folderrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
             folder={{ id: folder.id, name: folder.name, icon: folder.icon, color: folder.color }}
@@ -291,7 +289,7 @@ function FolderTreeRow({
             />
           ))}
           {folder.boards.map((b) => (
-            <BoardTreeRow key={b.id} board={b} spaceName={spaceName} onChanged={onChanged} />
+            <BoardTreeRow key={b.id} board={b} onChanged={onChanged} />
           ))}
           {folder.docs.map((d) => (
             <DocTreeRow key={d.id} doc={d} />
@@ -304,17 +302,15 @@ function FolderTreeRow({
 
 function BoardTreeRow({
   board,
-  spaceName,
   onChanged,
 }: {
   board: BoardChild;
-  spaceName: string;
   onChanged: () => void;
 }) {
   const router = useRouter();
   return (
     <li className="group/boardrow relative">
-      <div className="flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
@@ -326,14 +322,8 @@ function BoardTreeRow({
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
           ) : null}
         </button>
-        <span className="opacity-0 group-hover/boardrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/boardrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="board" id={board.id} />
-          <ShareBoardButton
-            boardId={board.id}
-            boardName={board.name}
-            visibility={board.visibility}
-            parentSpaceName={spaceName}
-          />
           <BoardMoreTrigger
             board={{ id: board.id, name: board.name, slug: board.slug, icon: board.icon, color: board.color }}
             onUpdated={onChanged}
@@ -354,7 +344,7 @@ function TableTreeRow({
   const router = useRouter();
   return (
     <li className="group/tablerow relative">
-      <div className="flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
@@ -363,7 +353,7 @@ function TableTreeRow({
           <EntityTile size="sm" color="#0EA5E9" fallbackIcon={TableIcon} name={table.name} />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
         </button>
-        <span className="opacity-0 group-hover/tablerow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/tablerow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="table" id={table.id} />
           <TableMoreTrigger table={{ id: table.id, name: table.name }} onUpdated={onChanged} />
         </span>
@@ -376,7 +366,7 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
   const router = useRouter();
   return (
     <li className="group/docrow relative">
-      <div className="flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
@@ -385,7 +375,7 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
           <EntityTile size="sm" color="#3B82F6" fallbackIcon={FileText} name={doc.title} />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
         </button>
-        <span className="opacity-0 group-hover/docrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/docrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="doc" id={doc.id} />
         </span>
       </div>
@@ -397,7 +387,7 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
   return (
     <li className="group/wbrow relative">
-      <div className="flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
@@ -406,7 +396,7 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
           <EntityTile size="sm" color="#F59E0B" fallbackIcon={WhiteboardIcon} name={whiteboard.name} />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled whiteboard"}</span>
         </button>
-        <span className="opacity-0 group-hover/wbrow:opacity-100 transition-opacity shrink-0 inline-flex items-center gap-0.5">
+        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/wbrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
         </span>
       </div>
