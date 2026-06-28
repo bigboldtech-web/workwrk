@@ -81,7 +81,7 @@ export async function POST(req: Request) {
         organizationId: c.organizationId,
         userId: c.userId,
         spaceId: space.id,
-        name: "List",
+        name: "Tasks",
       });
     } catch (boardErr) {
       console.error("[Spaces POST] default list creation failed", boardErr);

@@ -29,7 +29,7 @@ import { ShareBoardButton } from "@/components/layout/os/share-board-button";
 import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
 import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
 import { EntityTile } from "@/components/ui/entity-tile";
-import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
+import { SpaceViewTabs } from "./space-view-tabs";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
@@ -601,37 +601,7 @@ export default async function SpacePage(props: {
       {/* View tabs — matches ClickUp's Space-level view switcher.
           Overview + List are functional; others stub until the
           cross-board renderers ship. */}
-      <ViewTabStrip className="px-6">
-        {VIEW_TABS.map((t) => {
-          const active = view === t.key;
-          if (t.enabled) {
-            return (
-              <ViewTab
-                key={t.key}
-                icon={t.Icon}
-                label={t.label}
-                active={active}
-                href={t.key === "overview" ? `/spaces/${space.slug}` : `/spaces/${space.slug}?view=${t.key}`}
-              />
-            );
-          }
-          return (
-            <ViewTab
-              key={t.key}
-              icon={t.Icon}
-              label={t.label}
-              active={active}
-              title="Coming soon"
-              className="text-zinc-400 cursor-not-allowed hover:text-zinc-400"
-              trailing={
-                <span className="ml-1 text-[9px] uppercase tracking-wide text-zinc-400 bg-zinc-100 px-1 py-px rounded">
-                  soon
-                </span>
-              }
-            />
-          );
-        })}
-      </ViewTabStrip>
+      <SpaceViewTabs view={view} spaceSlug={space.slug} />
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">

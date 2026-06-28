@@ -1,0 +1,36 @@
+"use client";
+
+// Client wrapper for the Space view-tab strip. The lucide icon components are
+// functions, which a Server Component cannot pass across the boundary into the
+// client ViewTab. Keeping the icons here (client -> client) fixes that crash.
+
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
+import {
+  LayoutDashboard, List as ListIcon, Kanban, Users as UsersIcon,
+  Calendar as CalendarIcon, GanttChart, type LucideIcon,
+} from "lucide-react";
+
+const VIEW_TABS: { key: string; label: string; Icon: LucideIcon }[] = [
+  { key: "overview", label: "Overview", Icon: LayoutDashboard },
+  { key: "list", label: "List", Icon: ListIcon },
+  { key: "board", label: "Board", Icon: Kanban },
+  { key: "team", label: "Team", Icon: UsersIcon },
+  { key: "calendar", label: "Calendar", Icon: CalendarIcon },
+  { key: "gantt", label: "Gantt", Icon: GanttChart },
+];
+
+export function SpaceViewTabs({ view, spaceSlug }: { view: string; spaceSlug: string }) {
+  return (
+    <ViewTabStrip className="px-6">
+      {VIEW_TABS.map((t) => (
+        <ViewTab
+          key={t.key}
+          icon={t.Icon}
+          label={t.label}
+          active={view === t.key}
+          href={t.key === "overview" ? `/spaces/${spaceSlug}` : `/spaces/${spaceSlug}?view=${t.key}`}
+        />
+      ))}
+    </ViewTabStrip>
+  );
+}
