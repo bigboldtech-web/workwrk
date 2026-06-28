@@ -216,7 +216,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
       ) : null}
 
       <aside
-        className={`fixed top-0 right-0 bottom-0 z-50 w-[400px] max-w-full bg-white border-l border-zinc-200 shadow-2xl transition-transform duration-200 ${
+        className={`fixed top-0 right-0 bottom-0 z-50 w-[360px] max-w-full bg-white border-l border-zinc-200 shadow-2xl transition-transform duration-200 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
         aria-hidden={!open}
@@ -232,7 +232,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
               >
                 <X className="w-4 h-4" />
               </button>
-              <span className="text-sm font-medium">Fields</span>
+              <span className="text-[13px] font-semibold">Fields</span>
             </div>
 
             <ViewTabStrip className="px-5 mt-3">
@@ -248,7 +248,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search for new or existing fields"
-                  className="w-full h-8 pl-8 pr-3 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
+                  className="w-full h-8 pl-8 pr-3 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-[var(--os-brand)]"
                 />
               </div>
             </div>
@@ -279,7 +279,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
 
               {ordered.length > 0 ? (
                 <section className="mt-6 px-2">
-                  <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">
                     {onToggleHidden ? "Shown" : "On this board"}
                   </h3>
                   <ul className="space-y-1">
@@ -292,7 +292,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
                   </ul>
                   {onToggleHidden && hiddenList.length > 0 ? (
                     <>
-                      <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2 mt-5">Hidden</h3>
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2 mt-5">Hidden</h3>
                       <ul className="space-y-1">
                         {hiddenList.map((f) => (
                           <FieldRow key={f.key} {...fieldRowProps(f)} />
@@ -306,7 +306,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
               {/* Built-in fields — show/hide the fixed columns per view. */}
               {onToggleHidden ? (
                 <section className="mt-6 px-2">
-                  <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Built-in fields</h3>
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Built-in fields</h3>
                   <ul className="space-y-1">
                     {BUILTIN_FIELD_TOGGLES.map((b) => {
                       const isHidden = hidden.has(b.key);
@@ -353,7 +353,7 @@ function CreateNewTab({
         if (items.length === 0) return null;
         return (
           <section key={group}>
-            <h3 className="text-xs uppercase tracking-wide text-zinc-500 px-2 mb-1">{group === "AI" ? "AI fields" : group}</h3>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 px-2 mb-1">{group === "AI" ? "AI fields" : group}</h3>
             <ul className="space-y-0.5">
               {items.map((e) => (
                 <li key={e.type}>
