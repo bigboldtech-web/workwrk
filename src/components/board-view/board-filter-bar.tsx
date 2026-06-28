@@ -303,9 +303,9 @@ export function BoardFilterBar({ items, filters, statuses, onChange }: BoardFilt
       <button
         type="button"
         onClick={() => onChange({ ...filters, hideDone: !filters.hideDone })}
-        className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11.5px] transition-colors ${
+        className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-[12.5px] transition-colors ${
           filters.hideDone
-            ? "bg-zinc-900 text-white border-zinc-900"
+            ? "bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)] text-[var(--os-brand)] border-[var(--os-brand)] font-medium"
             : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
         }`}
         title={filters.hideDone ? "Showing open items only" : "Hide done items"}
@@ -318,7 +318,7 @@ export function BoardFilterBar({ items, filters, statuses, onChange }: BoardFilt
         <button
           type="button"
           onClick={() => onChange(EMPTY_FILTERS)}
-          className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11.5px] text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+          className="inline-flex items-center gap-1 h-8 px-2 rounded-md text-[12.5px] text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
         >
           <X className="w-3 h-3" />
           Clear
@@ -340,7 +340,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
+        className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
         aria-label="Search items"
       >
         <Search className="w-3.5 h-3.5" />
@@ -348,7 +348,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
     );
   }
   return (
-    <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 bg-white">
+    <div className="inline-flex items-center gap-1.5 h-8 px-2 rounded-md border border-zinc-200 bg-white">
       <Search className="w-3 h-3 text-zinc-400 shrink-0" />
       <input
         ref={inputRef}
@@ -400,9 +400,9 @@ function FacetMenu({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11.5px] transition-colors ${
+        className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-[12.5px] transition-colors ${
           activeCount > 0
-            ? "bg-zinc-900 text-white border-zinc-900"
+            ? "bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)] text-[var(--os-brand)] border-[var(--os-brand)] font-medium"
             : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
         }`}
       >
