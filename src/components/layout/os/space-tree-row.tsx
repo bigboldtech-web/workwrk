@@ -310,7 +310,7 @@ function BoardTreeRow({
   const router = useRouter();
   return (
     <li className="group/boardrow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
@@ -344,7 +344,7 @@ function TableTreeRow({
   const router = useRouter();
   return (
     <li className="group/tablerow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
@@ -366,7 +366,7 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
   const router = useRouter();
   return (
     <li className="group/docrow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
@@ -387,7 +387,7 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
   return (
     <li className="group/wbrow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-6 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-2 pl-2 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
