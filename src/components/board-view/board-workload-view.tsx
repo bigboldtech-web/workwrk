@@ -64,7 +64,7 @@ export function BoardWorkloadView({ initialItems, statuses, variant = "workload"
     return (
       <div className="flex gap-3 overflow-x-auto pb-2">
         {buckets.map((b) => (
-          <div key={b.key} className="flex flex-col w-[280px] flex-shrink-0 rounded-lg bg-zinc-50/80 p-2">
+          <div key={b.key} className="flex flex-col w-[300px] flex-shrink-0 rounded-lg bg-zinc-50/80 p-2">
             <PersonHeader bucket={b} statuses={statuses} />
             <div className="flex-1 space-y-2 min-h-[40px] mt-2">
               {b.rows.map((it) => {
@@ -189,7 +189,7 @@ function StatusBar({ rows, statuses }: { rows: BoardItemRow[]; statuses: StatusO
   if (total === 0) return <span className="text-[11px] text-zinc-300">—</span>;
   return (
     <div
-      className="flex h-3 w-full max-w-[420px] rounded-sm overflow-hidden ring-1 ring-black/5"
+      className="flex h-3.5 w-full max-w-[420px] rounded-sm overflow-hidden ring-1 ring-black/5"
       title={segs.map((s) => `${s.label}: ${s.count}`).join("  ·  ")}
     >
       {segs.map((s) => (

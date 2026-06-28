@@ -641,7 +641,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                 const collapsed = collapsedGroups.has(b.key);
                 return (
                   <React.Fragment key={b.key}>
-                    <tr className="bg-zinc-50/80 border-y border-zinc-200">
+                    <tr className="bg-zinc-100/60 border-y border-zinc-200">
                       <td colSpan={colCount} className="px-3 py-1.5" style={b.color ? { boxShadow: `inset 3px 0 0 ${b.color}` } : undefined}>
                         <div className="inline-flex items-center gap-2">
                           <button

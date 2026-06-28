@@ -235,7 +235,7 @@ function KanbanCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onOpen}
-      className={`rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ${
+      className={`rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-sm ${
         canEdit ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
       } ${isDragging ? "opacity-40" : ""} hover:shadow-sm transition-shadow`}
     >
