@@ -141,7 +141,7 @@ export default async function BoardPage(props: {
         </button>
         <button
           type="button"
-          className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+          className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
           title="Automations"
         >
           <Zap className="w-3.5 h-3.5 text-amber-500" />
@@ -149,14 +149,14 @@ export default async function BoardPage(props: {
         </button>
         <button
           type="button"
-          className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+          className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
         >
           <Sparkles className="w-3.5 h-3.5 text-violet-500" />
           Ask
         </button>
         <button
           type="button"
-          className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+          className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
         >
           <Share2 className="w-3.5 h-3.5" />
           Share

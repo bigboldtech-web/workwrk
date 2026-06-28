@@ -21,14 +21,14 @@ export function ViewTabStrip({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-1 border-b border-zinc-200", className)}>
+    <div className={cn("flex items-center gap-1.5 border-b border-zinc-200", className)}>
       {children}
     </div>
   );
 }
 
 const tabVariants = cva(
-  "group/view inline-flex items-center gap-1.5 px-2 py-2 text-[13px] border-b-2 -mb-px transition-colors whitespace-nowrap",
+  "group/view inline-flex items-center gap-1.5 px-2 py-2 text-[13px] border-b-[2.5px] -mb-px transition-colors whitespace-nowrap",
   {
     variants: {
       active: {
@@ -67,7 +67,7 @@ export function ViewTab({
   const inner = (
     <>
       {Icon ? (
-        <Icon className={cn("w-3.5 h-3.5 shrink-0", active ? "text-zinc-900" : iconClassName)} />
+        <Icon className={cn("w-4 h-4 shrink-0", active ? "text-zinc-900" : iconClassName)} />
       ) : null}
       <span className="truncate">{label}</span>
       {trailing}
