@@ -14,7 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, Loader2,
-  Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus,
+  Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, List as ListIcon,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceMoreTrigger } from "./space-more-menu";
@@ -320,7 +320,7 @@ function BoardTreeRow({
           onClick={() => router.push(`/boards/${board.slug}`)}
           className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
-          <EntityTile size="sm" icon={board.icon} color={board.color} name={board.name} />
+          <EntityTile size="sm" icon={board.icon} color={board.color} name={board.name} fallbackIcon={ListIcon} />
           <span className="min-w-0 flex-1 truncate">{board.name}</span>
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
