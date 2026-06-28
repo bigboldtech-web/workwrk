@@ -30,6 +30,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import {
   List as ListIcon,
   GanttChart,
@@ -203,20 +204,20 @@ export function NewBoardDialog({
     <Dialog open={open} onOpenChange={handle}>
       <DialogContent className="max-w-[560px] p-0">
         <div className="px-5 pt-5 pb-2">
-          <DialogTitle className="text-base font-semibold">New Board</DialogTitle>
-          <DialogDescription className="text-xs text-zinc-500 mt-1">
+          <DialogTitle className="text-[15px] font-semibold">New Board</DialogTitle>
+          <DialogDescription className="text-[12px] text-zinc-500 mt-1">
             Name your Board and pick how it should open.
           </DialogDescription>
         </div>
 
         <div className="px-5 pb-3">
-          <label className="text-xs font-medium block mb-1">Name</label>
+          <label className="text-[12.5px] font-medium block mb-1.5">Name</label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Onboarding tasks, Sprint board, Customer feedback"
-            className="w-full h-9 px-3 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
+            className="w-full h-8 px-3 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-[var(--os-brand)]"
             autoFocus
           />
         </div>
@@ -228,7 +229,7 @@ export function NewBoardDialog({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search or describe a view to create"
-              className="w-full h-9 px-3 pr-9 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full h-8 px-3 pr-9 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-[var(--os-brand)]"
             />
             <button
               type="button"
@@ -244,18 +245,18 @@ export function NewBoardDialog({
         <div className="px-3 pb-3 max-h-[55vh] overflow-y-auto">
           {tiles.popular.length > 0 ? (
             <>
-              <div className="text-xs text-zinc-500 px-3 pt-2 pb-1">Popular</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 px-3 pt-2 pb-1">Popular</div>
               <TileGrid tiles={tiles.popular} selectedKey={selectedTile} onPick={setSelectedTile} />
             </>
           ) : null}
           {tiles.integrations.length > 0 ? (
             <>
-              <div className="text-xs text-zinc-500 px-3 pt-3 pb-1">Embed an integration</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 px-3 pt-3 pb-1">Embed an integration</div>
               <TileGrid tiles={tiles.integrations} selectedKey={selectedTile} onPick={setSelectedTile} />
             </>
           ) : null}
           {tiles.popular.length + tiles.integrations.length === 0 ? (
-            <div className="px-3 py-6 text-sm text-zinc-500 text-center">
+            <div className="px-3 py-6 text-[13px] text-zinc-500 text-center">
               No views match &ldquo;{query.trim()}&rdquo;.
             </div>
           ) : null}
@@ -263,45 +264,25 @@ export function NewBoardDialog({
 
         <div className="px-5 py-3 border-t border-zinc-200 flex items-center justify-between gap-3">
           <label className="flex-1 cursor-pointer" onClick={() => setIsPrivate(!isPrivate)}>
-            <div className="text-[13px] font-medium text-zinc-900">Make Private</div>
-            <div className="text-[11.5px] text-zinc-500 leading-snug">
+            <div className="text-[12.5px] font-medium text-zinc-900">Make Private</div>
+            <div className="text-[12px] text-zinc-500 leading-snug">
               Tighter than the Space — only board members + the Space owner can read.
             </div>
           </label>
-          <span
-            role="switch"
-            aria-checked={isPrivate}
-            tabIndex={0}
-            onClick={() => setIsPrivate((v) => !v)}
-            onKeyDown={(e) => {
-              if (e.key === " " || e.key === "Enter") {
-                e.preventDefault();
-                setIsPrivate((v) => !v);
-              }
-            }}
-            className={`relative inline-flex w-7 h-4 rounded-full transition-colors cursor-pointer shrink-0 ${
-              isPrivate ? "bg-zinc-900" : "bg-zinc-300"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${
-                isPrivate ? "translate-x-3.5" : "translate-x-0.5"
-              }`}
-            />
-          </span>
+          <Switch checked={isPrivate} onChange={setIsPrivate} aria-label="Make board private" />
         </div>
 
-        {error ? <div className="px-5 py-2 text-xs text-red-500 bg-red-500/10">{error}</div> : null}
+        {error ? <div className="px-5 py-2 text-[12px] text-red-500 bg-red-500/10">{error}</div> : null}
 
         <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-zinc-200">
-          <button type="button" onClick={() => handle(false)} className="text-sm text-zinc-500 hover:text-zinc-900 px-3 py-2" disabled={submitting}>
+          <button type="button" onClick={() => handle(false)} className="text-[12.5px] text-zinc-500 hover:text-zinc-900 px-3 h-8 rounded-md" disabled={submitting}>
             Cancel
           </button>
           <button
             type="button"
             onClick={submit}
             disabled={submitting || !name.trim()}
-            className="px-4 py-2 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+            className="px-4 h-8 rounded-md text-[12.5px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {submitting ? "Creating…" : "Create Board"}
           </button>
@@ -330,21 +311,21 @@ function TileGrid({
             key={t.key}
             type="button"
             onClick={() => onPick(t.key)}
-            className={`flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors ${
+            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
               active
                 ? "bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
-                : "hover:bg-zinc-50"
+                : "hover:bg-zinc-100"
             }`}
           >
             <span
-              className="inline-flex items-center justify-center w-7 h-7 rounded"
+              className="inline-flex items-center justify-center w-7 h-7 rounded-[8px]"
               style={{ background: `${t.hue}22`, color: t.hue }}
             >
-              <t.Icon className="w-4 h-4" />
+              <t.Icon className="w-3.5 h-3.5" />
             </span>
-            <span className="text-sm flex items-baseline gap-1.5">
+            <span className="text-[13px] flex items-baseline gap-1.5">
               {t.label}
-              {t.sublabel ? <span className="text-xs text-zinc-500">{t.sublabel}</span> : null}
+              {t.sublabel ? <span className="text-[12px] text-zinc-500">{t.sublabel}</span> : null}
               {disabled ? <span className="text-[10px] uppercase tracking-wide text-zinc-500">Soon</span> : null}
             </span>
           </button>
