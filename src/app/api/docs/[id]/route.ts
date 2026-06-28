@@ -28,6 +28,11 @@ const putSchema = z.object({
   parentId: z.string().nullable().optional(),
   position: z.number().optional(),
   isFolder: z.boolean().optional(),
+  // Polymorphic anchor (which Space / Folder this doc lives under in the
+  // sidebar tree). Re-anchoring is how a doc moves between a Space root
+  // (entityType="SPACE") and a Folder (entityType="FOLDER").
+  entityType: z.string().max(40).nullable().optional(),
+  entityId: z.string().nullable().optional(),
 });
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -85,7 +90,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     parsed.data.title === undefined &&
     parsed.data.content === undefined &&
     parsed.data.excerpt === undefined &&
-    (parsed.data.parentId !== undefined || parsed.data.position !== undefined || parsed.data.isFolder !== undefined);
+    (parsed.data.parentId !== undefined || parsed.data.position !== undefined ||
+     parsed.data.isFolder !== undefined || parsed.data.entityType !== undefined ||
+     parsed.data.entityId !== undefined);
   if (isTreeOnly) {
     if (parsed.data.parentId === id) {
       return NextResponse.json({ error: "cannot nest a note under itself" }, { status: 400 });
@@ -96,8 +103,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         ...(parsed.data.parentId !== undefined ? { parentId: parsed.data.parentId } : {}),
         ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
         ...(parsed.data.isFolder !== undefined ? { isFolder: parsed.data.isFolder } : {}),
+        ...(parsed.data.entityType !== undefined ? { entityType: parsed.data.entityType } : {}),
+        ...(parsed.data.entityId !== undefined ? { entityId: parsed.data.entityId } : {}),
       },
-      select: { id: true, parentId: true, position: true, isFolder: true },
+      select: { id: true, parentId: true, position: true, isFolder: true, entityType: true, entityId: true },
     });
     return NextResponse.json({ doc });
   }

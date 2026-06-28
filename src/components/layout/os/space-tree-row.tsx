@@ -32,7 +32,7 @@ import { SidebarQuickStar } from "./sidebar-quick-star";
 // Drop targets are folders (drop INTO) and the Space row (drop to root).
 // ---------------------------------------------------------------------------
 const DND_MIME = "application/x-wwrk-tree-item";
-type DragKind = "board" | "folder";
+type DragKind = "board" | "folder" | "doc";
 interface DragPayload { kind: DragKind; id: string }
 
 function startTreeDrag(e: DragEvent, payload: DragPayload) {
@@ -52,23 +52,37 @@ function isTreeDrag(e: DragEvent): boolean {
   return e.dataTransfer.types.includes(DND_MIME);
 }
 
-// Persist a move. destFolderId === null means the Space root.
-async function moveTreeItem(p: DragPayload, destFolderId: string | null): Promise<boolean> {
+// Persist a move. dest.folderId === null means the Space root; dest.spaceId is
+// the Space the drop landed in (needed to re-anchor a doc back to the root).
+async function moveTreeItem(p: DragPayload, dest: { folderId: string | null; spaceId: string }): Promise<boolean> {
   if (p.kind === "board") {
     const res = await fetch(`/api/boards/${p.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ folderId: destFolderId }),
+      body: JSON.stringify({ folderId: dest.folderId }),
     });
     return res.ok;
   }
   if (p.kind === "folder") {
     // Guard the obvious self-drop; deeper cycles are capped server-side.
-    if (p.id === destFolderId) return false;
+    if (p.id === dest.folderId) return false;
     const res = await fetch(`/api/folders/${p.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ parentFolderId: destFolderId }),
+      body: JSON.stringify({ parentFolderId: dest.folderId }),
+    });
+    return res.ok;
+  }
+  if (p.kind === "doc") {
+    // Docs have no folderId column — they re-anchor via the polymorphic
+    // entityType/entityId pair the children API already reads.
+    const anchor = dest.folderId
+      ? { entityType: "FOLDER", entityId: dest.folderId }
+      : { entityType: "SPACE", entityId: dest.spaceId };
+    const res = await fetch(`/api/docs/${p.id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(anchor),
     });
     return res.ok;
   }
@@ -205,7 +219,7 @@ export function SpaceTreeRow({
           setRootDragOver(false);
           const p = readTreeDrag(e);
           if (!p) return;
-          const ok = await moveTreeItem(p, null);
+          const ok = await moveTreeItem(p, { folderId: null, spaceId: space.id });
           if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); refreshSidebar(); }
         }}
         className={`relative flex h-7 items-center gap-2 px-2 rounded-md ${
@@ -331,7 +345,7 @@ function FolderTreeRow({
           setDragOver(false);
           const p = readTreeDrag(e);
           if (!p) return;
-          const ok = await moveTreeItem(p, folder.id);
+          const ok = await moveTreeItem(p, { folderId: folder.id, spaceId });
           if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
         className={`relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
@@ -475,7 +489,11 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
   const router = useRouter();
   return (
     <li className="group/docrow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80">
+      <div
+        draggable
+        onDragStart={(e) => startTreeDrag(e, { kind: "doc", id: doc.id })}
+        className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
+      >
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
