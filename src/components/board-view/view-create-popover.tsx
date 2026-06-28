@@ -287,13 +287,13 @@ function ViewTileButton({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="flex items-center gap-2 px-2 py-2 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
+      className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-zinc-100 text-left disabled:opacity-50"
     >
       <span
-        className="h-6 w-6 rounded-md flex items-center justify-center text-white shrink-0"
+        className="h-7 w-7 rounded-[8px] flex items-center justify-center text-white shrink-0"
         style={{ backgroundColor: tile.swatch }}
       >
-        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <tile.Icon className="h-3 w-3" />}
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <tile.Icon className="h-3.5 w-3.5" />}
       </span>
       <span className="text-[12.5px] text-zinc-900 truncate">
         <span className="font-medium">{tile.label}</span>
@@ -308,13 +308,13 @@ function EmbedTileButton({ tile, onClick }: { tile: EmbedTile; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-2 px-2 py-2 rounded-md hover:bg-zinc-50 text-left"
+      className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-zinc-100 text-left"
     >
       <span
-        className="h-6 w-6 rounded-md flex items-center justify-center text-white shrink-0"
+        className="h-7 w-7 rounded-[8px] flex items-center justify-center text-white shrink-0"
         style={{ backgroundColor: tile.swatch }}
       >
-        <tile.Icon className="h-3 w-3" />
+        <tile.Icon className="h-3.5 w-3.5" />
       </span>
       <span className="text-[12.5px] text-zinc-700 truncate">{tile.label}</span>
     </button>
