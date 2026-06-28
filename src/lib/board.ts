@@ -162,7 +162,9 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
 
 function viewTypeDefaultLabel(t: ViewType): string {
   switch (t) {
-    case "TABLE":    return "Table";
+    // The default TABLE view renders as a clean grouped task List (ClickUp's
+    // basic view). A Monday-style "Table" is a separate, explicitly-added view.
+    case "TABLE":    return "List";
     case "KANBAN":   return "Board";
     case "CALENDAR": return "Calendar";
     case "GANTT":    return "Gantt";
