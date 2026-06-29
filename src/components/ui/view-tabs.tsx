@@ -28,12 +28,12 @@ export function ViewTabStrip({
 }
 
 const tabVariants = cva(
-  "group/view inline-flex items-center gap-1 px-1 py-1 text-[12px] border-b-[2.5px] -mb-px transition-colors whitespace-nowrap",
+  "group/view relative inline-flex items-center gap-1 px-1 py-1 text-[12px] transition-colors whitespace-nowrap",
   {
     variants: {
       active: {
-        true: "border-zinc-900 text-zinc-900 font-medium",
-        false: "border-transparent text-zinc-600 hover:text-zinc-900",
+        true: "text-zinc-900 font-medium",
+        false: "text-zinc-600 hover:text-zinc-900",
       },
     },
     defaultVariants: { active: false },
@@ -90,6 +90,9 @@ export function ViewTab({
       ) : null}
       <span className="truncate">{label}</span>
       {trailing}
+      {active ? (
+        <span className="pointer-events-none absolute -bottom-px left-2 right-2 h-[2px] rounded-full bg-zinc-900" />
+      ) : null}
     </>
   );
   const cls = cn(tabVariants({ active }), className);
