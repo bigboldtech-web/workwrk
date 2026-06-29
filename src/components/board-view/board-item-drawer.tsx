@@ -156,15 +156,15 @@ export function BoardItemDrawer({
         />
       ) : null}
 
-      {/* Drawer */}
-      <aside
-        className={`fixed top-0 right-0 bottom-0 z-50 w-[480px] max-w-full bg-white border-l border-zinc-200 shadow-2xl transition-transform duration-200 ${
-          open ? "translate-x-0" : "translate-x-full"
-        }`}
-        aria-hidden={!open}
-      >
-        {open ? (
-          <div className="flex flex-col h-full">
+      {/* Modal — big centered popup (ClickUp task view) */}
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" onClick={onClose}>
+          <div
+            className="relative w-[1000px] max-w-[95vw] h-[88vh] bg-white rounded-2xl border border-zinc-200 shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
             {/* Header */}
             <div className="px-5 py-3 border-b border-zinc-200 flex items-center gap-2">
               <button
@@ -210,22 +210,24 @@ export function BoardItemDrawer({
             {loading || !item ? (
               <div className="flex-1 px-5 py-6 text-sm text-zinc-500">Loading…</div>
             ) : (
-              <div className="flex-1 overflow-y-auto px-5 py-4">
-                <BoardItemDetail
-                  item={item}
-                  canEdit={canEdit}
-                  currentUserId={currentUserId}
-                  customFields={customFields}
-                  statusOptions={statusOptions}
-                  onPatch={patch}
-                  layout="drawer"
-                  onOpenItem={onOpenItem}
-                />
+              <div className="flex-1 overflow-y-auto px-8 py-6">
+                <div className="max-w-[760px] mx-auto">
+                  <BoardItemDetail
+                    item={item}
+                    canEdit={canEdit}
+                    currentUserId={currentUserId}
+                    customFields={customFields}
+                    statusOptions={statusOptions}
+                    onPatch={patch}
+                    layout="drawer"
+                    onOpenItem={onOpenItem}
+                  />
+                </div>
               </div>
             )}
           </div>
-        ) : null}
-      </aside>
+        </div>
+      ) : null}
     </>
   );
 }
