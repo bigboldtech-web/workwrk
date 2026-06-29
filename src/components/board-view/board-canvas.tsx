@@ -176,7 +176,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
 
   return (
     <>
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         <BoardFilterBar items={items} filters={filters} statuses={statuses} onChange={handleFiltersChange} />
         {filtersActive(filters) ? (
           <span className="text-[11px] text-zinc-400 tabular-nums">

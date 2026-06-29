@@ -28,7 +28,7 @@ export function ViewTabStrip({
 }
 
 const tabVariants = cva(
-  "group/view inline-flex items-center gap-1.5 px-2 py-2 text-[13px] border-b-[2.5px] -mb-px transition-colors whitespace-nowrap",
+  "group/view inline-flex items-center gap-1.5 px-2 py-1.5 text-[13px] border-b-[2.5px] -mb-px transition-colors whitespace-nowrap",
   {
     variants: {
       active: {

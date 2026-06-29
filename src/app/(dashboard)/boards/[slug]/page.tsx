@@ -77,7 +77,7 @@ export default async function BoardPage(props: {
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Title row — inline breadcrumb with Space tile + Folder + Board */}
-      <div className="px-6 pt-4 pb-2 flex items-center gap-1.5">
+      <div className="px-6 pt-3 pb-1.5 flex items-center gap-1.5">
         {/* Space tile + name */}
         <Link
           href={`/spaces/${board.space.slug}`}
@@ -175,7 +175,7 @@ export default async function BoardPage(props: {
 
       {/* Renderer — its single toolbar row (filters + Statuses/Fields + the
           "+ Task" passed below) is the one concise ClickUp-style toolbar. */}
-      <div className="flex-1 overflow-y-auto px-6 pt-3 pb-4">
+      <div className="flex-1 overflow-y-auto px-6 pt-2.5 pb-4">
         <BoardCanvas
           boardId={board.id}
           viewId={activeView?.id ?? null}
