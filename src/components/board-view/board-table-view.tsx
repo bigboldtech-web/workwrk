@@ -97,9 +97,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   })();
   const [groupBy, setGroupByState] = useState<string | null>(initialGroupBy);
 
-  // When the List is grouped by status, the status IS the group header, so the
-  // Status column is redundant (ClickUp hides it). The Monday Table keeps it.
-  const showStatus = monday || groupBy !== "status";
+  // The List always shows the status as an inline circle before the task name
+  // (click it to change status / task type) — never a separate Status column.
+  // Only the Monday-style Table keeps a Status column.
+  const showStatus = monday;
 
   // Direction for the grouped buckets. Default ascending. Persists per-view.
   const initialGroupDir: "asc" | "desc" = (() => {
