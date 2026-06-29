@@ -80,6 +80,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // Inline "Add Task": null = button shown; a string = the input is open. Enter
   // creates and keeps the input open (cleared) so you can keep typing tasks.
   const [addDraft, setAddDraft] = useState<string | null>(null);
+  // Per-group inline add (grouped view). Tracks which group's input is open.
+  const [groupAdd, setGroupAdd] = useState<{ key: string; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Group-by axis seeded from the saved view config (Phase 74). Null
   // means "no grouping" — strings can be "status" / "owner" / a field key.
@@ -449,7 +451,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     setBulkBusy(false);
   }, [selected]);
 
-  const handleAdd = useCallback(async (title?: string): Promise<BoardItemRow | null> => {
+  const handleAdd = useCallback(async (title?: string, status?: string): Promise<BoardItemRow | null> => {
     if (!canEdit) return null;
     setAdding(true);
     setError(null);
@@ -457,7 +459,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: title?.trim() || "New item", status: firstStatus }),
+        body: JSON.stringify({ title: title?.trim() || "New item", status: status ?? firstStatus }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -672,9 +674,47 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                         </div>
                       </td>
                     </tr>
-                    {!collapsed
-                      ? b.rows.flatMap((row) => renderRowAndSubtasks(row, 0))
-                      : null}
+                    {!collapsed ? (
+                      <>
+                        {b.rows.flatMap((row) => renderRowAndSubtasks(row, 0))}
+                        {canEdit ? (
+                          <tr className="hover:bg-zinc-50">
+                            <td colSpan={colCount} className="px-4 py-1.5 pl-10">
+                              {groupAdd?.key === b.key ? (
+                                <input
+                                  autoFocus
+                                  value={groupAdd.text}
+                                  onChange={(e) => setGroupAdd({ key: b.key, text: e.target.value })}
+                                  onKeyDown={async (e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      const t = groupAdd.text.trim();
+                                      if (!t) { setGroupAdd(null); return; }
+                                      // Create into this group's value when grouped by status.
+                                      await handleAdd(t, groupBy === "status" ? b.key : undefined);
+                                      setGroupAdd({ key: b.key, text: "" });
+                                    } else if (e.key === "Escape") {
+                                      setGroupAdd(null);
+                                    }
+                                  }}
+                                  onBlur={() => { if (!groupAdd.text.trim()) setGroupAdd(null); }}
+                                  placeholder="Task name, then Enter…"
+                                  className="w-full max-w-md bg-transparent outline-none text-sm text-zinc-900 placeholder:text-zinc-400"
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setGroupAdd({ key: b.key, text: "" })}
+                                  className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900"
+                                >
+                                  <Plus className="w-3.5 h-3.5" /> Add Task
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ) : null}
+                      </>
+                    ) : null}
                     {/* Monday-style per-group summary footer — aggregates
                         every column (stacked bars, people, sums…). */}
                     <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} />

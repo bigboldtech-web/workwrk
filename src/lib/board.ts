@@ -134,7 +134,9 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
         isDefault: true,
         isShared: true,
         ownerId: input.userId,
-        config: {},
+        // The default List opens grouped by status (ClickUp parity); other
+        // view types start ungrouped.
+        config: viewType === "TABLE" ? { groupBy: "status" } : {},
         displayOrder: 0,
       },
     });
