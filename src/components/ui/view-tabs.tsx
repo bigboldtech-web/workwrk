@@ -28,12 +28,13 @@ export function ViewTabStrip({
 }
 
 const tabVariants = cva(
-  "group/view relative inline-flex items-center gap-1 px-1 py-1 text-[12px] transition-colors whitespace-nowrap",
+  // Bold text always; gray when inactive, black when selected (ClickUp).
+  "group/view relative inline-flex items-center gap-1 px-1 py-1 text-[12px] font-semibold transition-colors whitespace-nowrap",
   {
     variants: {
       active: {
-        true: "text-zinc-900 font-medium",
-        false: "text-zinc-600 hover:text-zinc-900",
+        true: "text-zinc-900",
+        false: "text-zinc-500 hover:text-zinc-800",
       },
     },
     defaultVariants: { active: false },
@@ -79,12 +80,13 @@ export function ViewTab({
             className="w-[15px] h-[15px] rounded-[4px] inline-flex items-center justify-center shrink-0"
             style={{ backgroundColor: iconTileColor }}
           >
-            <Icon className="w-[10px] h-[10px] text-white" />
+            <Icon className="w-[10px] h-[10px] text-white" strokeWidth={2.75} />
           </span>
         ) : (
-          <Icon 
-            className={cn("w-3.5 h-3.5 shrink-0", active ? "text-zinc-900" : iconClassName)} 
-            style={!active && iconColor ? { color: iconColor } : undefined} 
+          <Icon
+            className={cn("w-3.5 h-3.5 shrink-0", active ? "text-zinc-900" : iconClassName)}
+            strokeWidth={2.5}
+            style={!active && iconColor ? { color: iconColor } : undefined}
           />
         )
       ) : null}
