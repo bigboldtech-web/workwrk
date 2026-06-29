@@ -1089,22 +1089,26 @@ function Row({
       </td>
       <td className="pl-1 pr-4 py-2">
         <div className="flex items-center gap-1.5" style={{ paddingLeft: indent * 20 }}>
-          {/* Expand caret always reserves its slot (keeps every row's circle/
-              title aligned). Always visible when there are subtasks or the row
-              is open; otherwise it appears on hover — clicking it opens the row
-              so you can add the first subtask. */}
-          <button
-            type="button"
-            onClick={onToggleExpand}
-            className={`inline-flex items-center justify-center w-4 h-4 rounded text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 shrink-0 transition-opacity ${hasSubtasks || expanded ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-            aria-label={expanded ? "Collapse subtasks" : hasSubtasks ? "Expand subtasks" : "Add subtask"}
-            title={expanded ? "Collapse" : hasSubtasks ? "Expand subtasks" : "Add subtask"}
-          >
-            {/* Filled caret — points right when collapsed, down when open. */}
-            <svg viewBox="0 0 8 8" className={`w-[11px] h-[11px] fill-current transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden>
-              <path d="M2 1 L6 4 L2 7 Z" />
-            </svg>
-          </button>
+          {/* Expand caret. Top-level tasks always reserve the slot (visible when
+              they have subtasks / are open, else on hover → add the first
+              subtask). Subtasks don't get the add-subtask arrow — only a spacer,
+              unless they already have nested children to expand. */}
+          {indent === 0 || hasSubtasks ? (
+            <button
+              type="button"
+              onClick={onToggleExpand}
+              className={`inline-flex items-center justify-center w-4 h-4 rounded text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 shrink-0 transition-opacity ${hasSubtasks || expanded ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+              aria-label={expanded ? "Collapse subtasks" : hasSubtasks ? "Expand subtasks" : "Add subtask"}
+              title={expanded ? "Collapse" : hasSubtasks ? "Expand subtasks" : "Add subtask"}
+            >
+              {/* Filled caret — points right when collapsed, down when open. */}
+              <svg viewBox="0 0 8 8" className={`w-[11px] h-[11px] fill-current transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden>
+                <path d="M2 1 L6 4 L2 7 Z" />
+              </svg>
+            </button>
+          ) : (
+            <span className="w-4 h-4 shrink-0" aria-hidden />
+          )}
           {!showStatus ? (
             <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} dot />
           ) : null}
