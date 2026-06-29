@@ -10,7 +10,7 @@
 // never offer a filter that would return zero rows at open time.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, ChevronDown, Flag, Search, Shapes, Tag as TagIcon, Users, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Flag, ListFilter, Search, Shapes, Tag as TagIcon, Users, X } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   isDoneStatus,
@@ -166,11 +166,34 @@ export function BoardFilterBar({ items, filters, statuses, onChange }: BoardFilt
   };
 
   const active = filtersActive(filters);
+  // Number of active facet selections (drives the Filter funnel badge).
+  const facetCount = filters.statuses.length + filters.owners.length + filters.priorities.length + filters.itemTypes.length + filters.tagIds.length + (filters.hideDone ? 1 : 0);
+  // ClickUp keeps the toolbar concise: the facets live behind a Filter funnel,
+  // revealed on click (or whenever a facet is already active).
+  const [showFacets, setShowFacets] = useState(false);
+  const facetsOpen = showFacets || facetCount > 0;
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       <SearchBox value={filters.search} onChange={(search) => onChange({ ...filters, search })} />
 
+      <button
+        type="button"
+        onClick={() => setShowFacets((v) => !v)}
+        className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-[12.5px] transition-colors ${
+          facetsOpen
+            ? "bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)] text-[var(--os-brand)] border-[var(--os-brand)] font-medium"
+            : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
+        }`}
+        title="Filter"
+      >
+        <ListFilter className="w-3.5 h-3.5" />
+        Filter
+        {facetCount > 0 ? <span className="tabular-nums">· {facetCount}</span> : null}
+      </button>
+
+      {facetsOpen ? (
+      <>
       <FacetMenu
         label="Status"
         Icon={ChevronDown}
@@ -313,6 +336,8 @@ export function BoardFilterBar({ items, filters, statuses, onChange }: BoardFilt
         <CheckCircle2 className="w-3 h-3" />
         {filters.hideDone ? "Open only" : "Closed"}
       </button>
+      </>
+      ) : null}
 
       {active ? (
         <button
