@@ -77,14 +77,14 @@ export default async function BoardPage(props: {
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Title row — inline breadcrumb with Space tile + Folder + Board */}
-      <div className="px-6 pt-3 pb-1.5 flex items-center gap-1.5">
+      <div className="px-6 pt-2.5 pb-1.5 flex items-center gap-1">
         {/* Space tile + name */}
         <Link
           href={`/spaces/${board.space.slug}`}
-          className="inline-flex items-center gap-1.5 text-[13px] text-zinc-700 hover:text-zinc-900 min-w-0"
+          className="inline-flex items-center gap-1.5 text-[12.5px] text-zinc-700 hover:text-zinc-900 min-w-0"
         >
           <EntityTile
-            size="md"
+            size="sm"
             icon={board.space.icon}
             color={board.space.color}
             name={board.space.name}
@@ -96,9 +96,9 @@ export default async function BoardPage(props: {
         {board.folder ? (
           <>
             <ChevronRight className="w-3 h-3 text-zinc-400 shrink-0" />
-            <span className="inline-flex items-center gap-1.5 text-[13px] text-zinc-700 min-w-0">
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] text-zinc-700 min-w-0">
               <EntityTile
-                size="md"
+                size="sm"
                 icon={board.folder.icon}
                 color={board.folder.color}
                 name={board.folder.name}
@@ -111,11 +111,11 @@ export default async function BoardPage(props: {
 
         {/* Board (current) — bold + star + filter */}
         <ChevronRight className="w-3 h-3 text-zinc-400 shrink-0" />
-        <h1 className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-zinc-900 min-w-0">
+        <h1 className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-zinc-900 min-w-0">
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3.5 h-3.5 text-zinc-500" />
           ) : (
-            <EntityTile size="md" icon={board.icon} color={board.color} name={board.name} />
+            <EntityTile size="sm" icon={board.icon} color={board.color} name={board.name} />
           )}
           <span className="truncate">{board.name}</span>
         </h1>
