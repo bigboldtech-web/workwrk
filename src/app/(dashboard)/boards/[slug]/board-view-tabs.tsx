@@ -5,7 +5,7 @@
 // client ViewTab ("Functions cannot be passed directly to Client Components").
 // Keeping the icon map + tab rendering here (client -> client) fixes that crash.
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   List as ListIcon, LayoutGrid, Calendar as CalIcon, GanttChart, Table2,
@@ -89,22 +89,30 @@ export function BoardViewTabs({
   const [syncedKey, setSyncedKey] = useState(viewsKey);
   if (syncedKey !== viewsKey) { setSyncedKey(viewsKey); setOrder(views); }
   const [dragId, setDragId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
+  const movedRef = useRef(false);
 
-  function handleDrop(targetId: string) {
-    const from = dragId;
+  // Live reorder: as you drag over a tab, the dragged tab jumps into that slot
+  // (the others shift) — no drop-line indicator.
+  function liveReorder(targetId: string) {
+    if (!dragId || dragId === targetId) return;
+    movedRef.current = true;
+    setOrder((cur) => {
+      const fi = cur.findIndex((v) => v.id === dragId);
+      const ti = cur.findIndex((v) => v.id === targetId);
+      if (fi < 0 || ti < 0 || fi === ti) return cur;
+      const arr = [...cur];
+      const [moved] = arr.splice(fi, 1);
+      arr.splice(ti, 0, moved);
+      return arr;
+    });
+  }
+
+  function endDrag() {
     setDragId(null);
-    setOverId(null);
-    if (!from || from === targetId) return;
-    const arr = [...order];
-    const fi = arr.findIndex((v) => v.id === from);
-    const ti = arr.findIndex((v) => v.id === targetId);
-    if (fi < 0 || ti < 0) return;
-    const [moved] = arr.splice(fi, 1);
-    arr.splice(ti, 0, moved);
-    setOrder(arr);
-    // Persist the new tab order (displayOrder 0..n), then re-sync from server.
-    void Promise.all(arr.map((v, i) =>
+    if (!movedRef.current) return;
+    movedRef.current = false;
+    // Persist the final order (displayOrder 0..n), then re-sync from server.
+    void Promise.all(order.map((v, i) =>
       fetch(`/api/boards/${boardId}/views/${v.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -131,11 +139,10 @@ export function BoardViewTabs({
             key={v.id}
             draggable
             onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragId(v.id); }}
-            onDragOver={(e) => { e.preventDefault(); if (dragId && dragId !== v.id) setOverId(v.id); }}
-            onDragLeave={() => setOverId((o) => (o === v.id ? null : o))}
-            onDrop={(e) => { e.preventDefault(); handleDrop(v.id); }}
-            onDragEnd={() => { setDragId(null); setOverId(null); }}
-            className={`inline-flex cursor-grab active:cursor-grabbing ${dragId === v.id ? "opacity-40" : ""} ${overId === v.id ? "shadow-[inset_2px_0_0_var(--os-brand)]" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); liveReorder(v.id); }}
+            onDrop={(e) => e.preventDefault()}
+            onDragEnd={endDrag}
+            className={`inline-flex items-stretch cursor-grab active:cursor-grabbing transition-[opacity] ${dragId === v.id ? "opacity-40" : ""}`}
           >
             <ViewTabContextMenu boardId={boardId} view={v}>
               <ViewTab

@@ -29,7 +29,8 @@ export function ViewTabStrip({
 
 const tabVariants = cva(
   // Bold text always; gray when inactive, black when selected (ClickUp).
-  "group/view relative inline-flex items-center gap-1 px-1 py-1 text-[12px] font-semibold transition-colors whitespace-nowrap",
+  // Hover paints a soft gray card behind the tab.
+  "group/view relative inline-flex items-center gap-1 px-1.5 py-1 text-[12px] font-semibold rounded-md hover:bg-zinc-100 transition-colors whitespace-nowrap",
   {
     variants: {
       active: {
