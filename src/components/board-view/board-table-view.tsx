@@ -15,11 +15,12 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, ChevronRight, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, ChevronRight, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
   type StatusOption,
+  type ItemTag,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar } from "./assignee-picker";
@@ -560,6 +561,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         onArchive={handleArchive}
         onOpen={onOpenItem ? () => onOpenItem(row.id) : undefined}
         onDuplicate={handleDuplicate}
+        onAddSubtask={() => addSubtask(row.id, row.status)}
         dragEnabled={canEdit && !buckets && indent === 0}
         isDragging={dragId === row.id}
         isDragOver={dragOverId === row.id && dragId !== null && dragId !== row.id}
@@ -990,6 +992,7 @@ function Row({
   onArchive,
   onOpen,
   onDuplicate,
+  onAddSubtask,
   dragEnabled,
   isDragging,
   isDragOver,
@@ -1021,6 +1024,7 @@ function Row({
   onArchive: (id: string) => void;
   onOpen?: () => void;
   onDuplicate?: (row: BoardItemRow) => void;
+  onAddSubtask?: () => void;
   dragEnabled: boolean;
   isDragging: boolean;
   isDragOver: boolean;
@@ -1033,6 +1037,8 @@ function Row({
   expanded?: boolean;
   onToggleExpand?: () => void;
 }) {
+  // Bumped by the hover "rename" pencil to put the title cell into edit mode.
+  const [editToken, setEditToken] = useState(0);
   return (
     <tr
       draggable={dragEnabled}
@@ -1099,9 +1105,16 @@ function Row({
             <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} dot />
           ) : null}
           <div className="flex-1 min-w-0">
-            <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} />
+            <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} editToken={editToken} />
           </div>
-          <RowHoverActions itemId={row.id} />
+          <RowHoverActions
+            itemId={row.id}
+            canEdit={canEdit}
+            tags={row.tags ?? []}
+            onAddSubtask={() => onAddSubtask?.()}
+            onTagsChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })}
+            onRename={() => setEditToken((t) => t + 1)}
+          />
         </div>
       </td>
       {showStatus ? (
@@ -1559,7 +1572,14 @@ function RowActionsMenu({
   );
 }
 
-function RowHoverActions({ itemId }: { itemId: string }) {
+function RowHoverActions({ itemId, canEdit, tags, onAddSubtask, onTagsChange, onRename }: {
+  itemId: string;
+  canEdit: boolean;
+  tags: ItemTag[];
+  onAddSubtask: () => void;
+  onTagsChange: (tags: ItemTag[]) => void;
+  onRename: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
     try {
@@ -1573,15 +1593,25 @@ function RowHoverActions({ itemId }: { itemId: string }) {
       // navigator.clipboard may reject (insecure context, denied). Silent fail.
     }
   };
+  const iconBtn = "inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100";
   return (
     <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 shrink-0">
-      <button
-        type="button"
-        onClick={onCopy}
-        className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
-        title={copied ? "Copied" : "Copy link"}
-        aria-label="Copy link to this item"
-      >
+      {canEdit ? (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onAddSubtask(); }} className={iconBtn} title="Add subtask" aria-label="Add subtask">
+          <Plus className="w-3 h-3" />
+        </button>
+      ) : null}
+      {canEdit ? (
+        <span onClick={(e) => e.stopPropagation()} className="inline-flex">
+          <TagPicker value={tags} canEdit compact onChange={onTagsChange} />
+        </span>
+      ) : null}
+      {canEdit ? (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onRename(); }} className={iconBtn} title="Rename" aria-label="Rename task">
+          <Pencil className="w-3 h-3" />
+        </button>
+      ) : null}
+      <button type="button" onClick={onCopy} className={iconBtn} title={copied ? "Copied" : "Copy link"} aria-label="Copy link to this item">
         {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Link2 className="w-3 h-3" />}
       </button>
     </span>
@@ -1593,15 +1623,25 @@ function TitleCell({
   canEdit,
   onUpdate,
   onOpen,
+  editToken = 0,
 }: {
   row: BoardItemRow;
   canEdit: boolean;
   onUpdate: (id: string, patch: Partial<Pick<BoardItemRow, "title">>) => void;
   onOpen?: () => void;
+  /** Bumped externally (the hover "rename" pencil) to enter edit mode. */
+  editToken?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.title);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // When the external rename token changes, open the editor.
+  const [seenToken, setSeenToken] = useState(editToken);
+  if (editToken !== seenToken) {
+    setSeenToken(editToken);
+    if (canEdit) setEditing(true);
+  }
 
   // Derived-state-during-render (guarded setState) — avoids the
   // cascading-renders lint that fires on useEffect(setDraft).
