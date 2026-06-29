@@ -60,7 +60,7 @@ interface BoardTableViewProps {
 /** Patch shape rows can emit. `owner`/`tags` only update the local
  *  optimistic row — the API's zod schema strips unknown keys; `tagIds`
  *  is what the server persists. */
-type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "dueAt">> & { tagIds?: string[] };
+type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "dueAt" | "itemTypeId">> & { tagIds?: string[] };
 
 export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
@@ -1768,7 +1768,7 @@ function StatusCell({
   row: BoardItemRow;
   statuses: StatusOption[];
   canEdit: boolean;
-  onUpdate: (id: string, patch: Partial<Pick<BoardItemRow, "status">>) => void;
+  onUpdate: (id: string, patch: RowPatch) => void;
   /** Monday-style Table variant: status fills the whole cell with the
    *  status color + white label, instead of a soft pill. */
   monday?: boolean;
@@ -1778,6 +1778,8 @@ function StatusCell({
   dot?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"status" | "type">("status");
+  const itemTypes = useItemTypes();
   const ref = useRef<HTMLDivElement>(null);
   const current = useMemo(
     () => (row.status ? statuses.find((o) => o.value === row.status) ?? null : null),
@@ -1810,29 +1812,63 @@ function StatusCell({
       <span className="w-[15px] h-[15px] rounded-full border-[1.5px] border-dashed border-zinc-300 shrink-0" />
     );
     if (!canEdit) return circle;
+    const activeTypeId = row.itemTypeId ?? itemTypes.default?.id ?? null;
     return (
       <div className="relative shrink-0 leading-none" ref={ref}>
         <button type="button" onClick={() => setOpen((v) => !v)} title={current?.label ?? "Set status"} className="block">
           {circle}
         </button>
         {open ? (
-          <div className="absolute z-20 mt-1 left-0 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
-            {statuses.map((opt) => {
-              const active = opt.value === row.status;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => { onUpdate(row.id, { status: opt.value }); setOpen(false); }}
-                  className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
-                >
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium" style={{ background: `${opt.color}22`, color: opt.color }}>
-                    {opt.label}
-                  </span>
-                  {active ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
-                </button>
-              );
-            })}
+          <div className="absolute z-20 mt-1 left-0 w-[224px] rounded-lg border border-zinc-200 bg-white shadow-xl p-1.5">
+            {/* Status / Task Type tab switch (ClickUp). */}
+            <div className="flex items-center gap-1 p-0.5 mb-1.5 bg-zinc-100 rounded-md">
+              <button type="button" onClick={() => setTab("status")} className={`flex-1 h-7 rounded-[5px] text-[12.5px] font-medium transition-colors ${tab === "status" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"}`}>Status</button>
+              <button type="button" onClick={() => setTab("type")} className={`flex-1 h-7 rounded-[5px] text-[12.5px] font-medium transition-colors ${tab === "type" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"}`}>Task Type</button>
+            </div>
+            {tab === "status" ? (
+              <div className="max-h-[240px] overflow-y-auto">
+                {statuses.map((opt) => {
+                  const active = opt.value === row.status;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => { onUpdate(row.id, { status: opt.value }); setOpen(false); }}
+                      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left text-sm hover:bg-zinc-50"
+                    >
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium" style={{ background: `${opt.color}22`, color: opt.color }}>
+                        {opt.label}
+                      </span>
+                      {active ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="max-h-[240px] overflow-y-auto">
+                {itemTypes.list.length === 0 ? (
+                  <div className="px-2 py-2 text-[12px] text-zinc-400">No task types yet.</div>
+                ) : (
+                  itemTypes.list.map((t) => {
+                    const active = activeTypeId === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => { onUpdate(row.id, { itemTypeId: t.id }); setOpen(false); }}
+                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left text-[13px] hover:bg-zinc-50"
+                      >
+                        {React.createElement(itemTypeIcon(t.icon), { className: "w-4 h-4 text-zinc-500 shrink-0" })}
+                        <span className="flex-1 min-w-0 truncate text-zinc-800">
+                          {t.singular}{t.isDefault ? <span className="text-zinc-400"> (default)</span> : null}
+                        </span>
+                        {active ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0" /> : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
         ) : null}
       </div>
