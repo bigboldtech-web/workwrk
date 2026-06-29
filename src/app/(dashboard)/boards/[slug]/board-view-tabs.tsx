@@ -5,6 +5,8 @@
 // client ViewTab ("Functions cannot be passed directly to Client Components").
 // Keeping the icon map + tab rendering here (client -> client) fixes that crash.
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   List as ListIcon, LayoutGrid, Calendar as CalIcon, GanttChart, Table2,
   ClipboardList, FileText, BarChart3, AlignLeft, GaugeCircle, MapPin, Brush,
@@ -79,9 +81,41 @@ export function BoardViewTabs({
   activeViewId: string | null;
   defaultViewId: string | null;
 }) {
+  const router = useRouter();
+  // Local order so a drag reorders instantly; re-syncs when the server view set
+  // changes (add / delete / refresh).
+  const [order, setOrder] = useState<BoardViewItem[]>(views);
+  const viewsKey = views.map((v) => v.id).join("|");
+  const [syncedKey, setSyncedKey] = useState(viewsKey);
+  if (syncedKey !== viewsKey) { setSyncedKey(viewsKey); setOrder(views); }
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+
+  function handleDrop(targetId: string) {
+    const from = dragId;
+    setDragId(null);
+    setOverId(null);
+    if (!from || from === targetId) return;
+    const arr = [...order];
+    const fi = arr.findIndex((v) => v.id === from);
+    const ti = arr.findIndex((v) => v.id === targetId);
+    if (fi < 0 || ti < 0) return;
+    const [moved] = arr.splice(fi, 1);
+    arr.splice(ti, 0, moved);
+    setOrder(arr);
+    // Persist the new tab order (displayOrder 0..n), then re-sync from server.
+    void Promise.all(arr.map((v, i) =>
+      fetch(`/api/boards/${boardId}/views/${v.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ displayOrder: i }),
+      }).catch(() => {}),
+    )).then(() => router.refresh());
+  }
+
   return (
     <ViewTabStrip className="px-6">
-      {views.map((v) => {
+      {order.map((v) => {
         // Monday-style Table (TABLE + config.grid) and the Team variant
         // (WORKLOAD + config.variant) get their own icon + tile color.
         const config = v.config as { grid?: string; variant?: string } | null;
@@ -93,26 +127,36 @@ export function BoardViewTabs({
         const isDefault = v.id === defaultViewId;
         const href = isDefault ? `/boards/${boardSlug}` : `/boards/${boardSlug}?view=${v.id}`;
         return (
-          <ViewTab
+          <span
             key={v.id}
-            icon={VIcon}
-            iconTileColor={tileColor}
-            label={v.name}
-            active={active}
-            href={href}
-            trailing={
-              <span
-                className="opacity-0 group-hover/view:opacity-100 transition-opacity"
-                onClick={(e) => {
-                  // Tab body is a single <Link>; keep menu clicks from navigating.
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-              >
-                <ViewTabMenu boardId={boardId} view={v} />
-              </span>
-            }
-          />
+            draggable
+            onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragId(v.id); }}
+            onDragOver={(e) => { e.preventDefault(); if (dragId && dragId !== v.id) setOverId(v.id); }}
+            onDragLeave={() => setOverId((o) => (o === v.id ? null : o))}
+            onDrop={(e) => { e.preventDefault(); handleDrop(v.id); }}
+            onDragEnd={() => { setDragId(null); setOverId(null); }}
+            className={`inline-flex cursor-grab active:cursor-grabbing ${dragId === v.id ? "opacity-40" : ""} ${overId === v.id ? "shadow-[inset_2px_0_0_var(--os-brand)]" : ""}`}
+          >
+            <ViewTab
+              icon={VIcon}
+              iconTileColor={tileColor}
+              label={v.name}
+              active={active}
+              href={href}
+              trailing={
+                <span
+                  className="opacity-0 group-hover/view:opacity-100 transition-opacity"
+                  onClick={(e) => {
+                    // Tab body is a single <Link>; keep menu clicks from navigating.
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                >
+                  <ViewTabMenu boardId={boardId} view={v} />
+                </span>
+              }
+            />
+          </span>
         );
       })}
       <NewViewTrigger boardId={boardId} />

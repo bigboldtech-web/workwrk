@@ -41,7 +41,7 @@ export default async function BoardPage(props: {
     include: {
       space: { select: { id: true, slug: true, name: true, visibility: true, icon: true, color: true } },
       folder: { select: { id: true, name: true, icon: true, color: true } },
-      views: { orderBy: [{ isDefault: "desc" }, { displayOrder: "asc" }, { name: "asc" }] },
+      views: { orderBy: [{ displayOrder: "asc" }, { name: "asc" }] },
     },
   });
   if (!board || !board.space) notFound();

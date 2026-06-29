@@ -90,13 +90,13 @@ export function ViewTab({
 
   if (href) {
     return (
-      <Link href={href} onClick={onClick} title={title} className={cls}>
+      <Link href={href} onClick={onClick} title={title} className={cls} draggable={false}>
         {inner}
       </Link>
     );
   }
   return (
-    <button type="button" onClick={onClick} title={title} className={cls}>
+    <button type="button" onClick={onClick} title={title} className={cls} draggable={false}>
       {inner}
     </button>
   );
