@@ -176,7 +176,7 @@ function Step2Main({
   return (
     <>
       <div className="px-6 pt-6 pb-3">
-        <DialogTitle className="text-[17px] font-semibold">Define your workflow</DialogTitle>
+        <DialogTitle className="text-[15px] font-semibold">Define your workflow</DialogTitle>
         <DialogDescription className="mt-1">
           Choose a pre-configured solution or customize the views, statuses, and modules.
         </DialogDescription>
