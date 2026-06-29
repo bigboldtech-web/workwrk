@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { NewViewTrigger } from "@/components/board-view/view-create-popover";
-import { ViewTabMenu } from "@/components/board-view/view-tab-menu";
+import { ViewTabContextMenu } from "@/components/board-view/view-tab-menu";
 import type { ViewType } from "@/generated/prisma";
 
 const VIEW_ICONS: Record<ViewType, LucideIcon> = {
@@ -137,29 +137,22 @@ export function BoardViewTabs({
             onDragEnd={() => { setDragId(null); setOverId(null); }}
             className={`inline-flex cursor-grab active:cursor-grabbing ${dragId === v.id ? "opacity-40" : ""} ${overId === v.id ? "shadow-[inset_2px_0_0_var(--os-brand)]" : ""}`}
           >
-            <ViewTab
-              icon={VIcon}
-              iconTileColor={tileColor}
-              label={v.name}
-              active={active}
-              href={href}
-              trailing={
-                <span
-                  className="opacity-0 group-hover/view:opacity-100 transition-opacity"
-                  onClick={(e) => {
-                    // Tab body is a single <Link>; keep menu clicks from navigating.
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                >
-                  <ViewTabMenu boardId={boardId} view={v} />
-                </span>
-              }
-            />
+            <ViewTabContextMenu boardId={boardId} view={v}>
+              <ViewTab
+                icon={VIcon}
+                iconTileColor={tileColor}
+                label={v.name}
+                active={active}
+                href={href}
+              />
+            </ViewTabContextMenu>
           </span>
         );
       })}
-      <NewViewTrigger boardId={boardId} />
+      <div className="w-px h-3.5 bg-zinc-300 mx-1 self-center" />
+      <span className="inline-flex items-center self-center">
+        <NewViewTrigger boardId={boardId} />
+      </span>
     </ViewTabStrip>
   );
 }

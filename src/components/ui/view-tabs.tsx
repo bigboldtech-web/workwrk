@@ -21,14 +21,14 @@ export function ViewTabStrip({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-1.5 border-b border-zinc-200", className)}>
+    <div className={cn("flex items-stretch gap-0.5 border-b border-zinc-200", className)}>
       {children}
     </div>
   );
 }
 
 const tabVariants = cva(
-  "group/view inline-flex items-center gap-1.5 px-2 py-1.5 text-[13px] border-b-[2.5px] -mb-px transition-colors whitespace-nowrap",
+  "group/view inline-flex items-center gap-1 px-1 py-1 text-[12px] border-b-[2.5px] -mb-px transition-colors whitespace-nowrap",
   {
     variants: {
       active: {
@@ -44,6 +44,8 @@ export interface ViewTabProps extends VariantProps<typeof tabVariants> {
   icon?: LucideIcon;
   /** Icon color when inactive (per-view tint). Mono zinc-900 when active. */
   iconClassName?: string;
+  /** Hex color for the icon itself. Mono zinc-900 when active. */
+  iconColor?: string;
   /** Hex color — when set, the icon renders as a small filled rounded-square
    *  tile (white glyph on this color), the ClickUp tab style. */
   iconTileColor?: string;
@@ -59,6 +61,7 @@ export interface ViewTabProps extends VariantProps<typeof tabVariants> {
 export function ViewTab({
   icon: Icon,
   iconClassName = "text-zinc-500",
+  iconColor,
   iconTileColor,
   label,
   trailing,
@@ -73,13 +76,16 @@ export function ViewTab({
       {Icon ? (
         iconTileColor ? (
           <span
-            className="w-[17px] h-[17px] rounded-[5px] inline-flex items-center justify-center shrink-0"
+            className="w-[15px] h-[15px] rounded-[4px] inline-flex items-center justify-center shrink-0"
             style={{ backgroundColor: iconTileColor }}
           >
-            <Icon className="w-3 h-3 text-white" />
+            <Icon className="w-[10px] h-[10px] text-white" />
           </span>
         ) : (
-          <Icon className={cn("w-4 h-4 shrink-0", active ? "text-zinc-900" : iconClassName)} />
+          <Icon 
+            className={cn("w-3.5 h-3.5 shrink-0", active ? "text-zinc-900" : iconClassName)} 
+            style={!active && iconColor ? { color: iconColor } : undefined} 
+          />
         )
       ) : null}
       <span className="truncate">{label}</span>

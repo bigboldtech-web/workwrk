@@ -10,7 +10,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Lock, Share2, Sparkles, ChevronRight,
+  Lock, Share2, Sparkles, ChevronRight, ChevronDown, ListChecks,
   ListFilter, Glasses, Zap, Folder as FolderIcon,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -81,7 +81,7 @@ export default async function BoardPage(props: {
         {/* Space tile + name */}
         <Link
           href={`/spaces/${board.space.slug}`}
-          className="inline-flex items-center gap-1.5 text-[12.5px] text-zinc-700 hover:text-zinc-900 min-w-0"
+          className="inline-flex items-center gap-1.5 text-[14px] text-zinc-700 hover:text-zinc-900 min-w-0 hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors"
         >
           <EntityTile
             size="sm"
@@ -95,8 +95,8 @@ export default async function BoardPage(props: {
         {/* Folder breadcrumb segment (when board lives in a folder) */}
         {board.folder ? (
           <>
-            <ChevronRight className="w-3 h-3 text-zinc-400 shrink-0" />
-            <span className="inline-flex items-center gap-1.5 text-[12.5px] text-zinc-700 min-w-0">
+            <span className="text-zinc-300 text-[14px] px-0.5">/</span>
+            <span className="inline-flex items-center gap-1.5 text-[14px] text-zinc-700 min-w-0 hover:bg-zinc-100 rounded px-1 py-0.5 transition-colors cursor-pointer">
               <EntityTile
                 size="sm"
                 icon={board.folder.icon}
@@ -110,14 +110,15 @@ export default async function BoardPage(props: {
         ) : null}
 
         {/* Board (current) — bold + star + filter */}
-        <ChevronRight className="w-3 h-3 text-zinc-400 shrink-0" />
-        <h1 className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-zinc-900 min-w-0">
+        <span className="text-zinc-300 text-[14px] px-0.5">/</span>
+        <h1 className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-zinc-900 min-w-0 group cursor-pointer hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors">
           {board.visibility === "PRIVATE" ? (
-            <Lock className="w-3.5 h-3.5 text-zinc-500" />
+            <Lock className="w-4 h-4 text-zinc-500" />
           ) : (
-            <EntityTile size="sm" icon={board.icon} color={board.color} name={board.name} />
+            <ListChecks className="w-4 h-4 text-zinc-700" />
           )}
           <span className="truncate">{board.name}</span>
+          <ChevronDown className="w-3 h-3 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity" />
         </h1>
         <BoardFavoriteButton boardId={board.id} initiallyStarred={initiallyStarred} />
         <button

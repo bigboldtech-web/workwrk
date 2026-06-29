@@ -28,18 +28,19 @@ interface ViewLike {
 interface Props {
   boardId: string;
   view: ViewLike;
+  children?: React.ReactNode;
 }
 
-export function ViewTabMenu({ boardId, view }: Props) {
+export function ViewTabContextMenu({ boardId, view, children }: Props) {
   const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (panelRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
@@ -52,31 +53,30 @@ export function ViewTabMenu({ boardId, view }: Props) {
   }, [open]);
 
   return (
-    <span className="relative inline-flex">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={(e) => {
+    <>
+      <div
+        className="inline-flex h-full items-stretch"
+        onContextMenu={(e) => {
           e.preventDefault();
-          e.stopPropagation();
-          setOpen((v) => !v);
+          setPos({ x: e.clientX, y: e.clientY });
+          setOpen(true);
         }}
-        className={`p-0.5 rounded transition-colors ${
-          open ? "text-zinc-900 bg-zinc-200" : "text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
-        }`}
-        aria-label="View actions"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="View actions"
       >
-        <MoreHorizontal className="w-3 h-3" />
-      </button>
+        {children}
+      </div>
       {open ? (
-        <div ref={panelRef} className="absolute left-0 top-6 z-[80] w-[200px]">
+        <div 
+          ref={panelRef} 
+          className="fixed z-[100] w-[200px]"
+          style={{ 
+            left: Math.min(pos.x, typeof window !== 'undefined' ? window.innerWidth - 210 : pos.x), 
+            top: Math.min(pos.y, typeof window !== 'undefined' ? window.innerHeight - 300 : pos.y) 
+          }}
+        >
           <ViewMenuPanel boardId={boardId} view={view} onClose={() => setOpen(false)} />
         </div>
       ) : null}
-    </span>
+    </>
   );
 }
 
