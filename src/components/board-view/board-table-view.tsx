@@ -667,7 +667,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                             onClick={() => toggleGroup(b.key)}
                             className="inline-flex items-center gap-2 text-[12px] font-semibold text-zinc-800 hover:text-zinc-900"
                           >
-                            {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            <svg viewBox="0 0 8 8" className={`w-2 h-2 fill-current text-zinc-500 transition-transform ${collapsed ? "" : "rotate-90"}`} aria-hidden>
+                              <path d="M2 1 L6 4 L2 7 Z" />
+                            </svg>
                             {b.color ? (
                               <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: b.color }}>
                                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: b.color }} aria-hidden />
@@ -1095,8 +1097,12 @@ function Row({
               onClick={onToggleExpand}
               className="inline-flex items-center justify-center w-4 h-4 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 shrink-0"
               aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
+              title={expanded ? "Collapse subtasks" : "Expand subtasks"}
             >
-              {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              {/* Filled caret — points right when collapsed, down when open. */}
+              <svg viewBox="0 0 8 8" className={`w-2 h-2 fill-current transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden>
+                <path d="M2 1 L6 4 L2 7 Z" />
+              </svg>
             </button>
           ) : indent > 0 ? (
             <span className="w-4 h-4 shrink-0" aria-hidden />
