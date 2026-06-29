@@ -607,7 +607,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       {/* Group-by selector — ClickUp parity (2026-06-07). Toolbar pill
           shows the active field; click → "Group by" popover with field +
           direction dropdowns + trash to clear. */}
-      <div className="px-3 py-2 border-b border-zinc-100 flex items-center gap-2">
+      <div className={`${monday ? "px-3 border-b border-zinc-100" : "px-1"} py-1.5 flex items-center gap-2`}>
         <GroupByPill
           groupBy={groupBy}
           groupDirection={groupDirection}
@@ -623,7 +623,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-200">
+            <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
               <th className="px-2 py-2 w-[36px] text-center">
                 {canEdit ? (
                   <input
@@ -666,11 +666,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                           >
                             {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             {b.color ? (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium text-white" style={{ backgroundColor: b.color }}>
-                                {b.label}
+                              <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: b.color }}>
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: b.color }} aria-hidden />
+                                <span className={groupBy === "status" ? "uppercase tracking-wide text-[11px]" : ""}>{b.label}</span>
                               </span>
                             ) : (
-                              <span>{b.label}</span>
+                              <span className="text-[12px] font-semibold text-zinc-700">{b.label}</span>
                             )}
                             <span className="text-[10.5px] text-zinc-500 tabular-nums">{b.rows.length}</span>
                           </button>
@@ -1051,7 +1052,7 @@ function Row({
         onDrop(row.id);
       }}
       onDragEnd={onDragEnd}
-      className={`border-b border-zinc-200 last:border-b-0 hover:bg-zinc-50 group ${
+      className={`border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 group ${
         selected ? "bg-violet-50/40" : ""
       } ${isDragging ? "opacity-40" : ""} ${
         isDragOver ? "outline outline-2 outline-violet-400 outline-offset-[-2px]" : ""
@@ -1092,6 +1093,9 @@ function Row({
             </button>
           ) : indent > 0 ? (
             <span className="w-4 h-4 shrink-0" aria-hidden />
+          ) : null}
+          {!showStatus ? (
+            <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} dot />
           ) : null}
           <div className="flex-1 min-w-0">
             <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} />
@@ -1759,6 +1763,7 @@ function StatusCell({
   canEdit,
   onUpdate,
   monday = false,
+  dot = false,
 }: {
   row: BoardItemRow;
   statuses: StatusOption[];
@@ -1767,6 +1772,10 @@ function StatusCell({
   /** Monday-style Table variant: status fills the whole cell with the
    *  status color + white label, instead of a soft pill. */
   monday?: boolean;
+  /** Dot variant — renders just the ClickUp status circle (ring when
+   *  not-started, filled check when done), used inline before the title
+   *  when the List is grouped by status so the Status column is hidden. */
+  dot?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1783,6 +1792,52 @@ function StatusCell({
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [open]);
+
+  // Dot variant — the ClickUp status circle shown before the title when
+  // the Status column is hidden (grouped by status). Ring for not-started
+  // (ACTIVE), filled with a check for DONE/CLOSED.
+  if (dot) {
+    const done = current?.group === "DONE" || current?.group === "CLOSED";
+    const circle = current ? (
+      done ? (
+        <span className="inline-flex items-center justify-center w-[15px] h-[15px] rounded-full shrink-0" style={{ backgroundColor: current.color }}>
+          <Check className="w-2.5 h-2.5 text-white" />
+        </span>
+      ) : (
+        <span className="w-[15px] h-[15px] rounded-full border-2 shrink-0" style={{ borderColor: current.color }} />
+      )
+    ) : (
+      <span className="w-[15px] h-[15px] rounded-full border-[1.5px] border-dashed border-zinc-300 shrink-0" />
+    );
+    if (!canEdit) return circle;
+    return (
+      <div className="relative shrink-0 leading-none" ref={ref}>
+        <button type="button" onClick={() => setOpen((v) => !v)} title={current?.label ?? "Set status"} className="block">
+          {circle}
+        </button>
+        {open ? (
+          <div className="absolute z-20 mt-1 left-0 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+            {statuses.map((opt) => {
+              const active = opt.value === row.status;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => { onUpdate(row.id, { status: opt.value }); setOpen(false); }}
+                  className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+                >
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium" style={{ background: `${opt.color}22`, color: opt.color }}>
+                    {opt.label}
+                  </span>
+                  {active ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   // Monday Table fill — the trigger is a full-cell colored block.
   if (monday) {

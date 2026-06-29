@@ -68,23 +68,25 @@ interface ViewTile {
   hue: string;                     // bg tint for the icon chip
 }
 
+// Colors + order match ClickUp's "+ View" panel (and our board +View popover):
+// solid tile, white glyph, one accent per view type.
 const POPULAR_TILES: ViewTile[] = [
-  { key: "list",        label: "List",                            Icon: ListIcon,        viewType: "TABLE",      hue: "#3ab39e" },
-  { key: "gantt",       label: "Gantt", sublabel: "Chart",        Icon: GanttChart,      viewType: "GANTT",      hue: "#22c55e" },
+  { key: "list",        label: "List",                            Icon: ListIcon,        viewType: "TABLE",      hue: "#6b7280" },
+  { key: "gantt",       label: "Gantt", sublabel: "Chart",        Icon: GanttChart,      viewType: "GANTT",      hue: "#ef4444" },
   { key: "calendar",    label: "Calendar",                        Icon: CalIcon,         viewType: "CALENDAR",   hue: "#f59e0b" },
   { key: "doc",         label: "Doc", sublabel: "Wiki",           Icon: FileText,        viewType: "DOC",        hue: "#3b82f6" },
-  { key: "board",       label: "Board", sublabel: "Kanban",       Icon: LayoutGrid,      viewType: "KANBAN",     hue: "#7c3aed" },
-  { key: "form",        label: "Form", sublabel: "Survey",        Icon: ClipboardList,   viewType: "FORM",       hue: "#a855f7" },
+  { key: "board",       label: "Board", sublabel: "Kanban",       Icon: LayoutGrid,      viewType: "KANBAN",     hue: "#4f6bed" },
+  { key: "form",        label: "Form", sublabel: "Survey",        Icon: ClipboardList,   viewType: "FORM",       hue: "#8b5cf6" },
   { key: "ai",          label: "Create with AI",                  Icon: BloomMark,       viewType: null,         hue: "#ec4899" },
-  { key: "dashboard",   label: "Dashboard", sublabel: "Report",   Icon: BarChart3,       viewType: "DASHBOARD",  hue: "#6366f1" },
-  { key: "table",       label: "Table",                           Icon: Table2,          viewType: "TABLE",      hue: "#14b8a6" },
-  { key: "whiteboard",  label: "Whiteboard",                      Icon: Brush,           viewType: "WHITEBOARD", hue: "#22d3ee" },
-  { key: "timeline",    label: "Timeline",                        Icon: AlignLeft,       viewType: "TIMELINE",   hue: "#8b5cf6" },
-  { key: "activity",    label: "Activity", sublabel: "Feed",      Icon: ActivityIcon,    viewType: null,         hue: "#a78b6c" },
-  { key: "workload",    label: "Workload", sublabel: "Capacity",  Icon: GaugeCircle,     viewType: "WORKLOAD",   hue: "#0ea5e9" },
-  { key: "mindmap",     label: "Mind Map",                        Icon: Network,         viewType: null,         hue: "#10b981" },
-  { key: "team",        label: "Team",                            Icon: UsersIcon,       viewType: null,         hue: "#f43f5e" },
-  { key: "map",         label: "Map",                             Icon: MapPin,          viewType: "MAP",        hue: "#ef4444" },
+  { key: "dashboard",   label: "Dashboard", sublabel: "Report",   Icon: BarChart3,       viewType: "DASHBOARD",  hue: "#ec4899" },
+  { key: "table",       label: "Table",                           Icon: Table2,          viewType: "TABLE",      hue: "#10b981" },
+  { key: "whiteboard",  label: "Whiteboard",                      Icon: Brush,           viewType: "WHITEBOARD", hue: "#eab308" },
+  { key: "activity",    label: "Activity", sublabel: "Feed",      Icon: ActivityIcon,    viewType: null,         hue: "#0ea5e9" },
+  { key: "workload",    label: "Workload", sublabel: "Capacity",  Icon: GaugeCircle,     viewType: "WORKLOAD",   hue: "#14b8a6" },
+  { key: "team",        label: "Team",                            Icon: UsersIcon,       viewType: null,         hue: "#a855f7" },
+  { key: "mindmap",     label: "Mind Map",                        Icon: Network,         viewType: null,         hue: "#ec4899" },
+  { key: "map",         label: "Map",                             Icon: MapPin,          viewType: "MAP",        hue: "#ea580c" },
+  { key: "timeline",    label: "Timeline",                        Icon: AlignLeft,       viewType: "TIMELINE",   hue: "#f59e0b" },
 ];
 
 const INTEGRATION_TILES: ViewTile[] = [
@@ -318,8 +320,8 @@ function TileGrid({
             }`}
           >
             <span
-              className="inline-flex items-center justify-center w-7 h-7 rounded-[8px]"
-              style={{ background: `${t.hue}22`, color: t.hue }}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-[8px] text-white"
+              style={{ background: t.hue }}
             >
               <t.Icon className="w-3.5 h-3.5" />
             </span>

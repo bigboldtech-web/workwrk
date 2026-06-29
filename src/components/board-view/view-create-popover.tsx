@@ -48,16 +48,18 @@ const POPULAR: ViewTile[] = [
 // the old placeholders (Activity→CHART, Team→DASHBOARD) are gone.
 // Team rides WORKLOAD with a config variant; Mind Map rides WHITEBOARD
 // (the canvas covers it until a dedicated graph renderer exists).
+// Order mirrors ClickUp's "+ View" panel; our extra views (Pivot / Hierarchy /
+// File gallery) trail at the end. Colors match ClickUp's per-view palette.
 const SECONDARY: ViewTile[] = [
   { type: "TABLE",        label: "Table",         tag: undefined, Icon: Table2,       swatch: "#10B981", config: { grid: "monday" } },
-  { type: "CHART",        label: "Chart",         tag: "Report",  Icon: BarChart3,    swatch: "#F43F5E" },
   { type: "WHITEBOARD",   label: "Whiteboard",    tag: undefined, Icon: Brush,        swatch: "#FACC15" },
-  { type: "TIMELINE",     label: "Timeline",      tag: undefined, Icon: AlignLeft,    swatch: "#F59E0B" },
   { type: "ACTIVITY",     label: "Activity",      tag: "Feed",    Icon: Activity,     swatch: "#0EA5E9" },
   { type: "WORKLOAD",     label: "Workload",      tag: "Capacity",Icon: GaugeCircle,  swatch: "#14B8A6" },
   { type: "WORKLOAD",     label: "Team",          tag: undefined, Icon: UsersIcon,    swatch: "#A855F7", config: { variant: "team" } },
   { type: "WHITEBOARD",   label: "Mind Map",      tag: undefined, Icon: Workflow,     swatch: "#EC4899" },
   { type: "MAP",          label: "Map",           tag: undefined, Icon: MapPin,       swatch: "#EA580C" },
+  { type: "CHART",        label: "Chart",         tag: "Report",  Icon: BarChart3,    swatch: "#F43F5E" },
+  { type: "TIMELINE",     label: "Timeline",      tag: undefined, Icon: AlignLeft,    swatch: "#F59E0B" },
   { type: "CARDS",        label: "Cards",         tag: "Gallery", Icon: SquareStack,  swatch: "#6366F1" },
   { type: "PIVOT",        label: "Pivot",         tag: undefined, Icon: Grid3X3,      swatch: "#059669" },
   { type: "HIERARCHY",    label: "Hierarchy",     tag: "Tree",    Icon: ListTree,     swatch: "#0D9488" },
