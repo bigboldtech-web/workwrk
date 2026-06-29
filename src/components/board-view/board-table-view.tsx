@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, ChevronRight, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, ChevronRight, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
@@ -60,7 +60,7 @@ interface BoardTableViewProps {
 /** Patch shape rows can emit. `owner`/`tags` only update the local
  *  optimistic row — the API's zod schema strips unknown keys; `tagIds`
  *  is what the server persists. */
-type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags">> & { tagIds?: string[] };
+type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "dueAt">> & { tagIds?: string[] };
 
 export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
@@ -70,6 +70,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // Built-in column visibility (FieldShelf "Built-in fields" toggles).
   const hideBuiltin = useMemo(() => new Set(hiddenBuiltins ?? []), [hiddenBuiltins]);
   const showOwner = !hideBuiltin.has("__builtin_owner");
+  const showDue = !hideBuiltin.has("__builtin_due");
   const showPriority = !hideBuiltin.has("__builtin_priority");
   // A clean ClickUp-style List stays lean: Name / Assignee / Priority only.
   // Type, Tags and Created are spreadsheet columns — show them in the Monday-
@@ -526,7 +527,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
   // select + name + actions (3 fixed) + optional status/owner/priority/type/
   // tags/created + custom fields.
-  const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
+  const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -545,6 +546,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         itemTypeMap={itemTypeMap}
         showStatus={showStatus}
         showOwner={showOwner}
+        showDue={showDue}
         showPriority={showPriority}
         showType={showType}
         showTags={showTags}
@@ -594,7 +596,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   };
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
+    <div className={monday ? "rounded-lg border border-zinc-200 bg-white overflow-hidden" : ""}>
       {error ? (
         <div className="px-4 py-2 text-xs text-red-500 bg-red-500/10 flex items-center justify-between">
           {error}
@@ -636,7 +638,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               </th>
               <th className="px-4 py-2 font-medium w-[36%]">Name</th>
               {showStatus ? <th className="px-4 py-2 font-medium w-[140px]">Status</th> : null}
-              {showOwner ? <th className="px-4 py-2 font-medium w-[180px]">Owner</th> : null}
+              {showOwner ? <th className="px-4 py-2 font-medium w-[180px]">Assignee</th> : null}
+              {showDue ? <th className="px-4 py-2 font-medium w-[130px]">Due date</th> : null}
               {showPriority ? <th className="px-4 py-2 font-medium w-[110px]">Priority</th> : null}
               {showType ? <th className="px-4 py-2 font-medium w-[130px]">Type</th> : null}
               {showTags ? <th className="px-4 py-2 font-medium w-[160px]">Tags</th> : null}
@@ -972,6 +975,7 @@ function Row({
   itemTypeMap,
   showStatus = true,
   showOwner,
+  showDue = true,
   showPriority,
   showType,
   showTags,
@@ -1002,6 +1006,7 @@ function Row({
   itemTypeMap: Map<string, ItemTypeLite>;
   showStatus?: boolean;
   showOwner: boolean;
+  showDue?: boolean;
   showPriority: boolean;
   showType: boolean;
   showTags: boolean;
@@ -1104,6 +1109,11 @@ function Row({
           <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
         </td>
       ) : null}
+      {showDue ? (
+        <td className="px-4 py-2">
+          <DueDateCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
+        </td>
+      ) : null}
       {showPriority ? (
         <td className="px-4 py-2">
           <PriorityPicker value={row.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onUpdate(row.id, { priority })} />
@@ -1140,6 +1150,43 @@ function Row({
         ) : null}
       </td>
     </tr>
+  );
+}
+
+// Inline due-date cell — a faint calendar+ affordance when empty (ClickUp
+// style), the date when set, click to edit via a native date input.
+function DueDateCell({ row, canEdit, onUpdate }: { row: BoardItemRow; canEdit: boolean; onUpdate: (id: string, patch: RowPatch) => void }) {
+  const [editing, setEditing] = useState(false);
+  const due = row.dueAt ? new Date(row.dueAt) : null;
+  const overdue = due ? due.getTime() < new Date().setHours(0, 0, 0, 0) : false;
+  const inputVal = due
+    ? `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`
+    : "";
+
+  if (editing && canEdit) {
+    return (
+      <input
+        type="date"
+        autoFocus
+        value={inputVal}
+        onChange={(e) => onUpdate(row.id, { dueAt: e.target.value ? `${e.target.value}T00:00:00.000Z` : null })}
+        onBlur={() => setEditing(false)}
+        className="h-6 px-1 text-[12px] border border-zinc-200 rounded bg-white focus:outline-none focus:border-[var(--os-brand)]"
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={!canEdit}
+      onClick={() => setEditing(true)}
+      className={`inline-flex items-center gap-1 text-[12px] disabled:cursor-default ${
+        due ? (overdue ? "text-red-500" : "text-zinc-600 hover:text-zinc-900") : "text-zinc-300 hover:text-zinc-500"
+      }`}
+      title={due ? "Edit due date" : "Set due date"}
+    >
+      {due ? <span>{due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-4 h-4" />}
+    </button>
   );
 }
 
