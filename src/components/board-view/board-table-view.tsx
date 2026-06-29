@@ -627,16 +627,19 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         <table className="w-full text-sm">
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
-              <th className="px-2 py-2 w-[36px] text-center">
+              <th className="pl-3 pr-0 py-2 w-[42px]">
                 {canEdit ? (
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    ref={(el) => { if (el) el.indeterminate = someSelected; }}
-                    onChange={() => (allSelected || someSelected ? clearSelection() : selectAllVisible())}
-                    aria-label="Select all rows"
-                    className="cursor-pointer"
-                  />
+                  <div className="flex items-center gap-1">
+                    <span className="w-3 shrink-0" aria-hidden />
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                      onChange={() => (allSelected || someSelected ? clearSelection() : selectAllVisible())}
+                      aria-label="Select all rows"
+                      className="cursor-pointer w-3.5 h-3.5 accent-[var(--os-brand)]"
+                    />
+                  </div>
                 ) : null}
               </th>
               <th className="px-4 py-2 font-medium w-auto">Name</th>
@@ -1067,11 +1070,11 @@ function Row({
         isDragOver ? "outline outline-2 outline-violet-400 outline-offset-[-2px]" : ""
       }`}
     >
-      <td className="px-2 py-2 w-[36px]">
-        <div className="flex items-center gap-0.5">
+      <td className="pl-3 pr-0 py-2 w-[42px]">
+        <div className="flex items-center gap-1">
           {canEdit ? (
             <span
-              className={`group-hover:text-zinc-400 ${dragEnabled ? "text-zinc-300 cursor-grab" : "text-zinc-200"}`}
+              className={`w-3 shrink-0 inline-flex justify-center opacity-0 group-hover:opacity-100 transition-opacity ${dragEnabled ? "text-zinc-400 cursor-grab" : "text-zinc-300"}`}
               title={dragEnabled ? "Drag to reorder" : "Drag disabled while grouped"}
               aria-hidden
             >
@@ -1084,23 +1087,23 @@ function Row({
               checked={selected}
               onChange={() => onToggleSelect(row.id)}
               aria-label="Select row"
-              className={`cursor-pointer transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+              className={`cursor-pointer w-3.5 h-3.5 accent-[var(--os-brand)] transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
             />
           ) : null}
         </div>
       </td>
-      <td className="px-4 py-2">
+      <td className="pl-1 pr-4 py-2">
         <div className="flex items-center gap-1.5" style={{ paddingLeft: indent * 20 }}>
           {hasSubtasks ? (
             <button
               type="button"
               onClick={onToggleExpand}
-              className="inline-flex items-center justify-center w-4 h-4 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 shrink-0"
+              className="inline-flex items-center justify-center w-4 h-4 rounded text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 shrink-0"
               aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
               title={expanded ? "Collapse subtasks" : "Expand subtasks"}
             >
               {/* Filled caret — points right when collapsed, down when open. */}
-              <svg viewBox="0 0 8 8" className={`w-2 h-2 fill-current transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden>
+              <svg viewBox="0 0 8 8" className={`w-[11px] h-[11px] fill-current transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden>
                 <path d="M2 1 L6 4 L2 7 Z" />
               </svg>
             </button>
