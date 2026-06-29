@@ -71,8 +71,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const hideBuiltin = useMemo(() => new Set(hiddenBuiltins ?? []), [hiddenBuiltins]);
   const showOwner = !hideBuiltin.has("__builtin_owner");
   const showPriority = !hideBuiltin.has("__builtin_priority");
-  const showType = !hideBuiltin.has("__builtin_type");
-  const showTags = !hideBuiltin.has("__builtin_tags");
+  // A clean ClickUp-style List stays lean: Name / Assignee / Priority only.
+  // Type, Tags and Created are spreadsheet columns — show them in the Monday-
+  // style Table view, not the List.
+  const showType = !hideBuiltin.has("__builtin_type") && monday;
+  const showTags = !hideBuiltin.has("__builtin_tags") && monday;
+  const showCreated = monday;
   // New rows default to the board's first status (its "not started").
   const firstStatus = statuses[0]?.value ?? "TO_DO";
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -91,6 +95,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     return typeof raw === "string" ? raw : null;
   })();
   const [groupBy, setGroupByState] = useState<string | null>(initialGroupBy);
+
+  // When the List is grouped by status, the status IS the group header, so the
+  // Status column is redundant (ClickUp hides it). The Monday Table keeps it.
+  const showStatus = monday || groupBy !== "status";
 
   // Direction for the grouped buckets. Default ascending. Persists per-view.
   const initialGroupDir: "asc" | "desc" = (() => {
@@ -516,9 +524,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit, confirm]);
 
-  // select + name + status + created + actions (5 fixed) + optional
-  // owner/priority/type/tags + custom fields.
-  const colCount = 5 + (showOwner ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + customFields.length;
+  // select + name + actions (3 fixed) + optional status/owner/priority/type/
+  // tags/created + custom fields.
+  const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -535,10 +543,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         customFields={customFields}
         statuses={statuses}
         itemTypeMap={itemTypeMap}
+        showStatus={showStatus}
         showOwner={showOwner}
         showPriority={showPriority}
         showType={showType}
         showTags={showTags}
+        showCreated={showCreated}
         canEdit={canEdit}
         monday={monday}
         selected={selected.has(row.id)}
@@ -625,7 +635,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                 ) : null}
               </th>
               <th className="px-4 py-2 font-medium w-[36%]">Name</th>
-              <th className="px-4 py-2 font-medium w-[140px]">Status</th>
+              {showStatus ? <th className="px-4 py-2 font-medium w-[140px]">Status</th> : null}
               {showOwner ? <th className="px-4 py-2 font-medium w-[180px]">Owner</th> : null}
               {showPriority ? <th className="px-4 py-2 font-medium w-[110px]">Priority</th> : null}
               {showType ? <th className="px-4 py-2 font-medium w-[130px]">Type</th> : null}
@@ -633,7 +643,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               {customFields.map((f) => (
                 <th key={f.key} className="px-4 py-2 font-medium">{f.label}</th>
               ))}
-              <th className="px-4 py-2 font-medium w-[120px]">Created</th>
+              {showCreated ? <th className="px-4 py-2 font-medium w-[120px]">Created</th> : null}
               <th className="px-2 py-2 w-[40px]"></th>
             </tr>
           </thead>
@@ -716,15 +726,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                       </>
                     ) : null}
                     {/* Monday-style per-group summary footer — aggregates
-                        every column (stacked bars, people, sums…). */}
-                    <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} />
+                        every column (stacked bars, people, sums…). Table view only;
+                        a clean List has no spreadsheet summary. */}
+                    {monday ? <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} /> : null}
                   </React.Fragment>
                 );
               })
             ) : (
               <>
                 {topLevel.flatMap((row) => renderRowAndSubtasks(row, 0))}
-                {items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} /> : null}
+                {monday && items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} /> : null}
               </>
             )}
             {canEdit && !buckets ? (
@@ -959,10 +970,12 @@ function Row({
   customFields,
   statuses,
   itemTypeMap,
+  showStatus = true,
   showOwner,
   showPriority,
   showType,
   showTags,
+  showCreated = true,
   canEdit,
   monday = false,
   selected,
@@ -987,10 +1000,12 @@ function Row({
   customFields: FieldDef[];
   statuses: StatusOption[];
   itemTypeMap: Map<string, ItemTypeLite>;
+  showStatus?: boolean;
   showOwner: boolean;
   showPriority: boolean;
   showType: boolean;
   showTags: boolean;
+  showCreated?: boolean;
   canEdit: boolean;
   monday?: boolean;
   selected: boolean;
@@ -1079,9 +1094,11 @@ function Row({
           <RowHoverActions itemId={row.id} />
         </div>
       </td>
-      <td className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-2"}>
-        <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} monday={monday} />
-      </td>
+      {showStatus ? (
+        <td className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-2"}>
+          <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} monday={monday} />
+        </td>
+      ) : null}
       {showOwner ? (
         <td className="px-4 py-2">
           <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
@@ -1107,9 +1124,11 @@ function Row({
           <FieldValue field={f} value={row.metadata?.[f.key]} mode="display" />
         </td>
       ))}
-      <td className="px-4 py-2 text-xs text-zinc-500">
-        {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
-      </td>
+      {showCreated ? (
+        <td className="px-4 py-2 text-xs text-zinc-500">
+          {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
+        </td>
+      ) : null}
       <td className="px-2 py-2 text-right">
         {canEdit ? (
           <RowActionsMenu
