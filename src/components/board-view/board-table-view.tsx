@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, ChevronRight, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
@@ -631,13 +631,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                 {canEdit ? (
                   <div className="flex items-center gap-1">
                     <span className="w-3 shrink-0" aria-hidden />
-                    <input
-                      type="checkbox"
+                    <CheckBox
                       checked={allSelected}
-                      ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                      indeterminate={someSelected && !allSelected}
                       onChange={() => (allSelected || someSelected ? clearSelection() : selectAllVisible())}
-                      aria-label="Select all rows"
-                      className="cursor-pointer w-3.5 h-3.5 accent-[var(--os-brand)]"
                     />
                   </div>
                 ) : null}
@@ -1082,34 +1079,32 @@ function Row({
             </span>
           ) : null}
           {canEdit ? (
-            <input
-              type="checkbox"
+            <CheckBox
               checked={selected}
               onChange={() => onToggleSelect(row.id)}
-              aria-label="Select row"
-              className={`cursor-pointer w-3.5 h-3.5 accent-[var(--os-brand)] transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+              className={selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
             />
           ) : null}
         </div>
       </td>
       <td className="pl-1 pr-4 py-2">
         <div className="flex items-center gap-1.5" style={{ paddingLeft: indent * 20 }}>
-          {hasSubtasks ? (
-            <button
-              type="button"
-              onClick={onToggleExpand}
-              className="inline-flex items-center justify-center w-4 h-4 rounded text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 shrink-0"
-              aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
-              title={expanded ? "Collapse subtasks" : "Expand subtasks"}
-            >
-              {/* Filled caret — points right when collapsed, down when open. */}
-              <svg viewBox="0 0 8 8" className={`w-[11px] h-[11px] fill-current transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden>
-                <path d="M2 1 L6 4 L2 7 Z" />
-              </svg>
-            </button>
-          ) : indent > 0 ? (
-            <span className="w-4 h-4 shrink-0" aria-hidden />
-          ) : null}
+          {/* Expand caret always reserves its slot (keeps every row's circle/
+              title aligned). Always visible when there are subtasks or the row
+              is open; otherwise it appears on hover — clicking it opens the row
+              so you can add the first subtask. */}
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            className={`inline-flex items-center justify-center w-4 h-4 rounded text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 shrink-0 transition-opacity ${hasSubtasks || expanded ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+            aria-label={expanded ? "Collapse subtasks" : hasSubtasks ? "Expand subtasks" : "Add subtask"}
+            title={expanded ? "Collapse" : hasSubtasks ? "Expand subtasks" : "Add subtask"}
+          >
+            {/* Filled caret — points right when collapsed, down when open. */}
+            <svg viewBox="0 0 8 8" className={`w-[11px] h-[11px] fill-current transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden>
+              <path d="M2 1 L6 4 L2 7 Z" />
+            </svg>
+          </button>
           {!showStatus ? (
             <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} dot />
           ) : null}
@@ -1214,6 +1209,31 @@ function DueDateCell({ row, canEdit, onUpdate }: { row: BoardItemRow; canEdit: b
     >
       {due ? <span>{due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-4 h-4" />}
     </button>
+  );
+}
+
+// Custom checkbox — the OS shell's global `button { background:none;border:none }`
+// reset (and native checkbox rendering) makes class-based boxes look black, so
+// the fill + border are set via inline styles, like the Switch primitive.
+function CheckBox({ checked, indeterminate, onChange, className = "" }: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: () => void;
+  className?: string;
+}) {
+  const on = checked || !!indeterminate;
+  return (
+    <span
+      role="checkbox"
+      aria-checked={indeterminate ? "mixed" : checked}
+      tabIndex={0}
+      onClick={(e) => { e.stopPropagation(); onChange(); }}
+      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onChange(); } }}
+      style={{ backgroundColor: on ? "var(--os-brand)" : "#fff", border: on ? "1px solid var(--os-brand)" : "1px solid #d4d4d8" }}
+      className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded cursor-pointer shrink-0 transition-colors ${className}`}
+    >
+      {checked ? <Check className="w-2.5 h-2.5 text-white" /> : indeterminate ? <span className="block w-1.5 h-[2px] rounded-full bg-white" /> : null}
+    </span>
   );
 }
 
