@@ -639,7 +639,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   />
                 ) : null}
               </th>
-              <th className="px-4 py-2 font-medium w-[36%]">Name</th>
+              <th className="px-4 py-2 font-medium w-auto">Name</th>
               {showStatus ? <th className="px-4 py-2 font-medium w-[140px]">Status</th> : null}
               {showOwner ? <th className="px-4 py-2 font-medium w-[180px]">Assignee</th> : null}
               {showDue ? <th className="px-4 py-2 font-medium w-[130px]">Due date</th> : null}
@@ -1088,7 +1088,7 @@ function Row({
         </div>
       </td>
       <td className="px-4 py-2">
-        <div className="flex items-center gap-2" style={{ paddingLeft: indent * 18 }}>
+        <div className="flex items-center gap-1.5" style={{ paddingLeft: indent * 20 }}>
           {hasSubtasks ? (
             <button
               type="button"
@@ -1847,10 +1847,10 @@ function StatusCell({
           <Check className="w-2.5 h-2.5 text-white" />
         </span>
       ) : (
-        <span className="w-[15px] h-[15px] rounded-full border-2 shrink-0" style={{ borderColor: current.color }} />
+        <span className="inline-block w-[15px] h-[15px] rounded-full border-2 shrink-0" style={{ borderColor: current.color }} />
       )
     ) : (
-      <span className="w-[15px] h-[15px] rounded-full border-[1.5px] border-dashed border-zinc-300 shrink-0" />
+      <span className="inline-block w-[15px] h-[15px] rounded-full border-[1.5px] border-dashed border-zinc-300 shrink-0" />
     );
     if (!canEdit) return circle;
     const activeTypeId = row.itemTypeId ?? itemTypes.default?.id ?? null;
