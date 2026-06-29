@@ -10,13 +10,13 @@ import {
   Calendar as CalendarIcon, GanttChart, type LucideIcon,
 } from "lucide-react";
 
-const VIEW_TABS: { key: string; label: string; Icon: LucideIcon }[] = [
-  { key: "overview", label: "Overview", Icon: LayoutDashboard },
-  { key: "list", label: "List", Icon: ListIcon },
-  { key: "board", label: "Board", Icon: Kanban },
-  { key: "team", label: "Team", Icon: UsersIcon },
-  { key: "calendar", label: "Calendar", Icon: CalendarIcon },
-  { key: "gantt", label: "Gantt", Icon: GanttChart },
+const VIEW_TABS: { key: string; label: string; Icon: LucideIcon; tile: string }[] = [
+  { key: "overview", label: "Overview", Icon: LayoutDashboard, tile: "#6366F1" },
+  { key: "list", label: "List", Icon: ListIcon, tile: "#6B7280" },
+  { key: "board", label: "Board", Icon: Kanban, tile: "#4F6BED" },
+  { key: "team", label: "Team", Icon: UsersIcon, tile: "#A855F7" },
+  { key: "calendar", label: "Calendar", Icon: CalendarIcon, tile: "#F59E0B" },
+  { key: "gantt", label: "Gantt", Icon: GanttChart, tile: "#EF4444" },
 ];
 
 export function SpaceViewTabs({ view, spaceSlug }: { view: string; spaceSlug: string }) {
@@ -26,6 +26,7 @@ export function SpaceViewTabs({ view, spaceSlug }: { view: string; spaceSlug: st
         <ViewTab
           key={t.key}
           icon={t.Icon}
+          iconTileColor={t.tile}
           label={t.label}
           active={view === t.key}
           href={t.key === "overview" ? `/spaces/${spaceSlug}` : `/spaces/${spaceSlug}?view=${t.key}`}

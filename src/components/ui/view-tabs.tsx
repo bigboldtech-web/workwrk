@@ -44,6 +44,9 @@ export interface ViewTabProps extends VariantProps<typeof tabVariants> {
   icon?: LucideIcon;
   /** Icon color when inactive (per-view tint). Mono zinc-900 when active. */
   iconClassName?: string;
+  /** Hex color — when set, the icon renders as a small filled rounded-square
+   *  tile (white glyph on this color), the ClickUp tab style. */
+  iconTileColor?: string;
   label: ReactNode;
   /** Right-aligned content (e.g. a count badge). */
   trailing?: ReactNode;
@@ -56,6 +59,7 @@ export interface ViewTabProps extends VariantProps<typeof tabVariants> {
 export function ViewTab({
   icon: Icon,
   iconClassName = "text-zinc-500",
+  iconTileColor,
   label,
   trailing,
   active = false,
@@ -67,7 +71,16 @@ export function ViewTab({
   const inner = (
     <>
       {Icon ? (
-        <Icon className={cn("w-4 h-4 shrink-0", active ? "text-zinc-900" : iconClassName)} />
+        iconTileColor ? (
+          <span
+            className="w-[17px] h-[17px] rounded-[5px] inline-flex items-center justify-center shrink-0"
+            style={{ backgroundColor: iconTileColor }}
+          >
+            <Icon className="w-3 h-3 text-white" />
+          </span>
+        ) : (
+          <Icon className={cn("w-4 h-4 shrink-0", active ? "text-zinc-900" : iconClassName)} />
+        )
       ) : null}
       <span className="truncate">{label}</span>
       {trailing}
