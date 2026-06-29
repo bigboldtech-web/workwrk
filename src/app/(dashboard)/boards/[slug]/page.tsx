@@ -173,20 +173,9 @@ export default async function BoardPage(props: {
         defaultViewId={defaultView?.id ?? null}
       />
 
-      {/* Action row — the functional filter bar lives inside BoardCanvas
-          (it owns the items it filters); this row keeps task creation. */}
-      <div className="px-6 py-2 border-b border-zinc-100 flex items-center gap-2">
-        <div className="flex-1" />
-        <BoardAddTaskButton
-          boardId={board.id}
-          boardSlug={board.slug}
-          boardName={board.name}
-          spaceId={board.space.id}
-        />
-      </div>
-
-      {/* Renderer */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      {/* Renderer — its single toolbar row (filters + Statuses/Fields + the
+          "+ Task" passed below) is the one concise ClickUp-style toolbar. */}
+      <div className="flex-1 overflow-y-auto px-6 pt-3 pb-4">
         <BoardCanvas
           boardId={board.id}
           viewId={activeView?.id ?? null}
@@ -197,6 +186,14 @@ export default async function BoardPage(props: {
           statuses={statuses}
           canEdit={canEdit}
           currentUserId={u.id}
+          addTaskSlot={
+            <BoardAddTaskButton
+              boardId={board.id}
+              boardSlug={board.slug}
+              boardName={board.name}
+              spaceId={board.space.id}
+            />
+          }
         />
       </div>
     </div>

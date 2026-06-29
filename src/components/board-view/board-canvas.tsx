@@ -6,7 +6,7 @@
 // SSR while all interactivity (drawer state, field shelf, row clicks)
 // lives here.
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CircleDot, Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
@@ -51,9 +51,12 @@ interface BoardCanvasProps {
   /** Threaded through to the drawer so the comments thread can gate
    *  "delete my own comment" without an extra session fetch. */
   currentUserId: string | null;
+  /** The "+ Task" affordance, rendered on the right of the single toolbar row
+   *  (ClickUp keeps create + filters + Statuses/Fields on one line). */
+  addTaskSlot?: ReactNode;
 }
 
-export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId, addTaskSlot }: BoardCanvasProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -184,7 +187,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <button
           type="button"
           onClick={() => setStatusEditorOpen(true)}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50"
+          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
           title="Edit this List's task statuses"
         >
           <CircleDot className="w-3.5 h-3.5" />
@@ -193,11 +196,12 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <button
           type="button"
           onClick={() => setShelfOpen(true)}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50"
+          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
         >
           <Settings2 className="w-3.5 h-3.5" />
           Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
         </button>
+        {addTaskSlot}
       </div>
 
       {viewType === "TABLE" ? (
