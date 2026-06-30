@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
@@ -97,6 +97,44 @@ function compareRows(a: BoardItemRow, b: BoardItemRow, key: SortKey): number {
     default:
       return 0;
   }
+}
+
+// Rule-based filters (ported from the Personal List's funnel).
+type FilterOp = "is" | "isNot" | "contains" | "isEmpty" | "isNotEmpty";
+interface FilterRule { id: string; field: string; op: FilterOp; value: string }
+let _ruleSeq = 0;
+function newRuleId(): string { _ruleSeq += 1; return `rule-${_ruleSeq}`; }
+
+function rowFieldValue(row: BoardItemRow, field: string): string {
+  switch (field) {
+    case "status": return row.status ?? "";
+    case "owner": return row.ownerId ?? "";
+    case "priority": return row.priority ?? "";
+    case "type": return row.itemTypeId ?? "";
+    case "due": return row.dueAt ? new Date(row.dueAt).toISOString() : "";
+    default: {
+      const v = row.metadata?.[field];
+      return v == null ? "" : String(v);
+    }
+  }
+}
+
+function matchesRule(row: BoardItemRow, rule: FilterRule): boolean {
+  const v = rowFieldValue(row, rule.field).toLowerCase();
+  const target = rule.value.toLowerCase();
+  switch (rule.op) {
+    case "is": return v === target;
+    case "isNot": return v !== target;
+    case "contains": return v.includes(target);
+    case "isEmpty": return v === "";
+    case "isNotEmpty": return v !== "";
+    default: return true;
+  }
+}
+
+function csvCell(v: unknown): string {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
@@ -183,6 +221,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const [sortKey, setSortKey] = useState<SortKey>("none");
   // "Me" quick filter — only rows assigned to the viewer.
   const [mineOnly, setMineOnly] = useState(false);
+  // Rule-based filters (funnel).
+  const [filterRules, setFilterRules] = useState<FilterRule[]>([]);
+  const [filterConnector, setFilterConnector] = useState<"AND" | "OR">("AND");
 
   // Split top-level items from subtasks for the render. Subtasks are
   // rendered indented below their parent when expanded.
@@ -213,9 +254,35 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (mineOnly && currentUserId) {
       topFiltered = topFiltered.filter((r) => r.ownerId === currentUserId);
     }
+    if (filterRules.length > 0) {
+      topFiltered = topFiltered.filter((r) => {
+        const results = filterRules.map((rule) => matchesRule(r, rule));
+        return filterConnector === "OR" ? results.some(Boolean) : results.every(Boolean);
+      });
+    }
     const topSorted = sortKey === "none" ? topFiltered : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
     return { topLevel: topSorted, childrenByParent: byParent };
-  }, [items, query, sortKey, mineOnly, currentUserId]);
+  }, [items, query, sortKey, mineOnly, currentUserId, filterRules, filterConnector]);
+
+  // CSV export of the currently visible (filtered/sorted) rows.
+  function exportCsv() {
+    const header = ["Name", "Status", "Assignee", "Priority", "Due date", "Date created"];
+    const lines = [header.join(",")];
+    for (const r of topLevel) {
+      const status = statuses.find((s) => s.value === r.status)?.label ?? "";
+      const owner = r.owner ? `${r.owner.firstName ?? ""} ${r.owner.lastName ?? ""}`.trim() : "";
+      const due = r.dueAt ? new Date(r.dueAt).toLocaleDateString() : "";
+      const created = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "";
+      lines.push([r.title, status, owner, r.priority ?? "", due, created].map(csvCell).join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tasks.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedParents((prev) => {
@@ -709,6 +776,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           {topLevel.length} item{topLevel.length === 1 ? "" : "s"}
         </span>
         <div className="flex-1" />
+        {/* Filters */}
+        <FilterMenu
+          rules={filterRules}
+          connector={filterConnector}
+          onRules={setFilterRules}
+          onConnector={setFilterConnector}
+          statuses={statuses}
+          customFields={customFields}
+        />
         {/* Me — only rows assigned to the viewer */}
         {currentUserId ? (
           <button
@@ -723,6 +799,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         ) : null}
         {/* Sort */}
         <SortMenu sortKey={sortKey} onChange={setSortKey} />
+        {/* CSV export */}
+        <button
+          type="button"
+          onClick={exportCsv}
+          title="Export to CSV"
+          aria-label="Export to CSV"
+          className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+        >
+          <Download className="w-4 h-4" />
+        </button>
         {/* Quick search (magnifier expands to an input) */}
         {searchOpen ? (
           <div className="flex items-center gap-1 h-7 px-2 rounded-md border border-zinc-200 bg-white">
@@ -1428,6 +1514,115 @@ function SubtaskModeMenu({ onCollapseAll, onExpandAll }: { onCollapseAll: () => 
               {mode === o.k ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0 mt-0.5" /> : null}
             </button>
           ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Filter popover (ported from the Personal List's funnel) — field/op/value
+// rules combined with an AND/OR connector.
+function FilterMenu({ rules, connector, onRules, onConnector, statuses, customFields }: {
+  rules: FilterRule[];
+  connector: "AND" | "OR";
+  onRules: (next: FilterRule[]) => void;
+  onConnector: (c: "AND" | "OR") => void;
+  statuses: StatusOption[];
+  customFields: FieldDef[];
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const fieldOptions = [
+    { key: "status", label: "Status" },
+    { key: "priority", label: "Priority" },
+    { key: "type", label: "Type" },
+    { key: "due", label: "Due date" },
+    ...customFields.map((f) => ({ key: f.key, label: f.label })),
+  ];
+  const opOptions: { k: FilterOp; label: string }[] = [
+    { k: "is", label: "is" },
+    { k: "isNot", label: "is not" },
+    { k: "contains", label: "contains" },
+    { k: "isEmpty", label: "is empty" },
+    { k: "isNotEmpty", label: "is not empty" },
+  ];
+  const selectCls = "h-7 rounded-md border border-zinc-200 bg-white text-[12px] px-1.5 focus:outline-none focus:border-zinc-400";
+  const update = (id: string, patch: Partial<FilterRule>) => onRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const active = rules.length > 0;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Filter"
+        aria-label="Filter"
+        className={`inline-flex items-center justify-center gap-0.5 h-7 px-1.5 rounded-md ${active ? "text-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)]" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"}`}
+      >
+        <ListFilter className="w-4 h-4" />
+        {active ? <span className="text-[10.5px] font-semibold tabular-nums">{rules.length}</span> : null}
+      </button>
+      {open ? (
+        <div className="absolute z-30 mt-1 right-0 w-[440px] rounded-lg border border-zinc-200 bg-white shadow-xl p-2.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Filters</div>
+          {rules.length === 0 ? <p className="text-[12px] text-zinc-500 px-0.5 pb-2">No filters. Add one to narrow the list.</p> : null}
+          <div className="space-y-1.5">
+            {rules.map((rule, i) => {
+              const needsValue = rule.op !== "isEmpty" && rule.op !== "isNotEmpty";
+              return (
+                <div key={rule.id} className="flex items-center gap-1.5">
+                  <div className="w-[52px] shrink-0">
+                    {i === 0 ? (
+                      <span className="text-[11px] text-zinc-400">Where</span>
+                    ) : (
+                      <button type="button" onClick={() => onConnector(connector === "AND" ? "OR" : "AND")} className="h-7 w-full rounded-md border border-zinc-200 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50">
+                        {connector}
+                      </button>
+                    )}
+                  </div>
+                  <select value={rule.field} onChange={(e) => update(rule.id, { field: e.target.value, value: "" })} className={selectCls}>
+                    {fieldOptions.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                  </select>
+                  <select value={rule.op} onChange={(e) => update(rule.id, { op: e.target.value as FilterOp })} className={selectCls}>
+                    {opOptions.map((o) => <option key={o.k} value={o.k}>{o.label}</option>)}
+                  </select>
+                  {needsValue ? (
+                    rule.field === "status" ? (
+                      <select value={rule.value} onChange={(e) => update(rule.id, { value: e.target.value })} className={`${selectCls} flex-1`}>
+                        <option value="">Select…</option>
+                        {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    ) : rule.field === "priority" ? (
+                      <select value={rule.value} onChange={(e) => update(rule.id, { value: e.target.value })} className={`${selectCls} flex-1`}>
+                        <option value="">Select…</option>
+                        {PRIORITY_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                      </select>
+                    ) : (
+                      <input value={rule.value} onChange={(e) => update(rule.id, { value: e.target.value })} placeholder="Value" className={`${selectCls} flex-1`} />
+                    )
+                  ) : <div className="flex-1" />}
+                  <button type="button" onClick={() => onRules(rules.filter((r) => r.id !== rule.id))} className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded text-zinc-400 hover:text-red-500 hover:bg-red-500/10" aria-label="Remove filter">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between mt-2">
+            <button type="button" onClick={() => onRules([...rules, { id: newRuleId(), field: "status", op: "is", value: "" }])} className="inline-flex items-center gap-1.5 text-[12px] text-zinc-600 hover:text-zinc-900">
+              <Plus className="w-3.5 h-3.5" /> Add filter
+            </button>
+            {rules.length > 0 ? (
+              <button type="button" onClick={() => onRules([])} className="text-[12px] text-zinc-500 hover:text-zinc-800">Clear all</button>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>
