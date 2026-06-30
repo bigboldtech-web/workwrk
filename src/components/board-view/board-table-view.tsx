@@ -664,7 +664,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         ) : null}
       </div>
 
-      <div className="overflow-x-auto">
+      {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
+          inline cell editors (assignee/date/dropdown popovers) aren't cut off. */}
+      <div className={monday ? "overflow-x-auto" : "overflow-visible"}>
         <table className="w-full text-[13px]">
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
@@ -739,7 +741,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                         {b.rows.flatMap((row) => renderRowAndSubtasks(row, 0))}
                         {canEdit ? (
                           <tr className="hover:bg-zinc-50">
-                            <td colSpan={colCount} className="px-4 py-1.5 pl-10">
+                            <td colSpan={colCount} className="py-1.5 pr-4" style={{ paddingLeft: 60 }}>
                               {groupAdd?.key === b.key ? (
                                 <input
                                   autoFocus
@@ -790,7 +792,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             )}
             {canEdit && !buckets ? (
               <tr className="hover:bg-zinc-50">
-                <td colSpan={colCount} className="px-4 py-1.5">
+                <td colSpan={colCount} className="py-1.5 pr-4">
+                  {/* "+" lines up under the status circle (leading col + arrow + gap). */}
+                  <div style={{ paddingLeft: 60 }}>
                   {addDraft !== null ? (
                     <input
                       autoFocus
@@ -822,6 +826,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                       Add Task
                     </button>
                   )}
+                  </div>
                 </td>
               </tr>
             ) : null}
@@ -1378,12 +1383,12 @@ function AddSubtaskRow({
 }) {
   return (
     <tr className="hover:bg-zinc-50" data-parent-id={parentId}>
-      <td colSpan={colCount} className="px-4 py-1.5">
+      <td colSpan={colCount} className="py-1.5 pr-4">
         <button
           type="button"
           onClick={onAdd}
           className="inline-flex items-center gap-1.5 text-[12px] text-zinc-400 hover:text-zinc-700"
-          style={{ paddingLeft: indent * 18 + 18 }}
+          style={{ paddingLeft: 60 + indent * 20 }}
         >
           <Plus className="w-3 h-3" />
           Add subtask
