@@ -965,7 +965,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                 {monday && items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} /> : null}
               </>
             )}
-            {canEdit && !buckets ? (
+            {/* Bottom "+ Add Task" — shown when ungrouped, OR when grouped but
+                there are no groups yet (a brand-new/empty List). Otherwise each
+                group renders its own inline add. */}
+            {canEdit && (!buckets || buckets.length === 0) ? (
               <tr className="hover:bg-zinc-50">
                 <td colSpan={colCount} className="py-1.5 pr-4">
                   {/* "+" lines up under the status circle (leading col + arrow + gap). */}
