@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3 } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
@@ -84,7 +84,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // style Table view, not the List.
   const showType = !hideBuiltin.has("__builtin_type") && monday;
   const showTags = !hideBuiltin.has("__builtin_tags") && monday;
-  const showCreated = monday;
+  const showCreated = !hideBuiltin.has("__builtin_created");
   // New rows default to the board's first status (its "not started").
   const firstStatus = statuses[0]?.value ?? "TO_DO";
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -146,6 +146,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   // Phase 73 — expanded subtask sets per parent. Closed by default.
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  // Quick search (toolbar magnifier) — filters rows by title.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   // Split top-level items from subtasks for the render. Subtasks are
   // rendered indented below their parent when expanded.
@@ -163,8 +166,18 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     // Sort children by position so reorder within a parent works.
     for (const arr of byParent.values()) arr.sort((a, b) => a.position - b.position);
-    return { topLevel: top, childrenByParent: byParent };
-  }, [items]);
+    // Quick search — keep a top-level row if its title matches or any of its
+    // subtasks match.
+    const q = query.trim().toLowerCase();
+    const topFiltered = q
+      ? top.filter(
+          (r) =>
+            r.title.toLowerCase().includes(q) ||
+            (byParent.get(r.id) ?? []).some((c) => c.title.toLowerCase().includes(q)),
+        )
+      : top;
+    return { topLevel: topFiltered, childrenByParent: byParent };
+  }, [items, query]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedParents((prev) => {
@@ -655,14 +668,37 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           </button>
         ) : null}
         <span className="ml-1 text-[11px] text-zinc-400">
-          {items.length} item{items.length === 1 ? "" : "s"}
+          {topLevel.length} item{topLevel.length === 1 ? "" : "s"}
         </span>
-        {toolbarActions ? (
-          <>
-            <div className="flex-1" />
-            <div className="flex items-center gap-2">{toolbarActions}</div>
-          </>
-        ) : null}
+        <div className="flex-1" />
+        {/* Quick search (magnifier expands to an input) */}
+        {searchOpen ? (
+          <div className="flex items-center gap-1 h-7 px-2 rounded-md border border-zinc-200 bg-white">
+            <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearchOpen(false); } }}
+              placeholder="Search tasks…"
+              className="w-[150px] bg-transparent outline-none text-[12.5px] text-zinc-900 placeholder:text-zinc-400"
+            />
+            <button type="button" onClick={() => { setQuery(""); setSearchOpen(false); }} className="text-zinc-400 hover:text-zinc-700 shrink-0" aria-label="Close search">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setSearchOpen(true)}
+            title="Search"
+            aria-label="Search"
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+          >
+            <Search className="w-4 h-4" />
+          </button>
+        )}
+        {toolbarActions ? <div className="flex items-center gap-2">{toolbarActions}</div> : null}
       </div>
 
       {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
