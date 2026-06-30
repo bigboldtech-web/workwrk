@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
@@ -68,6 +68,34 @@ interface BoardTableViewProps {
  *  optimistic row — the API's zod schema strips unknown keys; `tagIds`
  *  is what the server persists. */
 type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "dueAt" | "itemTypeId">> & { tagIds?: string[]; metadata?: Record<string, unknown> };
+
+// Toolbar sort (ported from the Personal List).
+type SortKey = "none" | "title" | "due" | "created" | "priority";
+function compareRows(a: BoardItemRow, b: BoardItemRow, key: SortKey): number {
+  switch (key) {
+    case "title":
+      return a.title.localeCompare(b.title);
+    case "due": {
+      const av = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
+      const bv = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
+      return av - bv;
+    }
+    case "created": {
+      const av = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bv = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return av - bv;
+    }
+    case "priority": {
+      const rank = (p: string | null | undefined) => {
+        const i = PRIORITY_OPTIONS.findIndex((o) => o.value === p);
+        return i < 0 ? PRIORITY_OPTIONS.length : i;
+      };
+      return rank(a.priority) - rank(b.priority);
+    }
+    default:
+      return 0;
+  }
+}
 
 export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, toolbarActions, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
@@ -149,6 +177,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // Quick search (toolbar magnifier) — filters rows by title.
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // Sort (toolbar) — ported from the Personal List: none/title/due/created/priority.
+  const [sortKey, setSortKey] = useState<SortKey>("none");
 
   // Split top-level items from subtasks for the render. Subtasks are
   // rendered indented below their parent when expanded.
@@ -176,8 +206,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             (byParent.get(r.id) ?? []).some((c) => c.title.toLowerCase().includes(q)),
         )
       : top;
-    return { topLevel: topFiltered, childrenByParent: byParent };
-  }, [items, query]);
+    const topSorted = sortKey === "none" ? topFiltered : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
+    return { topLevel: topSorted, childrenByParent: byParent };
+  }, [items, query, sortKey]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedParents((prev) => {
@@ -671,6 +702,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           {topLevel.length} item{topLevel.length === 1 ? "" : "s"}
         </span>
         <div className="flex-1" />
+        {/* Sort */}
+        <SortMenu sortKey={sortKey} onChange={setSortKey} />
         {/* Quick search (magnifier expands to an input) */}
         {searchOpen ? (
           <div className="flex items-center gap-1 h-7 px-2 rounded-md border border-zinc-200 bg-white">
@@ -1374,6 +1407,55 @@ function SubtaskModeMenu({ onCollapseAll, onExpandAll }: { onCollapseAll: () => 
                 {o.hint ? <span className="block text-[11px] text-zinc-400">{o.hint}</span> : null}
               </span>
               {mode === o.k ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0 mt-0.5" /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Sort menu (ported from the Personal List's toolbar).
+function SortMenu({ sortKey, onChange }: { sortKey: SortKey; onChange: (k: SortKey) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const opts: { k: SortKey; label: string }[] = [
+    { k: "none", label: "Default" },
+    { k: "title", label: "Name" },
+    { k: "due", label: "Due date" },
+    { k: "created", label: "Date created" },
+    { k: "priority", label: "Priority" },
+  ];
+  const active = sortKey !== "none";
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Sort"
+        aria-label="Sort"
+        className={`inline-flex items-center justify-center w-7 h-7 rounded-md ${active ? "text-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)]" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"}`}
+      >
+        <ArrowUpDown className="w-4 h-4" />
+      </button>
+      {open ? (
+        <div className="absolute z-20 mt-1 right-0 w-[180px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1.5">
+          <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Sort by</div>
+          {opts.map((o) => (
+            <button
+              key={o.k}
+              type="button"
+              onClick={() => { onChange(o.k); setOpen(false); }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-zinc-50"
+            >
+              <span className={sortKey === o.k ? "flex-1 text-[13px] font-semibold text-zinc-900" : "flex-1 text-[13px] text-zinc-700"}>{o.label}</span>
+              {sortKey === o.k ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>
           ))}
         </div>
