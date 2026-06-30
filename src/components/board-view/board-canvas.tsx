@@ -6,7 +6,7 @@
 // SSR while all interactivity (drawer state, field shelf, row clicks)
 // lives here.
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CircleDot, Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
@@ -30,7 +30,7 @@ import { BoardPivotView } from "./board-pivot-view";
 import { BoardCardsView } from "./board-cards-view";
 import { BoardActivityView } from "./board-activity-view";
 import { BoardItemDrawer } from "./board-item-drawer";
-import { BoardFilterBar, applyFilters, filtersActive, parseFilters, type BoardFilters } from "./board-filter-bar";
+import { applyFilters, parseFilters } from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
 import { BoardStatusEditor } from "./board-status-editor";
 
@@ -135,32 +135,10 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     [fields, hiddenFields],
   );
 
-  // Per-view filters (View.config.filters). Applied to every renderer;
-  // search persistence is debounced so typing doesn't spam PATCHes.
-  const [filters, setFilters] = useState<BoardFilters>(() => parseFilters(viewConfig?.filters));
-  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleFiltersChange = useCallback((next: BoardFilters) => {
-    setFilters((prev) => {
-      if (viewId) {
-        const searchOnly =
-          prev.search !== next.search &&
-          prev.statuses === next.statuses && prev.owners === next.owners &&
-          prev.priorities === next.priorities && prev.tagIds === next.tagIds &&
-          prev.hideDone === next.hideDone;
-        const persist = () => {
-          void fetch(`/api/boards/${boardId}/views/${viewId}`, {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ config: { ...(viewConfig ?? {}), hiddenFields, filters: next } }),
-          }).catch(() => {});
-        };
-        if (persistTimer.current) clearTimeout(persistTimer.current);
-        if (searchOnly) persistTimer.current = setTimeout(persist, 800);
-        else persist();
-      }
-      return next;
-    });
-  }, [boardId, viewId, viewConfig, hiddenFields]);
+  // Per-view filters (View.config.filters), applied to every renderer. The
+  // search + filter UI was pulled out (it's moving to a new spot), so there's no
+  // live setter right now — the config-level filters still apply.
+  const filters = useMemo(() => parseFilters(viewConfig?.filters), [viewConfig]);
 
   const filteredItems = useMemo(() => applyFilters(items, filters, statuses), [items, filters, statuses]);
 
@@ -177,12 +155,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   return (
     <>
       <div className="flex items-center gap-2 mb-2 flex-wrap">
-        <BoardFilterBar items={items} filters={filters} statuses={statuses} onChange={handleFiltersChange} />
-        {filtersActive(filters) ? (
-          <span className="text-[11px] text-zinc-400 tabular-nums">
-            {filteredItems.length} of {items.length}
-          </span>
-        ) : null}
+        {/* Search + filter intentionally removed for now — moving to a new spot. */}
         <div className="flex-1" />
         <button
           type="button"

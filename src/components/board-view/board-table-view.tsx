@@ -2175,17 +2175,17 @@ function GroupByPill({
   const fieldOptions = groupOptions.filter((o) => o.key !== "__none__");
 
   if (!groupBy) {
-    // Compact dropdown like ClickUp's collapsed state — single pill that
-    // opens the field picker directly.
+    // Not grouped — icon only (ClickUp). Click opens the field picker.
     return (
       <div className="relative">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-[11.5px] text-zinc-500 hover:bg-zinc-50"
+          title="Group by"
+          aria-label="Group by"
+          className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
         >
-          <Layers className="w-3 h-3" />
-          <span>Group</span>
+          <Layers className="w-4 h-4" />
         </button>
         {open ? (
           <>
