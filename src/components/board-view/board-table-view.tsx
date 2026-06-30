@@ -1840,15 +1840,6 @@ function TitleCell({
         title={row.title}
       >
         <span className="truncate flex-1 min-w-0 font-medium">{row.title}</span>
-        {(row.subtaskCount ?? 0) > 0 ? (
-          <span
-            className="inline-flex items-center gap-0.5 text-[10.5px] text-zinc-400 tabular-nums shrink-0"
-            title={`${row.subtaskCount} subtask${row.subtaskCount === 1 ? "" : "s"}`}
-          >
-            <Layers className="w-3 h-3" />
-            {row.subtaskCount}
-          </span>
-        ) : null}
         {(row.commentCount ?? 0) > 0 ? (
           <span
             className="inline-flex items-center gap-0.5 text-[10.5px] text-zinc-400 tabular-nums shrink-0"
