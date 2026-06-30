@@ -3,6 +3,17 @@
  * All scoped to `.workwrk-os` so marketing site is untouched.
  * ═════════════════════════════════════════════════════════════════ */
 
+/* Space Overview cards — hide the react-resizable corner grip by default
+ * (the little diagonal arrows looked noisy); reveal it subtly only while
+ * hovering a card, so resize still works. */
+.os-overview-grid .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.os-overview-grid .react-grid-item:hover > .react-resizable-handle {
+  opacity: 0.35;
+}
+
 .workwrk-os {
   /* Brand — default; per-accent overrides below key off
      `:root[data-accent="<key>"]` so the CustomizePanel theme picker

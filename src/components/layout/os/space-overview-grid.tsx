@@ -124,7 +124,7 @@ export function SpaceOverviewGrid({
   return (
     <>
       <ResponsiveGridLayout
-        className="layout"
+        className="layout os-overview-grid"
         layouts={visibleLayouts}
         breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
         cols={{ lg: 12, md: 12, sm: 12, xs: 6, xxs: 4 }}
