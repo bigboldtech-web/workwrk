@@ -624,10 +624,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[13px]">
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
-              <th className="pl-1 pr-0 py-2 w-[34px]">
+              <th className="pl-1 pr-0 py-1.5 w-[34px]">
                 {canEdit ? (
                   <div className="flex items-center gap-1">
                     <span className="w-3 shrink-0" aria-hidden />
@@ -1067,7 +1067,7 @@ function Row({
         isDragOver ? "outline outline-2 outline-violet-400 outline-offset-[-2px]" : ""
       }`}
     >
-      <td className="pl-1 pr-0 py-2 w-[34px]">
+      <td className="pl-1 pr-0 py-1.5 w-[34px]">
         <div className="flex items-center gap-1">
           {canEdit ? (
             <span
@@ -1087,7 +1087,7 @@ function Row({
           ) : null}
         </div>
       </td>
-      <td className="pl-1 pr-4 py-2">
+      <td className="pl-1 pr-4 py-1.5">
         <div className="flex items-center gap-1.5" style={{ paddingLeft: indent * 20 }}>
           {/* Expand caret. Top-level tasks always reserve the slot (visible when
               they have subtasks / are open, else on hover → add the first
@@ -1126,37 +1126,37 @@ function Row({
         </div>
       </td>
       {showStatus ? (
-        <td className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-2"}>
+        <td className={monday ? "p-0 align-middle border-l border-zinc-100" : "px-4 py-1.5"}>
           <StatusCell row={row} statuses={statuses} canEdit={canEdit} onUpdate={onUpdate} monday={monday} />
         </td>
       ) : null}
       {showOwner ? (
-        <td className="px-4 py-2">
+        <td className="px-4 py-1.5">
           <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
         </td>
       ) : null}
       {showDue ? (
-        <td className="px-4 py-2">
+        <td className="px-4 py-1.5">
           <DueDateCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
         </td>
       ) : null}
       {showPriority ? (
-        <td className="px-4 py-2">
+        <td className="px-4 py-1.5">
           <PriorityPicker value={row.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onUpdate(row.id, { priority })} />
         </td>
       ) : null}
       {showType ? (
-        <td className="px-4 py-2">
+        <td className="px-4 py-1.5">
           <TypeCell itemTypeId={row.itemTypeId ?? null} itemTypeMap={itemTypeMap} />
         </td>
       ) : null}
       {showTags ? (
-        <td className="px-4 py-2">
+        <td className="px-4 py-1.5">
           <TagPicker value={row.tags ?? []} canEdit={canEdit} compact onChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })} />
         </td>
       ) : null}
       {customFields.map((f) => (
-        <td key={f.key} className="px-4 py-2">
+        <td key={f.key} className="px-4 py-1.5">
           <FieldValue field={f} value={row.metadata?.[f.key]} mode="display" />
         </td>
       ))}
@@ -1165,7 +1165,7 @@ function Row({
           {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
-      <td className="px-2 py-2 text-right">
+      <td className="px-2 py-1.5 text-right">
         {canEdit ? (
           <RowActionsMenu
             itemId={row.id}
@@ -1715,7 +1715,7 @@ function TitleCell({
         className="w-full text-left truncate hover:text-[var(--os-brand)] transition-colors inline-flex items-center gap-2"
         title={row.title}
       >
-        <span className="truncate flex-1 min-w-0">{row.title}</span>
+        <span className="truncate flex-1 min-w-0 font-medium">{row.title}</span>
         {(row.subtaskCount ?? 0) > 0 ? (
           <span
             className="inline-flex items-center gap-0.5 text-[10.5px] text-zinc-400 tabular-nums shrink-0"
