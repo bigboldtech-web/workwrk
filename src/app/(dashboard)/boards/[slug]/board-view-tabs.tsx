@@ -122,7 +122,7 @@ export function BoardViewTabs({
   }
 
   return (
-    <ViewTabStrip className="px-6">
+    <ViewTabStrip className="px-4">
       {order.map((v) => {
         // Monday-style Table (TABLE + config.grid) and the Team variant
         // (WORKLOAD + config.variant) get their own icon + tile color.

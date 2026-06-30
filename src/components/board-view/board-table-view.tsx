@@ -627,7 +627,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         <table className="w-full text-sm">
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
-              <th className="pl-3 pr-0 py-2 w-[42px]">
+              <th className="pl-1 pr-0 py-2 w-[34px]">
                 {canEdit ? (
                   <div className="flex items-center gap-1">
                     <span className="w-3 shrink-0" aria-hidden />
@@ -1067,7 +1067,7 @@ function Row({
         isDragOver ? "outline outline-2 outline-violet-400 outline-offset-[-2px]" : ""
       }`}
     >
-      <td className="pl-3 pr-0 py-2 w-[42px]">
+      <td className="pl-1 pr-0 py-2 w-[34px]">
         <div className="flex items-center gap-1">
           {canEdit ? (
             <span
