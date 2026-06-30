@@ -437,7 +437,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       // Custom SELECT field — use field.options to resolve label + color.
       const field = customFields.find((f) => f.key === groupBy);
       const optionByValue = new Map<string, { label: string; color?: string }>();
-      const fieldOpts = field && "options" in field ? (field.options as Array<{ value: string; label: string; color?: string }> | undefined) ?? [] : [];
+      // Grouping is allowed on any field now, so options may be absent or a
+      // non-array shape — guard so a for..of never throws ("not iterable").
+      const rawFieldOpts = field && "options" in field ? (field as { options?: unknown }).options : undefined;
+      const fieldOpts: Array<{ value: string; label: string; color?: string }> = Array.isArray(rawFieldOpts) ? rawFieldOpts : [];
       for (const o of fieldOpts) optionByValue.set(o.value, o);
       for (const opt of fieldOpts) {
         const rows = map.get(opt.value) ?? [];
