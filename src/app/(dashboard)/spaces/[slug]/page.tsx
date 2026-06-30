@@ -30,6 +30,8 @@ import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
 import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceViewTabs } from "./space-view-tabs";
+import { SpaceListItemsTable } from "./space-list-items";
+import type { StatusOption } from "@/lib/board-items-shared";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
@@ -198,6 +200,10 @@ export default async function SpacePage(props: {
   });
   if (!isAdmin && space.visibility !== "ORG" && !membership) notFound();
   const isSpaceOwner = membership?.role === "OWNER";
+  // Optimistic edit-rights for the in-place item popup on the List tab — the
+  // item PATCH is still gated per-board on the server, so this only governs the
+  // editor UI.
+  const spaceCanEdit = isAdmin || isSpaceOwner || !!membership;
 
   const workflow = readWorkflow(space.settings);
 
@@ -608,7 +614,6 @@ export default async function SpacePage(props: {
         {view === "list" ? (
           <SpaceListSection
             items={crossBoardItems}
-            accent={accent}
             statusPalette={statusPalette}
             workflowStatuses={workflow?.statuses ?? []}
             ownerFacets={ownerFacets}
@@ -621,6 +626,7 @@ export default async function SpacePage(props: {
             }}
             viewerId={u.id}
             spaceSlug={space.slug}
+            canEdit={spaceCanEdit}
           />
         ) : null}
         {view === "board" ? (
@@ -1939,13 +1945,13 @@ function ListOwnerFilter({
 
 function SpaceListSection({
   items,
-  accent,
   statusPalette,
   workflowStatuses,
   ownerFacets,
   opts,
   viewerId,
   spaceSlug,
+  canEdit,
 }: {
   items: Array<{
     id: string;
@@ -1955,14 +1961,19 @@ function SpaceListSection({
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
-  accent: string;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
   workflowStatuses: Array<{ key: string; label: string; color: string; group: string }>;
   ownerFacets: Array<{ id: string; name: string; avatar: string | null; count: number }>;
   opts: ListUrlOpts;
   viewerId: string;
   spaceSlug: string;
+  canEdit: boolean;
 }) {
+  // The Space workflow palette, as the StatusOption[] both the progress circle
+  // and the item popup's status picker expect.
+  const statusOptions: StatusOption[] = workflowStatuses.map((s) => ({
+    value: s.key, label: s.label, color: s.color, group: s.group as StatusOption["group"],
+  }));
   const statusFilterActive = opts.statuses !== null && opts.statuses.size > 0;
   const ownerFilterActive = opts.owners !== null && opts.owners.size > 0;
   const filterActive = statusFilterActive || ownerFilterActive;
@@ -2044,11 +2055,13 @@ function SpaceListSection({
       ) : (
         <ListBody
           items={items}
-          accent={accent}
           statusPalette={statusPalette}
           ownerFacets={ownerFacets}
           groupBy={opts.groupBy}
           workflowStatuses={workflowStatuses}
+          statusOptions={statusOptions}
+          canEdit={canEdit}
+          currentUserId={viewerId}
         />
       )}
     </section>
@@ -2057,11 +2070,13 @@ function SpaceListSection({
 
 function ListBody({
   items,
-  accent,
   statusPalette,
   ownerFacets,
   groupBy,
   workflowStatuses,
+  statusOptions,
+  canEdit,
+  currentUserId,
 }: {
   items: Array<{
     id: string;
@@ -2071,16 +2086,18 @@ function ListBody({
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
-  accent: string;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
   ownerFacets: Array<{ id: string; name: string; avatar: string | null; count: number }>;
   groupBy: ListGroupBy;
   workflowStatuses: Array<{ key: string; label: string; color: string; group: string }>;
+  statusOptions: StatusOption[];
+  canEdit: boolean;
+  currentUserId: string;
 }) {
   if (groupBy === "none") {
     return (
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
-        <ListItemsTable items={items} accent={accent} statusPalette={statusPalette} />
+        <SpaceListItemsTable items={items} statuses={statusOptions} canEdit={canEdit} currentUserId={currentUserId} />
         {items.length === 200 ? (
           <div className="px-3 py-2 text-[10.5px] text-zinc-400 bg-zinc-50 border-t border-zinc-100">
             Showing 200 most-recently-updated items. Open a Board for the full set.
@@ -2170,7 +2187,7 @@ function ListBody({
               <span className="text-[12px] font-semibold text-zinc-800 flex-1 truncate">{g.label}</span>
               <span className="text-[11px] text-zinc-500 tabular-nums">{g.items.length}</span>
             </summary>
-            <ListItemsTable items={g.items} accent={accent} statusPalette={statusPalette} />
+            <SpaceListItemsTable items={g.items} statuses={statusOptions} canEdit={canEdit} currentUserId={currentUserId} />
           </details>
         ))}
       {items.length === 200 ? (
@@ -2182,78 +2199,7 @@ function ListBody({
   );
 }
 
-function ListItemsTable({
-  items,
-  accent,
-  statusPalette,
-}: {
-  items: Array<{
-    id: string;
-    title: string;
-    status: string | null;
-    ownerId: string | null;
-    updatedAt: Date;
-    board: { slug: string; name: string };
-  }>;
-  accent: string;
-  statusPalette: Map<string, { label: string; color: string; group: string }>;
-}) {
-  return (
-    <table className="w-full">
-      <thead className="bg-zinc-50 border-b border-zinc-200">
-        <tr className="text-left text-[10.5px] uppercase tracking-wide text-zinc-500">
-          <th className="px-3 py-2 font-medium">Title</th>
-          <th className="px-3 py-2 font-medium">Status</th>
-          <th className="px-3 py-2 font-medium hidden sm:table-cell">Board</th>
-          <th className="px-3 py-2 font-medium text-right tabular-nums">Updated</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-zinc-100">
-        {items.map((it) => {
-          const status = it.status ? statusPalette.get(it.status) : null;
-          const statusColor = status?.color ?? "#A1A1AA";
-          const statusLabel = status?.label ?? (it.status ?? "—");
-          return (
-            <tr key={it.id} className="hover:bg-zinc-50">
-              <td className="px-3 py-2">
-                <Link
-                  href={`/boards/${it.board.slug}?item=${it.id}`}
-                  className="flex items-center gap-2 min-w-0"
-                >
-                  <span
-                    className="h-1.5 w-1.5 rounded-full shrink-0"
-                    style={{ backgroundColor: accent }}
-                    aria-hidden
-                  />
-                  <span className="text-[13px] text-zinc-900 truncate hover:text-zinc-700">{it.title}</span>
-                </Link>
-              </td>
-              <td className="px-3 py-2">
-                <span
-                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium"
-                  style={{ backgroundColor: `${statusColor}1a`, color: statusColor }}
-                >
-                  {statusLabel}
-                </span>
-              </td>
-              <td className="px-3 py-2 hidden sm:table-cell">
-                <Link
-                  href={`/boards/${it.board.slug}`}
-                  className="text-[12px] text-zinc-600 hover:text-zinc-900 truncate inline-block max-w-[200px]"
-                >
-                  {it.board.name}
-                </Link>
-              </td>
-              <td className="px-3 py-2 text-right text-[11px] text-zinc-500 tabular-nums">
-                {timeAgo(it.updatedAt)}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
+// (ListItemsTable replaced by the interactive client SpaceListItemsTable.)
 
 function OverviewCard({
   title,
