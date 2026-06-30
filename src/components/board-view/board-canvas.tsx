@@ -152,30 +152,40 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     router.refresh();
   }, [router]);
 
+  // Right-side toolbar actions. For the TABLE view these ride on the same row as
+  // the group/subtask/columns icons (just below the tabs); other views keep the
+  // dedicated action row above the canvas.
+  const toolbarActions = (
+    <>
+      <button
+        type="button"
+        onClick={() => setStatusEditorOpen(true)}
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
+        title="Edit this List's task statuses"
+      >
+        <CircleDot className="w-3.5 h-3.5" />
+        Statuses <span className="text-xs text-zinc-500">({statuses.length})</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => setShelfOpen(true)}
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
+      >
+        <Settings2 className="w-3.5 h-3.5" />
+        Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
+      </button>
+      {addTaskSlot}
+    </>
+  );
+
   return (
     <>
-      <div className="flex items-center gap-2 mb-2 flex-wrap">
-        {/* Search + filter intentionally removed for now — moving to a new spot. */}
-        <div className="flex-1" />
-        <button
-          type="button"
-          onClick={() => setStatusEditorOpen(true)}
-          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
-          title="Edit this List's task statuses"
-        >
-          <CircleDot className="w-3.5 h-3.5" />
-          Statuses <span className="text-xs text-zinc-500">({statuses.length})</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setShelfOpen(true)}
-          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
-        >
-          <Settings2 className="w-3.5 h-3.5" />
-          Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
-        </button>
-        {addTaskSlot}
-      </div>
+      {viewType !== "TABLE" ? (
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <div className="flex-1" />
+          {toolbarActions}
+        </div>
+      ) : null}
 
       {viewType === "TABLE" ? (
         <BoardTableView
@@ -189,6 +199,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           onOpenItem={(id) => setOpenItemId(id)}
           onEditStatuses={() => setStatusEditorOpen(true)}
           onOpenFields={() => setShelfOpen(true)}
+          toolbarActions={toolbarActions}
           hiddenBuiltins={hiddenFields}
           gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
         />

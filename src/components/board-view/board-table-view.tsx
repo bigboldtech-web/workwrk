@@ -49,6 +49,9 @@ interface BoardTableViewProps {
   onOpenItem?: (itemId: string) => void;
   /** Opens the right-hand Fields panel (the toolbar "columns" icon). */
   onOpenFields?: () => void;
+  /** Right-aligned toolbar actions (Statuses / Fields / + Task) rendered on the
+   *  same row as the group/subtask/columns icons, just below the view tabs. */
+  toolbarActions?: React.ReactNode;
   /** Opens the board's status editor — wired to the group-header "…"
    *  menu (Rename / New status / Edit statuses / Hide status). */
   onEditStatuses?: () => void;
@@ -63,9 +66,9 @@ interface BoardTableViewProps {
 /** Patch shape rows can emit. `owner`/`tags` only update the local
  *  optimistic row — the API's zod schema strips unknown keys; `tagIds`
  *  is what the server persists. */
-type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "dueAt" | "itemTypeId">> & { tagIds?: string[] };
+type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "dueAt" | "itemTypeId">> & { tagIds?: string[]; metadata?: Record<string, unknown> };
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, toolbarActions, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
@@ -228,13 +231,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     const opts: { key: string; label: string }[] = [
       { key: "__none__", label: "No grouping" },
       { key: "status", label: "Status" },
-      { key: "owner", label: "Owner" },
+      { key: "owner", label: "Assignee" },
       { key: "priority", label: "Priority" },
+      { key: "type", label: "Type" },
     ];
+    // Every column in the list is a valid grouping — select fields bucket by
+    // their option, everything else buckets by its raw value.
     for (const f of customFields) {
-      if (f.type === "DROPDOWN" || f.type === "MULTI_SELECT" || f.type === "LABELS") {
-        opts.push({ key: f.key, label: f.label });
-      }
+      opts.push({ key: f.key, label: f.label });
     }
     return opts;
   }, [customFields]);
@@ -249,6 +253,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       if (groupBy === "status") return it.status ?? "__unset__";
       if (groupBy === "owner") return it.ownerId ?? "__unset__";
       if (groupBy === "priority") return it.priority ?? "__unset__";
+      if (groupBy === "type") return it.itemTypeId ?? "__unset__";
       const raw = it.metadata?.[groupBy];
       return raw == null || raw === "" ? "__unset__" : String(raw);
     };
@@ -299,6 +304,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       tuples.sort((a, b) => a.label.localeCompare(b.label));
       resolved.push(...tuples);
       map.clear();
+    } else if (groupBy === "type") {
+      // Group by item type — label via the type map; untyped rows last.
+      const tuples = Array.from(map.entries()).map(([k, rows]) => {
+        const t = k !== "__unset__" ? itemTypeMap.get(k) : null;
+        const label = t ? t.singular : k === "__unset__" ? "No type" : "Unknown";
+        return { key: k, label, color: null as string | null, rows };
+      });
+      tuples.sort((a, b) => a.label.localeCompare(b.label));
+      resolved.push(...tuples);
+      map.clear();
     } else {
       // Custom SELECT field — use field.options to resolve label + color.
       const field = customFields.find((f) => f.key === groupBy);
@@ -329,7 +344,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
     if (groupDirection === "desc") resolved.reverse();
     return resolved;
-  }, [groupBy, topLevel, customFields, groupDirection, statuses]);
+  }, [groupBy, topLevel, customFields, groupDirection, statuses, itemTypeMap]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => {
@@ -641,6 +656,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         <span className="ml-1 text-[11px] text-zinc-400">
           {items.length} item{items.length === 1 ? "" : "s"}
         </span>
+        {toolbarActions ? (
+          <>
+            <div className="flex-1" />
+            <div className="flex items-center gap-2">{toolbarActions}</div>
+          </>
+        ) : null}
       </div>
 
       <div className="overflow-x-auto">
@@ -1177,7 +1198,14 @@ function Row({
       ) : null}
       {customFields.map((f) => (
         <td key={f.key} className="px-4 py-1.5">
-          <FieldValue field={f} value={row.metadata?.[f.key]} mode="display" />
+          <EditableFieldCell
+            field={f}
+            value={row.metadata?.[f.key]}
+            canEdit={canEdit}
+            onChange={(next) =>
+              onUpdate(row.id, { metadata: { ...(row.metadata ?? {}), [f.key]: next } })
+            }
+          />
         </td>
       ))}
       {showCreated ? (
@@ -1197,6 +1225,20 @@ function Row({
       </td>
     </tr>
   );
+}
+
+// A custom-field cell that is editable in place, per type. Read-only viewers
+// (or no edit rights) see the compact display; editors get the field's own
+// inline editor — a dropdown for select fields, a text input for text, a date
+// picker for dates, etc. — so each column behaves like its own kind of cell.
+function EditableFieldCell({ field, value, canEdit, onChange }: {
+  field: FieldDef;
+  value: unknown;
+  canEdit: boolean;
+  onChange: (next: unknown) => void;
+}) {
+  if (!canEdit) return <FieldValue field={field} value={value} mode="display" />;
+  return <FieldValue field={field} value={value} mode="edit" onChange={onChange} />;
 }
 
 // Inline due-date cell — a faint calendar+ affordance when empty (ClickUp
