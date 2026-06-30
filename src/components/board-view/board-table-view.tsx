@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3 } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
@@ -47,6 +47,8 @@ interface BoardTableViewProps {
   /** When set, clicking a row's title opens the row drawer. The
    *  parent owns drawer state; we just emit the id. */
   onOpenItem?: (itemId: string) => void;
+  /** Opens the right-hand Fields panel (the toolbar "columns" icon). */
+  onOpenFields?: () => void;
   /** Opens the board's status editor — wired to the group-header "…"
    *  menu (Rename / New status / Edit statuses / Hide status). */
   onEditStatuses?: () => void;
@@ -63,7 +65,7 @@ interface BoardTableViewProps {
  *  is what the server persists. */
 type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "dueAt" | "itemTypeId">> & { tagIds?: string[] };
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
@@ -610,7 +612,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       {/* Group-by selector — ClickUp parity (2026-06-07). Toolbar pill
           shows the active field; click → "Group by" popover with field +
           direction dropdowns + trash to clear. */}
-      <div className={`${monday ? "px-3 border-b border-zinc-100" : "px-1"} py-1.5 flex items-center gap-2`}>
+      <div className={`${monday ? "px-3 border-b border-zinc-100" : "px-1"} py-1.5 flex items-center gap-0.5`}>
+        {/* 1 — Group by */}
         <GroupByPill
           groupBy={groupBy}
           groupDirection={groupDirection}
@@ -618,7 +621,24 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           onGroupBy={setGroupBy}
           onDirection={setGroupDirection}
         />
-        <span className="text-[11px] text-zinc-400">
+        {/* 2 — Subtasks display mode */}
+        <SubtaskModeMenu
+          onCollapseAll={() => setExpandedParents(new Set())}
+          onExpandAll={() => setExpandedParents(new Set(Array.from(childrenByParent.keys())))}
+        />
+        {/* 3 — Columns / Fields */}
+        {onOpenFields ? (
+          <button
+            type="button"
+            onClick={onOpenFields}
+            title="Columns"
+            aria-label="Columns / Fields"
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+          >
+            <Columns3 className="w-4 h-4" />
+          </button>
+        ) : null}
+        <span className="ml-1 text-[11px] text-zinc-400">
           {items.length} item{items.length === 1 ? "" : "s"}
         </span>
       </div>
@@ -1213,6 +1233,68 @@ function DueDateCell({ row, canEdit, onUpdate }: { row: BoardItemRow; canEdit: b
     >
       {due ? <span>{due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-4 h-4" />}
     </button>
+  );
+}
+
+// Subtasks display-mode menu (ClickUp's "Show subtasks"): Collapsed / Expanded /
+// Separate. Collapsed/Expanded drive the per-row expand state in one shot.
+function SubtaskModeMenu({ onCollapseAll, onExpandAll }: { onCollapseAll: () => void; onExpandAll: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"collapsed" | "expanded" | "separate">("collapsed");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const opts: { k: "collapsed" | "expanded" | "separate"; label: string; note?: string; hint?: string }[] = [
+    { k: "collapsed", label: "Collapsed", note: "(default)" },
+    { k: "expanded", label: "Expanded" },
+    { k: "separate", label: "Separate", hint: "Use this to filter subtasks" },
+  ];
+
+  function pick(k: "collapsed" | "expanded" | "separate") {
+    setMode(k);
+    setOpen(false);
+    if (k === "collapsed") onCollapseAll();
+    else if (k === "expanded") onExpandAll();
+    // "separate" — show subtasks as their own rows; lands in a later pass.
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Subtasks"
+        aria-label="Subtasks display"
+        className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+      >
+        <Network className="w-4 h-4" />
+      </button>
+      {open ? (
+        <div className="absolute z-20 mt-1 left-0 w-[220px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1.5">
+          <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Show subtasks</div>
+          {opts.map((o) => (
+            <button
+              key={o.k}
+              type="button"
+              onClick={() => pick(o.k)}
+              className="flex items-start gap-2 w-full px-3 py-1.5 text-left hover:bg-zinc-50"
+            >
+              <span className="flex-1 min-w-0">
+                <span className={mode === o.k ? "text-[13px] font-semibold text-zinc-900" : "text-[13px] text-zinc-700"}>{o.label}</span>
+                {o.note ? <span className="ml-1 text-[11px] text-zinc-400">{o.note}</span> : null}
+                {o.hint ? <span className="block text-[11px] text-zinc-400">{o.hint}</span> : null}
+              </span>
+              {mode === o.k ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0 mt-0.5" /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

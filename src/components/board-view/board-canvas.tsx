@@ -215,6 +215,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           onEditStatuses={() => setStatusEditorOpen(true)}
+          onOpenFields={() => setShelfOpen(true)}
           hiddenBuiltins={hiddenFields}
           gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
         />
