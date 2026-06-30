@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
@@ -50,6 +50,8 @@ interface BoardTableViewProps {
   onOpenItem?: (itemId: string) => void;
   /** Opens the right-hand Fields panel (the toolbar "columns" icon). */
   onOpenFields?: () => void;
+  /** Viewer id — powers the toolbar "Me" (assigned to me) quick filter. */
+  currentUserId?: string | null;
   /** Right-aligned toolbar actions (Statuses / Fields / + Task) rendered on the
    *  same row as the group/subtask/columns icons, just below the view tabs. */
   toolbarActions?: React.ReactNode;
@@ -97,7 +99,7 @@ function compareRows(a: BoardItemRow, b: BoardItemRow, key: SortKey): number {
   }
 }
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, toolbarActions, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
@@ -179,6 +181,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const [query, setQuery] = useState("");
   // Sort (toolbar) — ported from the Personal List: none/title/due/created/priority.
   const [sortKey, setSortKey] = useState<SortKey>("none");
+  // "Me" quick filter — only rows assigned to the viewer.
+  const [mineOnly, setMineOnly] = useState(false);
 
   // Split top-level items from subtasks for the render. Subtasks are
   // rendered indented below their parent when expanded.
@@ -199,16 +203,19 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     // Quick search — keep a top-level row if its title matches or any of its
     // subtasks match.
     const q = query.trim().toLowerCase();
-    const topFiltered = q
+    let topFiltered = q
       ? top.filter(
           (r) =>
             r.title.toLowerCase().includes(q) ||
             (byParent.get(r.id) ?? []).some((c) => c.title.toLowerCase().includes(q)),
         )
       : top;
+    if (mineOnly && currentUserId) {
+      topFiltered = topFiltered.filter((r) => r.ownerId === currentUserId);
+    }
     const topSorted = sortKey === "none" ? topFiltered : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
     return { topLevel: topSorted, childrenByParent: byParent };
-  }, [items, query, sortKey]);
+  }, [items, query, sortKey, mineOnly, currentUserId]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedParents((prev) => {
@@ -702,6 +709,18 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           {topLevel.length} item{topLevel.length === 1 ? "" : "s"}
         </span>
         <div className="flex-1" />
+        {/* Me — only rows assigned to the viewer */}
+        {currentUserId ? (
+          <button
+            type="button"
+            onClick={() => setMineOnly((v) => !v)}
+            title={mineOnly ? "Showing your tasks" : "Show only my tasks"}
+            aria-pressed={mineOnly}
+            className={`inline-flex items-center justify-center w-7 h-7 rounded-md ${mineOnly ? "text-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)]" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"}`}
+          >
+            <UserCheck className="w-4 h-4" />
+          </button>
+        ) : null}
         {/* Sort */}
         <SortMenu sortKey={sortKey} onChange={setSortKey} />
         {/* Quick search (magnifier expands to an input) */}
