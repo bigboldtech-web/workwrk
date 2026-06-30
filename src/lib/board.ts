@@ -76,6 +76,55 @@ export interface CreateBoardInput {
  * boards we also seed an empty `schema.fields` array so the field-shelf
  * UI has somewhere to write to.
  */
+// Find-or-create the viewer's personal, space-less List board. This backs
+// /tasks/personal-list so it renders through the very same board-table-view as
+// every other List — one component, one Item-backed model. Marked by
+// productSlug="personal-list" + ownerId; visibility PRIVATE so only the owner
+// sees it.
+export async function getOrCreatePersonalBoard(organizationId: string, userId: string) {
+  const existing = await prisma.board.findFirst({
+    where: { organizationId, ownerId: userId, productSlug: "personal-list" },
+  });
+  if (existing) return existing;
+  const slug = `personal-${userId}`;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const board = await tx.board.create({
+        data: {
+          organizationId,
+          spaceId: null,
+          slug,
+          name: "Personal List",
+          itemType: "studio-item",
+          productSlug: "personal-list",
+          ownerId: userId,
+          visibility: "PRIVATE",
+          schema: { fields: [] },
+          settings: {},
+        },
+      });
+      await tx.view.create({
+        data: {
+          boardId: board.id,
+          name: "List",
+          type: "TABLE",
+          isDefault: true,
+          isShared: true,
+          ownerId: userId,
+          config: { groupBy: "status" },
+          displayOrder: 0,
+        },
+      });
+      return board;
+    });
+  } catch {
+    // Lost the slug race on a concurrent first visit — return the existing row.
+    const board = await prisma.board.findFirst({ where: { organizationId, slug } });
+    if (board) return board;
+    throw new Error("Failed to provision personal board");
+  }
+}
+
 export async function createBoard(input: CreateBoardInput): Promise<BoardSummary & { defaultViewType: ViewType }> {
   const trimmed = input.name.trim();
   if (!trimmed) throw new Error("Board name is required");

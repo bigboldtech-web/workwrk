@@ -74,12 +74,16 @@ export function BoardViewTabs({
   boardSlug,
   activeViewId,
   defaultViewId,
+  basePath,
 }: {
   views: BoardViewItem[];
   boardId: string;
   boardSlug: string;
   activeViewId: string | null;
   defaultViewId: string | null;
+  /** URL the tabs link to (default `/boards/<slug>`). The Personal List passes
+   *  `/tasks/personal-list` so its tabs stay on that route. */
+  basePath?: string;
 }) {
   const router = useRouter();
   // Local order so a drag reorders instantly; re-syncs when the server view set
@@ -133,7 +137,8 @@ export function BoardViewTabs({
         const tileColor = isMondayTable ? "#16A34A" : isTeam ? "#A855F7" : (VIEW_HEX[v.type] ?? "#6B7280");
         const active = v.id === activeViewId;
         const isDefault = v.id === defaultViewId;
-        const href = isDefault ? `/boards/${boardSlug}` : `/boards/${boardSlug}?view=${v.id}`;
+        const base = basePath ?? `/boards/${boardSlug}`;
+        const href = isDefault ? base : `${base}?view=${v.id}`;
         return (
           <span
             key={v.id}
