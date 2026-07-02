@@ -28,6 +28,10 @@ export interface HomePref {
   favoriteBoardIds?: string[];
   // Phase 80 — favorite (starred) Space ids. Same shape.
   favoriteSpaceIds?: string[];
+  // Top-pinned favorites of ANY kind (space/folder/board/table/doc/whiteboard),
+  // rendered as chips in the topbar strip (ClickUp "Favorite → Top"). The
+  // sidebar-favorites lists above cover the "Favorite → Sidebar" destination.
+  topPins?: { kind: string; id: string }[];
   // Phase 15+ — favorite (starred) Doc/note ids. Surfaced in the Notes
   // sidebar Favorites section and as the filled star on /docs/[id].
   favoriteDocIds?: string[];
