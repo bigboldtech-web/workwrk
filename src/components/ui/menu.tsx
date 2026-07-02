@@ -18,11 +18,44 @@
 // so always render menus through a portal (MorePortal / Radix) — every
 // existing call site already does.
 
-import { createElement, type ReactNode } from "react";
+import { createElement, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Check, ChevronRight, Loader2, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+/* ─────────────────────────── hover submenu ─────────────────────────── */
+
+// A row that reveals a nested MenuList to its right on hover/click (ClickUp
+// "Favorite ›" style). The nested panel is a descendant, and a padding bridge
+// spans the gap, so moving onto it doesn't close the submenu.
+export function MenuSubmenu({
+  icon,
+  iconClassName,
+  label,
+  children,
+}: {
+  icon?: LucideIcon;
+  iconClassName?: string;
+  label: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <MenuItem icon={icon} iconClassName={iconClassName} label={label} submenu onClick={() => setOpen((v) => !v)} />
+      {open ? (
+        <div className="absolute left-full top-[-6px] z-[120] pl-1">
+          <MenuList className="min-w-[190px]">{children}</MenuList>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /* ───────────────────────────── container ───────────────────────────── */
 

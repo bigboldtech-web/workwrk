@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Edit2, Palette, Share2, Archive, Loader2, Star, PanelLeft,
+  MoreHorizontal, Edit2, Palette, Share2, Archive, Loader2, Star, PanelLeft, PanelTop,
   Link as LinkIcon, Zap, Tag, CircleDot,
   Download, Files, ArrowRightLeft, Copy, Trash2, Save,
   Shapes, Info, Mail,
@@ -22,7 +22,7 @@ import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
-import { MenuItem, MenuList, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
+import { MenuItem, MenuList, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardRowLike {
@@ -341,20 +341,20 @@ function BoardMoreMenu({
 
   return (
     <MenuList>
-      <MenuSectionLabel>Favorite</MenuSectionLabel>
-      <MenuItem
-        icon={PanelLeft}
-        label={starred ? "Remove from Sidebar" : "Favorite in Sidebar"}
-        onClick={toggleFavorite}
-        iconFilled={!!starred}
-      />
-      <MenuItem
-        icon={Star}
-        label={pinnedTop ? "Remove from Top" : "Pin to Top"}
-        onClick={togglePinTop}
-        iconFilled={!!pinnedTop}
-      />
-      <MenuSeparator />
+      <MenuSubmenu icon={Star} label="Favorite">
+        <MenuItem
+          icon={PanelLeft}
+          label={starred ? "Remove from Sidebar" : "Sidebar"}
+          onClick={toggleFavorite}
+          iconFilled={!!starred}
+        />
+        <MenuItem
+          icon={PanelTop}
+          label={pinnedTop ? "Remove from Top" : "Top"}
+          onClick={togglePinTop}
+          iconFilled={!!pinnedTop}
+        />
+      </MenuSubmenu>
       <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
       <MenuItem icon={LinkIcon} label="Copy link" onClick={copyLink} />
 
