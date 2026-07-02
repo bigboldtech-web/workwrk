@@ -89,7 +89,10 @@ const rowVariants = cva(
       },
     },
     compoundVariants: [
-      { tone: "default", class: "hover:bg-zinc-50 dark:hover:bg-white/10" },
+      // NB: avoid `bg-white/10` here — a light-mode guardrail in globals.css
+      // (`[class*="bg-white/10"] { background:#0000000f !important }`) matches the
+      // class substring even on a `dark:hover:` variant and paints every row gray.
+      { tone: "default", class: "hover:bg-zinc-50 dark:hover:bg-zinc-800" },
       { tone: "destructive", class: "hover:bg-red-50 dark:hover:bg-red-500/15" },
     ],
     defaultVariants: { variant: "flush", tone: "default" },
@@ -203,7 +206,7 @@ export function MenuItem({
 
   const rowClass = cn(
     rowVariants({ variant: v, tone }),
-    active ? "bg-zinc-100 dark:bg-white/10" : null,
+    active ? "bg-zinc-100 dark:bg-zinc-800" : null,
     className,
   );
 
