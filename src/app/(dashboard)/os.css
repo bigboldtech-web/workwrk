@@ -4,11 +4,18 @@
  * ═════════════════════════════════════════════════════════════════ */
 
 /* Popover panels render via createPortal to <body>, outside `.workwrk-os`, so
- * the global button reset doesn't reach them and native buttons draw their OS
- * gray chrome (appearance: auto ignores background-color). Kill the native
- * appearance here — Tailwind bg-* utilities still control the actual fill /
- * hover. Only `appearance` is reset (not background), so hover styles win. */
-.os-portal-panel button { -webkit-appearance: none; appearance: none; }
+ * the global `.workwrk-os button` reset doesn't reach them — native buttons then
+ * show their gray chrome. Mirror that reset here, but INSIDE @layer base so
+ * Tailwind hover/active bg utilities still win on top (unlayered rules would
+ * override hover and kill the highlight). */
+@layer base {
+  .os-portal-panel button {
+    background: none;
+    border: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
 
 /* Space Overview cards — hide the react-resizable corner grip by default
  * (the little diagonal arrows looked noisy); reveal it subtly only while
