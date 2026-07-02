@@ -98,18 +98,19 @@ export function SpaceCreateTrigger({
 
 function SpaceCreateMenu({
   spaceId,
-  onRequestBoard,
   onRequestFolder,
   onCreated,
 }: {
   spaceId: string;
-  onRequestBoard: () => void;
+  /** Retained for API compatibility; the "List" action now opens the clean
+   *  CreateListModal via openCreateList instead of the board view-picker. */
+  onRequestBoard?: () => void;
   onRequestFolder: () => void;
   onCreated?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
-  const { openTemplateCenter } = useOsShell();
+  const { openTemplateCenter, openCreateList } = useOsShell();
   const [busyKind, setBusyKind] = useState<string | null>(null);
 
   const stub = (label: string) => () => toast(`${label} creation coming soon`);
@@ -192,7 +193,7 @@ function SpaceCreateMenu({
         iconClassName="text-zinc-700 dark:text-zinc-200"
         label="List"
         description="Track tasks, projects, people & more"
-        onClick={onRequestBoard}
+        onClick={() => { onCreated?.(); openCreateList({ spaceId }); }}
       />
       <MenuItem
         variant="inset"

@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 type SpaceRow = { id: string; slug?: string; name: string; icon: string | null; color: string | null };
 
 export function CreateListModal() {
-  const { createListOpen, closeCreateList, openTemplateCenter } = useOsShell();
+  const { createListOpen, closeCreateList, openTemplateCenter, createListPreselect } = useOsShell();
   const router = useRouter();
   const [listName, setListName] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
@@ -31,12 +31,16 @@ export function CreateListModal() {
       .then((d) => {
         const rows: SpaceRow[] = Array.isArray(d.spaces) ? d.spaces : [];
         setSpaces(rows);
+        // Preselect: explicit space from the opener (e.g. a Space "+" menu)
+        // wins; else derive from the current /spaces/[slug] route; else first.
+        const preId = createListPreselect?.spaceId;
+        const fromPreselect = preId ? rows.find((s) => s.id === preId) : null;
         const slug = typeof window !== "undefined" ? window.location.pathname.match(/\/spaces\/([^/?#]+)/)?.[1] : null;
         const fromRoute = slug ? rows.find((s) => s.slug === decodeURIComponent(slug)) : null;
-        setSpaceId(fromRoute?.id ?? rows[0]?.id ?? "");
+        setSpaceId(fromPreselect?.id ?? fromRoute?.id ?? rows[0]?.id ?? "");
       })
       .catch(() => {});
-  }, [createListOpen]);
+  }, [createListOpen, createListPreselect]);
 
   if (!createListOpen) return null;
 
