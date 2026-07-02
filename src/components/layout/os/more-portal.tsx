@@ -81,7 +81,7 @@ export function MorePortal({
     <div
       ref={ref}
       style={{ position: "fixed", left: coords.left, top: coords.top, width }}
-      className="z-[80]"
+      className="z-[80] os-portal-panel"
     >
       {children}
     </div>,

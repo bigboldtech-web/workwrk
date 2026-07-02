@@ -3,6 +3,12 @@
  * All scoped to `.workwrk-os` so marketing site is untouched.
  * ═════════════════════════════════════════════════════════════════ */
 
+/* Popover panels render via createPortal to <body>, outside `.workwrk-os`, so
+ * the global `button { background:none }` reset doesn't reach them and native
+ * buttons show their default gray fill. Neutralize it here (Tailwind bg-*
+ * utilities still override for buttons that want a fill). */
+.os-portal-panel button { background-color: transparent; }
+
 /* Space Overview cards — hide the react-resizable corner grip by default
  * (the little diagonal arrows looked noisy); reveal it subtly only while
  * hovering a card, so resize still works. */
