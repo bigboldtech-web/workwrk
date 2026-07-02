@@ -71,10 +71,11 @@ export function MenuSectionLabel({
 /* ─────────────────────────────── item ──────────────────────────────── */
 
 const rowVariants = cva(
-  // bg-transparent is explicit: these rows often render in a portal (outside
-  // .workwrk-os), where the global `button { background:none }` reset doesn't
-  // reach — without it native buttons show their default gray fill.
-  "group/menuitem w-full flex items-center text-left bg-transparent transition-colors disabled:opacity-100 focus-visible:outline-none",
+  // appearance-none + bg-transparent: these rows often render in a portal
+  // (outside .workwrk-os), where the global button reset doesn't reach — native
+  // buttons then draw their OS gray chrome (which ignores background-color), so
+  // appearance-none is required to kill it. hover/active still paint the fill.
+  "group/menuitem w-full flex items-center text-left appearance-none bg-transparent transition-colors disabled:opacity-100 focus-visible:outline-none",
   {
     variants: {
       variant: {
