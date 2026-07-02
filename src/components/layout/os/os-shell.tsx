@@ -28,6 +28,7 @@ import { ThemeApplier } from "./theme-applier";
 import { ClickAppRail } from "./click-app-rail";
 import { ClickSidebar } from "./click-sidebar";
 import { ClickTopbar } from "./click-topbar";
+import { TopPinsStrip } from "./top-pins-strip";
 import { AppsMorePopover } from "./apps-more-popover";
 import { OsSidekickPanel } from "./sidekick-panel";
 import { SetStatusModal } from "./set-status-modal";
@@ -84,6 +85,8 @@ export function OsShell({ children }: { children: React.ReactNode }) {
         ) : (
           <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5 overflow-hidden">
             <ClickTopbar />
+            {/* Top-pinned favorites — their own tab-strip row below the topbar */}
+            <TopPinsStrip />
             <div className="flex-1 flex min-h-0 relative gap-1.5 overflow-hidden">
               <ClickAppRail />
               <ClickSidebar />

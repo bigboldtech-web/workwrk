@@ -20,7 +20,6 @@ import { useSession } from "next-auth/react";
 import { useOsShell } from "./shell-context";
 import { ChevronDown, Search } from "lucide-react";
 import { WorkspaceMenu } from "./workspace-menu";
-import { TopPinsStrip } from "./top-pins-strip";
 import { CalendarPeek } from "./calendar-peek";
 import { ToolGlyph, hasToolGlyph } from "@/components/brand/app-glyphs";
 import { AskAiButton } from "./ask-ai-button";
@@ -93,9 +92,6 @@ export function ClickTopbar() {
         <CalendarPeek />
         <WorkspaceMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={switcherRef} />
       </div>
-
-      {/* Top-pinned favorites (ClickUp "Favorite → Top") */}
-      <TopPinsStrip />
 
       {/* Spacer pushes the search to its own slot */}
       <div className="flex-1" />

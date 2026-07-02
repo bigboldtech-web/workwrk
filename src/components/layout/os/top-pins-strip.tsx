@@ -41,7 +41,7 @@ export function TopPinsStrip() {
   if (pins.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+    <div className="flex items-center gap-1 px-1 shrink-0 overflow-x-auto no-scrollbar">
       {pins.map((p) => (
         <span
           key={`${p.kind}:${p.id}`}
