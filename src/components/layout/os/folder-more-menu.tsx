@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Edit2, Palette, Archive, Loader2, Star,
+  MoreHorizontal, Edit2, Palette, Archive, Loader2, Star, PanelLeft,
   Link as LinkIcon, Zap,
   Download, Files, ArrowRightLeft, Copy, Trash2, Share2,
 } from "lucide-react";
@@ -22,7 +22,7 @@ import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
-import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { MenuItem, MenuList, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface FolderRowLike {
@@ -106,6 +106,7 @@ function FolderMoreMenu({
   const [iconName, setIconName] = useState(folder.icon);
   const [color, setColor] = useState(folder.color ?? "#71717A");
   const [starred, setStarred] = useState<boolean | null>(null);
+  const [pinnedTop, setPinnedTop] = useState<boolean | null>(null);
 
   // Load current favorite state once when the menu opens.
   useEffect(() => {
@@ -116,10 +117,28 @@ function FolderMoreMenu({
         if (!alive) return;
         const ids: string[] = d?.effective?.home?.favoriteFolderIds ?? [];
         setStarred(ids.includes(folder.id));
+        const pins: { kind: string; id: string }[] = d?.effective?.home?.topPins ?? [];
+        setPinnedTop(pins.some((p) => p.kind === "folder" && p.id === folder.id));
       })
-      .catch(() => { if (alive) setStarred(false); });
+      .catch(() => { if (alive) { setStarred(false); setPinnedTop(false); } });
     return () => { alive = false; };
   }, [folder.id]);
+
+  const togglePinTop = useCallback(async () => {
+    if (pinnedTop === null) return;
+    const next = !pinnedTop;
+    setPinnedTop(next);
+    try {
+      await fetch("/api/me/pins", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "folder", id: folder.id, on: next }),
+      });
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("workwrk:pins-changed"));
+    } catch {
+      setPinnedTop(pinnedTop);
+    }
+  }, [folder.id, pinnedTop]);
 
   const toggleFavorite = useCallback(async () => {
     if (starred === null) return;
@@ -288,12 +307,20 @@ function FolderMoreMenu({
 
   return (
     <MenuList>
+      <MenuSectionLabel>Favorite</MenuSectionLabel>
       <MenuItem
-        icon={Star}
-        label={starred ? "Unfavorite" : "Favorite"}
+        icon={PanelLeft}
+        label={starred ? "Remove from Sidebar" : "Favorite in Sidebar"}
         onClick={toggleFavorite}
         iconFilled={!!starred}
       />
+      <MenuItem
+        icon={Star}
+        label={pinnedTop ? "Remove from Top" : "Pin to Top"}
+        onClick={togglePinTop}
+        iconFilled={!!pinnedTop}
+      />
+      <MenuSeparator />
       <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
       <MenuItem icon={LinkIcon} label="Copy link" onClick={copyLink} />
 
