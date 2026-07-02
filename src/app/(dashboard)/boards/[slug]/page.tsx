@@ -10,7 +10,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Lock, Share2, Sparkles, ChevronRight, ChevronDown, ListChecks,
+  Lock, Share2, Sparkles, ChevronDown, ListChecks,
   ListFilter, Glasses, Zap, Folder as FolderIcon,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -19,9 +19,7 @@ import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { canEditSpace } from "@/lib/space";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
-import { BoardFavoriteButton } from "@/components/board-view/board-favorite-button";
 import { parseBoardSchema } from "@/lib/field-catalog";
-import { getEffectivePreferences } from "@/lib/preferences";
 
 export const dynamic = "force-dynamic";
 
@@ -61,14 +59,10 @@ export default async function BoardPage(props: {
   const activeView =
     (sp.view ? board.views.find((v) => v.id === sp.view) : null) ?? defaultView;
 
-  const [items, canEdit, prefs] = await Promise.all([
+  const [items, canEdit] = await Promise.all([
     listBoardItems(board.id),
     canEditSpace(board.space.id, u.id, u.accessLevel),
-    getEffectivePreferences(u.id, u.organizationId),
   ]);
-  const initiallyStarred = Array.isArray(prefs?.home?.favoriteBoardIds)
-    ? prefs.home.favoriteBoardIds.includes(board.id)
-    : false;
   const initialFields = parseBoardSchema(board.schema).fields;
   // Per-List statuses (backbone #1) — the board's own set, or the
   // canonical default trio when Board.statuses is null.
@@ -120,7 +114,6 @@ export default async function BoardPage(props: {
           <span className="truncate">{board.name}</span>
           <ChevronDown className="w-3 h-3 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity" />
         </h1>
-        <BoardFavoriteButton boardId={board.id} initiallyStarred={initiallyStarred} />
         <button
           type="button"
           aria-label="Filter board"

@@ -22,7 +22,6 @@ import Link from "next/link";
 import { SpaceActions } from "@/components/layout/os/space-actions";
 import { SpaceQuickStart } from "@/components/layout/os/space-quick-start";
 import { SpaceShareButton } from "@/components/layout/os/space-share-button";
-import { SpaceFavoriteButton } from "@/components/layout/os/space-favorite-button";
 import { ListCsvExport } from "@/components/board-view/list-csv-export";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { ShareBoardButton } from "@/components/layout/os/share-board-button";
@@ -283,9 +282,6 @@ export default async function SpacePage(props: {
       : Promise.resolve([] as { status: string | null; _count: { _all: number } }[]),
     getEffectivePreferences(u.id, u.organizationId),
   ]);
-  const initiallySpaceStarred = Array.isArray(prefs?.home?.favoriteSpaceIds)
-    ? prefs.home.favoriteSpaceIds.includes(space.id)
-    : false;
 
   const hasContent =
     space.folders.length > 0 ||
@@ -554,7 +550,6 @@ export default async function SpacePage(props: {
             {space.visibility === "PRIVATE" ? (
               <Lock className="w-3.5 h-3.5 text-zinc-400" />
             ) : null}
-            <SpaceFavoriteButton spaceId={space.id} initiallyStarred={initiallySpaceStarred} />
             <button
               type="button"
               aria-label="Filter Space"
