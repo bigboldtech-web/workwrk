@@ -160,6 +160,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // busy state, so we only need the setter here).
   const [, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-column widths (drag the header border to resize) — persisted per view.
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
+    const raw = viewConfig?.colWidths;
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, number>) } : {};
+  });
+  const colWidthsRef = useRef(colWidths);
+  useEffect(() => { colWidthsRef.current = colWidths; }, [colWidths]);
+  const widthFor = (key: string, def: number) => colWidths[key] ?? def;
   // Group-by axis seeded from the saved view config (Phase 74). Null
   // means "no grouping" — strings can be "status" / "owner" / a field key.
   const initialGroupBy = (() => {
@@ -191,6 +199,27 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       }),
     }).catch(() => {});
   }, [viewId, boardId, viewConfig]);
+
+  // Column resize — drag a header's right border to set its width, min 60px.
+  // Persists to the view config on release (colWidthsRef holds the latest).
+  const startColResize = useCallback((e: React.PointerEvent, key: string, startW: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.max(60, Math.round(startW + (ev.clientX - startX)));
+      setColWidths((prev) => ({ ...prev, [key]: next }));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.cursor = "";
+      persistView({ colWidths: colWidthsRef.current });
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [persistView]);
 
   const setGroupBy = useCallback((next: string | null) => {
     setGroupByState(next);
@@ -850,7 +879,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
           inline cell editors (assignee/date/dropdown popovers) aren't cut off. */}
       <div className={monday ? "overflow-x-auto" : "overflow-visible"}>
-        <table className="w-full text-[13px]">
+        <table className="w-full text-[13px]" style={{ tableLayout: "fixed" }}>
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
               <th className="pl-1 pr-0 py-1.5 w-[34px]">
@@ -865,18 +894,32 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   </div>
                 ) : null}
               </th>
+              {/* Name flexes (absorbs remaining width); every other column has an
+                  explicit, drag-resizable width. */}
               <th className="px-4 py-2 font-medium w-auto">Name</th>
-              {showStatus ? <th className="px-4 py-2 font-medium w-[140px]">Status</th> : null}
-              {showOwner ? <th className="px-4 py-2 font-medium w-[110px]">Assignee</th> : null}
-              {showDue ? <th className="px-4 py-2 font-medium w-[110px]">Due date</th> : null}
-              {showPriority ? <th className="px-4 py-2 font-medium w-[90px]">Priority</th> : null}
-              {showType ? <th className="px-4 py-2 font-medium w-[130px]">Type</th> : null}
-              {showTags ? <th className="px-4 py-2 font-medium w-[160px]">Tags</th> : null}
+              {showStatus ? <ResizableTh label="Status" width={widthFor("status", 140)} onResize={(e) => startColResize(e, "status", widthFor("status", 140))} /> : null}
+              {showOwner ? <ResizableTh label="Assignee" width={widthFor("owner", 110)} onResize={(e) => startColResize(e, "owner", widthFor("owner", 110))} /> : null}
+              {showDue ? <ResizableTh label="Due date" width={widthFor("due", 110)} onResize={(e) => startColResize(e, "due", widthFor("due", 110))} /> : null}
+              {showPriority ? <ResizableTh label="Priority" width={widthFor("priority", 90)} onResize={(e) => startColResize(e, "priority", widthFor("priority", 90))} /> : null}
+              {showType ? <ResizableTh label="Type" width={widthFor("type", 130)} onResize={(e) => startColResize(e, "type", widthFor("type", 130))} /> : null}
+              {showTags ? <ResizableTh label="Tags" width={widthFor("tags", 160)} onResize={(e) => startColResize(e, "tags", widthFor("tags", 160))} /> : null}
               {customFields.map((f) => (
-                <th key={f.key} className="px-4 py-2 font-medium">{f.label}</th>
+                <ResizableTh key={f.key} label={f.label} width={widthFor(f.key, 150)} onResize={(e) => startColResize(e, f.key, widthFor(f.key, 150))} />
               ))}
-              {showCreated ? <th className="px-4 py-2 font-medium w-[120px]">Created</th> : null}
-              <th className="px-2 py-2 w-[40px]"></th>
+              {showCreated ? <ResizableTh label="Created" width={widthFor("created", 120)} onResize={(e) => startColResize(e, "created", widthFor("created", 120))} /> : null}
+              <th className="px-1 py-2 w-[40px] text-center">
+                {canEdit && onOpenFields ? (
+                  <button
+                    type="button"
+                    onClick={onOpenFields}
+                    className="inline-flex items-center justify-center w-6 h-6 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+                    title="Add field / column"
+                    aria-label="Add field"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                ) : null}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -1658,6 +1701,29 @@ function CheckBox({ checked, indeterminate, onChange, className = "" }: {
     >
       {checked ? <Check className="w-2.5 h-2.5 text-white" /> : indeterminate ? <span className="block w-1.5 h-[2px] rounded-full bg-white" /> : null}
     </span>
+  );
+}
+
+// Resizable column header — a right-edge drag handle shows a brand line on
+// hover (like ClickUp); dragging it resizes the column.
+function ResizableTh({ label, width, onResize }: {
+  label: string;
+  width: number;
+  onResize: (e: React.PointerEvent) => void;
+}) {
+  return (
+    <th className="relative group/th px-4 py-2 font-medium" style={{ width }}>
+      <span className="block truncate pr-2">{label}</span>
+      <span
+        onPointerDown={onResize}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute top-0 right-0 h-full w-2 flex justify-center cursor-col-resize select-none touch-none"
+        title="Drag to resize"
+        aria-hidden
+      >
+        <span className="w-[2px] h-full bg-transparent group-hover/th:bg-[var(--os-brand)] transition-colors" />
+      </span>
+    </th>
   );
 }
 
