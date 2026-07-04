@@ -28,6 +28,7 @@ import { NoteActionMenu, useNoteMenu, type NoteTarget } from "@/components/docs/
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
+import { renderNoteIcon } from "@/components/docs/note-icon";
 import { ShareSpaceDialog } from "./share-space-dialog";
 import { SpaceTreeRow } from "./space-tree-row";
 import { onSidebarRefresh, refreshSidebar } from "./sidebar-refresh";
@@ -874,10 +875,12 @@ function DocsSidebar() {
         const d = await docsRes.json();
         const all = (d.docs ?? d.data ?? []) as Array<{
           id: string; title: string; parentId?: string | null; isFolder?: boolean; position?: number;
-          content?: { meta?: { icon?: string } };
+          emoji?: string | null; content?: { meta?: { icon?: string } };
         }>;
         setDocs(all.map((x) => ({
-          id: x.id, title: x.title, emoji: x.content?.meta?.icon,
+          // Prefer the server-derived `emoji` (from content.meta.icon); fall back
+          // to reading content directly if a caller still returns it.
+          id: x.id, title: x.title, emoji: x.emoji ?? x.content?.meta?.icon ?? undefined,
           parentId: x.parentId ?? null, isFolder: !!x.isFolder, position: x.position ?? 0,
         })));
       } else setDocs([]);
@@ -1072,8 +1075,8 @@ function DocsSidebar() {
           >
             {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
-          <span className="w-4 flex-shrink-0 grid place-items-center text-[13px]">
-            {node.emoji ?? <FileText className="w-3.5 h-3.5 text-zinc-400" />}
+          <span className="w-4 flex-shrink-0 grid place-items-center text-[13px] [&_svg]:w-3.5 [&_svg]:h-3.5 [&_img]:w-4 [&_img]:h-4 [&_img]:rounded-[3px] [&_img]:object-cover">
+            {node.emoji ? renderNoteIcon(node.emoji) : <FileText className="w-3.5 h-3.5 text-zinc-400" />}
           </span>
           <span className="truncate flex-1">{node.title || "Untitled note"}</span>
           {actionsFor(node)}
@@ -1120,8 +1123,8 @@ function DocsSidebar() {
                 onClick={() => router.push(`/docs/${d.id}`)}
                 onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: true })}
               >
-                <span className="w-4 flex-shrink-0 grid place-items-center text-[13px]">
-                  {d.emoji ?? <FileText className="w-3.5 h-3.5 text-zinc-400" />}
+                <span className="w-4 flex-shrink-0 grid place-items-center text-[13px] [&_svg]:w-3.5 [&_svg]:h-3.5 [&_img]:w-4 [&_img]:h-4 [&_img]:rounded-[3px] [&_img]:object-cover">
+                  {d.emoji ? renderNoteIcon(d.emoji) : <FileText className="w-3.5 h-3.5 text-zinc-400" />}
                 </span>
                 <span className="truncate flex-1">{d.title || "Untitled note"}</span>
                 {actionsFor(d)}

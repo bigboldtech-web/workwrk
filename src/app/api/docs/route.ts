@@ -43,6 +43,10 @@ export async function GET(req: Request) {
       id: true, title: true, excerpt: true, entityType: true, entityId: true,
       createdById: true, createdAt: true, updatedAt: true, archivedAt: true,
       parentId: true, isFolder: true, position: true,
+      // The note's icon/emoji lives in content.meta.icon (no dedicated column),
+      // so pull content to derive `emoji` for list rows. Dropped from the
+      // response below so the payload stays lean.
+      content: true,
     },
     orderBy: { updatedAt: "desc" },
     take: 200,
@@ -70,7 +74,12 @@ export async function GET(req: Request) {
   const enriched = gated.map((d) => {
     const u = d.createdById ? creatorById.get(d.createdById) : undefined;
     const name = u ? (`${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || null) : null;
-    return { ...d, createdBy: u ? { name, avatar: u.avatar } : null };
+    // Derive the list-row icon from content.meta.icon, then drop the heavy
+    // content blob so the response stays small.
+    const { content, ...rest } = d;
+    const meta = (content as { meta?: { icon?: string | null } } | null)?.meta;
+    const emoji = typeof meta?.icon === "string" && meta.icon ? meta.icon : null;
+    return { ...rest, emoji, createdBy: u ? { name, avatar: u.avatar } : null };
   });
 
   return NextResponse.json({ docs: enriched });

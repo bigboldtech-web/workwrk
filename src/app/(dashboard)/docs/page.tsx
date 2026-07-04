@@ -33,6 +33,7 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { NOTE_TEMPLATES, type NoteTemplate } from "@/components/docs/note-templates";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
+import { renderNoteIcon } from "@/components/docs/note-icon";
 
 type ApiDoc = {
   id: string;
@@ -41,6 +42,7 @@ type ApiDoc = {
   entityType?: string | null;
   entityId?: string | null;
   summary?: string | null;
+  emoji?: string | null;
   createdById?: string | null;
   createdBy?: { name: string | null; avatar?: string | null } | null;
   parentId?: string | null;
@@ -263,7 +265,7 @@ export default function NotesPage() {
             >
               {hasKids ? (open ? <ChevronDown /> : <ChevronRight />) : null}
             </button>
-            <FileText />
+            {d.emoji ? <span className="docs-tbl__ico">{renderNoteIcon(d.emoji)}</span> : <FileText />}
             <span>{d.title || "Untitled note"}</span>
           </div>
           <CreatedBy doc={d} />
@@ -397,7 +399,7 @@ export default function NotesPage() {
                 >
                   <div className="docs-tbl__name">
                     <span className="docs-tbl__tw is-empty" />
-                    <FileText />
+                    {d.emoji ? <span className="docs-tbl__ico">{renderNoteIcon(d.emoji)}</span> : <FileText />}
                     <span>{d.title || "Untitled note"}</span>
                   </div>
                   <CreatedBy doc={d} />

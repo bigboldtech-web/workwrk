@@ -17469,6 +17469,10 @@ table.os-tbl {
 .docs-tbl__name { display: flex; align-items: center; gap: 9px; min-width: 0; font-size: 14px; color: var(--os-ink); }
 .docs-tbl__name svg { width: 15px; height: 15px; color: var(--os-ink-3); flex: 0 0 15px; }
 .docs-tbl__name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Note-icon wrapper (emoji / lucide / image) — matches the FileText slot size. */
+.docs-tbl__ico { flex: 0 0 15px; display: inline-grid; place-items: center; overflow: visible; font-size: 13px; line-height: 1; }
+.docs-tbl__ico svg { width: 15px; height: 15px; }
+.docs-tbl__ico img { width: 15px; height: 15px; border-radius: 3px; object-fit: cover; }
 .docs-tbl__by { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; color: var(--os-ink-2); }
 .docs-tbl__by--empty { color: var(--os-ink-4); }
 .docs-tbl__by-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
