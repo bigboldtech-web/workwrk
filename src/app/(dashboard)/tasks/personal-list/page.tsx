@@ -7,7 +7,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Lock } from "lucide-react";
-import { getOrCreatePersonalBoard } from "@/lib/board";
+import { getOrCreatePersonalBoard, ensureCoreListViews } from "@/lib/board";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { BoardViewTabs } from "../../boards/[slug]/board-view-tabs";
@@ -26,6 +26,9 @@ export default async function PersonalListPage(props: {
   if (!u.id || !u.organizationId) redirect("/login");
 
   const board = await getOrCreatePersonalBoard(u.organizationId, u.id);
+  // Personal List gets the same self-heal as any List — Board/Calendar/Gantt
+  // tabs alongside List (no-op once they exist).
+  await ensureCoreListViews(board.id, u.id);
   const views = await prisma.view.findMany({
     where: { boardId: board.id },
     orderBy: [{ displayOrder: "asc" }, { name: "asc" }],

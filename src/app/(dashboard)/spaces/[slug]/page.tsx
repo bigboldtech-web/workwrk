@@ -225,8 +225,11 @@ export default async function SpacePage(props: {
   // mixing — that mixed surface was misleading).
   const dateKeyByBoard = new Map<string, string>();
   for (const b of allBoards) {
-    const schema = b.schema as { fields?: Array<{ key: string; fieldType: string }> } | null;
-    const dateField = schema?.fields?.find((f) => f.fieldType === "DATE");
+    // Board.schema.fields store the field type under `type` (FieldDef), not
+    // `fieldType` — the earlier `fieldType` read never matched, so the DATE
+    // projection was dead on the Space Calendar + Gantt. Accept DATETIME too.
+    const schema = b.schema as { fields?: Array<{ key: string; type: string }> } | null;
+    const dateField = schema?.fields?.find((f) => f.type === "DATE" || f.type === "DATETIME");
     if (dateField?.key) dateKeyByBoard.set(b.id, dateField.key);
   }
   const ownedPrivateIds = allBoards

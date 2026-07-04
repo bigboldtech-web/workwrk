@@ -226,12 +226,14 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "GANTT" ? (
         <BoardGanttView
+          boardId={boardId}
           initialItems={filteredItems}
           initialFields={fields}
           statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           onItemChanged={handleItemChanged}
+          onItemCreated={(item) => setItems((prev) => [...prev, item])}
         />
       ) : viewType === "CHART" ? (
         <BoardChartView

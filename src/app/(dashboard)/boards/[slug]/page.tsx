@@ -16,6 +16,7 @@ import {
 import { EntityTile } from "@/components/ui/entity-tile";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
+import { ensureCoreListViews } from "@/lib/board";
 import { canEditSpace } from "@/lib/space";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
@@ -44,6 +45,18 @@ export default async function BoardPage(props: {
   });
   if (!board || !board.space) notFound();
 
+  // Self-heal: give every task List the full ClickUp view set (Board/Calendar/
+  // Gantt) so switching views on the list always shows the same tasks. No-op
+  // (no writes) once the views exist. Refetch the view set only if it grew.
+  let views = board.views;
+  const createdViews = await ensureCoreListViews(board.id, u.id);
+  if (createdViews > 0) {
+    views = await prisma.view.findMany({
+      where: { boardId: board.id },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+    });
+  }
+
   const isAdmin = u.accessLevel === "SUPER_ADMIN" || u.accessLevel === "COMPANY_ADMIN";
   if (!isAdmin && board.visibility !== "ORG" && board.space.visibility !== "ORG") {
     const member = await prisma.spaceMember.findUnique({
@@ -53,11 +66,11 @@ export default async function BoardPage(props: {
     if (!member) notFound();
   }
 
-  const defaultView = board.views.find((v) => v.isDefault) ?? board.views[0];
+  const defaultView = views.find((v) => v.isDefault) ?? views[0];
   // Active view = ?view=<id> if it matches an existing view; else default.
   // Tab click is a Link that updates this param.
   const activeView =
-    (sp.view ? board.views.find((v) => v.id === sp.view) : null) ?? defaultView;
+    (sp.view ? views.find((v) => v.id === sp.view) : null) ?? defaultView;
 
   const [items, canEdit] = await Promise.all([
     listBoardItems(board.id),
@@ -160,7 +173,7 @@ export default async function BoardPage(props: {
       {/* View tabs — clicking switches the active view via ?view=<id>.
           Phase 65: tabs were previously inert (always rendered default). */}
       <BoardViewTabs
-        views={board.views}
+        views={views}
         boardId={board.id}
         boardSlug={board.slug}
         activeViewId={activeView?.id ?? null}

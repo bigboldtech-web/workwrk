@@ -1,27 +1,30 @@
 "use client";
 
-// BoardGanttView — per-board GANTT renderer. 12-week horizontal window
-// with greedy lane packing (adapted from the Space-level Gantt, minus
-// the per-board swimlane grouping since this is a single board).
-// Items with startAt + dueAt render as duration bars; a single date
-// renders a one-day marker. Items without any date are listed in a
-// footer note. Window nav is local state; clicking a bar opens the
-// drawer.
+// BoardGanttView — per-board GANTT renderer, ClickUp-style.
 //
-// Editing: bars are pointer-draggable. Dragging the body shifts both
-// startAt + dueAt by whole days; the left/right edge handles resize
-// start or due independently (one-day minimum). A live preview tracks
-// the cursor; release PATCHes the changed dates and syncs the canvas
-// via onItemChanged. Pointer events (not HTML5 DnD) so resize handles
-// and sub-bar precision work cleanly.
+// Layout: a sticky left Name column lists EVERY task (one row each), and a
+// right 12-week timeline shows each task on its own lane. Tasks with dates
+// render as duration bars; tasks with NO date render as a small "schedule"
+// marker parked on today's column so the board is never an empty timeline
+// (ClickUp parity — you add tasks in List, they show here immediately and you
+// drag/click to schedule them). A bottom "+ Add Task" row appends new tasks.
+//
+// Editing: bars are pointer-draggable — dragging the body shifts start+due by
+// whole days; the left/right edges resize independently (one-day minimum). A
+// live preview tracks the cursor; release PATCHes the dates and syncs via
+// onItemChanged. Undated markers open a date picker (or drag) to set dueAt.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { CalendarPlus, ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
+import { StatusGlyph } from "./status-glyph";
 
 const WEEK_COUNT = 12;
 const MS_PER_DAY = 86_400_000;
+const ROW_H = 34;      // per-task lane height (matches the left name rows)
+const HEAD_H = 34;     // week-header / name-header height
+const NAME_W = 240;    // left Name column width
 
 type DragMode = "move" | "resize-start" | "resize-end";
 interface DragState {
@@ -32,15 +35,19 @@ interface DragState {
 }
 
 interface BoardGanttViewProps {
+  /** Needed to append new tasks from the bottom "+ Add Task" row. */
+  boardId?: string;
   initialItems: BoardItemRow[];
   initialFields?: FieldDef[];
-  /** Per-List statuses (backbone #1) — drives the bar colors. */
+  /** Per-List statuses (backbone #1) — drives the bar colors + status glyph. */
   statuses: StatusOption[];
   canEdit?: boolean;
   onOpenItem?: (itemId: string) => void;
-  /** Called after a drag/resize PATCH succeeds so the canvas syncs
+  /** Called after a drag/resize/schedule PATCH succeeds so the canvas syncs
    *  shared item state (same contract as the drawer + calendar). */
   onItemChanged?: (item: BoardItemRow) => void;
+  /** Called after the bottom add-row creates a task so the canvas appends it. */
+  onItemCreated?: (item: BoardItemRow) => void;
 }
 
 function startOfWeek(d: Date): Date {
@@ -60,11 +67,21 @@ function shiftToIso(d: Date, deltaDays: number): string {
   return `${y}-${m}-${day}T00:00:00.000Z`;
 }
 
-export function BoardGanttView({ initialItems, initialFields, statuses, canEdit = false, onOpenItem, onItemChanged }: BoardGanttViewProps) {
+export function BoardGanttView({
+  boardId,
+  initialItems,
+  initialFields,
+  statuses,
+  canEdit = false,
+  onOpenItem,
+  onItemChanged,
+  onItemCreated,
+}: BoardGanttViewProps) {
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
+  const firstStatus = statuses[0]?.value ?? "TO_DO";
   const today = new Date();
-  // Window anchor — start 2 weeks back from this week so "now" sits
-  // about a sixth into the chart, with most space for what's ahead.
+  // Window anchor — start 2 weeks back from this week so "now" sits about a
+  // sixth into the chart, with most space for what's ahead.
   const defaultAnchor = useMemo(() => {
     const w = startOfWeek(today);
     w.setDate(w.getDate() - 14);
@@ -73,16 +90,19 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
   }, []);
   const [anchor, setAnchor] = useState<Date>(defaultAnchor);
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
 
   const dateFieldKey = useMemo(
     () => (initialFields ?? []).find((f) => f.type === "DATE" || f.type === "DATETIME")?.key ?? null,
     [initialFields],
   );
 
-  // Resolve each item to a [start, end] span (end inclusive).
-  const { spans, undated } = useMemo(() => {
-    const out: Array<{ item: BoardItemRow; start: Date; end: Date }> = [];
-    let skipped = 0;
+  // Resolve EVERY non-archived item to a lane row: dated rows carry a
+  // [start, end] span; undated rows carry start=end=null so they render as a
+  // schedule marker instead of a bar. Order mirrors the List view (position).
+  const rows = useMemo(() => {
+    const out: Array<{ item: BoardItemRow; start: Date | null; end: Date | null }> = [];
     for (const it of initialItems) {
       if (it.archivedAt) continue;
       const due = it.dueAt ? new Date(it.dueAt) : null;
@@ -96,41 +116,35 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
           if (!Number.isNaN(d.getTime())) e = d;
         }
       }
-      if (!s && !e) { skipped += 1; continue; }
-      if (!s) s = e!;
-      if (!e) e = s;
-      if (e.getTime() < s.getTime()) [s, e] = [e, s];
+      if (s || e) {
+        if (!s) s = e!;
+        if (!e) e = s;
+        if (e.getTime() < s.getTime()) [s, e] = [e, s];
+      }
       out.push({ item: it, start: s, end: e });
     }
-    return { spans: out, undated: skipped };
+    return out;
   }, [initialItems, dateFieldKey]);
 
-  // Lookup updated every render so the (mount-stable) pointer-up handler
-  // can resolve the dragging item's real dates without stale closures.
+  const undatedCount = useMemo(() => rows.filter((r) => !r.start && !r.end).length, [rows]);
+
+  // Lookup updated every render so the (mount-stable) pointer-up handler can
+  // resolve the dragging item's real dates without stale closures. Undated
+  // rows anchor to today so a drag maps to a concrete day → dueAt.
   const spanByIdRef = useRef(new Map<string, { item: BoardItemRow; start: Date; end: Date }>());
-  spanByIdRef.current = new Map(spans.map((s) => [s.item.id, s]));
+  spanByIdRef.current = new Map(
+    rows.map((r) => {
+      const anchorDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      return [r.item.id, { item: r.item, start: r.start ?? anchorDay, end: r.end ?? anchorDay }];
+    }),
+  );
 
   const totalDays = WEEK_COUNT * 7;
   const windowEnd = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + totalDays);
-
-  // Bars inside the window + greedy first-fit lane packing.
-  const { bars, laneCount } = useMemo(() => {
-    const visible = spans
-      .filter(({ start, end }) => end.getTime() >= anchor.getTime() && start.getTime() < windowEnd.getTime())
-      .sort((a, b) => a.start.getTime() - b.start.getTime());
-    const lanes: number[] = []; // value = lastEndCol (exclusive)
-    const packed = visible.map(({ item, start, end }) => {
-      const startDay = Math.max(0, Math.floor((start.getTime() - anchor.getTime()) / MS_PER_DAY));
-      const endDay = Math.min(totalDays - 1, Math.floor((end.getTime() - anchor.getTime()) / MS_PER_DAY));
-      const startCol = startDay;
-      const spanCols = Math.max(1, endDay - startDay + 1);
-      let lane = lanes.findIndex((endIdx) => endIdx <= startCol);
-      if (lane === -1) { lane = lanes.length; lanes.push(0); }
-      lanes[lane] = startCol + spanCols;
-      return { item, start, end, startCol, spanCols, lane };
-    });
-    return { bars: packed, laneCount: Math.max(1, lanes.length) };
-  }, [spans, anchor, windowEnd, totalDays]);
+  const todayCol = Math.floor(
+    (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - anchor.getTime()) / MS_PER_DAY,
+  );
+  const todayInWindow = todayCol >= 0 && todayCol < totalDays;
 
   // ── Drag / resize ────────────────────────────────────────────────
   const lanesRef = useRef<HTMLDivElement>(null);
@@ -148,7 +162,6 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
     if (!span || state.dayDelta === 0) return;
     const { item, start, end } = span;
 
-    // Clamp so a resize can't invert the bar (min one-day span).
     const spanDays = Math.round((new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime() -
       new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime()) / MS_PER_DAY);
     let delta = state.dayDelta;
@@ -159,12 +172,12 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
     if (state.mode === "move") {
       if (hasStart) patch.startAt = shiftToIso(start, delta);
       if (hasDue) patch.dueAt = shiftToIso(end, delta);
-      if (!hasStart && !hasDue) patch.dueAt = shiftToIso(end, delta); // metadata-only date → write dueAt
+      if (!hasStart && !hasDue) patch.dueAt = shiftToIso(end, delta); // undated / metadata-only → write dueAt
     } else if (state.mode === "resize-start") {
-      if (delta > spanDays) delta = spanDays; // keep start ≤ end
+      if (delta > spanDays) delta = spanDays;
       patch.startAt = shiftToIso(start, delta);
     } else {
-      if (delta < -spanDays) delta = -spanDays; // keep end ≥ start
+      if (delta < -spanDays) delta = -spanDays;
       patch.dueAt = shiftToIso(end, delta);
     }
     if (Object.keys(patch).length === 0) return;
@@ -187,8 +200,6 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
     }
   }, [onItemChanged]);
 
-  // Mount-stable window listeners drive the drag; they read dragRef so
-  // there are no stale-closure issues.
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const cur = dragRef.current;
@@ -208,7 +219,7 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
       dragRef.current = null;
       setDrag(null);
       if (cur.dayDelta !== 0) {
-        justDraggedRef.current = true; // suppress the click that follows
+        justDraggedRef.current = true;
         void commitDrag(cur);
       }
     };
@@ -229,6 +240,45 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
     setDrag(state);
   };
 
+  // Set a due date on an undated task from a native date input.
+  const scheduleDate = useCallback(async (id: string, value: string) => {
+    if (!value) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/items/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dueAt: `${value}T00:00:00.000Z` }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data?.error ?? "Failed to set date"); return; }
+      onItemChanged?.(data.item as BoardItemRow);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to set date");
+    }
+  }, [onItemChanged]);
+
+  const addTask = useCallback(async () => {
+    const title = newTitle.trim();
+    if (!title || !boardId) { setNewTitle(""); return; }
+    setAdding(true);
+    try {
+      const res = await fetch(`/api/boards/${boardId}/items`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title, status: firstStatus }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data?.error ?? "Failed to add task"); return; }
+      if (data?.item) onItemCreated?.(data.item as BoardItemRow);
+      setNewTitle("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add task");
+    } finally {
+      setAdding(false);
+    }
+  }, [newTitle, boardId, firstStatus, onItemCreated]);
+
   const weeks = Array.from({ length: WEEK_COUNT }, (_, i) =>
     new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + i * 7),
   );
@@ -236,9 +286,7 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
     new Date(windowEnd.getTime() - MS_PER_DAY).toLocaleString("default", { month: "short", day: "numeric", year: "numeric" })
   }`;
   const isCurrentWindow = anchor.getTime() === defaultAnchor.getTime();
-  const todayOffsetDays = (startOfWeek(today).getTime() - anchor.getTime()) / MS_PER_DAY + today.getDay();
-  const showTodayLine = todayOffsetDays >= 0 && todayOffsetDays < totalDays;
-  const chartHeight = laneCount * 26 + 16;
+  const chartHeight = Math.max(rows.length, 1) * ROW_H;
 
   const shift = (weeksDelta: number) =>
     setAnchor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + weeksDelta * 7));
@@ -284,125 +332,211 @@ export function BoardGanttView({ initialItems, initialFields, statuses, canEdit 
         <h2 className="text-[13px] font-semibold text-zinc-900">{rangeLabel}</h2>
         <div className="flex-1" />
         <span className="text-[10.5px] text-zinc-400 hidden sm:inline">
-          {canEdit ? "Drag a bar to move it · drag an edge to resize" : "Start + Due dates render as duration bars"}
+          {undatedCount > 0
+            ? `${undatedCount} unscheduled · drag or click a marker to schedule`
+            : canEdit ? "Drag a bar to move it · drag an edge to resize" : "Start + Due dates render as duration bars"}
         </span>
       </div>
 
-      {bars.length === 0 ? (
+      {rows.length === 0 ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center">
-          <div className="text-sm font-medium text-zinc-900 mb-1">Nothing on the timeline in this window</div>
-          <p className="text-xs text-zinc-500">
-            Set Start / Due dates on items (drawer or table) to plot them here.
-            {undated > 0 ? ` ${undated} item${undated === 1 ? " has" : "s have"} no dates yet.` : ""}
-          </p>
+          <div className="text-sm font-medium text-zinc-900 mb-1">No tasks yet</div>
+          <p className="text-xs text-zinc-500">Add a task below and it shows up here, ready to schedule.</p>
         </div>
       ) : (
         <div className="rounded-xl border border-zinc-200 bg-white overflow-x-auto">
-          <div className="min-w-[860px]">
-            {/* Week header */}
-            <div className="grid border-b border-zinc-200 bg-zinc-50" style={{ gridTemplateColumns: `repeat(${WEEK_COUNT}, minmax(72px, 1fr))` }}>
-              {weeks.map((w, i) => {
-                const isThisWeek = startOfWeek(today).getTime() === w.getTime();
+          <div className="flex" style={{ minWidth: NAME_W + 720 }}>
+            {/* Left Name column (sticky) */}
+            <div className="shrink-0 sticky left-0 z-20 bg-white border-r border-zinc-200" style={{ width: NAME_W }}>
+              <div className="flex items-center h-[34px] px-3 border-b border-zinc-200 bg-zinc-50 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-500">
+                Name
+              </div>
+              {rows.map(({ item, start, end }) => {
+                const current = item.status ? statusLookup[item.status] ?? null : null;
                 return (
-                  <div
-                    key={i}
-                    className={`border-l first:border-l-0 border-zinc-100 px-2 py-2 text-[10.5px] font-medium ${
-                      isThisWeek ? "text-zinc-900" : "text-zinc-500"
-                    }`}
-                  >
-                    {w.toLocaleString("default", { month: "short", day: "numeric" })}
-                  </div>
-                );
-              })}
-            </div>
-            {/* Lanes */}
-            <div ref={lanesRef} className="relative" style={{ height: chartHeight }}>
-              {Array.from({ length: WEEK_COUNT - 1 }, (_, i) => (
-                <span
-                  key={i}
-                  aria-hidden
-                  className="absolute top-0 bottom-0 w-px bg-zinc-100"
-                  style={{ left: `${((i + 1) / WEEK_COUNT) * 100}%` }}
-                />
-              ))}
-              {showTodayLine ? (
-                <span
-                  aria-hidden
-                  className="absolute top-0 bottom-0 w-px bg-red-400"
-                  style={{ left: `${(todayOffsetDays / totalDays) * 100}%` }}
-                />
-              ) : null}
-              {bars.map(({ item, start, end, startCol, spanCols, lane }) => {
-                // Live preview while dragging this bar.
-                let dispStartCol = startCol;
-                let dispSpan = spanCols;
-                const d = drag && drag.id === item.id ? drag : null;
-                if (d) {
-                  if (d.mode === "move") dispStartCol = startCol + d.dayDelta;
-                  else if (d.mode === "resize-start") { dispStartCol = startCol + d.dayDelta; dispSpan = spanCols - d.dayDelta; }
-                  else dispSpan = spanCols + d.dayDelta;
-                  if (dispSpan < 1) {
-                    if (d.mode === "resize-start") dispStartCol = startCol + spanCols - 1;
-                    dispSpan = 1;
-                  }
-                }
-                const leftPct = (dispStartCol / totalDays) * 100;
-                const widthPct = (dispSpan / totalDays) * 100;
-                const color = (item.status ? statusLookup[item.status]?.color : null) ?? "#94a3b8";
-                return (
-                  <div
-                    key={item.id}
-                    className={`absolute ${d ? "opacity-90 ring-2 ring-[var(--os-brand)] rounded" : ""}`}
-                    style={{
-                      left: `calc(${leftPct}% + 2px)`,
-                      width: `calc(${widthPct}% - 4px)`,
-                      top: 8 + lane * 26,
-                      height: 22,
-                    }}
-                  >
-                    {canEdit ? (
-                      <div
-                        onPointerDown={(e) => beginDrag(e, item.id, "resize-start")}
-                        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-l"
-                        aria-hidden
-                      />
-                    ) : null}
+                  <div key={item.id} className="flex items-center gap-2 px-3 border-b border-zinc-100" style={{ height: ROW_H }}>
+                    <StatusGlyph current={current} statuses={statuses} />
                     <button
                       type="button"
-                      onPointerDown={(e) => beginDrag(e, item.id, "move")}
-                      onClick={() => {
-                        if (justDraggedRef.current) { justDraggedRef.current = false; return; }
-                        onOpenItem?.(item.id);
-                      }}
-                      title={`${item.title} — ${start.toLocaleDateString()}${
-                        start.getTime() !== end.getTime() ? ` → ${end.toLocaleDateString()}` : ""
-                      }`}
-                      className={`w-full h-full px-2 rounded text-[10.5px] font-medium text-white truncate hover:opacity-90 leading-[22px] text-left ${
-                        canEdit ? "cursor-grab active:cursor-grabbing" : ""
-                      }`}
-                      style={{ backgroundColor: color }}
+                      onClick={() => onOpenItem?.(item.id)}
+                      className="flex-1 min-w-0 text-left text-[12.5px] font-medium text-zinc-800 truncate hover:text-[var(--os-brand)]"
+                      title={item.title}
                     >
                       {item.title}
                     </button>
-                    {canEdit ? (
-                      <div
-                        onPointerDown={(e) => beginDrag(e, item.id, "resize-end")}
-                        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-r"
-                        aria-hidden
-                      />
+                    {!start && !end && canEdit ? (
+                      <label className="relative inline-flex items-center justify-center w-5 h-5 rounded text-zinc-300 hover:text-[var(--os-brand)] hover:bg-zinc-100 cursor-pointer shrink-0" title="Set due date">
+                        <CalendarPlus className="w-3.5 h-3.5" />
+                        <input
+                          type="date"
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                          onChange={(e) => scheduleDate(item.id, e.target.value)}
+                        />
+                      </label>
                     ) : null}
                   </div>
                 );
               })}
             </div>
+
+            {/* Right timeline */}
+            <div className="flex-1 min-w-[720px]">
+              {/* Week header */}
+              <div
+                className="grid border-b border-zinc-200 bg-zinc-50"
+                style={{ height: HEAD_H, gridTemplateColumns: `repeat(${WEEK_COUNT}, minmax(60px, 1fr))` }}
+              >
+                {weeks.map((w, i) => {
+                  const isThisWeek = startOfWeek(today).getTime() === w.getTime();
+                  return (
+                    <div
+                      key={i}
+                      className={`border-l first:border-l-0 border-zinc-100 px-2 flex items-center text-[10.5px] font-medium ${
+                        isThisWeek ? "text-zinc-900" : "text-zinc-500"
+                      }`}
+                    >
+                      {w.toLocaleString("default", { month: "short", day: "numeric" })}
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Lanes */}
+              <div ref={lanesRef} className="relative" style={{ height: chartHeight }}>
+                {/* Week gridlines */}
+                {Array.from({ length: WEEK_COUNT - 1 }, (_, i) => (
+                  <span
+                    key={i}
+                    aria-hidden
+                    className="absolute top-0 bottom-0 w-px bg-zinc-100"
+                    style={{ left: `${((i + 1) / WEEK_COUNT) * 100}%` }}
+                  />
+                ))}
+                {/* Row separators */}
+                {rows.map((_, i) => (
+                  <span key={`sep-${i}`} aria-hidden className="absolute left-0 right-0 h-px bg-zinc-100" style={{ top: (i + 1) * ROW_H }} />
+                ))}
+                {/* Today line */}
+                {todayInWindow ? (
+                  <span aria-hidden className="absolute top-0 bottom-0 w-px bg-red-400" style={{ left: `${(todayCol / totalDays) * 100}%` }} />
+                ) : null}
+
+                {rows.map(({ item, start, end }, rowIndex) => {
+                  const color = (item.status ? statusLookup[item.status]?.color : null) ?? "#94a3b8";
+                  const top = rowIndex * ROW_H + (ROW_H - 22) / 2;
+
+                  // Undated → a schedule marker parked on today (draggable / clickable).
+                  if (!start && !end) {
+                    if (!todayInWindow) return null;
+                    const d = drag && drag.id === item.id ? drag : null;
+                    const markerCol = todayCol + (d ? d.dayDelta : 0);
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onPointerDown={(e) => beginDrag(e, item.id, "move")}
+                        onClick={() => {
+                          if (justDraggedRef.current) { justDraggedRef.current = false; return; }
+                          onOpenItem?.(item.id);
+                        }}
+                        title={`${item.title} — unscheduled${canEdit ? " · drag to schedule" : ""}`}
+                        className={`absolute rounded-full border border-dashed border-zinc-400 bg-white ${
+                          canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+                        } ${d ? "ring-2 ring-[var(--os-brand)]" : ""}`}
+                        style={{
+                          left: `calc(${(markerCol / totalDays) * 100}% - 7px)`,
+                          top: top + 4,
+                          width: 14,
+                          height: 14,
+                          backgroundColor: `${color}33`,
+                        }}
+                      />
+                    );
+                  }
+
+                  // Dated → a duration bar, clipped to the window.
+                  const s = start!;
+                  const e = end!;
+                  if (e.getTime() < anchor.getTime() || s.getTime() >= windowEnd.getTime()) return null;
+                  const startDay = Math.max(0, Math.floor((s.getTime() - anchor.getTime()) / MS_PER_DAY));
+                  const endDay = Math.min(totalDays - 1, Math.floor((e.getTime() - anchor.getTime()) / MS_PER_DAY));
+                  const startCol = startDay;
+                  const spanCols = Math.max(1, endDay - startDay + 1);
+
+                  let dispStartCol = startCol;
+                  let dispSpan = spanCols;
+                  const d = drag && drag.id === item.id ? drag : null;
+                  if (d) {
+                    if (d.mode === "move") dispStartCol = startCol + d.dayDelta;
+                    else if (d.mode === "resize-start") { dispStartCol = startCol + d.dayDelta; dispSpan = spanCols - d.dayDelta; }
+                    else dispSpan = spanCols + d.dayDelta;
+                    if (dispSpan < 1) {
+                      if (d.mode === "resize-start") dispStartCol = startCol + spanCols - 1;
+                      dispSpan = 1;
+                    }
+                  }
+                  const leftPct = (dispStartCol / totalDays) * 100;
+                  const widthPct = (dispSpan / totalDays) * 100;
+                  return (
+                    <div
+                      key={item.id}
+                      className={`absolute ${d ? "opacity-90 ring-2 ring-[var(--os-brand)] rounded" : ""}`}
+                      style={{ left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, top, height: 22 }}
+                    >
+                      {canEdit ? (
+                        <div
+                          onPointerDown={(e) => beginDrag(e, item.id, "resize-start")}
+                          className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-l"
+                          aria-hidden
+                        />
+                      ) : null}
+                      <button
+                        type="button"
+                        onPointerDown={(e) => beginDrag(e, item.id, "move")}
+                        onClick={() => {
+                          if (justDraggedRef.current) { justDraggedRef.current = false; return; }
+                          onOpenItem?.(item.id);
+                        }}
+                        title={`${item.title} — ${s.toLocaleDateString()}${
+                          s.getTime() !== e.getTime() ? ` → ${e.toLocaleDateString()}` : ""
+                        }`}
+                        className={`w-full h-full px-2 rounded text-[10.5px] font-medium text-white truncate hover:opacity-90 leading-[22px] text-left ${
+                          canEdit ? "cursor-grab active:cursor-grabbing" : ""
+                        }`}
+                        style={{ backgroundColor: color }}
+                      >
+                        {item.title}
+                      </button>
+                      {canEdit ? (
+                        <div
+                          onPointerDown={(e) => beginDrag(e, item.id, "resize-end")}
+                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-r"
+                          aria-hidden
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
+
+          {/* Bottom add-task row */}
+          {canEdit && boardId ? (
+            <div className="flex items-center gap-2 h-[34px] px-3 border-t border-zinc-200" style={{ width: NAME_W }}>
+              <Plus className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+              <input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void addTask(); }}
+                onBlur={() => { if (newTitle.trim()) void addTask(); }}
+                disabled={adding}
+                placeholder="Add Task"
+                className="flex-1 min-w-0 bg-transparent text-[12.5px] text-zinc-800 placeholder:text-zinc-400 focus:outline-none"
+              />
+            </div>
+          ) : null}
         </div>
       )}
-      {bars.length > 0 && undated > 0 ? (
-        <p className="mt-2 text-[10.5px] text-zinc-400">
-          {undated} item{undated === 1 ? "" : "s"} without dates {undated === 1 ? "is" : "are"} not shown — set Start / Due in the drawer.
-        </p>
-      ) : null}
     </section>
   );
 }

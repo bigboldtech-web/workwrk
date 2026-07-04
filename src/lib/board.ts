@@ -71,6 +71,77 @@ export interface CreateBoardInput {
   visibility?: Visibility;
 }
 
+// The ClickUp-style view set every task List ships with: a grouped List, a
+// Board (kanban), a Calendar and a Gantt — all reading the SAME items, so a
+// task added in one shows in all. This is why "add in List → see in Board /
+// Gantt" just works. Non-task boards (Doc / Form / Whiteboard / Dashboard) are
+// single-view and are left alone.
+const CORE_LIST_VIEWS: { type: ViewType; name: string }[] = [
+  { type: "TABLE", name: "List" },
+  { type: "KANBAN", name: "Board" },
+  { type: "CALENDAR", name: "Calendar" },
+  { type: "GANTT", name: "Gantt" },
+];
+const TASK_LIST_VIEW_TYPES = new Set<ViewType>(["TABLE", "KANBAN", "CALENDAR", "GANTT", "TIMELINE"]);
+
+function isTaskListBoard(itemType: string, viewType: ViewType): boolean {
+  return itemType === "studio-item" && TASK_LIST_VIEW_TYPES.has(viewType);
+}
+
+// Build the create-data for a fresh task List's core views, default-view first.
+function coreViewCreateData(boardId: string, ownerId: string, defaultType: ViewType) {
+  const ordered = [
+    ...CORE_LIST_VIEWS.filter((v) => v.type === defaultType),
+    ...CORE_LIST_VIEWS.filter((v) => v.type !== defaultType),
+  ];
+  if (!ordered.some((v) => v.type === defaultType)) {
+    ordered.unshift({ type: defaultType, name: viewTypeDefaultLabel(defaultType) });
+  }
+  return ordered.map((v, i) => ({
+    boardId,
+    name: v.name,
+    type: v.type,
+    isDefault: v.type === defaultType,
+    isShared: true,
+    ownerId,
+    config: (v.type === "TABLE" ? { groupBy: "status" } : {}) as Prisma.InputJsonValue,
+    displayOrder: i,
+  }));
+}
+
+/**
+ * Self-heal: ensure an existing task List has the full core view set. Only
+ * touches boards that already have a TABLE view (i.e. real task Lists), and
+ * only appends the missing core views (Board / Calendar / Gantt) — it never
+ * changes the default or existing views. Idempotent + cheap after the first
+ * run (returns 0 with no writes once all core views exist). Returns the number
+ * of views created so the caller can decide whether to refetch.
+ */
+export async function ensureCoreListViews(boardId: string, ownerId: string): Promise<number> {
+  const views = await prisma.view.findMany({
+    where: { boardId },
+    select: { type: true, displayOrder: true },
+  });
+  if (!views.some((v) => v.type === "TABLE")) return 0; // not a task List — leave alone
+  const present = new Set(views.map((v) => v.type));
+  const missing = CORE_LIST_VIEWS.filter((v) => !present.has(v.type));
+  if (missing.length === 0) return 0;
+  let order = views.reduce((max, v) => Math.max(max, v.displayOrder), 0) + 1;
+  await prisma.view.createMany({
+    data: missing.map((v) => ({
+      boardId,
+      name: v.name,
+      type: v.type,
+      isDefault: false,
+      isShared: true,
+      ownerId,
+      config: (v.type === "TABLE" ? { groupBy: "status" } : {}) as Prisma.InputJsonValue,
+      displayOrder: order++,
+    })),
+  });
+  return missing.length;
+}
+
 /**
  * Create a Board with a default View of the given type. For studio-item
  * boards we also seed an empty `schema.fields` array so the field-shelf
@@ -103,18 +174,9 @@ export async function getOrCreatePersonalBoard(organizationId: string, userId: s
           settings: {},
         },
       });
-      await tx.view.create({
-        data: {
-          boardId: board.id,
-          name: "List",
-          type: "TABLE",
-          isDefault: true,
-          isShared: true,
-          ownerId: userId,
-          config: { groupBy: "status" },
-          displayOrder: 0,
-        },
-      });
+      // Personal List is "just a List that happens to be personal" — same full
+      // view set as any other List so its Board/Calendar/Gantt tabs match.
+      await tx.view.createMany({ data: coreViewCreateData(board.id, userId, "TABLE") });
       return board;
     });
   } catch {
@@ -175,6 +237,16 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
         ...(seededStatuses ? { statuses: seededStatuses as unknown as Prisma.InputJsonValue } : {}),
       },
     });
+    // Task Lists ship with the full ClickUp view set (List/Board/Calendar/
+    // Gantt); non-task boards (Doc/Form/Whiteboard/…) get just their one view.
+    if (isTaskListBoard(itemType, viewType)) {
+      await tx.view.createMany({ data: coreViewCreateData(board.id, input.userId, viewType) });
+      const defaultView = await tx.view.findFirstOrThrow({
+        where: { boardId: board.id, isDefault: true },
+        select: { id: true, type: true },
+      });
+      return { board, defaultView };
+    }
     const defaultView = await tx.view.create({
       data: {
         boardId: board.id,
