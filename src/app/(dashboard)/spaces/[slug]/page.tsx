@@ -19,7 +19,7 @@ import {
   ListFilter, Glasses, Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { SpaceActions } from "@/components/layout/os/space-actions";
+import { FolderCardCreate, ListCardCreate } from "@/components/layout/os/space-overview-create";
 import { SpaceQuickStart } from "@/components/layout/os/space-quick-start";
 import { SpaceShareButton } from "@/components/layout/os/space-share-button";
 import { ListCsvExport } from "@/components/board-view/list-csv-export";
@@ -597,11 +597,6 @@ export default async function SpacePage(props: {
         ) : null}
       </div>
 
-      {/* Action row */}
-      <div className="px-6 pb-3 flex items-center gap-2">
-        <SpaceActions spaceId={space.id} />
-      </div>
-
       {/* View tabs — matches ClickUp's Space-level view switcher.
           Overview + List are functional; others stub until the
           cross-board renderers ship. */}
@@ -740,7 +735,7 @@ export default async function SpacePage(props: {
                   </OverviewCard>
                 ),
                 folders: (
-                  <OverviewCard title="Folders">
+                  <OverviewCard title="Folders" action={<FolderCardCreate spaceId={space.id} />}>
                     {space.folders.length === 0 ? (
                       <p className="text-xs text-zinc-500 px-2 py-3">No folders yet.</p>
                     ) : (
@@ -764,7 +759,7 @@ export default async function SpacePage(props: {
                   </OverviewCard>
                 ),
                 lists: (
-                  <OverviewCard title="Lists">
+                  <OverviewCard title="Lists" action={<ListCardCreate spaceId={space.id} />}>
                     {allBoards.length === 0 ? (
                       <p className="text-xs text-zinc-500 px-2 py-3">No lists yet.</p>
                     ) : (
@@ -2201,15 +2196,18 @@ function ListBody({
 
 function OverviewCard({
   title,
+  action,
   children,
 }: {
   title: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="h-full w-full rounded-xl border border-zinc-200 bg-white p-4 flex flex-col overflow-hidden">
       <div className="dash-card-handle flex items-center justify-between mb-2 cursor-grab active:cursor-grabbing select-none">
         <h2 className="text-sm font-semibold text-zinc-900">{title}</h2>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       <div className="flex-1 overflow-y-auto">{children}</div>
     </section>
