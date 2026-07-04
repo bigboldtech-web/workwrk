@@ -160,6 +160,7 @@ export function SpaceTreeRow({
   onRequestNewBoard,
   onRequestNewFolder,
 }: Props) {
+  const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [data, setData] = useState<ChildrenPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -197,6 +198,10 @@ export function SpaceTreeRow({
   const refresh = () => {
     if (expanded) loadChildren();
     onReloadSpaces();
+    // Also re-fetch the current route so a create/rename/move made from the
+    // sidebar shows up on the page being viewed (e.g. the Space Overview cards)
+    // without a manual refresh.
+    router.refresh();
   };
 
   // Re-fetch this Space's children whenever anything in the app signals a

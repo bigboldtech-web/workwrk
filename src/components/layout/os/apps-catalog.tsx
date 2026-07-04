@@ -367,6 +367,7 @@ function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder"
 
 function HomeSidebar() {
   const pathname = usePathname() || "";
+  const router = useRouter();
   const { query: searchQuery } = useSidebarSearch();
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
@@ -737,7 +738,7 @@ function HomeSidebar() {
       <NewSpaceDialog
         open={newSpaceOpen}
         onOpenChange={setNewSpaceOpen}
-        onCreated={() => { void reload(); refreshSidebar(); }}
+        onCreated={() => { void reload(); refreshSidebar(); router.refresh(); }}
       />
 
       {boardDialogSpaceId ? (
@@ -746,7 +747,9 @@ function HomeSidebar() {
           onOpenChange={(v) => { if (!v) setBoardDialogSpaceId(null); }}
           spaceId={boardDialogSpaceId}
           folderId={null}
-          onCreated={() => { setBoardDialogSpaceId(null); refreshSidebar(); }}
+          // refreshSidebar updates the tree; router.refresh re-fetches the
+          // current route (e.g. the Space Overview) so its cards update too.
+          onCreated={() => { setBoardDialogSpaceId(null); refreshSidebar(); router.refresh(); }}
         />
       ) : null}
 
@@ -756,7 +759,7 @@ function HomeSidebar() {
           onOpenChange={(v) => { if (!v) setFolderDialogSpaceId(null); }}
           spaceId={folderDialogSpaceId}
           parentFolderId={null}
-          onCreated={() => { setFolderDialogSpaceId(null); refreshSidebar(); }}
+          onCreated={() => { setFolderDialogSpaceId(null); refreshSidebar(); router.refresh(); }}
         />
       ) : null}
 
