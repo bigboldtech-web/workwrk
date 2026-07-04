@@ -9,7 +9,7 @@
 // Rename / "..." menu). Native HTML5 drag re-statuses a card between columns.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarPlus, CheckCircle2, Pencil, Plus, X } from "lucide-react";
+import { CalendarPlus, CheckCircle2, Network, Pencil, Plus, X } from "lucide-react";
 import { isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
@@ -61,6 +61,15 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     }
     return map;
   }, [items, statusOrder]);
+
+  // Subtask counts per parent — shown on each card (ClickUp "N subtasks").
+  const subtaskCountByParent = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of items) {
+      if (it.parentItemId) m.set(it.parentItemId, (m.get(it.parentItemId) ?? 0) + 1);
+    }
+    return m;
+  }, [items]);
 
   const refetch = useCallback(async () => {
     try {
@@ -212,6 +221,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     boardId={boardId}
                     card={card}
                     chipFields={chipFields}
+                    subtaskCount={subtaskCountByParent.get(card.id) ?? 0}
                     statuses={statuses}
                     canEdit={canEdit}
                     onDragStart={() => setDragId(card.id)}
@@ -248,6 +258,7 @@ function KanbanCard({
   boardId,
   card,
   chipFields,
+  subtaskCount,
   statuses,
   canEdit,
   onDragStart,
@@ -264,6 +275,7 @@ function KanbanCard({
   boardId: string;
   card: BoardItemRow;
   chipFields: FieldDef[];
+  subtaskCount: number;
   statuses: StatusOption[];
   canEdit: boolean;
   onDragStart: () => void;
@@ -425,8 +437,14 @@ function KanbanCard({
         ))}
       </div>
 
-      {/* Footer — created date. */}
-      <div className="mt-1.5 flex items-center justify-end text-[11px] text-zinc-400">
+      {/* Footer — subtask count (ClickUp) + created date. */}
+      <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-400">
+        {subtaskCount > 0 ? (
+          <span className="inline-flex items-center gap-1">
+            <Network className="w-3 h-3" />
+            {subtaskCount} subtask{subtaskCount === 1 ? "" : "s"}
+          </span>
+        ) : <span />}
         <span>{new Date(card.createdAt).toLocaleDateString()}</span>
       </div>
     </div>

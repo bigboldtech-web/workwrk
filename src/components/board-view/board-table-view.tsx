@@ -862,9 +862,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               </th>
               <th className="px-4 py-2 font-medium w-auto">Name</th>
               {showStatus ? <th className="px-4 py-2 font-medium w-[140px]">Status</th> : null}
-              {showOwner ? <th className="px-4 py-2 font-medium w-[180px]">Assignee</th> : null}
-              {showDue ? <th className="px-4 py-2 font-medium w-[130px]">Due date</th> : null}
-              {showPriority ? <th className="px-4 py-2 font-medium w-[110px]">Priority</th> : null}
+              {showOwner ? <th className="px-4 py-2 font-medium w-[110px]">Assignee</th> : null}
+              {showDue ? <th className="px-4 py-2 font-medium w-[110px]">Due date</th> : null}
+              {showPriority ? <th className="px-4 py-2 font-medium w-[90px]">Priority</th> : null}
               {showType ? <th className="px-4 py-2 font-medium w-[130px]">Type</th> : null}
               {showTags ? <th className="px-4 py-2 font-medium w-[160px]">Tags</th> : null}
               {customFields.map((f) => (
@@ -2502,6 +2502,7 @@ function OwnerCell({
     <AssigneePicker
       value={row.owner ? { ...row.owner, email: null } : null}
       canEdit={canEdit}
+      compact
       onChange={(person) =>
         onUpdate(row.id, {
           ownerId: person?.id ?? null,
