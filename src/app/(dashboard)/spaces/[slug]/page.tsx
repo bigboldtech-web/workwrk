@@ -346,6 +346,7 @@ export default async function SpacePage(props: {
         take: 200,
         select: {
           id: true, title: true, status: true, updatedAt: true, ownerId: true,
+          parentItemId: true,
           board: { select: { slug: true, name: true } },
         },
       })
@@ -1265,6 +1266,7 @@ function SpaceTeamSection({
     title: string;
     status: string | null;
     ownerId: string | null;
+    parentItemId: string | null;
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
@@ -1447,6 +1449,7 @@ function SpaceBoardSection({
     title: string;
     status: string | null;
     ownerId: string | null;
+    parentItemId: string | null;
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
@@ -1940,6 +1943,7 @@ function SpaceListSection({
     title: string;
     status: string | null;
     ownerId: string | null;
+    parentItemId: string | null;
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
@@ -2065,6 +2069,7 @@ function ListBody({
     title: string;
     status: string | null;
     ownerId: string | null;
+    parentItemId: string | null;
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
