@@ -12,7 +12,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { UserPlus, ArrowUpCircle, LayoutGrid, ExternalLink, PinOff, Sparkles } from "lucide-react";
+import { UserPlus, ArrowUpCircle, LayoutGrid, ExternalLink, PinOff } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { MenuItem, MenuList } from "@/components/ui/menu";
 import { APPS, canAccessApp, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
@@ -46,6 +46,7 @@ export function ClickAppRail() {
     activeAppKey, setActiveApp, sidebarCollapsed,
     pinnedAppKeys, openAppsGrid, appsGridOpen,
     togglePinned, movePinned, pushRecentApp, iconsOnly,
+    setPreviewApp, keepPreview, clearPreviewSoon,
   } = useOsShell();
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -96,12 +97,14 @@ export function ClickAppRail() {
   const scheduleOpen = (key: string) => {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    hoverTimer.current = setTimeout(() => setHoverKey(key), HOVER_OPEN_MS);
+    keepPreview(); // cancel any pending close so sweeping between icons doesn't flicker
+    hoverTimer.current = setTimeout(() => { setHoverKey(key); setPreviewApp(key); }, HOVER_OPEN_MS);
   };
   const scheduleClose = () => {
     if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; }
     if (closeTimer.current) clearTimeout(closeTimer.current);
     closeTimer.current = setTimeout(() => setHoverKey(null), HOVER_CLOSE_MS);
+    clearPreviewSoon(); // the sidebar cancels this if the pointer lands on it
   };
 
   const handleClick = (app: AppEntry) => {
@@ -213,7 +216,6 @@ export function ClickAppRail() {
                 </span>
                 {iconsOnly ? null : <RailLabel>{app.label}</RailLabel>}
               </button>
-              {isHovered && !dragKey && !active ? <AppRailHoverPreview app={app} /> : null}
             </div>
           );
         })}
@@ -239,7 +241,6 @@ export function ClickAppRail() {
               </span>
               {iconsOnly ? null : <RailLabel italic>{ghostApp.label}</RailLabel>}
             </button>
-            {hoverKey === ghostApp.key && !dragKey ? <AppRailHoverPreview app={ghostApp} /> : null}
           </div>
         ) : null}
 
@@ -307,23 +308,6 @@ export function ClickAppRail() {
         />
       ) : null}
     </aside>
-  );
-}
-
-function AppRailHoverPreview({ app }: { app: AppEntry }) {
-  return (
-    <div className="absolute left-full top-0 ml-1 z-40 pointer-events-auto">
-      <div className="w-[240px] max-h-[480px] overflow-y-auto bg-white rounded-lg shadow-lg border border-zinc-200 py-1.5">
-        <div className="px-3 pt-1 pb-2 flex items-center gap-2 border-b border-zinc-100 mb-1.5">
-          <app.Icon className="w-3.5 h-3.5 text-zinc-500" />
-          <h3 className="text-[13px] font-semibold text-zinc-900 flex-1">{app.label.replace(/\.\.$/, "")}</h3>
-          <Sparkles className="w-3 h-3" style={{ color: "var(--os-brand)" }} />
-        </div>
-        <div className="px-1.5 pb-1">
-          <app.Sidebar />
-        </div>
-      </div>
-    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ALWAYS_PINNED_KEYS, APPS, DEFAULT_PINNED_KEYS, isAlwaysPinned } from "./apps-catalog";
 
 /** Always-pinned keys come first, then the user's chosen order minus dupes. */
@@ -132,6 +132,13 @@ type ShellState = {
   // reloads via localStorage.
   activeAppKey: string;
   setActiveApp: (key: string) => void;
+  // Rail-hover preview: the middle sidebar shows THIS app's options while the
+  // mouse is over its rail icon (or the sidebar itself); clicking commits it to
+  // activeApp. Null = no preview (show the active app).
+  previewAppKey: string | null;
+  setPreviewApp: (key: string | null) => void;
+  keepPreview: () => void;
+  clearPreviewSoon: () => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
   setSidebarCollapsed: (v: boolean) => void;
@@ -221,6 +228,8 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [openItem, setOpenItem] = useState<OpenItem | null>(null);
   const [rowVersions, setRowVersions] = useState<Record<string, number>>({});
   const [activeAppKey, setActiveAppKeyState] = useState<string>("home");
+  const [previewAppKey, setPreviewAppKeyState] = useState<string | null>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(false);
   const [appsGridOpen, setAppsGridOpen] = useState(false);
   const [pinnedAppKeys, setPinnedAppKeysState] = useState<string[]>(DEFAULT_PINNED_KEYS);
@@ -377,11 +386,30 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
 
   const setActiveApp = useCallback((key: string) => {
     setActiveAppKeyState(key);
+    // Committing an app ends any hover-preview.
+    if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
+    setPreviewAppKeyState(null);
     setSidebarCollapsedState(false);
     try {
       window.localStorage.setItem(ACTIVE_APP_KEY, key);
       window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "0");
     } catch {}
+  }, []);
+
+  // Rail-hover preview coordination. setPreviewApp opens immediately;
+  // clearPreviewSoon closes after a short grace period so the mouse can travel
+  // from the rail icon into the sidebar without the preview flickering away;
+  // keepPreview cancels a pending close while the pointer is over the sidebar.
+  const setPreviewApp = useCallback((key: string | null) => {
+    if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
+    setPreviewAppKeyState(key);
+  }, []);
+  const keepPreview = useCallback(() => {
+    if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
+  }, []);
+  const clearPreviewSoon = useCallback(() => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => { setPreviewAppKeyState(null); previewTimerRef.current = null; }, 160);
   }, []);
 
   const setSidebarCollapsed = useCallback((v: boolean) => {
@@ -526,6 +554,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       openItem, openItemDrawer, closeItemDrawer,
       bumpRowVersion, rowVersion,
       activeAppKey, setActiveApp,
+      previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon,
       sidebarCollapsed, toggleSidebar, setSidebarCollapsed,
       appsGridOpen, openAppsGrid, closeAppsGrid,
       pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned,
@@ -535,7 +564,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedNotifications, setMutedNotifications,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, createListPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, createListPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

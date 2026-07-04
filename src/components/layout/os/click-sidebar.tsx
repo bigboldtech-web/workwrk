@@ -44,7 +44,7 @@ export function ClickSidebar() {
 }
 
 function ClickSidebarBody() {
-  const { activeAppKey, toggleSidebar, openCustomize } = useOsShell();
+  const { activeAppKey, previewAppKey, setActiveApp, keepPreview, clearPreviewSoon, toggleSidebar, openCustomize } = useOsShell();
   const pathname = usePathname() || "";
   const router = useRouter();
   const { query, setQuery } = useSidebarSearch();
@@ -73,9 +73,17 @@ function ClickSidebarBody() {
     sidebarWidthRef.current = sidebarWidth;
   }, [sidebarWidth]);
 
+  // While a rail icon is hovered, preview THAT app's options here; otherwise
+  // render the committed active app. Clicking a rail icon (or any option in the
+  // previewed list) commits it via setActiveApp.
+  const previewing = Boolean(previewAppKey && previewAppKey !== activeAppKey && getApp(previewAppKey));
   const app = useMemo(() => {
+    if (previewAppKey) {
+      const p = getApp(previewAppKey);
+      if (p) return p;
+    }
     return getApp(activeAppKey) ?? findAppForPath(pathname) ?? APPS[0];
-  }, [activeAppKey, pathname]);
+  }, [previewAppKey, activeAppKey, pathname]);
 
   const title = app.label.replace(/\.\.$/, "");
   const runAppNewAction = () => {
@@ -154,7 +162,11 @@ function ClickSidebarBody() {
   return (
     <aside
       data-branded="0"
-      className={`group/sidebar relative flex-shrink-0 h-full bg-zinc-50 border border-zinc-200 rounded-[14px] ${
+      onMouseEnter={keepPreview}
+      onMouseLeave={clearPreviewSoon}
+      className={`group/sidebar relative flex-shrink-0 h-full bg-zinc-50 border rounded-[14px] ${
+        previewing ? "border-[var(--os-brand)] shadow-[0_0_0_1px_var(--os-brand)]" : "border-zinc-200"
+      } ${
         resizing
           ? "select-none transition-[background-color,border-color] shadow-[0_0_0_1px_rgba(161,161,170,0.35)]"
           : "transition-[width,background-color,border-color]"
@@ -237,7 +249,12 @@ function ClickSidebarBody() {
           )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 pb-2">
+        <nav
+          className="flex-1 overflow-y-auto px-3 pb-2"
+          // Clicking anything in a previewed list commits that app (so the rail
+          // + work area follow), then lets the click's own navigation proceed.
+          onClickCapture={() => { if (previewAppKey) setActiveApp(previewAppKey); }}
+        >
           <app.Sidebar />
         </nav>
 
