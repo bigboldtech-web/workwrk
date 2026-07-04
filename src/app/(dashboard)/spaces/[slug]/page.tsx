@@ -16,7 +16,7 @@ import {
   FileText, Bookmark,
   LayoutDashboard, List as ListIcon, Kanban, Calendar as CalendarIcon, GanttChart,
   ChevronLeft, ChevronRight, ChevronDown, X,
-  ListFilter, Glasses, Zap,
+  ListFilter, Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { FolderCardCreate, ListCardCreate } from "@/components/layout/os/space-overview-create";
@@ -541,7 +541,7 @@ export default async function SpacePage(props: {
         <div className="flex items-center gap-3">
           <EntityTile size="lg" icon={space.icon} color={space.color} name={space.name} />
           <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-1.5 min-w-0">
-            <span className="truncate">{space.name}</span>
+            <span className="truncate" title={space.description || space.name}>{space.name}</span>
             <button
               type="button"
               aria-label="Space menu"
@@ -565,14 +565,6 @@ export default async function SpacePage(props: {
           <div className="flex-1" />
           <button
             type="button"
-            aria-label="Reader mode"
-            title="Reader mode"
-            className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500"
-          >
-            <Glasses className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
             className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
             title="Automations"
           >
@@ -583,7 +575,7 @@ export default async function SpacePage(props: {
             type="button"
             className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
           >
-            <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+            <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
             Ask
           </button>
           <SpaceShareButton
@@ -592,9 +584,6 @@ export default async function SpacePage(props: {
             initialVisibility={space.visibility}
           />
         </div>
-        {space.description ? (
-          <p className="text-sm text-zinc-600 mt-2 max-w-[640px]">{space.description}</p>
-        ) : null}
       </div>
 
       {/* View tabs — matches ClickUp's Space-level view switcher.
