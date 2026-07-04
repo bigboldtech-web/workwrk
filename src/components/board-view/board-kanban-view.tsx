@@ -1,27 +1,23 @@
 "use client";
 
-// BoardKanbanView — Phase 3c KANBAN renderer for studio-item Boards.
+// BoardKanbanView — KANBAN renderer for studio-item Boards.
 //
-// One column per status option from the board's own status set. Cards
-// inside a column show the title, owner avatar, and created date.
-// Native HTML5 drag-and-drop lets the user re-status a row by
-// dropping it into another column; uses optimistic update + refetch
-// on failure (same pattern as BoardTableView).
-//
-// Design rules from the 2026-06-02 Monday-clean spec:
-//   - Column header = status pill + count + "+" button. No border on
-//     the header; column has a subtle surface tint instead.
-//   - Card = rounded-md surface, no left-border color rail, title
-//     + small footer row with owner + date.
-//   - Drop target highlight = 2px dashed brand outline on hover.
+// One column per status option. Cards carry the full ClickUp toolset (parity
+// with the List row): the title (inline-rename), an interactive meta row
+// (Assignee / Due / Priority / Tags — value when set, faint affordance on hover
+// when empty), and a hover action rail top-right (Mark complete / Add subtask /
+// Rename / "..." menu). Native HTML5 drag re-statuses a card between columns.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Plus, X } from "lucide-react";
+import { CalendarPlus, CheckCircle2, Pencil, Plus, X } from "lucide-react";
 import { isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
-import { PriorityFlag } from "./priority-picker";
-import { TagChip } from "./tag-picker";
+import { AssigneePicker } from "./assignee-picker";
+import { PriorityPicker } from "./priority-picker";
+import { TagPicker } from "./tag-picker";
+import { ItemRowMoreMenu } from "./item-row-more-menu";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardKanbanViewProps {
   boardId: string;
@@ -36,8 +32,7 @@ interface BoardKanbanViewProps {
 }
 
 export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem }: BoardKanbanViewProps) {
-  // Card chips show at most the first two choice-type custom fields —
-  // keeps cards compact while surfacing the most pill-like data.
+  const confirm = useConfirm();
   const chipFields = useMemo(
     () => (initialFields ?? []).filter((f) => f.type === "DROPDOWN" || f.type === "LABELS" || f.type === "MULTI_SELECT").slice(0, 2),
     [initialFields],
@@ -50,6 +45,11 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   useEffect(() => { setItems(initialItems); }, [initialItems]);
 
   const statusOrder = useMemo(() => statuses.map((o) => o.value), [statuses]);
+  const firstStatus = statusOrder[0] ?? "TO_DO";
+  const doneStatusValue = useMemo(
+    () => statuses.find((s) => s.group === "DONE")?.value ?? statuses.find((s) => s.group !== "ACTIVE")?.value ?? null,
+    [statuses],
+  );
   const grouped = useMemo(() => {
     const map = new Map<string, BoardItemRow[]>();
     for (const s of statusOrder) map.set(s, []);
@@ -71,25 +71,30 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     } catch {}
   }, [boardId]);
 
-  const moveTo = useCallback(async (id: string, newStatus: string) => {
+  // Optimistic PATCH — merges a display patch locally, sends the API body, and
+  // refetches on failure. Backs assignee / due / priority / tags / status edits.
+  const patchCard = useCallback(async (id: string, apiBody: Record<string, unknown>, localPatch: Partial<BoardItemRow>) => {
     if (!canEdit) return;
-    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, status: newStatus } : r)));
+    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...localPatch } : r)));
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify(apiBody),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data?.error ?? "Failed to move card");
-        await refetch();
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to move card");
-      await refetch();
-    }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d?.error ?? "Update failed"); await refetch(); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Update failed"); await refetch(); }
   }, [canEdit, refetch]);
+
+  const moveTo = useCallback((id: string, newStatus: string) => {
+    void patchCard(id, { status: newStatus }, { status: newStatus });
+  }, [patchCard]);
+
+  const toggleComplete = useCallback((card: BoardItemRow) => {
+    const done = isDoneStatus(statuses, card.status);
+    const next = done ? firstStatus : (doneStatusValue ?? firstStatus);
+    void patchCard(card.id, { status: next }, { status: next });
+  }, [statuses, firstStatus, doneStatusValue, patchCard]);
 
   const addCard = useCallback(async (status: string) => {
     if (!canEdit) return;
@@ -100,15 +105,47 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         body: JSON.stringify({ title: "New item", status }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data?.error ?? "Failed to add card");
-        return;
-      }
+      if (!res.ok) { setError(data?.error ?? "Failed to add card"); return; }
       setItems((prev) => [...prev, data.item as BoardItemRow]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add card");
     }
   }, [boardId, canEdit]);
+
+  const addSubtask = useCallback(async (parentId: string, status: string | null) => {
+    if (!canEdit) return;
+    try {
+      const res = await fetch(`/api/boards/${boardId}/items`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "New subtask", status: status ?? firstStatus, parentItemId: parentId }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.item) setItems((prev) => [...prev, data.item as BoardItemRow]);
+    } catch {}
+  }, [boardId, canEdit, firstStatus]);
+
+  const duplicateCard = useCallback(async (card: BoardItemRow) => {
+    if (!canEdit) return;
+    try {
+      const res = await fetch(`/api/boards/${boardId}/items`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: `${card.title} (copy)`, status: card.status ?? firstStatus, ownerId: card.ownerId, metadata: card.metadata }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.item) setItems((prev) => [...prev, data.item as BoardItemRow]);
+    } catch {}
+  }, [boardId, canEdit, firstStatus]);
+
+  const removeLocal = useCallback((id: string) => setItems((prev) => prev.filter((r) => r.id !== id)), []);
+
+  const archiveCard = useCallback(async (id: string) => {
+    if (!canEdit) return;
+    if (!(await confirm({ title: "Archive card", description: "Archive this card? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
+    setItems((prev) => prev.filter((r) => r.id !== id));
+    try { const res = await fetch(`/api/items/${id}`, { method: "DELETE" }); if (!res.ok) await refetch(); } catch { await refetch(); }
+  }, [canEdit, confirm, refetch]);
 
   return (
     <div className="space-y-2">
@@ -144,7 +181,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                 setHoverColumn(null);
                 if (!dragId || !canEdit) return;
                 const card = items.find((r) => r.id === dragId);
-                if (card && card.status !== status) void moveTo(dragId, status);
+                if (card && card.status !== status) moveTo(dragId, status);
                 setDragId(null);
               }}
             >
@@ -172,6 +209,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                 {cards.map((card) => (
                   <KanbanCard
                     key={card.id}
+                    boardId={boardId}
                     card={card}
                     chipFields={chipFields}
                     statuses={statuses}
@@ -180,6 +218,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     onDragEnd={() => { setDragId(null); setHoverColumn(null); }}
                     isDragging={dragId === card.id}
                     onOpen={onOpenItem ? () => onOpenItem(card.id) : undefined}
+                    onPatch={patchCard}
+                    onToggleComplete={() => toggleComplete(card)}
+                    onAddSubtask={() => addSubtask(card.id, card.status)}
+                    onDuplicate={() => duplicateCard(card)}
+                    onArchive={() => archiveCard(card.id)}
+                    onDeleted={() => removeLocal(card.id)}
                   />
                 ))}
                 {canEdit ? (
@@ -201,6 +245,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
 }
 
 function KanbanCard({
+  boardId,
   card,
   chipFields,
   statuses,
@@ -209,7 +254,14 @@ function KanbanCard({
   onDragEnd,
   isDragging,
   onOpen,
+  onPatch,
+  onToggleComplete,
+  onAddSubtask,
+  onDuplicate,
+  onArchive,
+  onDeleted,
 }: {
+  boardId: string;
   card: BoardItemRow;
   chipFields: FieldDef[];
   statuses: StatusOption[];
@@ -218,65 +270,163 @@ function KanbanCard({
   onDragEnd: () => void;
   isDragging: boolean;
   onOpen?: () => void;
+  onPatch: (id: string, apiBody: Record<string, unknown>, localPatch: Partial<BoardItemRow>) => void;
+  onToggleComplete: () => void;
+  onAddSubtask: () => void;
+  onDuplicate: () => void;
+  onArchive: () => void;
+  onDeleted: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(card.title);
+  const [dueOpen, setDueOpen] = useState(false);
+  // Seed the input from the current title only when entering edit mode — avoids
+  // a prop-sync effect (which cascades renders).
+  const startEdit = () => { setTitle(card.title); setEditing(true); };
+
+  const done = isDoneStatus(statuses, card.status);
   const due = card.dueAt ? new Date(card.dueAt) : null;
-  // Group-driven: any DONE/CLOSED-group status stops the overdue flag,
-  // not just the literal "DONE".
-  const overdue = !!due && due < new Date() && !isDoneStatus(statuses, card.status);
+  const overdue = !!due && due < new Date() && !done;
   const tags = card.tags ?? [];
   const fieldChips = chipFields.filter((f) => {
     const v = card.metadata?.[f.key];
     return v != null && v !== "" && (!Array.isArray(v) || v.length > 0);
   });
+  const dueInput = due
+    ? `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`
+    : "";
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  const iconBtn = "inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100";
+
+  const saveTitle = () => {
+    const next = title.trim();
+    setEditing(false);
+    if (next && next !== card.title) onPatch(card.id, { title: next }, { title: next });
+    else setTitle(card.title);
+  };
 
   return (
     <div
-      draggable={canEdit}
+      draggable={canEdit && !editing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      onClick={onOpen}
-      className={`rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-sm ${
-        canEdit ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
+      onClick={() => { if (!editing) onOpen?.(); }}
+      className={`group relative rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-sm ${
+        canEdit && !editing ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
       } ${isDragging ? "opacity-40" : ""} hover:shadow-sm transition-shadow`}
     >
-      <div className="break-words">{card.title}</div>
-
-      {/* Pills row — due date / priority / tags / choice-field chips.
-          Only renders when at least one is present so empty cards stay slim. */}
-      {due || card.priority || tags.length > 0 || fieldChips.length > 0 ? (
-        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-          {due ? (
-            <span
-              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-medium ${
-                overdue ? "bg-red-50 text-red-600" : "bg-zinc-100 text-zinc-600"
-              }`}
-            >
-              <CalendarDays className="w-3 h-3" />
-              {due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-            </span>
-          ) : null}
-          {card.priority ? <PriorityFlag value={card.priority} /> : null}
-          {tags.slice(0, 3).map((t) => <TagChip key={t.id} tag={t} />)}
-          {tags.length > 3 ? <span className="text-[10.5px] text-zinc-500">+{tags.length - 3}</span> : null}
-          {fieldChips.map((f) => (
-            <FieldValue key={f.key} field={f} value={card.metadata?.[f.key]} mode="display" />
-          ))}
+      {/* Title + action rail */}
+      <div className="flex items-start gap-1">
+        <div className="flex-1 min-w-0">
+          {editing ? (
+            <input
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onClick={stop}
+              onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); else if (e.key === "Escape") { setTitle(card.title); setEditing(false); } }}
+              onBlur={saveTitle}
+              className="w-full bg-white border border-[var(--os-brand)] rounded px-1 py-0.5 text-sm text-zinc-900 focus:outline-none"
+            />
+          ) : (
+            <div className="break-words">{card.title}</div>
+          )}
         </div>
-      ) : null}
+        {/* Mark complete — filled when done (always), else in the hover rail. */}
+        {canEdit && done ? (
+          <button type="button" onClick={(e) => { stop(e); onToggleComplete(); }} className="inline-flex items-center justify-center w-5 h-5 rounded text-emerald-600 shrink-0" title="Mark incomplete" aria-label="Mark incomplete">
+            <CheckCircle2 className="w-3.5 h-3.5" style={{ fill: "currentColor" }} />
+          </button>
+        ) : null}
+        <div className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 shrink-0" onClick={stop}>
+          {canEdit && !done ? (
+            <button type="button" onClick={(e) => { stop(e); onToggleComplete(); }} className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100" title="Mark complete" aria-label="Mark complete">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+            </button>
+          ) : null}
+          {canEdit ? (
+            <button type="button" onClick={(e) => { stop(e); onAddSubtask(); }} className={iconBtn} title="Add subtask" aria-label="Add subtask">
+              <Plus className="w-3 h-3" />
+            </button>
+          ) : null}
+          {canEdit ? (
+            <button type="button" onClick={(e) => { stop(e); startEdit(); }} className={iconBtn} title="Rename" aria-label="Rename">
+              <Pencil className="w-3 h-3" />
+            </button>
+          ) : null}
+          <ItemRowMoreMenu
+            item={{ id: card.id, boardId, title: card.title }}
+            canEdit={canEdit}
+            onOpen={onOpen}
+            onRename={startEdit}
+            onDuplicate={onDuplicate}
+            onArchive={onArchive}
+            onDeleted={onDeleted}
+          />
+        </div>
+      </div>
 
-      <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-500">
-        {card.owner ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-zinc-100 text-[10px] font-medium">
-              {`${card.owner.firstName?.[0] ?? ""}${card.owner.lastName?.[0] ?? ""}`.toUpperCase() || "?"}
-            </span>
-            <span className="truncate max-w-[120px]">
-              {card.owner.firstName} {card.owner.lastName}
-            </span>
-          </span>
-        ) : (
-          <span>Unassigned</span>
-        )}
+      {/* Meta row — Assignee / Due / Priority / Tags + field chips. Set values
+          show always; empty affordances appear on hover. */}
+      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" onClick={stop}>
+        <span className={card.ownerId ? "inline-flex" : "hidden group-hover:inline-flex"}>
+          <AssigneePicker
+            value={card.owner ? { ...card.owner, email: null } : null}
+            canEdit={canEdit}
+            compact
+            onChange={(person) =>
+              onPatch(
+                card.id,
+                { ownerId: person?.id ?? null },
+                { ownerId: person?.id ?? null, owner: person ? { id: person.id, firstName: person.firstName ?? "", lastName: person.lastName ?? "", avatar: person.avatar } : null },
+              )
+            }
+          />
+        </span>
+
+        {/* Due */}
+        <span className={`relative ${due ? "inline-flex" : "hidden group-hover:inline-flex"}`}>
+          <button
+            type="button"
+            disabled={!canEdit}
+            onClick={() => canEdit && setDueOpen((v) => !v)}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-medium ${
+              due ? (overdue ? "bg-red-50 text-red-600" : "bg-zinc-100 text-zinc-600") : "text-zinc-300 hover:text-zinc-500"
+            }`}
+            title={due ? "Edit due date" : "Set due date"}
+          >
+            <CalendarPlus className="w-3 h-3" />
+            {due ? due.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null}
+          </button>
+          {dueOpen && canEdit ? (
+            <input
+              type="date"
+              autoFocus
+              value={dueInput}
+              onChange={(e) => { onPatch(card.id, { dueAt: e.target.value ? `${e.target.value}T00:00:00.000Z` : null }, { dueAt: e.target.value ? `${e.target.value}T00:00:00.000Z` : null }); setDueOpen(false); }}
+              onBlur={() => setDueOpen(false)}
+              className="absolute left-0 top-6 z-20 h-7 px-1 text-[12px] border border-zinc-200 rounded bg-white shadow-md focus:outline-none focus:border-[var(--os-brand)]"
+            />
+          ) : null}
+        </span>
+
+        {/* Priority */}
+        <span className={card.priority ? "inline-flex" : "hidden group-hover:inline-flex"}>
+          <PriorityPicker value={card.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onPatch(card.id, { priority }, { priority })} />
+        </span>
+
+        {/* Tags */}
+        <span className={tags.length > 0 ? "inline-flex" : "hidden group-hover:inline-flex"}>
+          <TagPicker value={tags} canEdit={canEdit} compact onChange={(next) => onPatch(card.id, { tagIds: next.map((t) => t.id) }, { tags: next })} />
+        </span>
+
+        {fieldChips.map((f) => (
+          <FieldValue key={f.key} field={f} value={card.metadata?.[f.key]} mode="display" />
+        ))}
+      </div>
+
+      {/* Footer — created date. */}
+      <div className="mt-1.5 flex items-center justify-end text-[11px] text-zinc-400">
         <span>{new Date(card.createdAt).toLocaleDateString()}</span>
       </div>
     </div>
