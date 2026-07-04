@@ -15,12 +15,12 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, CheckCircle2 } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
+  isDoneStatus,
   type BoardItemRow,
   type StatusOption,
-  type ItemTag,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar } from "./assignee-picker";
@@ -29,6 +29,7 @@ import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
 import { useItemTypes, type ItemTypeLite } from "./use-item-types";
 import { StatusGlyph } from "./status-glyph";
+import { ItemRowMoreMenu } from "./item-row-more-menu";
 import { itemTypeIcon } from "@/lib/item-type-icons";
 import type { FieldChoice } from "@/lib/field-catalog";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -144,15 +145,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const { byId: itemTypeMap } = useItemTypes();
   // Built-in column visibility (FieldShelf "Built-in fields" toggles).
   const hideBuiltin = useMemo(() => new Set(hiddenBuiltins ?? []), [hiddenBuiltins]);
-  const showOwner = !hideBuiltin.has("__builtin_owner");
-  const showDue = !hideBuiltin.has("__builtin_due");
-  const showPriority = !hideBuiltin.has("__builtin_priority");
-  // A clean ClickUp-style List stays lean: Name / Assignee / Priority only.
-  // Type, Tags and Created are spreadsheet columns — show them in the Monday-
-  // style Table view, not the List.
+  // Clean ClickUp-style List: Assignee / Due / Priority / Tags live INLINE on the
+  // row (set values + hover affordances next to the name), not as far-right
+  // columns. The Monday-style Table keeps them as real spreadsheet columns.
+  const showOwner = !hideBuiltin.has("__builtin_owner") && monday;
+  const showDue = !hideBuiltin.has("__builtin_due") && monday;
+  const showPriority = !hideBuiltin.has("__builtin_priority") && monday;
   const showType = !hideBuiltin.has("__builtin_type") && monday;
   const showTags = !hideBuiltin.has("__builtin_tags") && monday;
-  const showCreated = !hideBuiltin.has("__builtin_created");
+  const showCreated = !hideBuiltin.has("__builtin_created") && monday;
   // New rows default to the board's first status (its "not started").
   const firstStatus = statuses[0]?.value ?? "TO_DO";
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -650,6 +651,26 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit]);
 
+  // Mark-complete toggle — flips a row to the board's first DONE/CLOSED status
+  // (or back to the first status). Uses the group model so custom "done"
+  // statuses count, not a hardcoded "DONE".
+  const doneStatusValue = useMemo(
+    () => statuses.find((s) => s.group === "DONE")?.value ?? statuses.find((s) => s.group !== "ACTIVE")?.value ?? null,
+    [statuses],
+  );
+  const toggleComplete = useCallback((row: BoardItemRow) => {
+    if (!canEdit) return;
+    const done = isDoneStatus(statuses, row.status);
+    const next = done ? firstStatus : (doneStatusValue ?? firstStatus);
+    handleUpdate(row.id, { status: next });
+  }, [canEdit, statuses, firstStatus, doneStatusValue, handleUpdate]);
+
+  // Local-only removal (after a hard delete in the row "..." menu already hit
+  // the API) — drops the row without a second request.
+  const handleRemoveLocal = useCallback((id: string) => {
+    setItems((prev) => prev.filter((r) => r.id !== id));
+  }, []);
+
   const handleArchive = useCallback(async (id: string) => {
     if (!canEdit) return;
     if (!(await confirm({ title: "Archive row", description: "Archive this row? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
@@ -666,9 +687,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit, confirm]);
 
-  // select + name + actions (3 fixed) + optional status/owner/priority/type/
-  // tags/created + custom fields.
-  const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
+  // select + name (2 fixed; the row "..." menu now lives inline in the Name
+  // cell, so there's no trailing actions column) + optional status/owner/
+  // priority/type/tags/created + custom fields.
+  const colCount = 2 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -682,6 +704,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       <Row
         key={row.id}
         row={row}
+        boardId={boardId}
         customFields={customFields}
         statuses={statuses}
         itemTypeMap={itemTypeMap}
@@ -701,6 +724,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         onOpen={onOpenItem ? () => onOpenItem(row.id) : undefined}
         onDuplicate={handleDuplicate}
         onAddSubtask={() => addSubtask(row.id, row.status)}
+        onToggleComplete={toggleComplete}
+        onRemoveLocal={handleRemoveLocal}
         dragEnabled={canEdit && !buckets && indent === 0}
         isDragging={dragId === row.id}
         isDragOver={dragOverId === row.id && dragId !== null && dragId !== row.id}
@@ -871,7 +896,6 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                 <th key={f.key} className="px-4 py-2 font-medium">{f.label}</th>
               ))}
               {showCreated ? <th className="px-4 py-2 font-medium w-[120px]">Created</th> : null}
-              <th className="px-2 py-2 w-[40px]"></th>
             </tr>
           </thead>
           <tbody>
@@ -1203,6 +1227,7 @@ function BulkOwner({ onSet, busy }: { onSet: (ownerId: string | null) => void; b
 
 function Row({
   row,
+  boardId,
   customFields,
   statuses,
   itemTypeMap,
@@ -1222,6 +1247,8 @@ function Row({
   onOpen,
   onDuplicate,
   onAddSubtask,
+  onToggleComplete,
+  onRemoveLocal,
   dragEnabled,
   isDragging,
   isDragOver,
@@ -1235,6 +1262,7 @@ function Row({
   onToggleExpand,
 }: {
   row: BoardItemRow;
+  boardId: string;
   customFields: FieldDef[];
   statuses: StatusOption[];
   itemTypeMap: Map<string, ItemTypeLite>;
@@ -1254,6 +1282,8 @@ function Row({
   onOpen?: () => void;
   onDuplicate?: (row: BoardItemRow) => void;
   onAddSubtask?: () => void;
+  onToggleComplete?: (row: BoardItemRow) => void;
+  onRemoveLocal?: (id: string) => void;
   dragEnabled: boolean;
   isDragging: boolean;
   isDragOver: boolean;
@@ -1342,13 +1372,20 @@ function Row({
           <div className="flex-1 min-w-0">
             <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} editToken={editToken} />
           </div>
-          <RowHoverActions
-            itemId={row.id}
+          <RowInlineControls
+            row={row}
+            statuses={statuses}
             canEdit={canEdit}
-            tags={row.tags ?? []}
+            showMeta={!monday}
+            boardId={boardId}
+            onUpdate={onUpdate}
             onAddSubtask={() => onAddSubtask?.()}
-            onTagsChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })}
             onRename={() => setEditToken((t) => t + 1)}
+            onToggleComplete={() => onToggleComplete?.(row)}
+            onOpen={onOpen}
+            onDuplicate={onDuplicate ? () => onDuplicate(row) : undefined}
+            onArchive={() => onArchive(row.id)}
+            onDeleted={() => onRemoveLocal?.(row.id)}
           />
         </div>
       </td>
@@ -1399,16 +1436,6 @@ function Row({
           {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
-      <td className="px-2 py-1.5 text-right">
-        {canEdit ? (
-          <RowActionsMenu
-            itemId={row.id}
-            onOpen={onOpen}
-            onDuplicate={onDuplicate ? () => onDuplicate(row) : undefined}
-            onArchive={() => onArchive(row.id)}
-          />
-        ) : null}
-      </td>
     </tr>
   );
 }
@@ -2004,117 +2031,122 @@ function GroupStatusBreakdown({ rows, statuses }: { rows: BoardItemRow[]; status
   );
 }
 
-function RowActionsMenu({
-  itemId,
+// RowInlineControls — the ClickUp row toolset. In List mode (`showMeta`) it
+// shows inline Assignee / Due / Priority / Tags (the value when set, a faint
+// affordance on hover when empty) right after the task name, followed by the
+// hover action rail: Mark complete, Add subtask, Rename, and the "..." menu.
+// In Monday-Table mode those four are real columns, so only the action rail
+// shows here.
+function RowInlineControls({
+  row,
+  statuses,
+  canEdit,
+  showMeta,
+  boardId,
+  onUpdate,
+  onAddSubtask,
+  onRename,
+  onToggleComplete,
   onOpen,
   onDuplicate,
   onArchive,
+  onDeleted,
 }: {
-  itemId: string;
+  row: BoardItemRow;
+  statuses: StatusOption[];
+  canEdit: boolean;
+  showMeta: boolean;
+  boardId: string;
+  onUpdate: (id: string, patch: RowPatch) => void;
+  onAddSubtask: () => void;
+  onRename: () => void;
+  onToggleComplete: () => void;
   onOpen?: () => void;
   onDuplicate?: () => void;
   onArchive: () => void;
+  onDeleted: () => void;
 }) {
-  const copyLink = async () => {
-    try {
-      const url = `${window.location.origin}${window.location.pathname}?item=${itemId}`;
-      await navigator.clipboard.writeText(url);
-    } catch {}
-  };
-  return (
-    <details className="relative inline-block">
-      <summary
-        className="list-none cursor-pointer opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 select-none"
-        title="More actions"
-        aria-label="More actions"
-      >
-        <MoreHorizontal className="w-3.5 h-3.5" />
-      </summary>
-      <div className="absolute right-0 top-full mt-1 z-50 w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
-        {onOpen ? (
-          <button
-            type="button"
-            onClick={onOpen}
-            className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-zinc-700 hover:bg-zinc-50"
-          >
-            <ExternalLink className="w-3 h-3 text-zinc-400" />
-            Open
-          </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={copyLink}
-          className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-zinc-700 hover:bg-zinc-50"
-        >
-          <Link2 className="w-3 h-3 text-zinc-400" />
-          Copy link
-        </button>
-        {onDuplicate ? (
-          <button
-            type="button"
-            onClick={onDuplicate}
-            className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-zinc-700 hover:bg-zinc-50"
-          >
-            <Copy className="w-3 h-3 text-zinc-400" />
-            Duplicate
-          </button>
-        ) : null}
-        <div className="h-px bg-zinc-100 my-1" />
-        <button
-          type="button"
-          onClick={onArchive}
-          className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-red-600 hover:bg-red-50"
-        >
-          <Trash2 className="w-3 h-3" />
-          Archive
-        </button>
-      </div>
-    </details>
-  );
-}
-
-function RowHoverActions({ itemId, canEdit, tags, onAddSubtask, onTagsChange, onRename }: {
-  itemId: string;
-  canEdit: boolean;
-  tags: ItemTag[];
-  onAddSubtask: () => void;
-  onTagsChange: (tags: ItemTag[]) => void;
-  onRename: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  const onCopy = async () => {
-    try {
-      // Build a deep-link URL that opens the drawer for this item via
-      // Phase 62's ?item=<id> param on whatever board page hosts it.
-      const url = `${window.location.origin}${window.location.pathname}?item=${itemId}`;
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    } catch {
-      // navigator.clipboard may reject (insecure context, denied). Silent fail.
-    }
-  };
+  const done = isDoneStatus(statuses, row.status);
   const iconBtn = "inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100";
+  const hasTags = (row.tags?.length ?? 0) > 0;
+  // Empty meta / the action rail take ZERO space until the row is hovered
+  // (display:contents when shown), so short titles aren't clipped by reserved
+  // affordance slots. Set values render inline always.
+  const shown = "contents";
+  const hoverOnly = "hidden group-hover:contents";
   return (
-    <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 shrink-0">
-      {canEdit ? (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onAddSubtask(); }} className={iconBtn} title="Add subtask" aria-label="Add subtask">
-          <Plus className="w-3 h-3" />
+    <span className="inline-flex items-center gap-0.5 shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+      {showMeta ? (
+        <>
+          <span className={row.ownerId ? shown : hoverOnly}>
+            <AssigneePicker
+              value={row.owner ? { ...row.owner, email: null } : null}
+              canEdit={canEdit}
+              compact
+              onChange={(person) =>
+                onUpdate(row.id, {
+                  ownerId: person?.id ?? null,
+                  owner: person
+                    ? { id: person.id, firstName: person.firstName ?? "", lastName: person.lastName ?? "", avatar: person.avatar }
+                    : null,
+                })
+              }
+            />
+          </span>
+          <span className={row.dueAt ? shown : hoverOnly}>
+            <DueDateCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
+          </span>
+          <span className={row.priority ? shown : hoverOnly}>
+            <PriorityPicker value={row.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onUpdate(row.id, { priority })} />
+          </span>
+          <span className={hasTags ? shown : hoverOnly}>
+            <TagPicker value={row.tags ?? []} canEdit={canEdit} compact onChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })} />
+          </span>
+          <span aria-hidden className={`${hoverOnly}`}><span className="inline-block w-px h-3.5 bg-zinc-200 mx-0.5" /></span>
+        </>
+      ) : null}
+      {/* Mark complete — always visible (filled) when done; hover affordance otherwise. */}
+      {canEdit && done ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onToggleComplete(); }}
+          className="inline-flex items-center justify-center w-5 h-5 rounded shrink-0 text-emerald-600"
+          title="Mark incomplete"
+          aria-label="Mark incomplete"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" style={{ fill: "currentColor" }} />
         </button>
       ) : null}
-      {canEdit ? (
-        <span onClick={(e) => e.stopPropagation()} className="inline-flex">
-          <TagPicker value={tags} canEdit compact onChange={onTagsChange} />
-        </span>
-      ) : null}
-      {canEdit ? (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onRename(); }} className={iconBtn} title="Rename" aria-label="Rename task">
-          <Pencil className="w-3 h-3" />
-        </button>
-      ) : null}
-      <button type="button" onClick={onCopy} className={iconBtn} title={copied ? "Copied" : "Copy link"} aria-label="Copy link to this item">
-        {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Link2 className="w-3 h-3" />}
-      </button>
+      {/* Action rail — appears on hover, reserves no space when idle. */}
+      <span className={hoverOnly}>
+        {canEdit && !done ? (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onToggleComplete(); }} className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100" title="Mark complete" aria-label="Mark complete">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          </button>
+        ) : null}
+        {canEdit ? (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onAddSubtask(); }} className={iconBtn} title="Add subtask" aria-label="Add subtask">
+            <Plus className="w-3 h-3" />
+          </button>
+        ) : null}
+        {canEdit ? (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onRename(); }} className={iconBtn} title="Rename" aria-label="Rename task">
+            <Pencil className="w-3 h-3" />
+          </button>
+        ) : null}
+      </span>
+      {/* More menu — rendered outside the hover wrapper so its trigger keeps a
+          layout box (stable MorePortal anchor) even if the menu stays open after
+          the mouse leaves the row. Its own trigger fades in on hover / when open. */}
+      <ItemRowMoreMenu
+        item={{ id: row.id, boardId, title: row.title }}
+        canEdit={canEdit}
+        onOpen={onOpen}
+        onRename={onRename}
+        onDuplicate={onDuplicate}
+        onArchive={onArchive}
+        onDeleted={onDeleted}
+      />
     </span>
   );
 }
