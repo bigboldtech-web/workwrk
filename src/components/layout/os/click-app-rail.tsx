@@ -198,7 +198,7 @@ export function ClickAppRail() {
                 onClick={() => handleClick(app)}
                 onContextMenu={(e) => onContextMenu(e, app.key)}
                 title={`${app.label.replace(/\.\.$/, "")}${shortcut ? `  ${shortcut}` : ""}`}
-                className={`group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 transition-colors ${
+                className={`group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 focus:outline-none focus-visible:outline-none transition-colors ${
                   active ? "text-white" : `${railTextColor} hover:text-white`
                 } ${dragKey === app.key ? "opacity-40" : ""}`}
                 aria-current={active ? "page" : undefined}
@@ -234,7 +234,7 @@ export function ClickAppRail() {
               }}
               onContextMenu={(e) => onContextMenu(e, ghostApp.key)}
               title={`${ghostApp.label.replace(/\.\.$/, "")} (not pinned — right-click to pin)`}
-              className="group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 text-white/70 hover:text-white"
+              className="group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 focus:outline-none focus-visible:outline-none text-white/70 hover:text-white"
             >
               <span className="flex items-center justify-center w-[26px] h-[26px] rounded-md border border-dashed border-white/40 group-hover:bg-white/10">
                 {hasAppGlyph(ghostApp.key) ? <AppGlyph appKey={ghostApp.key} size={20} /> : <ghostApp.Icon className="w-[16px] h-[16px]" />}
@@ -249,7 +249,7 @@ export function ClickAppRail() {
             type="button"
             onClick={openAppsGrid}
             title="Add apps, customize navigation"
-            className={`group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 transition-colors ${
+            className={`group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 focus:outline-none focus-visible:outline-none transition-colors ${
               appsGridOpen ? "text-white" : `${railTextColor} hover:text-white`
             }`}
             aria-haspopup="dialog"

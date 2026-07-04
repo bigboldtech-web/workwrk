@@ -75,8 +75,8 @@ function ClickSidebarBody() {
 
   // While a rail icon is hovered, preview THAT app's options here; otherwise
   // render the committed active app. Clicking a rail icon (or any option in the
-  // previewed list) commits it via setActiveApp.
-  const previewing = Boolean(previewAppKey && previewAppKey !== activeAppKey && getApp(previewAppKey));
+  // previewed list) commits it via setActiveApp. The swap itself is the cue —
+  // no border/ring (that read as noise).
   const app = useMemo(() => {
     if (previewAppKey) {
       const p = getApp(previewAppKey);
@@ -164,9 +164,7 @@ function ClickSidebarBody() {
       data-branded="0"
       onMouseEnter={keepPreview}
       onMouseLeave={clearPreviewSoon}
-      className={`group/sidebar relative flex-shrink-0 h-full bg-zinc-50 border rounded-[14px] ${
-        previewing ? "border-[var(--os-brand)] shadow-[0_0_0_1px_var(--os-brand)]" : "border-zinc-200"
-      } ${
+      className={`group/sidebar relative flex-shrink-0 h-full bg-zinc-50 border border-zinc-200 rounded-[14px] ${
         resizing
           ? "select-none transition-[background-color,border-color] shadow-[0_0_0_1px_rgba(161,161,170,0.35)]"
           : "transition-[width,background-color,border-color]"
