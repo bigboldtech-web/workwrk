@@ -344,6 +344,18 @@ export async function unarchiveSpace(spaceId: string) {
   });
 }
 
+// Permanent delete. Boards reference spaceId with onDelete:SetNull (so a bare
+// space delete would orphan them), so we delete the space's boards + folders
+// first — Board's own children (Items/Views/Members) cascade — then the space
+// row itself. All-or-nothing in one transaction.
+export async function deleteSpace(spaceId: string) {
+  return prisma.$transaction(async (tx) => {
+    await tx.board.deleteMany({ where: { spaceId } });
+    await tx.folder.deleteMany({ where: { spaceId } });
+    await tx.space.delete({ where: { id: spaceId } });
+  });
+}
+
 export async function listSpaceMembers(spaceId: string) {
   return prisma.spaceMember.findMany({
     where: { spaceId },

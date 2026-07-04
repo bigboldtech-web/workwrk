@@ -1,12 +1,13 @@
 // GET    /api/spaces/[id]         — read; visibility check enforced
 // PATCH  /api/spaces/[id]         — edit; SpaceMember OWNER/ADMIN or org admin
-// DELETE /api/spaces/[id]         — archive (soft-delete); same gate as PATCH
+// DELETE /api/spaces/[id]         — archive (soft-delete); ?hard=1 permanently
+//                                    deletes the Space + its boards/folders.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveSpace, canEditSpace, getSpaceForReader, updateSpace } from "@/lib/space";
+import { archiveSpace, canEditSpace, deleteSpace, getSpaceForReader, updateSpace } from "@/lib/space";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -69,7 +70,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await ctx();
   if ("error" in c) return c.error;
   const { id } = await params;
@@ -80,6 +81,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const canEdit = await canEditSpace(id, c.userId, c.accessLevel);
   if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  const hard = new URL(req.url).searchParams.get("hard") === "1";
+  if (hard) {
+    try {
+      await deleteSpace(id);
+      return NextResponse.json({ ok: true });
+    } catch {
+      return NextResponse.json({ error: "Couldn't delete this Space" }, { status: 400 });
+    }
+  }
   const archived = await archiveSpace(id);
   return NextResponse.json({ space: archived });
 }

@@ -20,6 +20,7 @@ import {
   MoreHorizontal, Edit2, Palette, Lock, Globe, Archive, Settings,
   Share2, EyeOff, Loader2, Star, Link as LinkIcon, PanelLeft, PanelTop,
   Plus, Zap, Tag, CircleDot, Download, Files, ArrowRightLeft, Copy, Trash2, Save,
+  FileText, FolderPlus, ListChecks,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
@@ -115,7 +116,7 @@ function SpaceMoreMenu({
   const router = useRouter();
   const { toast } = useOsToast();
   const confirm = useConfirm();
-  const { openTemplateCenter } = useOsShell();
+  const { openTemplateCenter, openCreateList } = useOsShell();
   const [mode, setMode] = useState<Mode>("menu");
   const [draft, setDraft] = useState(space.name);
   const [busy, setBusy] = useState<string | null>(null);
@@ -200,6 +201,85 @@ function SpaceMoreMenu({
       setBusy(null);
     }
   }, [space.id, space.name, toast, onClose]);
+
+  // ── Create new (List / Doc / Folder) ───────────────────────────────
+  const createList = useCallback(() => {
+    onClose();
+    openCreateList({ spaceId: space.id });
+  }, [onClose, openCreateList, space.id]);
+
+  const createDoc = useCallback(async () => {
+    setBusy("doc");
+    try {
+      const res = await fetch("/api/docs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Untitled doc",
+          entityType: "SPACE",
+          entityId: space.id,
+          content: { type: "doc", content: [{ type: "paragraph" }] },
+        }),
+      });
+      if (!res.ok) { toast("Couldn't create doc"); return; }
+      const d = await res.json();
+      onClose();
+      if (d?.doc?.id) router.push(`/docs/${d.doc.id}`);
+    } catch { toast("Couldn't create doc"); } finally { setBusy(null); }
+  }, [space.id, toast, onClose, router]);
+
+  const createFolder = useCallback(async () => {
+    setBusy("folder");
+    try {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ spaceId: space.id, name: "New Folder" }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d?.error ?? "Couldn't create folder"); return; }
+      toast("Folder created");
+      onUpdated?.();
+      router.refresh();
+      onClose();
+    } catch { toast("Couldn't create folder"); } finally { setBusy(null); }
+  }, [space.id, toast, onUpdated, router, onClose]);
+
+  const duplicate = useCallback(async () => {
+    setBusy("duplicate");
+    try {
+      const res = await fetch("/api/spaces", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: `${space.name} (copy)`,
+          icon: space.icon ?? undefined,
+          color: space.color ?? undefined,
+          visibility: space.visibility,
+        }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d?.error ?? "Couldn't duplicate"); return; }
+      const d = await res.json();
+      toast(`Duplicated “${space.name}”`);
+      onUpdated?.();
+      onClose();
+      if (d?.space?.slug) router.push(`/spaces/${d.space.slug}`);
+      else router.refresh();
+    } catch { toast("Couldn't duplicate"); } finally { setBusy(null); }
+  }, [space, toast, onUpdated, router, onClose]);
+
+  const del = useCallback(async () => {
+    if (!(await confirm({ title: "Delete Space", description: `Permanently delete "${space.name}" and everything in it? This can't be undone.`, destructive: true, confirmLabel: "Delete" }))) return;
+    setBusy("delete");
+    try {
+      const res = await fetch(`/api/spaces/${space.id}?hard=1`, { method: "DELETE" });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d?.error ?? "Couldn't delete"); return; }
+      toast(`${space.name} deleted`);
+      onUpdated?.();
+      onClose();
+      router.push("/spaces");
+      router.refresh();
+    } catch { toast("Couldn't delete"); } finally { setBusy(null); }
+  }, [space, confirm, toast, onUpdated, router, onClose]);
 
   const patch = async (body: Record<string, unknown>, kind: string) => {
     setBusy(kind);
@@ -364,33 +444,40 @@ function SpaceMoreMenu({
       <MenuItem icon={Edit2}    label="Rename"      onClick={() => setMode("rename")} />
       <MenuItem icon={LinkIcon} label="Copy link"   onClick={copyLink} />
 
-      <MenuItem icon={Plus}    label="Create new"  submenu disabled title="Coming soon" />
-      <MenuItem icon={Palette} label="Space color" onClick={() => setMode("icon")} submenu />
+      <MenuSeparator />
 
+      <MenuSubmenu icon={Plus} label="Create new">
+        <MenuItem icon={ListChecks} label="List"   busy={busy === "list"}   onClick={createList} />
+        <MenuItem icon={FileText}   label="Doc"    busy={busy === "doc"}    onClick={createDoc} />
+        <MenuItem icon={FolderPlus} label="Folder" busy={busy === "folder"} onClick={createFolder} />
+      </MenuSubmenu>
+      <MenuItem icon={Palette} label="Color & Icon" onClick={() => setMode("icon")} submenu />
       <MenuItem
         icon={isPrivate ? Globe : Lock}
         label={isPrivate ? "Make workspace-visible" : "Make Private"}
         busy={busy === "visibility"}
         onClick={() => patch({ visibility: isPrivate ? "WORKSPACE" : "PRIVATE" }, "visibility")}
       />
-
-      <MenuSeparator />
-
       <MenuItem icon={Zap}       label="Automations"   onClick={() => toast("Automations are coming soon")} />
-      <MenuItem icon={Tag}       label="Custom Fields" onClick={() => toast("Custom Fields are set on each List")} />
-      <MenuItem icon={CircleDot} label="Task statuses" onClick={() => toast("Task statuses are set on each List")} />
+      <MenuItem icon={Tag}       label="Custom Fields" onClick={() => toast("Custom Fields are set per List")} />
+      <MenuItem icon={CircleDot} label="Task statuses" onClick={() => toast("Task statuses are set per List")} />
+      <MenuItem icon={Settings}  label="Space settings" onClick={() => { onClose(); router.push(`/spaces/${space.slug ?? space.id}`); }} />
 
       <MenuSeparator />
 
       <MenuItem icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
-      <MenuItem icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ applyContext: { spaceId: space.id } }); }} />
-      <MenuItem icon={Save}           label="Save as template" busy={busy === "save-template"} onClick={saveAsTemplate} />
+      <MenuSubmenu icon={Files} label="Templates">
+        <MenuItem icon={Files} label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ applyContext: { spaceId: space.id } }); }} />
+        <MenuItem icon={Save}  label="Save as template"  busy={busy === "save-template"} onClick={saveAsTemplate} />
+      </MenuSubmenu>
       <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
-      <MenuItem icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
-      <MenuItem icon={Settings}       label="Space settings" onClick={() => { onClose(); router.push(`/spaces/${space.slug ?? space.id}`); }} />
-      <MenuItem icon={EyeOff}         label="Hide from sidebar" onClick={() => toast("Hide coming soon")} />
-      <MenuItem icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
-      <MenuItem icon={Trash2}         label="Delete"    destructive disabled title="Coming soon" />
+
+      <MenuSeparator />
+
+      <MenuItem icon={Copy}    label="Duplicate" busy={busy === "duplicate"} onClick={duplicate} />
+      <MenuItem icon={EyeOff}  label="Hide from sidebar" onClick={() => toast("Hide is coming soon")} />
+      <MenuItem icon={Archive} label="Archive"   busy={busy === "archive"} onClick={archive} />
+      <MenuItem icon={Trash2}  label="Delete"    destructive busy={busy === "delete"} onClick={del} />
 
       <MenuSeparator />
 
@@ -402,7 +489,7 @@ function SpaceMoreMenu({
             onClose();
             onRequestShare();
           } else {
-            toast("Share coming soon");
+            toast("Open the Space to manage sharing");
           }
         }}
       />
