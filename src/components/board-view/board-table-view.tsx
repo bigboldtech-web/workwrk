@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, Loader2 } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
@@ -23,7 +23,7 @@ import {
   type ItemTag,
 } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
-import { AssigneePicker, PersonAvatar } from "./assignee-picker";
+import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 import { FieldValue } from "./field-value";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
@@ -156,12 +156,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // New rows default to the board's first status (its "not started").
   const firstStatus = statuses[0]?.value ?? "TO_DO";
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
-  const [adding, setAdding] = useState(false);
-  // Inline "Add Task": null = button shown; a string = the input is open. Enter
-  // creates and keeps the input open (cleared) so you can keep typing tasks.
-  const [addDraft, setAddDraft] = useState<string | null>(null);
-  // Per-group inline add (grouped view). Tracks which group's input is open.
-  const [groupAdd, setGroupAdd] = useState<{ key: string; text: string } | null>(null);
+  // Set while a create request is in flight (the inline add rows show their own
+  // busy state, so we only need the setter here).
+  const [, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Group-by axis seeded from the saved view config (Phase 74). Null
   // means "no grouping" — strings can be "status" / "owner" / a field key.
@@ -601,7 +598,11 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     setBulkBusy(false);
   }, [selected]);
 
-  const handleAdd = useCallback(async (title?: string, status?: string): Promise<BoardItemRow | null> => {
+  // ClickUp-style rich add: create a task WITH the quick-set fields (assignee /
+  // due / priority / tags) chosen inline before saving.
+  const handleAddRich = useCallback(async (payload: {
+    title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[];
+  }): Promise<BoardItemRow | null> => {
     if (!canEdit) return null;
     setAdding(true);
     setError(null);
@@ -609,13 +610,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: title?.trim() || "New item", status: status ?? firstStatus }),
+        body: JSON.stringify({
+          title: payload.title.trim() || "New item",
+          status: payload.status ?? firstStatus,
+          ownerId: payload.ownerId ?? undefined,
+          dueAt: payload.dueAt ?? undefined,
+          priority: payload.priority ?? undefined,
+          tagIds: payload.tagIds.length ? payload.tagIds : undefined,
+        }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data?.error ?? "Failed to add item");
-        return null;
-      }
+      if (!res.ok) { setError(data?.error ?? "Failed to add item"); return null; }
       const row = data.item as BoardItemRow;
       setItems((prev) => [...prev, row]);
       return row;
@@ -919,37 +924,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                         {b.rows.flatMap((row) => renderRowAndSubtasks(row, 0))}
                         {canEdit ? (
                           <tr className="hover:bg-zinc-50">
-                            <td colSpan={colCount} className="py-1.5 pr-4" style={{ paddingLeft: 60 }}>
-                              {groupAdd?.key === b.key ? (
-                                <input
-                                  autoFocus
-                                  value={groupAdd.text}
-                                  onChange={(e) => setGroupAdd({ key: b.key, text: e.target.value })}
-                                  onKeyDown={async (e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      const t = groupAdd.text.trim();
-                                      if (!t) { setGroupAdd(null); return; }
-                                      // Create into this group's value when grouped by status.
-                                      await handleAdd(t, groupBy === "status" ? b.key : undefined);
-                                      setGroupAdd({ key: b.key, text: "" });
-                                    } else if (e.key === "Escape") {
-                                      setGroupAdd(null);
-                                    }
-                                  }}
-                                  onBlur={() => { if (!groupAdd.text.trim()) setGroupAdd(null); }}
-                                  placeholder="Task name, then Enter…"
-                                  className="w-full max-w-md bg-transparent outline-none text-sm text-zinc-900 placeholder:text-zinc-400"
-                                />
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setGroupAdd({ key: b.key, text: "" })}
-                                  className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900"
-                                >
-                                  <Plus className="w-3.5 h-3.5" /> Add Task
-                                </button>
-                              )}
+                            <td colSpan={colCount} className="py-1.5 pr-4">
+                              <AddTaskInline
+                                statuses={statuses}
+                                // Create into this group's value when grouped by status.
+                                defaultStatus={groupBy === "status" ? b.key : firstStatus}
+                                onCreate={async (p) => { await handleAddRich(p); }}
+                              />
                             </td>
                           </tr>
                         ) : null}
@@ -974,40 +955,11 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             {canEdit && (!buckets || buckets.length === 0) ? (
               <tr className="hover:bg-zinc-50">
                 <td colSpan={colCount} className="py-1.5 pr-4">
-                  {/* "+" lines up under the status circle (leading col + arrow + gap). */}
-                  <div style={{ paddingLeft: 60 }}>
-                  {addDraft !== null ? (
-                    <input
-                      autoFocus
-                      value={addDraft}
-                      onChange={(e) => setAddDraft(e.target.value)}
-                      onKeyDown={async (e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          const t = addDraft.trim();
-                          if (!t) { setAddDraft(null); return; }
-                          await handleAdd(t);
-                          setAddDraft(""); // keep open for the next task
-                        } else if (e.key === "Escape") {
-                          setAddDraft(null);
-                        }
-                      }}
-                      onBlur={() => { if (!addDraft.trim()) setAddDraft(null); }}
-                      placeholder="Task name, then Enter…"
-                      className="w-full max-w-md bg-transparent outline-none text-sm text-zinc-900 placeholder:text-zinc-400"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setAddDraft("")}
-                      disabled={adding}
-                      className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Add Task
-                    </button>
-                  )}
-                  </div>
+                  <AddTaskInline
+                    statuses={statuses}
+                    defaultStatus={firstStatus}
+                    onCreate={async (p) => { await handleAddRich(p); }}
+                  />
                 </td>
               </tr>
             ) : null}
@@ -1734,6 +1686,113 @@ function AddSubtaskRow({
         </button>
       </td>
     </tr>
+  );
+}
+
+// AddTaskInline — the ClickUp-style inline add row. Collapsed = a "+ Add Task"
+// affordance; open = a status circle + name input plus quick-set icons
+// (Assignee / Due / Priority / Tags) and a Save button, so a task is created
+// WITH those fields already set. Stays open after saving to add the next one.
+function AddTaskInline({
+  statuses,
+  defaultStatus,
+  onCreate,
+}: {
+  statuses: StatusOption[];
+  defaultStatus: string;
+  onCreate: (p: { title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[] }) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [owner, setOwner] = useState<PersonRef | null>(null);
+  const [dueAt, setDueAt] = useState<string | null>(null);
+  const [dueEditing, setDueEditing] = useState(false);
+  const [priority, setPriority] = useState<string | null>(null);
+  const [tags, setTags] = useState<ItemTag[]>([]);
+  const [busy, setBusy] = useState(false);
+  const current = statuses.find((s) => s.value === defaultStatus) ?? null;
+
+  const clearFields = () => { setTitle(""); setOwner(null); setDueAt(null); setDueEditing(false); setPriority(null); setTags([]); };
+  const close = () => { setOpen(false); clearFields(); };
+  const save = async () => {
+    const t = title.trim();
+    if (!t) { close(); return; }
+    setBusy(true);
+    await onCreate({ title: t, status: defaultStatus, ownerId: owner?.id ?? null, dueAt, priority, tagIds: tags.map((x) => x.id) });
+    setBusy(false);
+    clearFields(); // keep the row open for the next task
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900"
+        style={{ paddingLeft: 60 }}
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Add Task
+      </button>
+    );
+  }
+
+  const dueDate = dueAt ? new Date(dueAt) : null;
+  const dueInput = dueDate
+    ? `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, "0")}-${String(dueDate.getDate()).padStart(2, "0")}`
+    : "";
+
+  return (
+    <div className="flex items-center gap-1.5" style={{ paddingLeft: 36 }}>
+      <StatusGlyph current={current} statuses={statuses} />
+      <input
+        autoFocus
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); void save(); }
+          else if (e.key === "Escape") { close(); }
+        }}
+        placeholder="Task name…"
+        className="flex-1 min-w-0 bg-transparent outline-none text-sm text-zinc-900 placeholder:text-zinc-400"
+      />
+      <span className="inline-flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <AssigneePicker value={owner} canEdit compact onChange={setOwner} />
+        <span className="relative inline-flex">
+          <button
+            type="button"
+            onClick={() => setDueEditing((v) => !v)}
+            className={`inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-zinc-100 text-[12px] ${dueDate ? "text-zinc-600" : "text-zinc-300 hover:text-zinc-500"}`}
+            title="Set due date"
+          >
+            {dueDate ? dueDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : <CalendarPlus className="w-4 h-4" />}
+          </button>
+          {dueEditing ? (
+            <input
+              type="date"
+              autoFocus
+              value={dueInput}
+              onChange={(e) => { setDueAt(e.target.value ? `${e.target.value}T00:00:00.000Z` : null); setDueEditing(false); }}
+              onBlur={() => setDueEditing(false)}
+              className="absolute left-0 top-6 z-20 h-7 px-1 text-[12px] border border-zinc-200 rounded bg-white shadow-md focus:outline-none focus:border-[var(--os-brand)]"
+            />
+          ) : null}
+        </span>
+        <PriorityPicker value={priority} canEdit compact onChange={setPriority} />
+        <TagPicker value={tags} canEdit compact onChange={setTags} />
+        <button type="button" onClick={close} className="h-7 px-2 rounded-md text-[12px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy || !title.trim()}
+          className="h-7 px-2.5 rounded-md text-[12px] font-medium text-white inline-flex items-center gap-1 disabled:opacity-50"
+          style={{ background: "var(--os-brand)" }}
+        >
+          {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+          Save <span className="opacity-70">↵</span>
+        </button>
+      </span>
+    </div>
   );
 }
 
