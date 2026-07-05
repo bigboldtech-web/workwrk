@@ -15,9 +15,9 @@ const BY_VALUE = new Map(PRIORITY_OPTIONS.map((p) => [p.value as string, p]));
 
 export function PriorityFlag({ value, showLabel = false }: { value: string | null; showLabel?: boolean }) {
   const opt = value ? BY_VALUE.get(value.toUpperCase()) : null;
-  // Empty → a faint flag affordance (ClickUp style) instead of a bare "—", so
-  // the cell reads as "set priority" and stays visually aligned with set rows.
-  if (!opt) return <Flag className="w-3.5 h-3.5 text-zinc-300" />;
+  // Empty → a flag affordance (ClickUp style) instead of a bare "—", so the cell
+  // reads as "set priority" and stays visually aligned with set rows.
+  if (!opt) return <Flag className="w-[17px] h-[17px] text-zinc-400" />;
   return (
     <span className="inline-flex items-center gap-1.5">
       <Flag className="w-3.5 h-3.5" style={{ color: opt.color }} fill={opt.color} />

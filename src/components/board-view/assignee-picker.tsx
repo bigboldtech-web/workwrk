@@ -119,7 +119,7 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
     </span>
   ) : (
     compact ? (
-      <UserPlus className="w-[18px] h-[18px] text-zinc-400" />
+      <UserPlus className="w-[17px] h-[17px] text-zinc-400" />
     ) : (
       <span className="text-xs text-zinc-500">Unassigned</span>
     )

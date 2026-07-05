@@ -1429,11 +1429,11 @@ function DueDateCell({ row, canEdit, onUpdate }: { row: BoardItemRow; canEdit: b
       disabled={!canEdit}
       onClick={() => setEditing(true)}
       className={`inline-flex items-center gap-1 text-[12px] disabled:cursor-default ${
-        due ? (overdue ? "text-red-500" : "text-zinc-600 hover:text-zinc-900") : "text-zinc-300 hover:text-zinc-500"
+        due ? (overdue ? "text-red-500" : "text-zinc-600 hover:text-zinc-900") : "text-zinc-400 hover:text-zinc-600"
       }`}
       title={due ? "Edit due date" : "Set due date"}
     >
-      {due ? <span>{due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-4 h-4" />}
+      {due ? <span>{due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-[17px] h-[17px]" />}
     </button>
   );
 }
