@@ -2346,9 +2346,9 @@ function RowHoverActions({ itemId, canEdit, tags, onAddSubtask, onTagsChange, on
       // navigator.clipboard may reject (insecure context, denied). Silent fail.
     }
   };
-  const iconBtn = "inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100";
+  const iconBtn = "inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100";
   return (
-    <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 shrink-0">
+    <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 shrink-0 ml-2 rounded-md border border-zinc-200 bg-white shadow-sm px-0.5 py-0.5">
       {canEdit ? (
         <button type="button" onClick={(e) => { e.stopPropagation(); onAddSubtask(); }} className={iconBtn} title="Add subtask" aria-label="Add subtask">
           <Plus className="w-3 h-3" />
