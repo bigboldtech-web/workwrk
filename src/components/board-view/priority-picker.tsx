@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Ban, Flag } from "lucide-react";
 import { PRIORITY_OPTIONS } from "@/lib/board-items-shared";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { useAnchorPos } from "./use-anchor-pos";
 
 export { PRIORITY_OPTIONS };
 
@@ -37,6 +38,7 @@ interface PriorityPickerProps {
 export function PriorityPicker({ value, canEdit, compact = false, onChange }: PriorityPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuPos = useAnchorPos(ref, open, 170);
 
   useEffect(() => {
     if (!open) return;
@@ -60,9 +62,10 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
       >
         {display}
       </button>
-      {open ? (
+      {open && menuPos ? (
         <div
-          className="absolute z-50 mt-1 left-0 w-[170px] rounded-md border border-zinc-200 bg-white shadow-lg py-1"
+          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 170 }}
+          className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1"
           onClick={(e) => e.stopPropagation()}
         >
           {PRIORITY_OPTIONS.map((p) => {

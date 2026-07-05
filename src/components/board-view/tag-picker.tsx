@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Tag as TagIcon, X } from "lucide-react";
 import type { ItemTag } from "@/lib/board-items-shared";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { useAnchorPos } from "./use-anchor-pos";
 
 const FALLBACK_COLOR = "#94a3b8";
 
@@ -52,6 +53,7 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
   const [creating, setCreating] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuPos = useAnchorPos(ref, open, 240);
 
   useEffect(() => {
     if (!open) return;
@@ -136,9 +138,10 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
       >
         {display}
       </button>
-      {open ? (
+      {open && menuPos ? (
         <div
-          className="absolute z-50 mt-1 left-0 w-[240px] rounded-md border border-zinc-200 bg-white shadow-lg"
+          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 240 }}
+          className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-2 border-b border-zinc-100">

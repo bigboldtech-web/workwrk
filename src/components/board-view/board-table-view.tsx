@@ -28,6 +28,7 @@ import { FieldValue } from "./field-value";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
 import { useItemTypes, type ItemTypeLite } from "./use-item-types";
+import { useAnchorPos } from "./use-anchor-pos";
 import { StatusGlyph } from "./status-glyph";
 import { itemTypeIcon } from "@/lib/item-type-icons";
 import type { FieldChoice } from "@/lib/field-catalog";
@@ -722,13 +723,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
 
   // ── Column sizing ──────────────────────────────────────────────────────
-  // Divider model (like a spreadsheet's column boundaries). The row always
-  // fills the viewport exactly — no horizontal scroll — so the cell popovers are
-  // never clipped. Dragging a border grows THAT column and shrinks its right
-  // neighbour by the same amount, so the border tracks the cursor (drag right =
-  // this column expands right, the next one gives up that space) while the total
-  // stays constant. Name fills whatever the meta columns leave; the trailing
-  // actions column soaks up any rounding slack.
+  // Spreadsheet model. Dragging a column's right border grows/shrinks THAT
+  // column with no upper clamp, so the border tracks the cursor AND every column
+  // to its right shifts as a block. When the row grows past the viewport the
+  // table scrolls; when it's narrower the trailing actions column stretches so
+  // the row still spans full width. (The cell popovers are portalled to <body>,
+  // so the horizontal scroll container never clips them.)
   const colW = useCallback((key: string, def: number) => Math.max(60, colWidths[key] ?? def), [colWidths]);
   const metaColumns = useMemo(() => {
     const cols: Array<{ key: string; label: string; def: number }> = [];
@@ -749,12 +749,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     ? Math.max(120, colWidths.name)
     : Math.max(220, (containerW || 900) - LEADING_W - metaSumW - ACTIONS_MIN_W);
   const fixedSansActions = LEADING_W + nameW + metaSumW;
-  // Actions column absorbs whatever's left so the row spans the full width.
-  const actionsW = Math.max(ACTIONS_MIN_W, (containerW || fixedSansActions + ACTIONS_MIN_W) - fixedSansActions);
+  // Table spans at least the viewport; if the columns total more it grows and
+  // the wrapper scrolls. The actions column soaks up any slack when narrower.
+  const tableW = Math.max(containerW || fixedSansActions + ACTIONS_MIN_W, fixedSansActions + ACTIONS_MIN_W);
+  const actionsW = tableW - fixedSansActions;
+  const overflowing = tableW > (containerW || tableW) + 1;
 
   // Once the container is measured, freeze Name at its fill width so it becomes
-  // a real fixed column (otherwise it's the "remainder" and resizing a meta
-  // column would silently steal from Name instead of its actual neighbour).
+  // a real fixed column (otherwise it's the "remainder" and growing a meta
+  // column silently steals from Name instead of widening + scrolling the row).
   useEffect(() => {
     if (containerW <= 0) return;
     setColWidths((prev) => {
@@ -764,31 +767,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     });
   }, [containerW, metaSumW]);
 
-  // Drag the border between this column and its right neighbour. dx is clamped
-  // so neither drops below its min; this column takes +dx and the neighbour -dx,
-  // so the total is unchanged and the row never overflows the viewport. The
-  // trailing actions column (key "__actions__") can shrink to ACTIONS_MIN_W.
-  const startColResize = useCallback((
-    e: React.PointerEvent,
-    key: string,
-    startW: number,
-    nextKey: string,
-    nextStartW: number,
-  ) => {
+  // Drag a column's right border. newWidth = startWidth + dx (min 60), no upper
+  // clamp — the column grows freely and the table scrolls if it runs past the
+  // viewport, so the border always tracks the cursor and everything to its right
+  // shifts with it. Persist on release.
+  const startColResize = useCallback((e: React.PointerEvent, key: string, startW: number) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
-    const nextMin = nextKey === "__actions__" ? ACTIONS_MIN_W : 60;
     const onMove = (ev: PointerEvent) => {
-      let dx = Math.round(ev.clientX - startX);
-      dx = Math.max(-(startW - 60), Math.min(dx, nextStartW - nextMin));
-      setColWidths((prev) => {
-        const upd: Record<string, number> = { ...prev, [key]: startW + dx };
-        // The actions column is the flexible absorber — it re-derives its width
-        // from the others, so we only pin real neighbour columns.
-        if (nextKey !== "__actions__") upd[nextKey] = nextStartW - dx;
-        return upd;
-      });
+      const next = Math.max(60, Math.round(startW + (ev.clientX - startX)));
+      setColWidths((prev) => ({ ...prev, [key]: next }));
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
@@ -803,8 +792,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     window.addEventListener("pointerup", onUp);
   }, [persistView]);
 
-  // Ordered resizable columns (Name + meta). Each border pairs with the next
-  // entry, or the actions absorber for the last one.
+  // Ordered resizable columns (Name + meta).
   const resizeCols = [
     { key: "name", label: "Name", width: nameW, pad: "px-4" },
     ...metaColumns.map((c) => ({
@@ -989,8 +977,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
       {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
           inline cell editors (assignee/date/dropdown popovers) aren't cut off. */}
-      <div ref={tableWrapRef} className={monday ? "overflow-x-auto" : "overflow-visible"}>
-        <table className="w-full text-[13px]" style={{ tableLayout: "fixed" }}>
+      <div ref={tableWrapRef} className={monday || overflowing ? "overflow-x-auto" : "overflow-visible"}>
+        <table className="text-[13px]" style={{ tableLayout: "fixed", width: tableW }}>
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
               <th className="pl-1 pr-0 py-1.5" style={{ width: LEADING_W }}>
@@ -1005,25 +993,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   </div>
                 ) : null}
               </th>
-              {resizeCols.map((c, i) => {
-                const next = resizeCols[i + 1];
-                return (
-                  <ResizableTh
-                    key={c.key}
-                    label={c.label}
-                    width={c.width}
-                    className={c.pad}
-                    canEdit={canEdit}
-                    onResize={(e) => startColResize(
-                      e,
-                      c.key,
-                      c.width,
-                      next ? next.key : "__actions__",
-                      next ? next.width : actionsW,
-                    )}
-                  />
-                );
-              })}
+              {resizeCols.map((c) => (
+                <ResizableTh
+                  key={c.key}
+                  label={c.label}
+                  width={c.width}
+                  className={c.pad}
+                  canEdit={canEdit}
+                  onResize={(e) => startColResize(e, c.key, c.width)}
+                />
+              ))}
               <th className="px-1 py-2 text-right align-middle" style={{ width: actionsW }}>
                 {canEdit && onOpenFields ? (
                   <button
@@ -2595,6 +2574,7 @@ function GroupHeaderMenu({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuPos = useAnchorPos(ref, open, 190);
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
@@ -2607,8 +2587,8 @@ function GroupHeaderMenu({
       <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700" aria-label="Group options">
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
-      {open ? (
-        <div className="absolute z-20 mt-1 left-0 min-w-[190px] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-[13px]">
+      {open && menuPos ? (
+        <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, minWidth: 190 }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-[13px]">
           <GHItem label="Rename" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
           <GHItem label="New status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
           <GHItem label="Edit statuses" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
@@ -2670,6 +2650,7 @@ function StatusCell({
   const [tab, setTab] = useState<"status" | "type">("status");
   const itemTypes = useItemTypes();
   const ref = useRef<HTMLDivElement>(null);
+  const menuPos = useAnchorPos(ref, open, 224);
   const current = useMemo(
     () => (row.status ? statuses.find((o) => o.value === row.status) ?? null : null),
     [row.status, statuses],
@@ -2696,8 +2677,8 @@ function StatusCell({
         <button type="button" onClick={() => setOpen((v) => !v)} title={current?.label ?? "Set status"} className="block">
           {circle}
         </button>
-        {open ? (
-          <div className="absolute z-20 mt-1 left-0 w-[224px] rounded-lg border border-zinc-200 bg-white shadow-xl p-1.5">
+        {open && menuPos ? (
+          <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 224 }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-xl p-1.5">
             {/* Status / Task Type tab switch (ClickUp). */}
             <div className="flex items-center gap-1 p-0.5 mb-1.5 bg-zinc-100 rounded-md">
               <button type="button" onClick={() => setTab("status")} className={`flex-1 h-7 rounded-[5px] text-[12.5px] font-medium transition-colors ${tab === "status" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"}`}>Status</button>
@@ -2771,8 +2752,8 @@ function StatusCell({
         <button type="button" onClick={() => setOpen((v) => !v)} className="block w-full h-full min-h-[34px]">
           {fill}
         </button>
-        {open ? (
-          <div className="absolute z-10 mt-1 left-0 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+        {open && menuPos ? (
+          <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, minWidth: 160 }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
             {statuses.map((opt) => {
               const active = opt.value === row.status;
               return (
@@ -2818,8 +2799,8 @@ function StatusCell({
         {pill}
         <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
-      {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+      {open && menuPos ? (
+        <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, minWidth: 160 }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
           {statuses.map((opt) => {
             const active = opt.value === row.status;
             return (

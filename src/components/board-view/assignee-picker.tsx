@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { ChevronDown, Search, UserX, UserPlus } from "lucide-react";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { useAnchorPos } from "./use-anchor-pos";
 
 export interface PersonRef {
   id: string;
@@ -73,6 +74,7 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuPos = useAnchorPos(ref, open, 260);
 
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
@@ -119,10 +121,10 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
     </span>
   ) : (
     compact ? (
-      // The person+ glyph is less dense than the calendar/flag, so at a matched
-      // px size it reads small. Sized up to 20px (normal stroke) so it carries
-      // the same visual weight as its neighbors — not bolder, just as big.
-      <UserPlus className="w-5 h-5 text-zinc-400" />
+      // The person+ glyph is less dense than the calendar/flag, so it reads
+      // small + light. Sized up to 20px AND given a heavier 2.5 stroke so it
+      // matches the calendar's presence.
+      <UserPlus className="w-5 h-5 text-zinc-400" strokeWidth={2.5} />
     ) : (
       <span className="text-xs text-zinc-500">Unassigned</span>
     )
@@ -141,9 +143,10 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
         {trigger}
         {!compact && <ChevronDown className="w-3 h-3 text-zinc-400" />}
       </button>
-      {open ? (
+      {open && menuPos ? (
         <div
-          className="absolute z-50 mt-1 left-0 w-[260px] rounded-md border border-zinc-200 bg-white shadow-lg"
+          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 260 }}
+          className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-100">
