@@ -160,16 +160,6 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // busy state, so we only need the setter here).
   const [, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Per-column widths (drag the header border to resize) — persisted per view.
-  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
-    const raw = viewConfig?.colWidths;
-    return raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, number>) } : {};
-  });
-  const colWidthsRef = useRef(colWidths);
-  useEffect(() => { colWidthsRef.current = colWidths; }, [colWidths]);
-  const widthFor = (key: string, def: number) => colWidths[key] ?? def;
-  // Key of the column currently being dragged (keeps its drag line lit).
-  const [resizingKey, setResizingKey] = useState<string | null>(null);
   // Group-by axis seeded from the saved view config (Phase 74). Null
   // means "no grouping" — strings can be "status" / "owner" / a field key.
   const initialGroupBy = (() => {
@@ -201,42 +191,6 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       }),
     }).catch(() => {});
   }, [viewId, boardId, viewConfig]);
-
-  // Column resize — the handle sits on each column's LEFT border (the boundary
-  // it shares with the flexible Name column / the previous column). Dragging it
-  // left grows this column and shrinks Name; dragging right does the reverse.
-  // Min 60px. Persists to the view config on release (colWidthsRef holds latest).
-  const startColResize = useCallback((e: React.PointerEvent, key: string, startW: number) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    setResizingKey(key);
-    const onMove = (ev: PointerEvent) => {
-      const next = Math.max(60, Math.round(startW - (ev.clientX - startX)));
-      setColWidths((prev) => ({ ...prev, [key]: next }));
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      document.body.style.cursor = "";
-      setResizingKey(null);
-      persistView({ colWidths: colWidthsRef.current });
-    };
-    document.body.style.cursor = "col-resize";
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  }, [persistView]);
-
-  // Double-click a resize handle to reset that column to its default width.
-  const resetColWidth = useCallback((key: string) => {
-    const cur = colWidthsRef.current;
-    if (!(key in cur)) return;
-    const next = { ...cur };
-    delete next[key];
-    colWidthsRef.current = next;
-    setColWidths(next);
-    persistView({ colWidths: next });
-  }, [persistView]);
 
   const setGroupBy = useCallback((next: string | null) => {
     setGroupByState(next);
@@ -902,7 +856,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
           inline cell editors (assignee/date/dropdown popovers) aren't cut off. */}
       <div className={monday ? "overflow-x-auto" : "overflow-visible"}>
-        <table className="w-full text-[13px]" style={{ tableLayout: "fixed" }}>
+        <table className="w-full text-[13px]">
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
               <th className="pl-1 pr-0 py-1.5 w-[34px]">
@@ -917,19 +871,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   </div>
                 ) : null}
               </th>
-              {/* Name flexes (absorbs remaining width); every other column has an
-                  explicit, drag-resizable width. */}
               <th className="px-4 py-2 font-medium w-auto">Name</th>
-              {showStatus ? <ResizableTh label="Status" width={widthFor("status", 128)} active={resizingKey === "status"} onResize={(e) => startColResize(e, "status", widthFor("status", 128))} onReset={() => resetColWidth("status")} /> : null}
-              {showOwner ? <ResizableTh label="Assignee" width={widthFor("owner", 92)} active={resizingKey === "owner"} onResize={(e) => startColResize(e, "owner", widthFor("owner", 92))} onReset={() => resetColWidth("owner")} /> : null}
-              {showDue ? <ResizableTh label="Due date" width={widthFor("due", 96)} active={resizingKey === "due"} onResize={(e) => startColResize(e, "due", widthFor("due", 96))} onReset={() => resetColWidth("due")} /> : null}
-              {showPriority ? <ResizableTh label="Priority" width={widthFor("priority", 82)} active={resizingKey === "priority"} onResize={(e) => startColResize(e, "priority", widthFor("priority", 82))} onReset={() => resetColWidth("priority")} /> : null}
-              {showType ? <ResizableTh label="Type" width={widthFor("type", 120)} active={resizingKey === "type"} onResize={(e) => startColResize(e, "type", widthFor("type", 120))} onReset={() => resetColWidth("type")} /> : null}
-              {showTags ? <ResizableTh label="Tags" width={widthFor("tags", 140)} active={resizingKey === "tags"} onResize={(e) => startColResize(e, "tags", widthFor("tags", 140))} onReset={() => resetColWidth("tags")} /> : null}
+              {showStatus ? <th className="px-4 py-2 font-medium w-[128px]">Status</th> : null}
+              {showOwner ? <th className="px-3 py-2 font-medium w-[92px]">Assignee</th> : null}
+              {showDue ? <th className="px-3 py-2 font-medium w-[96px]">Due date</th> : null}
+              {showPriority ? <th className="px-3 py-2 font-medium w-[82px]">Priority</th> : null}
+              {showType ? <th className="px-3 py-2 font-medium w-[120px]">Type</th> : null}
+              {showTags ? <th className="px-3 py-2 font-medium w-[140px]">Tags</th> : null}
               {customFields.map((f) => (
-                <ResizableTh key={f.key} label={f.label} width={widthFor(f.key, 150)} active={resizingKey === f.key} onResize={(e) => startColResize(e, f.key, widthFor(f.key, 150))} onReset={() => resetColWidth(f.key)} />
+                <th key={f.key} className="px-3 py-2 font-medium">{f.label}</th>
               ))}
-              {showCreated ? <ResizableTh label="Created" width={widthFor("created", 120)} active={resizingKey === "created"} onResize={(e) => startColResize(e, "created", widthFor("created", 120))} onReset={() => resetColWidth("created")} /> : null}
+              {showCreated ? <th className="px-3 py-2 font-medium w-[110px]">Created</th> : null}
               <th className="px-1 py-2 w-[40px] text-center">
                 {canEdit && onOpenFields ? (
                   <button
@@ -1753,35 +1705,6 @@ function MetaCell({ children }: { children: React.ReactNode }) {
         {children}
       </div>
     </td>
-  );
-}
-
-// Resizable column header — a right-edge drag handle shows a brand line on
-// hover (like ClickUp); dragging it resizes the column.
-function ResizableTh({ label, width, active, onResize, onReset }: {
-  label: string;
-  width: number;
-  active?: boolean;
-  onResize: (e: React.PointerEvent) => void;
-  onReset?: () => void;
-}) {
-  return (
-    <th className="relative group/th px-4 py-2 font-medium" style={{ width }}>
-      <span className="block truncate">{label}</span>
-      {/* Handle on the LEFT border — the boundary shared with the flexible Name
-          column (or the previous column). Hover (or an active drag) shows a
-          brand line; double-click resets the column to its default width. */}
-      <span
-        onPointerDown={onResize}
-        onClick={(e) => e.stopPropagation()}
-        onDoubleClick={onReset}
-        className="absolute top-0 -left-1 h-full w-2 flex justify-center cursor-col-resize select-none touch-none z-10"
-        title="Drag to resize · double-click to reset"
-        aria-hidden
-      >
-        <span className={`w-[2px] h-full transition-colors ${active ? "bg-[var(--os-brand)]" : "bg-transparent group-hover/th:bg-[var(--os-brand)]"}`} />
-      </span>
-    </th>
   );
 }
 
