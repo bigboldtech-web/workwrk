@@ -920,12 +920,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               {/* Name flexes (absorbs remaining width); every other column has an
                   explicit, drag-resizable width. */}
               <th className="px-4 py-2 font-medium w-auto">Name</th>
-              {showStatus ? <ResizableTh label="Status" width={widthFor("status", 140)} active={resizingKey === "status"} onResize={(e) => startColResize(e, "status", widthFor("status", 140))} onReset={() => resetColWidth("status")} /> : null}
-              {showOwner ? <ResizableTh label="Assignee" width={widthFor("owner", 110)} active={resizingKey === "owner"} onResize={(e) => startColResize(e, "owner", widthFor("owner", 110))} onReset={() => resetColWidth("owner")} /> : null}
-              {showDue ? <ResizableTh label="Due date" width={widthFor("due", 110)} active={resizingKey === "due"} onResize={(e) => startColResize(e, "due", widthFor("due", 110))} onReset={() => resetColWidth("due")} /> : null}
-              {showPriority ? <ResizableTh label="Priority" width={widthFor("priority", 90)} active={resizingKey === "priority"} onResize={(e) => startColResize(e, "priority", widthFor("priority", 90))} onReset={() => resetColWidth("priority")} /> : null}
-              {showType ? <ResizableTh label="Type" width={widthFor("type", 130)} active={resizingKey === "type"} onResize={(e) => startColResize(e, "type", widthFor("type", 130))} onReset={() => resetColWidth("type")} /> : null}
-              {showTags ? <ResizableTh label="Tags" width={widthFor("tags", 160)} active={resizingKey === "tags"} onResize={(e) => startColResize(e, "tags", widthFor("tags", 160))} onReset={() => resetColWidth("tags")} /> : null}
+              {showStatus ? <ResizableTh label="Status" width={widthFor("status", 128)} active={resizingKey === "status"} onResize={(e) => startColResize(e, "status", widthFor("status", 128))} onReset={() => resetColWidth("status")} /> : null}
+              {showOwner ? <ResizableTh label="Assignee" width={widthFor("owner", 92)} active={resizingKey === "owner"} onResize={(e) => startColResize(e, "owner", widthFor("owner", 92))} onReset={() => resetColWidth("owner")} /> : null}
+              {showDue ? <ResizableTh label="Due date" width={widthFor("due", 96)} active={resizingKey === "due"} onResize={(e) => startColResize(e, "due", widthFor("due", 96))} onReset={() => resetColWidth("due")} /> : null}
+              {showPriority ? <ResizableTh label="Priority" width={widthFor("priority", 82)} active={resizingKey === "priority"} onResize={(e) => startColResize(e, "priority", widthFor("priority", 82))} onReset={() => resetColWidth("priority")} /> : null}
+              {showType ? <ResizableTh label="Type" width={widthFor("type", 120)} active={resizingKey === "type"} onResize={(e) => startColResize(e, "type", widthFor("type", 120))} onReset={() => resetColWidth("type")} /> : null}
+              {showTags ? <ResizableTh label="Tags" width={widthFor("tags", 140)} active={resizingKey === "tags"} onResize={(e) => startColResize(e, "tags", widthFor("tags", 140))} onReset={() => resetColWidth("tags")} /> : null}
               {customFields.map((f) => (
                 <ResizableTh key={f.key} label={f.label} width={widthFor(f.key, 150)} active={resizingKey === f.key} onResize={(e) => startColResize(e, f.key, widthFor(f.key, 150))} onReset={() => resetColWidth(f.key)} />
               ))}
@@ -1365,9 +1365,9 @@ function Row({
             <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} editToken={editToken} />
           </div>
           <RowHoverActions
-            itemId={row.id}
             canEdit={canEdit}
             tags={row.tags ?? []}
+            isSubtask={indent > 0}
             onAddSubtask={() => onAddSubtask?.()}
             onTagsChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })}
             onRename={() => setEditToken((t) => t + 1)}
@@ -1380,32 +1380,32 @@ function Row({
         </td>
       ) : null}
       {showOwner ? (
-        <td className="px-4 py-1.5">
+        <MetaCell>
           <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
-        </td>
+        </MetaCell>
       ) : null}
       {showDue ? (
-        <td className="px-4 py-1.5">
+        <MetaCell>
           <DueDateCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
-        </td>
+        </MetaCell>
       ) : null}
       {showPriority ? (
-        <td className="px-4 py-1.5">
+        <MetaCell>
           <PriorityPicker value={row.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onUpdate(row.id, { priority })} />
-        </td>
+        </MetaCell>
       ) : null}
       {showType ? (
-        <td className="px-4 py-1.5">
+        <MetaCell>
           <TypeCell itemTypeId={row.itemTypeId ?? null} itemTypeMap={itemTypeMap} />
-        </td>
+        </MetaCell>
       ) : null}
       {showTags ? (
-        <td className="px-4 py-1.5">
+        <MetaCell>
           <TagPicker value={row.tags ?? []} canEdit={canEdit} compact onChange={(tags) => onUpdate(row.id, { tags, tagIds: tags.map((t) => t.id) })} />
-        </td>
+        </MetaCell>
       ) : null}
       {customFields.map((f) => (
-        <td key={f.key} className="px-4 py-1.5">
+        <MetaCell key={f.key}>
           <EditableFieldCell
             field={f}
             value={row.metadata?.[f.key]}
@@ -1414,7 +1414,7 @@ function Row({
               onUpdate(row.id, { metadata: { ...(row.metadata ?? {}), [f.key]: next } })
             }
           />
-        </td>
+        </MetaCell>
       ))}
       {showCreated ? (
         <td className="px-4 py-2 text-xs text-zinc-500">
@@ -1728,6 +1728,19 @@ function CheckBox({ checked, indeterminate, onChange, className = "" }: {
     >
       {checked ? <Check className="w-2.5 h-2.5 text-white" /> : indeterminate ? <span className="block w-1.5 h-[2px] rounded-full bg-white" /> : null}
     </span>
+  );
+}
+
+// A row's meta cell (Assignee / Due / Priority / …) — its content sits in a
+// rounded area that highlights on hover, so each cell reads as its own aligned
+// "section" like ClickUp. Content left-aligns at ~16px to match the header.
+function MetaCell({ children }: { children: React.ReactNode }) {
+  return (
+    <td className="px-2 py-1 align-middle">
+      <div className="flex items-center min-h-[26px] rounded-md px-2 hover:bg-zinc-100/70 transition-colors">
+        {children}
+      </div>
+    </td>
   );
 }
 
@@ -2325,47 +2338,31 @@ function RowActionsMenu({
   );
 }
 
-function RowHoverActions({ itemId, canEdit, tags, onAddSubtask, onTagsChange, onRename }: {
-  itemId: string;
+// Row hover options — each icon in its OWN bordered box (like ClickUp), not one
+// container. A top-level task shows Add-subtask + Tags + Rename (3); a subtask
+// shows only Tags + Rename (2, no add-subtask). No copy-link.
+function RowHoverActions({ canEdit, tags, isSubtask, onAddSubtask, onTagsChange, onRename }: {
   canEdit: boolean;
   tags: ItemTag[];
+  isSubtask: boolean;
   onAddSubtask: () => void;
   onTagsChange: (tags: ItemTag[]) => void;
   onRename: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
-  const onCopy = async () => {
-    try {
-      // Build a deep-link URL that opens the drawer for this item via
-      // Phase 62's ?item=<id> param on whatever board page hosts it.
-      const url = `${window.location.origin}${window.location.pathname}?item=${itemId}`;
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    } catch {
-      // navigator.clipboard may reject (insecure context, denied). Silent fail.
-    }
-  };
-  const iconBtn = "inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100";
+  if (!canEdit) return null;
+  const box = "inline-flex items-center justify-center w-7 h-7 rounded-md border border-zinc-200 bg-white shadow-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors";
   return (
-    <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 shrink-0 ml-2 rounded-md border border-zinc-200 bg-white shadow-sm px-0.5 py-0.5">
-      {canEdit ? (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onAddSubtask(); }} className={iconBtn} title="Add subtask" aria-label="Add subtask">
-          <Plus className="w-3 h-3" />
+    <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1 shrink-0 ml-2">
+      {!isSubtask ? (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onAddSubtask(); }} className={box} title="Add subtask" aria-label="Add subtask">
+          <Plus className="w-3.5 h-3.5" />
         </button>
       ) : null}
-      {canEdit ? (
-        <span onClick={(e) => e.stopPropagation()} className="inline-flex">
-          <TagPicker value={tags} canEdit compact onChange={onTagsChange} />
-        </span>
-      ) : null}
-      {canEdit ? (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onRename(); }} className={iconBtn} title="Rename" aria-label="Rename task">
-          <Pencil className="w-3 h-3" />
-        </button>
-      ) : null}
-      <button type="button" onClick={onCopy} className={iconBtn} title={copied ? "Copied" : "Copy link"} aria-label="Copy link to this item">
-        {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Link2 className="w-3 h-3" />}
+      <span onClick={(e) => e.stopPropagation()} className={box} title="Tags">
+        <TagPicker value={tags} canEdit compact onChange={onTagsChange} />
+      </span>
+      <button type="button" onClick={(e) => { e.stopPropagation(); onRename(); }} className={box} title="Rename" aria-label="Rename task">
+        <Pencil className="w-3.5 h-3.5" />
       </button>
     </span>
   );
