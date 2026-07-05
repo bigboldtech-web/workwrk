@@ -119,7 +119,7 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 text-xs text-zinc-400">
-      <TagIcon className="w-3.5 h-3.5" />
+      <TagIcon className="w-[17px] h-[17px]" />
       {compact ? null : "No tags"}
     </span>
   );

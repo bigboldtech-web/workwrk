@@ -160,6 +160,42 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // busy state, so we only need the setter here).
   const [, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Column widths (resizable) — one fixed px per column keyed by column id
+  // ("name", "status", "owner", "due", …). The Name column is the flexible
+  // one: by default it fills whatever the meta columns leave, and dragging any
+  // border resizes that column while the trailing actions column absorbs the
+  // difference (so every column to the right shifts as a block, never collapses).
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
+    const raw = (viewConfig as { colWidths?: unknown } | null)?.colWidths;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    // Sanitize: the earlier (broken) resize could persist collapsed widths.
+    // Drop anything implausible so a previously-stuck view heals to defaults.
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      const floor = k === "name" ? 160 : 70;
+      if (v >= floor && v <= 1600) out[k] = Math.round(v);
+    }
+    return out;
+  });
+  const colWidthsRef = useRef(colWidths);
+  useEffect(() => { colWidthsRef.current = colWidths; }, [colWidths]);
+  // Measured width of the scroll container — used to give Name a sensible
+  // "fill" default and to clamp drags so the columns always fit (the actions
+  // column keeps at least ACTIONS_MIN, so nothing can be squeezed to zero).
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const [containerW, setContainerW] = useState(0);
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el) return;
+    const measure = () => setContainerW(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Group-by axis seeded from the saved view config (Phase 74). Null
   // means "no grouping" — strings can be "status" / "owner" / a field key.
   const initialGroupBy = (() => {
@@ -681,6 +717,63 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // tags/created + custom fields.
   const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
 
+  // ── Column sizing ──────────────────────────────────────────────────────
+  // The leading checkbox column and the trailing actions column are fixed; the
+  // actions column is the "absorber" (width:auto) so resizing any other column
+  // shifts everything to its right as a block. Every other column carries an
+  // explicit px width (saved widths win, else the default), and Name fills the
+  // slack that the meta columns leave.
+  const LEADING_W = 34;
+  const ACTIONS_MIN_W = 44;
+  const colW = useCallback((key: string, def: number) => Math.max(60, colWidths[key] ?? def), [colWidths]);
+  const metaColumns = useMemo(() => {
+    const cols: Array<{ key: string; label: string; def: number }> = [];
+    if (showStatus) cols.push({ key: "status", label: "Status", def: 128 });
+    if (showOwner) cols.push({ key: "owner", label: "Assignee", def: 96 });
+    if (showDue) cols.push({ key: "due", label: "Due date", def: 100 });
+    if (showPriority) cols.push({ key: "priority", label: "Priority", def: 86 });
+    if (showType) cols.push({ key: "type", label: "Type", def: 120 });
+    if (showTags) cols.push({ key: "tags", label: "Tags", def: 150 });
+    for (const f of customFields) cols.push({ key: f.key, label: f.label, def: 150 });
+    if (showCreated) cols.push({ key: "created", label: "Created", def: 110 });
+    return cols;
+  }, [showStatus, showOwner, showDue, showPriority, showType, showTags, showCreated, customFields]);
+  const metaSumW = metaColumns.reduce((s, c) => s + colW(c.key, c.def), 0);
+  // Name default = whatever the meta columns leave (clamped to a floor). Once
+  // the user drags Name, the saved width wins.
+  const nameW = colWidths.name != null
+    ? Math.max(120, colWidths.name)
+    : Math.max(220, (containerW || 900) - LEADING_W - metaSumW - ACTIONS_MIN_W);
+  const totalFixedW = LEADING_W + nameW + metaSumW;
+
+  // Drag a column's right border. newWidth = startWidth + dx, clamped so the
+  // whole row still fits (actions never drops below its minimum). Persist on
+  // release. Because only this column's width changes and actions absorbs the
+  // delta, every column to the right slides as a block.
+  const startColResize = useCallback((e: React.PointerEvent, key: string, startW: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const cw = tableWrapRef.current?.clientWidth || containerW || 900;
+    const otherFixed = totalFixedW - startW; // everything except the dragged column
+    const maxW = Math.max(60, cw - ACTIONS_MIN_W - otherFixed);
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.min(maxW, Math.max(60, Math.round(startW + (ev.clientX - startX))));
+      setColWidths((prev) => ({ ...prev, [key]: next }));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      persistView({ colWidths: colWidthsRef.current });
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [persistView, containerW, totalFixedW]);
+
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
 
@@ -855,11 +948,11 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
       {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
           inline cell editors (assignee/date/dropdown popovers) aren't cut off. */}
-      <div className={monday ? "overflow-x-auto" : "overflow-visible"}>
-        <table className="w-full text-[13px]">
+      <div ref={tableWrapRef} className={monday ? "overflow-x-auto" : "overflow-visible"}>
+        <table className="w-full text-[13px]" style={{ tableLayout: "fixed" }}>
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
-              <th className="pl-1 pr-0 py-1.5 w-[34px]">
+              <th className="pl-1 pr-0 py-1.5" style={{ width: LEADING_W }}>
                 {canEdit ? (
                   <div className="flex items-center gap-1">
                     <span className="w-3 shrink-0" aria-hidden />
@@ -871,18 +964,18 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   </div>
                 ) : null}
               </th>
-              <th className="px-4 py-2 font-medium w-auto">Name</th>
-              {showStatus ? <th className="px-4 py-2 font-medium w-[128px]">Status</th> : null}
-              {showOwner ? <th className="px-3 py-2 font-medium w-[92px]">Assignee</th> : null}
-              {showDue ? <th className="px-3 py-2 font-medium w-[96px]">Due date</th> : null}
-              {showPriority ? <th className="px-3 py-2 font-medium w-[82px]">Priority</th> : null}
-              {showType ? <th className="px-3 py-2 font-medium w-[120px]">Type</th> : null}
-              {showTags ? <th className="px-3 py-2 font-medium w-[140px]">Tags</th> : null}
-              {customFields.map((f) => (
-                <th key={f.key} className="px-3 py-2 font-medium">{f.label}</th>
+              <ResizableTh label="Name" width={nameW} className="px-4" canEdit={canEdit} onResize={(e) => startColResize(e, "name", nameW)} />
+              {metaColumns.map((c) => (
+                <ResizableTh
+                  key={c.key}
+                  label={c.label}
+                  width={colW(c.key, c.def)}
+                  className={c.key === "status" ? "px-4" : "px-3"}
+                  canEdit={canEdit}
+                  onResize={(e) => startColResize(e, c.key, colW(c.key, c.def))}
+                />
               ))}
-              {showCreated ? <th className="px-3 py-2 font-medium w-[110px]">Created</th> : null}
-              <th className="px-1 py-2 w-[40px] text-center">
+              <th className="px-1 py-2 text-right align-middle">
                 {canEdit && onOpenFields ? (
                   <button
                     type="button"
@@ -1708,6 +1801,36 @@ function MetaCell({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Column header with a right-edge drag handle. A 2px brand line appears on
+// hover (ClickUp style). Dragging resizes THIS column; every column to its
+// right shifts as a block (the trailing actions column absorbs the delta), so
+// it can never collapse the layout.
+function ResizableTh({ label, width, className, canEdit, onResize }: {
+  label: string;
+  width: number;
+  className?: string;
+  canEdit: boolean;
+  onResize: (e: React.PointerEvent) => void;
+}) {
+  return (
+    <th className={`relative group/th py-2 font-medium ${className ?? "px-3"}`} style={{ width }}>
+      <span className="block truncate">{label}</span>
+      {canEdit ? (
+        <span
+          onPointerDown={onResize}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          className="absolute top-0 right-0 h-full w-2 flex justify-end cursor-col-resize select-none touch-none z-10"
+          title="Drag to resize"
+          aria-hidden
+        >
+          <span className="w-[2px] h-full bg-transparent group-hover/th:bg-[var(--os-brand)] transition-colors" />
+        </span>
+      ) : null}
+    </th>
+  );
+}
+
 function AddSubtaskRow({
   parentId,
   indent,
@@ -1899,7 +2022,7 @@ function AddTaskInline({
             onClick={() => setDueEditing((v) => !v)}
             className="inline-flex items-center justify-center gap-1 w-full h-full text-[12px]"
           >
-            {dueDate ? <span className="px-0.5">{dueDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-3.5 h-3.5" />}
+            {dueDate ? <span className="px-0.5">{dueDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-[17px] h-[17px]" />}
           </button>
           {dueEditing ? (
             <input
