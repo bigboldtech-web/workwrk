@@ -200,14 +200,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }).catch(() => {});
   }, [viewId, boardId, viewConfig]);
 
-  // Column resize — drag a header's right border to set its width, min 60px.
-  // Persists to the view config on release (colWidthsRef holds the latest).
+  // Column resize — the handle sits on each column's LEFT border (the boundary
+  // it shares with the flexible Name column / the previous column). Dragging it
+  // left grows this column and shrinks Name; dragging right does the reverse.
+  // Min 60px. Persists to the view config on release (colWidthsRef holds latest).
   const startColResize = useCallback((e: React.PointerEvent, key: string, startW: number) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
     const onMove = (ev: PointerEvent) => {
-      const next = Math.max(60, Math.round(startW + (ev.clientX - startX)));
+      const next = Math.max(60, Math.round(startW - (ev.clientX - startX)));
       setColWidths((prev) => ({ ...prev, [key]: next }));
     };
     const onUp = () => {
@@ -1713,11 +1715,13 @@ function ResizableTh({ label, width, onResize }: {
 }) {
   return (
     <th className="relative group/th px-4 py-2 font-medium" style={{ width }}>
-      <span className="block truncate pr-2">{label}</span>
+      <span className="block truncate">{label}</span>
+      {/* Handle on the LEFT border — the boundary shared with the flexible Name
+          column (or the previous column). Hover shows a brand line. */}
       <span
         onPointerDown={onResize}
         onClick={(e) => e.stopPropagation()}
-        className="absolute top-0 right-0 h-full w-2 flex justify-center cursor-col-resize select-none touch-none"
+        className="absolute top-0 -left-1 h-full w-2 flex justify-center cursor-col-resize select-none touch-none z-10"
         title="Drag to resize"
         aria-hidden
       >
