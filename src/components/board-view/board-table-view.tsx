@@ -1812,8 +1812,10 @@ function AddTaskInline({
     ? `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, "0")}-${String(dueDate.getDate()).padStart(2, "0")}`
     : "";
 
+  // Each quick-set control sits in an identical bordered box (ClickUp parity).
+  const box = "inline-flex items-center justify-center h-7 min-w-[28px] px-1 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 transition-colors";
   return (
-    <div className="flex items-center gap-1.5" style={{ paddingLeft: 36 }}>
+    <div className="flex items-center gap-2 py-0.5" style={{ paddingLeft: 36 }}>
       <StatusGlyph current={current} statuses={statuses} />
       <input
         autoFocus
@@ -1823,19 +1825,18 @@ function AddTaskInline({
           if (e.key === "Enter") { e.preventDefault(); void save(); }
           else if (e.key === "Escape") { close(); }
         }}
-        placeholder="Task name…"
+        placeholder="Task name, or type to search…"
         className="flex-1 min-w-0 bg-transparent outline-none text-sm text-zinc-900 placeholder:text-zinc-400"
       />
-      <span className="inline-flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-        <AssigneePicker value={owner} canEdit compact onChange={setOwner} />
-        <span className="relative inline-flex">
+      <span className="inline-flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <span className={box} title="Assignee"><AssigneePicker value={owner} canEdit compact onChange={setOwner} /></span>
+        <span className={`relative ${box} ${dueDate ? "text-zinc-700" : "text-zinc-400"}`} title="Due date">
           <button
             type="button"
             onClick={() => setDueEditing((v) => !v)}
-            className={`inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-zinc-100 text-[12px] ${dueDate ? "text-zinc-600" : "text-zinc-300 hover:text-zinc-500"}`}
-            title="Set due date"
+            className="inline-flex items-center justify-center gap-1 w-full h-full text-[12px]"
           >
-            {dueDate ? dueDate.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : <CalendarPlus className="w-4 h-4" />}
+            {dueDate ? <span className="px-0.5">{dueDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-3.5 h-3.5" />}
           </button>
           {dueEditing ? (
             <input
@@ -1844,22 +1845,23 @@ function AddTaskInline({
               value={dueInput}
               onChange={(e) => { setDueAt(e.target.value ? `${e.target.value}T00:00:00.000Z` : null); setDueEditing(false); }}
               onBlur={() => setDueEditing(false)}
-              className="absolute left-0 top-6 z-20 h-7 px-1 text-[12px] border border-zinc-200 rounded bg-white shadow-md focus:outline-none focus:border-[var(--os-brand)]"
+              className="absolute left-0 top-8 z-20 h-7 px-1 text-[12px] border border-zinc-200 rounded bg-white shadow-md focus:outline-none focus:border-[var(--os-brand)]"
             />
           ) : null}
         </span>
-        <PriorityPicker value={priority} canEdit compact onChange={setPriority} />
-        <TagPicker value={tags} canEdit compact onChange={setTags} />
-        <button type="button" onClick={close} className="h-7 px-2 rounded-md text-[12px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
+        <span className={box} title="Priority"><PriorityPicker value={priority} canEdit compact onChange={setPriority} /></span>
+        <span className={`${box} ${tags.length ? "w-auto" : ""}`} title="Tags"><TagPicker value={tags} canEdit compact onChange={setTags} /></span>
+        <span aria-hidden className="w-px h-5 bg-zinc-200 mx-0.5" />
+        <button type="button" onClick={close} className="h-7 px-2.5 rounded-md text-[12px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
         <button
           type="button"
           onClick={() => void save()}
           disabled={busy || !title.trim()}
-          className="h-7 px-2.5 rounded-md text-[12px] font-medium text-white inline-flex items-center gap-1 disabled:opacity-50"
+          className="h-7 px-3 rounded-md text-[12px] font-medium text-white inline-flex items-center gap-1 disabled:opacity-50"
           style={{ background: "var(--os-brand)" }}
         >
           {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-          Save <span className="opacity-70">↵</span>
+          Save <span className="opacity-80 text-[13px] leading-none">↵</span>
         </button>
       </span>
     </div>
