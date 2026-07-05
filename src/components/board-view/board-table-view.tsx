@@ -648,8 +648,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // due / priority / tags) chosen inline before saving.
   const handleAddRich = useCallback(async (payload: {
     title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null;
-  }): Promise<BoardItemRow | null> => {
-    if (!canEdit) return null;
+  }): Promise<{ ok: boolean; error?: string }> => {
+    if (!canEdit) return { ok: false, error: "You don't have edit access to this list" };
     setAdding(true);
     setError(null);
     try {
@@ -666,14 +666,19 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           itemTypeId: payload.itemTypeId ?? undefined,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data?.error ?? "Failed to add item"); return null; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data?.error ?? `Save failed (HTTP ${res.status})`;
+        setError(msg);
+        return { ok: false, error: msg };
+      }
       const row = data.item as BoardItemRow;
       setItems((prev) => [...prev, row]);
-      return row;
+      return { ok: true };
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to add item");
-      return null;
+      const msg = e instanceof Error ? e.message : "Failed to add item";
+      setError(msg);
+      return { ok: false, error: msg };
     } finally {
       setAdding(false);
     }
@@ -992,7 +997,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                                 defaultStatus={groupBy === "status" ? b.key : firstStatus}
                                 itemTypes={itemTypeList}
                                 defaultTypeId={defaultItemType?.id ?? null}
-                                onCreate={async (p) => { await handleAddRich(p); }}
+                                onCreate={handleAddRich}
                               />
                             </td>
                           </tr>
@@ -1023,7 +1028,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                     defaultStatus={firstStatus}
                     itemTypes={itemTypeList}
                     defaultTypeId={defaultItemType?.id ?? null}
-                    onCreate={async (p) => { await handleAddRich(p); }}
+                    onCreate={handleAddRich}
                   />
                 </td>
               </tr>
@@ -1798,10 +1803,11 @@ function AddTaskInline({
   defaultStatus: string;
   itemTypes: ItemTypeLite[];
   defaultTypeId: string | null;
-  onCreate: (p: { title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null }) => Promise<void>;
+  onCreate: (p: { title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null }) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [failed, setFailed] = useState<string | null>(null);
   const [owner, setOwner] = useState<PersonRef | null>(null);
   const [dueAt, setDueAt] = useState<string | null>(null);
   const [dueEditing, setDueEditing] = useState(false);
@@ -1829,9 +1835,15 @@ function AddTaskInline({
     const t = title.trim();
     if (!t) { close(); return; }
     setBusy(true);
-    await onCreate({ title: t, status: defaultStatus, ownerId: owner?.id ?? null, dueAt, priority, tagIds: tags.map((x) => x.id), itemTypeId: typeId });
+    setFailed(null);
+    const res = await onCreate({ title: t, status: defaultStatus, ownerId: owner?.id ?? null, dueAt, priority, tagIds: tags.map((x) => x.id), itemTypeId: typeId });
     setBusy(false);
-    clearFields(); // keep the row open (and the type) for the next task
+    if (res.ok) {
+      clearFields(); // success — keep the row open (and the type) for the next task
+    } else {
+      // Keep the typed text so nothing is lost, and show why it failed.
+      setFailed(res.error ?? "Couldn't save this task");
+    }
   };
 
   const openWithType = (id: string | null) => { setTypeId(id); setOpen(true); };
@@ -1886,12 +1898,13 @@ function AddTaskInline({
   // Each quick-set control sits in an identical bordered box (ClickUp parity).
   const box = "inline-flex items-center justify-center h-7 min-w-[28px] px-1 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 transition-colors";
   return (
-    <div className="flex items-center gap-2 py-0.5" style={{ paddingLeft: 36 }}>
+    <div>
+    <div className={`flex items-center gap-2 py-0.5 ${failed ? "rounded-md ring-1 ring-red-300 bg-red-50/40" : ""}`} style={{ paddingLeft: 36 }}>
       <StatusGlyph current={current} statuses={statuses} />
       <input
         autoFocus
         value={title}
-        onChange={(e) => setTitle(e.target.value)}
+        onChange={(e) => { setTitle(e.target.value); if (failed) setFailed(null); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); void save(); }
           else if (e.key === "Escape") { close(); }
@@ -1966,6 +1979,12 @@ function AddTaskInline({
           Save <span className="opacity-80 text-[13px] leading-none">↵</span>
         </button>
       </span>
+    </div>
+    {failed ? (
+      <div className="pl-9 pt-0.5 pb-1 text-[11.5px] text-red-500">
+        {failed} — your text was kept; fix it or try again.
+      </div>
+    ) : null}
     </div>
   );
 }
