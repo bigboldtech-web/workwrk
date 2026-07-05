@@ -141,7 +141,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   const customFields: FieldDef[] = initialFields ?? [];
-  const { byId: itemTypeMap } = useItemTypes();
+  const { byId: itemTypeMap, list: itemTypeList, default: defaultItemType } = useItemTypes();
   // Built-in column visibility (FieldShelf "Built-in fields" toggles).
   const hideBuiltin = useMemo(() => new Set(hiddenBuiltins ?? []), [hiddenBuiltins]);
   const showOwner = !hideBuiltin.has("__builtin_owner");
@@ -632,7 +632,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // ClickUp-style rich add: create a task WITH the quick-set fields (assignee /
   // due / priority / tags) chosen inline before saving.
   const handleAddRich = useCallback(async (payload: {
-    title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[];
+    title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null;
   }): Promise<BoardItemRow | null> => {
     if (!canEdit) return null;
     setAdding(true);
@@ -648,6 +648,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           dueAt: payload.dueAt ?? undefined,
           priority: payload.priority ?? undefined,
           tagIds: payload.tagIds.length ? payload.tagIds : undefined,
+          itemTypeId: payload.itemTypeId ?? undefined,
         }),
       });
       const data = await res.json();
@@ -974,6 +975,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                                 statuses={statuses}
                                 // Create into this group's value when grouped by status.
                                 defaultStatus={groupBy === "status" ? b.key : firstStatus}
+                                itemTypes={itemTypeList}
+                                defaultTypeId={defaultItemType?.id ?? null}
                                 onCreate={async (p) => { await handleAddRich(p); }}
                               />
                             </td>
@@ -1003,6 +1006,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   <AddTaskInline
                     statuses={statuses}
                     defaultStatus={firstStatus}
+                    itemTypes={itemTypeList}
+                    defaultTypeId={defaultItemType?.id ?? null}
                     onCreate={async (p) => { await handleAddRich(p); }}
                   />
                 </td>
@@ -1766,11 +1771,15 @@ function AddSubtaskRow({
 function AddTaskInline({
   statuses,
   defaultStatus,
+  itemTypes,
+  defaultTypeId,
   onCreate,
 }: {
   statuses: StatusOption[];
   defaultStatus: string;
-  onCreate: (p: { title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[] }) => Promise<void>;
+  itemTypes: ItemTypeLite[];
+  defaultTypeId: string | null;
+  onCreate: (p: { title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null }) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -1779,31 +1788,74 @@ function AddTaskInline({
   const [dueEditing, setDueEditing] = useState(false);
   const [priority, setPriority] = useState<string | null>(null);
   const [tags, setTags] = useState<ItemTag[]>([]);
+  const [typeId, setTypeId] = useState<string | null>(defaultTypeId);
+  const [typeMenu, setTypeMenu] = useState(false);
+  const typeRef = useRef<HTMLSpanElement>(null);
   const [busy, setBusy] = useState(false);
   const current = statuses.find((s) => s.value === defaultStatus) ?? null;
+  const activeType = itemTypes.find((t) => t.id === typeId) ?? itemTypes.find((t) => t.id === defaultTypeId) ?? null;
+  const typeLabel = activeType?.singular ?? "Task";
 
+  useEffect(() => {
+    if (!typeMenu) return;
+    const onDoc = (e: MouseEvent) => { if (typeRef.current && !typeRef.current.contains(e.target as Node)) setTypeMenu(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [typeMenu]);
+
+  // Keep the chosen type across saves (ClickUp keeps the type sticky).
   const clearFields = () => { setTitle(""); setOwner(null); setDueAt(null); setDueEditing(false); setPriority(null); setTags([]); };
-  const close = () => { setOpen(false); clearFields(); };
+  const close = () => { setOpen(false); setTypeMenu(false); clearFields(); };
   const save = async () => {
     const t = title.trim();
     if (!t) { close(); return; }
     setBusy(true);
-    await onCreate({ title: t, status: defaultStatus, ownerId: owner?.id ?? null, dueAt, priority, tagIds: tags.map((x) => x.id) });
+    await onCreate({ title: t, status: defaultStatus, ownerId: owner?.id ?? null, dueAt, priority, tagIds: tags.map((x) => x.id), itemTypeId: typeId });
     setBusy(false);
-    clearFields(); // keep the row open for the next task
+    clearFields(); // keep the row open (and the type) for the next task
   };
+
+  const openWithType = (id: string | null) => { setTypeId(id); setOpen(true); };
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900"
-        style={{ paddingLeft: 60 }}
-      >
-        <Plus className="w-3.5 h-3.5" />
-        Add Task
-      </button>
+      <span className="relative inline-flex items-center" ref={typeRef} style={{ paddingLeft: 60 }}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Task
+        </button>
+        {itemTypes.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setTypeMenu((v) => !v)}
+            className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+            title="Add a different type"
+            aria-label="Choose task type"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+        ) : null}
+        {typeMenu ? (
+          <div className="absolute left-14 top-7 z-30 w-[200px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
+            <div className="px-3 pt-1 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">Create</div>
+            {itemTypes.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => { setTypeMenu(false); openWithType(t.id); }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
+              >
+                {React.createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-400" })}
+                {t.singular}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </span>
     );
   }
 
@@ -1829,6 +1881,37 @@ function AddTaskInline({
         className="flex-1 min-w-0 bg-transparent outline-none text-sm text-zinc-900 placeholder:text-zinc-400"
       />
       <span className="inline-flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+        {itemTypes.length > 0 ? (
+          <span className="relative inline-flex" ref={typeRef}>
+            <button
+              type="button"
+              onClick={() => setTypeMenu((v) => !v)}
+              className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 text-[12px] text-zinc-700"
+              title="Task type"
+            >
+              {React.createElement(itemTypeIcon(activeType?.icon), { className: "w-3.5 h-3.5 text-zinc-500" })}
+              {typeLabel}
+              <ChevronDown className="w-3 h-3 text-zinc-400" />
+            </button>
+            {typeMenu ? (
+              <div className="absolute right-0 top-8 z-30 w-[190px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
+                {itemTypes.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => { setTypeId(t.id); setTypeMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
+                  >
+                    {React.createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-400" })}
+                    <span className="flex-1 truncate">{t.singular}</span>
+                    {t.id === typeId ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </span>
+        ) : null}
+        {itemTypes.length > 0 ? <span aria-hidden className="w-px h-5 bg-zinc-200 mx-0.5" /> : null}
         <span className={box} title="Assignee"><AssigneePicker value={owner} canEdit compact onChange={setOwner} /></span>
         <span className={`relative ${box} ${dueDate ? "text-zinc-700" : "text-zinc-400"}`} title="Due date">
           <button
