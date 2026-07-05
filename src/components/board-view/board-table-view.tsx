@@ -1735,9 +1735,21 @@ function CheckBox({ checked, indeterminate, onChange, className = "" }: {
 // rounded area that highlights on hover, so each cell reads as its own aligned
 // "section" like ClickUp. Content left-aligns at ~16px to match the header.
 function MetaCell({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Clicking anywhere in the cell (not just the icon) opens the cell's picker:
+  // forward the click to the inner trigger button unless the icon/menu was hit.
+  const forwardClick = (e: React.MouseEvent) => {
+    const btn = ref.current?.querySelector("button");
+    const t = e.target as Node;
+    if (btn && t !== btn && !btn.contains(t)) btn.click();
+  };
   return (
-    <td className="px-2 py-1 align-middle">
-      <div className="flex items-center min-h-[26px] rounded-md px-2 hover:bg-zinc-100/70 transition-colors">
+    <td className="px-1.5 py-1 align-middle">
+      <div
+        ref={ref}
+        onClick={forwardClick}
+        className="flex items-center min-h-[28px] rounded-md px-2 border border-transparent cursor-pointer hover:bg-zinc-100 hover:border-zinc-300 transition-colors"
+      >
         {children}
       </div>
     </td>

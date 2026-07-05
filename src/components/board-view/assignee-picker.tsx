@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { ChevronDown, Search, UserX } from "lucide-react";
+import { ChevronDown, Search, UserX, UserPlus } from "lucide-react";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 
 export interface PersonRef {
@@ -118,11 +118,11 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
       {!compact && <span className="text-sm truncate">{personName(value)}</span>}
     </span>
   ) : (
-    <span className={compact
-      ? "inline-flex items-center justify-center w-[22px] h-[22px] rounded-full border border-dashed border-zinc-300 text-zinc-400"
-      : "text-xs text-zinc-500"}>
-      {compact ? "+" : "Unassigned"}
-    </span>
+    compact ? (
+      <UserPlus className="w-[18px] h-[18px] text-zinc-400" />
+    ) : (
+      <span className="text-xs text-zinc-500">Unassigned</span>
+    )
   );
 
   if (!canEdit) return trigger;
