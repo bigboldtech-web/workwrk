@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
   Lock, Share2, Sparkles, ChevronDown, ListChecks,
-  ListFilter, Glasses, Zap, Folder as FolderIcon,
+  ListFilter, Glasses, Zap,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { BoardViewTabs } from "./board-view-tabs";
@@ -109,7 +109,7 @@ export default async function BoardPage(props: {
                 icon={board.folder.icon}
                 color={board.folder.color}
                 name={board.folder.name}
-                fallbackIcon={FolderIcon}
+                fallback="folder"
               />
               <span className="truncate">{board.folder.name}</span>
             </span>

@@ -17,9 +17,21 @@
 
 import { createElement, type ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
-import type { LucideIcon } from "lucide-react";
+import { Folder, FileText, ListChecks, LayoutGrid, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSpaceIcon } from "@/components/layout/os/space-icon-catalog";
+
+// Named fallbacks — a Server Component can pass a *string* (not a function),
+// which is safe across the RSC boundary. `fallbackIcon` (a component) is only
+// safe from Client Components.
+const FALLBACK_ICONS = {
+  folder: Folder,
+  doc: FileText,
+  file: FileText,
+  board: LayoutGrid,
+  list: ListChecks,
+} as const;
+export type EntityTileFallback = keyof typeof FALLBACK_ICONS;
 
 /** Neutral zinc used when an entity has no color of its own. */
 export const DEFAULT_TILE_COLOR = "#71717A";
@@ -55,8 +67,11 @@ export interface EntityTileProps extends VariantProps<typeof tileVariants> {
   color?: string | null;
   /** Name — first letter is the glyph when no icon resolves. */
   name?: string | null;
-  /** Icon to use when `icon` resolves to nothing (e.g. FileText for docs). */
+  /** Icon to use when `icon` resolves to nothing (e.g. FileText for docs).
+   *  A component — only pass from Client Components. */
   fallbackIcon?: LucideIcon | null;
+  /** Named fallback icon — SAFE to pass from Server Components (it's a string). */
+  fallback?: EntityTileFallback | null;
   className?: string;
   title?: string;
 }
@@ -72,6 +87,7 @@ export function EntityTile({
   color,
   name,
   fallbackIcon,
+  fallback,
   size = "sm",
   className,
   title,
@@ -81,7 +97,8 @@ export function EntityTile({
   const lucide = resolveLucide(icon);
   // A string `icon` that isn't a catalog name (e.g. an emoji) renders as text.
   const emoji = typeof icon === "string" && !lucide && icon.trim() ? icon.trim() : null;
-  const Glyph = lucide ?? (emoji ? null : fallbackIcon ?? null);
+  const namedFallback = fallback ? FALLBACK_ICONS[fallback] : null;
+  const Glyph = lucide ?? (emoji ? null : (fallbackIcon ?? namedFallback ?? null));
 
   let content: ReactNode;
   if (Glyph) content = createElement(Glyph, { className: glyph });
