@@ -137,6 +137,10 @@ function csvCell(v: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+// Column widths: leading checkbox column, and the actions column's floor.
+const LEADING_W = 34;
+const ACTIONS_MIN_W = 44;
+
 export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
@@ -718,13 +722,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
 
   // ── Column sizing ──────────────────────────────────────────────────────
-  // The leading checkbox column and the trailing actions column are fixed; the
-  // actions column is the "absorber" (width:auto) so resizing any other column
-  // shifts everything to its right as a block. Every other column carries an
-  // explicit px width (saved widths win, else the default), and Name fills the
-  // slack that the meta columns leave.
-  const LEADING_W = 34;
-  const ACTIONS_MIN_W = 44;
+  // Spreadsheet model: every column has an explicit px width, and the table is
+  // exactly as wide as the sum of its columns. Dragging a column's right border
+  // grows/shrinks THAT column, so the border follows your cursor (drag right =
+  // wider, and the columns to the right shift right with it). When the row grows
+  // past the viewport it scrolls; when it's narrower, the trailing actions
+  // column stretches to fill so the row still spans the full width.
   const colW = useCallback((key: string, def: number) => Math.max(60, colWidths[key] ?? def), [colWidths]);
   const metaColumns = useMemo(() => {
     const cols: Array<{ key: string; label: string; def: number }> = [];
@@ -739,26 +742,40 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     return cols;
   }, [showStatus, showOwner, showDue, showPriority, showType, showTags, showCreated, customFields]);
   const metaSumW = metaColumns.reduce((s, c) => s + colW(c.key, c.def), 0);
-  // Name default = whatever the meta columns leave (clamped to a floor). Once
-  // the user drags Name, the saved width wins.
+  // Name default = whatever the meta columns leave, so the row fills the
+  // viewport on first paint. Once the user drags Name, the saved width wins.
   const nameW = colWidths.name != null
     ? Math.max(120, colWidths.name)
     : Math.max(220, (containerW || 900) - LEADING_W - metaSumW - ACTIONS_MIN_W);
-  const totalFixedW = LEADING_W + nameW + metaSumW;
+  const fixedSansActions = LEADING_W + nameW + metaSumW;
+  // Table spans at least the viewport; if the columns total more, it grows and
+  // the wrapper scrolls. The actions column soaks up any slack when narrower.
+  const tableW = Math.max(containerW || fixedSansActions + ACTIONS_MIN_W, fixedSansActions + ACTIONS_MIN_W);
+  const actionsW = tableW - fixedSansActions;
+  const overflowing = tableW > (containerW || tableW) + 1;
 
-  // Drag a column's right border. newWidth = startWidth + dx, clamped so the
-  // whole row still fits (actions never drops below its minimum). Persist on
-  // release. Because only this column's width changes and actions absorbs the
-  // delta, every column to the right slides as a block.
+  // Once the container is measured, freeze Name at its fill width so it becomes
+  // a real fixed column. Without this Name is the "remainder" and growing a meta
+  // column silently steals from Name (the dragged border wouldn't track the
+  // cursor); with it, growing a column widens the row (and scrolls) instead.
+  useEffect(() => {
+    if (containerW <= 0) return;
+    setColWidths((prev) => {
+      if (prev.name != null) return prev;
+      const fill = Math.max(220, containerW - LEADING_W - metaSumW - ACTIONS_MIN_W);
+      return { ...prev, name: fill };
+    });
+  }, [containerW, metaSumW]);
+
+  // Drag a column's right border. newWidth = startWidth + dx (min 60). No upper
+  // clamp — the column grows freely and the table scrolls if it runs past the
+  // viewport, so the border always tracks the cursor. Persist on release.
   const startColResize = useCallback((e: React.PointerEvent, key: string, startW: number) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
-    const cw = tableWrapRef.current?.clientWidth || containerW || 900;
-    const otherFixed = totalFixedW - startW; // everything except the dragged column
-    const maxW = Math.max(60, cw - ACTIONS_MIN_W - otherFixed);
     const onMove = (ev: PointerEvent) => {
-      const next = Math.min(maxW, Math.max(60, Math.round(startW + (ev.clientX - startX))));
+      const next = Math.max(60, Math.round(startW + (ev.clientX - startX)));
       setColWidths((prev) => ({ ...prev, [key]: next }));
     };
     const onUp = () => {
@@ -772,7 +789,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }, [persistView, containerW, totalFixedW]);
+  }, [persistView]);
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -948,8 +965,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
       {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
           inline cell editors (assignee/date/dropdown popovers) aren't cut off. */}
-      <div ref={tableWrapRef} className={monday ? "overflow-x-auto" : "overflow-visible"}>
-        <table className="w-full text-[13px]" style={{ tableLayout: "fixed" }}>
+      <div ref={tableWrapRef} className={monday || overflowing ? "overflow-x-auto" : "overflow-visible"}>
+        <table className="text-[13px]" style={{ tableLayout: "fixed", width: tableW }}>
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
               <th className="pl-1 pr-0 py-1.5" style={{ width: LEADING_W }}>
@@ -975,7 +992,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   onResize={(e) => startColResize(e, c.key, colW(c.key, c.def))}
                 />
               ))}
-              <th className="px-1 py-2 text-right align-middle">
+              <th className="px-1 py-2 text-right align-middle" style={{ width: actionsW }}>
                 {canEdit && onOpenFields ? (
                   <button
                     type="button"
