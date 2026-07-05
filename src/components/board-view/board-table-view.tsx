@@ -722,12 +722,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
 
   // ── Column sizing ──────────────────────────────────────────────────────
-  // Spreadsheet model: every column has an explicit px width, and the table is
-  // exactly as wide as the sum of its columns. Dragging a column's right border
-  // grows/shrinks THAT column, so the border follows your cursor (drag right =
-  // wider, and the columns to the right shift right with it). When the row grows
-  // past the viewport it scrolls; when it's narrower, the trailing actions
-  // column stretches to fill so the row still spans the full width.
+  // Divider model (like a spreadsheet's column boundaries). The row always
+  // fills the viewport exactly — no horizontal scroll — so the cell popovers are
+  // never clipped. Dragging a border grows THAT column and shrinks its right
+  // neighbour by the same amount, so the border tracks the cursor (drag right =
+  // this column expands right, the next one gives up that space) while the total
+  // stays constant. Name fills whatever the meta columns leave; the trailing
+  // actions column soaks up any rounding slack.
   const colW = useCallback((key: string, def: number) => Math.max(60, colWidths[key] ?? def), [colWidths]);
   const metaColumns = useMemo(() => {
     const cols: Array<{ key: string; label: string; def: number }> = [];
@@ -743,21 +744,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   }, [showStatus, showOwner, showDue, showPriority, showType, showTags, showCreated, customFields]);
   const metaSumW = metaColumns.reduce((s, c) => s + colW(c.key, c.def), 0);
   // Name default = whatever the meta columns leave, so the row fills the
-  // viewport on first paint. Once the user drags Name, the saved width wins.
+  // viewport on first paint. Once the user drags a border, the saved widths win.
   const nameW = colWidths.name != null
     ? Math.max(120, colWidths.name)
     : Math.max(220, (containerW || 900) - LEADING_W - metaSumW - ACTIONS_MIN_W);
   const fixedSansActions = LEADING_W + nameW + metaSumW;
-  // Table spans at least the viewport; if the columns total more, it grows and
-  // the wrapper scrolls. The actions column soaks up any slack when narrower.
-  const tableW = Math.max(containerW || fixedSansActions + ACTIONS_MIN_W, fixedSansActions + ACTIONS_MIN_W);
-  const actionsW = tableW - fixedSansActions;
-  const overflowing = tableW > (containerW || tableW) + 1;
+  // Actions column absorbs whatever's left so the row spans the full width.
+  const actionsW = Math.max(ACTIONS_MIN_W, (containerW || fixedSansActions + ACTIONS_MIN_W) - fixedSansActions);
 
   // Once the container is measured, freeze Name at its fill width so it becomes
-  // a real fixed column. Without this Name is the "remainder" and growing a meta
-  // column silently steals from Name (the dragged border wouldn't track the
-  // cursor); with it, growing a column widens the row (and scrolls) instead.
+  // a real fixed column (otherwise it's the "remainder" and resizing a meta
+  // column would silently steal from Name instead of its actual neighbour).
   useEffect(() => {
     if (containerW <= 0) return;
     setColWidths((prev) => {
@@ -767,16 +764,31 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     });
   }, [containerW, metaSumW]);
 
-  // Drag a column's right border. newWidth = startWidth + dx (min 60). No upper
-  // clamp — the column grows freely and the table scrolls if it runs past the
-  // viewport, so the border always tracks the cursor. Persist on release.
-  const startColResize = useCallback((e: React.PointerEvent, key: string, startW: number) => {
+  // Drag the border between this column and its right neighbour. dx is clamped
+  // so neither drops below its min; this column takes +dx and the neighbour -dx,
+  // so the total is unchanged and the row never overflows the viewport. The
+  // trailing actions column (key "__actions__") can shrink to ACTIONS_MIN_W.
+  const startColResize = useCallback((
+    e: React.PointerEvent,
+    key: string,
+    startW: number,
+    nextKey: string,
+    nextStartW: number,
+  ) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
+    const nextMin = nextKey === "__actions__" ? ACTIONS_MIN_W : 60;
     const onMove = (ev: PointerEvent) => {
-      const next = Math.max(60, Math.round(startW + (ev.clientX - startX)));
-      setColWidths((prev) => ({ ...prev, [key]: next }));
+      let dx = Math.round(ev.clientX - startX);
+      dx = Math.max(-(startW - 60), Math.min(dx, nextStartW - nextMin));
+      setColWidths((prev) => {
+        const upd: Record<string, number> = { ...prev, [key]: startW + dx };
+        // The actions column is the flexible absorber — it re-derives its width
+        // from the others, so we only pin real neighbour columns.
+        if (nextKey !== "__actions__") upd[nextKey] = nextStartW - dx;
+        return upd;
+      });
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
@@ -790,6 +802,18 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }, [persistView]);
+
+  // Ordered resizable columns (Name + meta). Each border pairs with the next
+  // entry, or the actions absorber for the last one.
+  const resizeCols = [
+    { key: "name", label: "Name", width: nameW, pad: "px-4" },
+    ...metaColumns.map((c) => ({
+      key: c.key,
+      label: c.label,
+      width: colW(c.key, c.def),
+      pad: c.key === "status" ? "px-4" : "px-3",
+    })),
+  ];
 
   const allSelected = items.length > 0 && items.every((r) => selected.has(r.id));
   const someSelected = !allSelected && items.some((r) => selected.has(r.id));
@@ -965,8 +989,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
       {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
           inline cell editors (assignee/date/dropdown popovers) aren't cut off. */}
-      <div ref={tableWrapRef} className={monday || overflowing ? "overflow-x-auto" : "overflow-visible"}>
-        <table className="text-[13px]" style={{ tableLayout: "fixed", width: tableW }}>
+      <div ref={tableWrapRef} className={monday ? "overflow-x-auto" : "overflow-visible"}>
+        <table className="w-full text-[13px]" style={{ tableLayout: "fixed" }}>
           <thead>
             <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
               <th className="pl-1 pr-0 py-1.5" style={{ width: LEADING_W }}>
@@ -981,17 +1005,25 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   </div>
                 ) : null}
               </th>
-              <ResizableTh label="Name" width={nameW} className="px-4" canEdit={canEdit} onResize={(e) => startColResize(e, "name", nameW)} />
-              {metaColumns.map((c) => (
-                <ResizableTh
-                  key={c.key}
-                  label={c.label}
-                  width={colW(c.key, c.def)}
-                  className={c.key === "status" ? "px-4" : "px-3"}
-                  canEdit={canEdit}
-                  onResize={(e) => startColResize(e, c.key, colW(c.key, c.def))}
-                />
-              ))}
+              {resizeCols.map((c, i) => {
+                const next = resizeCols[i + 1];
+                return (
+                  <ResizableTh
+                    key={c.key}
+                    label={c.label}
+                    width={c.width}
+                    className={c.pad}
+                    canEdit={canEdit}
+                    onResize={(e) => startColResize(
+                      e,
+                      c.key,
+                      c.width,
+                      next ? next.key : "__actions__",
+                      next ? next.width : actionsW,
+                    )}
+                  />
+                );
+              })}
               <th className="px-1 py-2 text-right align-middle" style={{ width: actionsW }}>
                 {canEdit && onOpenFields ? (
                   <button
