@@ -168,6 +168,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const colWidthsRef = useRef(colWidths);
   useEffect(() => { colWidthsRef.current = colWidths; }, [colWidths]);
   const widthFor = (key: string, def: number) => colWidths[key] ?? def;
+  // Key of the column currently being dragged (keeps its drag line lit).
+  const [resizingKey, setResizingKey] = useState<string | null>(null);
   // Group-by axis seeded from the saved view config (Phase 74). Null
   // means "no grouping" — strings can be "status" / "owner" / a field key.
   const initialGroupBy = (() => {
@@ -208,6 +210,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
+    setResizingKey(key);
     const onMove = (ev: PointerEvent) => {
       const next = Math.max(60, Math.round(startW - (ev.clientX - startX)));
       setColWidths((prev) => ({ ...prev, [key]: next }));
@@ -216,11 +219,23 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       document.body.style.cursor = "";
+      setResizingKey(null);
       persistView({ colWidths: colWidthsRef.current });
     };
     document.body.style.cursor = "col-resize";
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+  }, [persistView]);
+
+  // Double-click a resize handle to reset that column to its default width.
+  const resetColWidth = useCallback((key: string) => {
+    const cur = colWidthsRef.current;
+    if (!(key in cur)) return;
+    const next = { ...cur };
+    delete next[key];
+    colWidthsRef.current = next;
+    setColWidths(next);
+    persistView({ colWidths: next });
   }, [persistView]);
 
   const setGroupBy = useCallback((next: string | null) => {
@@ -900,16 +915,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               {/* Name flexes (absorbs remaining width); every other column has an
                   explicit, drag-resizable width. */}
               <th className="px-4 py-2 font-medium w-auto">Name</th>
-              {showStatus ? <ResizableTh label="Status" width={widthFor("status", 140)} onResize={(e) => startColResize(e, "status", widthFor("status", 140))} /> : null}
-              {showOwner ? <ResizableTh label="Assignee" width={widthFor("owner", 110)} onResize={(e) => startColResize(e, "owner", widthFor("owner", 110))} /> : null}
-              {showDue ? <ResizableTh label="Due date" width={widthFor("due", 110)} onResize={(e) => startColResize(e, "due", widthFor("due", 110))} /> : null}
-              {showPriority ? <ResizableTh label="Priority" width={widthFor("priority", 90)} onResize={(e) => startColResize(e, "priority", widthFor("priority", 90))} /> : null}
-              {showType ? <ResizableTh label="Type" width={widthFor("type", 130)} onResize={(e) => startColResize(e, "type", widthFor("type", 130))} /> : null}
-              {showTags ? <ResizableTh label="Tags" width={widthFor("tags", 160)} onResize={(e) => startColResize(e, "tags", widthFor("tags", 160))} /> : null}
+              {showStatus ? <ResizableTh label="Status" width={widthFor("status", 140)} active={resizingKey === "status"} onResize={(e) => startColResize(e, "status", widthFor("status", 140))} onReset={() => resetColWidth("status")} /> : null}
+              {showOwner ? <ResizableTh label="Assignee" width={widthFor("owner", 110)} active={resizingKey === "owner"} onResize={(e) => startColResize(e, "owner", widthFor("owner", 110))} onReset={() => resetColWidth("owner")} /> : null}
+              {showDue ? <ResizableTh label="Due date" width={widthFor("due", 110)} active={resizingKey === "due"} onResize={(e) => startColResize(e, "due", widthFor("due", 110))} onReset={() => resetColWidth("due")} /> : null}
+              {showPriority ? <ResizableTh label="Priority" width={widthFor("priority", 90)} active={resizingKey === "priority"} onResize={(e) => startColResize(e, "priority", widthFor("priority", 90))} onReset={() => resetColWidth("priority")} /> : null}
+              {showType ? <ResizableTh label="Type" width={widthFor("type", 130)} active={resizingKey === "type"} onResize={(e) => startColResize(e, "type", widthFor("type", 130))} onReset={() => resetColWidth("type")} /> : null}
+              {showTags ? <ResizableTh label="Tags" width={widthFor("tags", 160)} active={resizingKey === "tags"} onResize={(e) => startColResize(e, "tags", widthFor("tags", 160))} onReset={() => resetColWidth("tags")} /> : null}
               {customFields.map((f) => (
-                <ResizableTh key={f.key} label={f.label} width={widthFor(f.key, 150)} onResize={(e) => startColResize(e, f.key, widthFor(f.key, 150))} />
+                <ResizableTh key={f.key} label={f.label} width={widthFor(f.key, 150)} active={resizingKey === f.key} onResize={(e) => startColResize(e, f.key, widthFor(f.key, 150))} onReset={() => resetColWidth(f.key)} />
               ))}
-              {showCreated ? <ResizableTh label="Created" width={widthFor("created", 120)} onResize={(e) => startColResize(e, "created", widthFor("created", 120))} /> : null}
+              {showCreated ? <ResizableTh label="Created" width={widthFor("created", 120)} active={resizingKey === "created"} onResize={(e) => startColResize(e, "created", widthFor("created", 120))} onReset={() => resetColWidth("created")} /> : null}
               <th className="px-1 py-2 w-[40px] text-center">
                 {canEdit && onOpenFields ? (
                   <button
@@ -1713,24 +1728,28 @@ function CheckBox({ checked, indeterminate, onChange, className = "" }: {
 
 // Resizable column header — a right-edge drag handle shows a brand line on
 // hover (like ClickUp); dragging it resizes the column.
-function ResizableTh({ label, width, onResize }: {
+function ResizableTh({ label, width, active, onResize, onReset }: {
   label: string;
   width: number;
+  active?: boolean;
   onResize: (e: React.PointerEvent) => void;
+  onReset?: () => void;
 }) {
   return (
     <th className="relative group/th px-4 py-2 font-medium" style={{ width }}>
       <span className="block truncate">{label}</span>
       {/* Handle on the LEFT border — the boundary shared with the flexible Name
-          column (or the previous column). Hover shows a brand line. */}
+          column (or the previous column). Hover (or an active drag) shows a
+          brand line; double-click resets the column to its default width. */}
       <span
         onPointerDown={onResize}
         onClick={(e) => e.stopPropagation()}
+        onDoubleClick={onReset}
         className="absolute top-0 -left-1 h-full w-2 flex justify-center cursor-col-resize select-none touch-none z-10"
-        title="Drag to resize"
+        title="Drag to resize · double-click to reset"
         aria-hidden
       >
-        <span className="w-[2px] h-full bg-transparent group-hover/th:bg-[var(--os-brand)] transition-colors" />
+        <span className={`w-[2px] h-full transition-colors ${active ? "bg-[var(--os-brand)]" : "bg-transparent group-hover/th:bg-[var(--os-brand)]"}`} />
       </span>
     </th>
   );
