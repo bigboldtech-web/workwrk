@@ -119,9 +119,9 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
     </span>
   ) : (
     compact ? (
-      // Slightly larger + heavier stroke than the other affordance icons: the
-      // person glyph has thinner lines, so at a matched px size it reads small.
-      <UserPlus className="w-[19px] h-[19px] text-zinc-400" strokeWidth={2.25} />
+      // Exact same spec as the other affordance icons (due/priority/tags): 17px,
+      // default stroke, zinc-400 — so the row reads as one consistent icon set.
+      <UserPlus className="w-[17px] h-[17px] text-zinc-400" />
     ) : (
       <span className="text-xs text-zinc-500">Unassigned</span>
     )
