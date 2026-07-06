@@ -21,6 +21,7 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { renderNoteIcon } from "@/components/docs/note-icon";
+import { EntityTile, type EntityTileFallback } from "@/components/ui/entity-tile";
 
 type ApiDoc = {
   id: string;
@@ -29,6 +30,7 @@ type ApiDoc = {
   entityType?: string | null;
   entityId?: string | null;
   emoji?: string | null;
+  location?: { type: string; name: string; icon: string | null; color: string | null; href: string | null } | null;
   createdById?: string | null;
   createdBy?: { name: string | null; avatar?: string | null } | null;
   parentId?: string | null;
@@ -56,10 +58,12 @@ function smartDate(iso: string | null | undefined): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
-// Humanize an entity anchor into a Location chip label.
-function locationLabel(entityType: string | null | undefined): string | null {
-  if (!entityType) return null;
-  return entityType.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+// Fallback glyph for a location whose entity has no icon of its own.
+function locationFallback(type: string): EntityTileFallback | null {
+  if (type === "BOARD") return "board";
+  if (type === "FOLDER") return "folder";
+  if (type === "BOARD_ITEM") return "list";
+  return null;
 }
 
 // The three starter templates shown as cards (matches ClickUp's Docs home).
@@ -301,7 +305,7 @@ export default function DocsPage() {
         ) : (
           visible.map((d) => {
             const count = childCount.get(d.id) ?? 0;
-            const loc = locationLabel(d.entityType);
+            const loc = d.location;
             return (
               <div
                 key={d.id}
@@ -336,13 +340,24 @@ export default function DocsPage() {
                   </span>
                 </div>
 
-                {/* Location */}
+                {/* Location — the real Space / Folder / Board / item it lives in */}
                 <div className="pr-2 min-w-0">
                   {loc ? (
-                    <span className="inline-flex items-center gap-1.5 max-w-full text-[12.5px] text-zinc-600">
-                      <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-zinc-100 text-zinc-500 shrink-0 text-[9px] font-semibold">{loc[0]}</span>
-                      <span className="truncate">{loc}</span>
-                    </span>
+                    loc.href ? (
+                      <span
+                        className="inline-flex items-center gap-1.5 max-w-full text-[12.5px] text-zinc-700 hover:text-zinc-900 hover:underline"
+                        onClick={(e) => { e.stopPropagation(); router.push(loc.href!); }}
+                        title={loc.name}
+                      >
+                        <EntityTile size="xs" icon={loc.icon} color={loc.color} name={loc.name} fallback={locationFallback(loc.type)} />
+                        <span className="truncate">{loc.name}</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 max-w-full text-[12.5px] text-zinc-700" title={loc.name}>
+                        <EntityTile size="xs" icon={loc.icon} color={loc.color} name={loc.name} fallback={locationFallback(loc.type)} />
+                        <span className="truncate">{loc.name}</span>
+                      </span>
+                    )
                   ) : <span className="text-zinc-300">–</span>}
                 </div>
 

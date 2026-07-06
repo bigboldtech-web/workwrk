@@ -62,6 +62,23 @@ export async function GET(req: Request) {
   );
   const gated = docs.filter((_, i) => flags[i]);
 
+  // Resolve each doc's anchor into a "Location" (real Space/Folder/Board/Item
+  // name + icon/color) so the Docs list shows *which* Space, not just "Space".
+  const idsOf = (t: string) =>
+    [...new Set(gated.filter((d) => d.entityType === t && d.entityId).map((d) => d.entityId as string))];
+  const [locSpaces, locBoards, locFolders, locItems] = await Promise.all([
+    idsOf("SPACE").length ? prisma.space.findMany({ where: { id: { in: idsOf("SPACE") } }, select: { id: true, name: true, icon: true, color: true, slug: true } }) : Promise.resolve([]),
+    idsOf("BOARD").length ? prisma.board.findMany({ where: { id: { in: idsOf("BOARD") } }, select: { id: true, name: true, icon: true, color: true, slug: true } }) : Promise.resolve([]),
+    idsOf("FOLDER").length ? prisma.folder.findMany({ where: { id: { in: idsOf("FOLDER") } }, select: { id: true, name: true, icon: true, color: true } }) : Promise.resolve([]),
+    idsOf("BOARD_ITEM").length ? prisma.item.findMany({ where: { id: { in: idsOf("BOARD_ITEM") } }, select: { id: true, title: true } }) : Promise.resolve([]),
+  ]);
+  type Loc = { type: string; name: string; icon: string | null; color: string | null; href: string | null };
+  const locMap = new Map<string, Loc>();
+  for (const s of locSpaces) locMap.set(`SPACE:${s.id}`, { type: "SPACE", name: s.name, icon: s.icon, color: s.color, href: `/spaces/${s.slug}` });
+  for (const b of locBoards) locMap.set(`BOARD:${b.id}`, { type: "BOARD", name: b.name, icon: b.icon, color: b.color, href: `/boards/${b.slug}` });
+  for (const f of locFolders) locMap.set(`FOLDER:${f.id}`, { type: "FOLDER", name: f.name, icon: f.icon, color: f.color, href: null });
+  for (const it of locItems) locMap.set(`BOARD_ITEM:${it.id}`, { type: "BOARD_ITEM", name: it.title, icon: null, color: null, href: `/item/${it.id}` });
+
   // Attach creator display info for list views ("Created by" column).
   const creatorIds = [...new Set(gated.map((d) => d.createdById).filter((x): x is string => !!x))];
   const creators = creatorIds.length
@@ -79,7 +96,8 @@ export async function GET(req: Request) {
     const { content, ...rest } = d;
     const meta = (content as { meta?: { icon?: string | null } } | null)?.meta;
     const emoji = typeof meta?.icon === "string" && meta.icon ? meta.icon : null;
-    return { ...rest, emoji, createdBy: u ? { name, avatar: u.avatar } : null };
+    const location = d.entityType && d.entityId ? locMap.get(`${d.entityType}:${d.entityId}`) ?? null : null;
+    return { ...rest, emoji, location, createdBy: u ? { name, avatar: u.avatar } : null };
   });
 
   return NextResponse.json({ docs: enriched });
