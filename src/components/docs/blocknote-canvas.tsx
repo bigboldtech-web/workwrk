@@ -37,7 +37,7 @@ import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, filterSu
 import type { PartialBlock } from "@blocknote/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Lightbulb, ListTree, Sigma, Bookmark, Columns2, AtSign, Link as LinkIcon } from "lucide-react";
+import { FileText, Lightbulb, ListTree, Sigma, Bookmark, Columns2, AtSign, Link as LinkIcon, Film } from "lucide-react";
 
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
@@ -48,6 +48,7 @@ import { calloutBlockSpec } from "./blocknote-blocks/callout-block";
 import { tocBlockSpec } from "./blocknote-blocks/toc-block";
 import { equationBlockSpec } from "./blocknote-blocks/equation-block";
 import { bookmarkBlockSpec } from "./blocknote-blocks/bookmark-block";
+import { videoEmbedBlockSpec, isPlayableVideoUrl, extractIframeSrc } from "./blocknote-blocks/video-embed-block";
 import { columnsBlockSpec } from "./blocknote-blocks/columns-block";
 import { mentionInlineSpec } from "./blocknote-blocks/mention-inline";
 import { BlockDragMenu, BlockDragMenuProvider } from "./blocknote-blocks/block-drag-menu";
@@ -63,6 +64,7 @@ const schema = BlockNoteSchema.create({
     toc: tocBlockSpec(),
     equation: equationBlockSpec(),
     bookmark: bookmarkBlockSpec(),
+    videoEmbed: videoEmbedBlockSpec(),
     columns: columnsBlockSpec(),
   },
   inlineContentSpecs: {
@@ -166,6 +168,14 @@ function workspaceSlashItems(
       icon: <Bookmark size={18} />,
       onItemClick: () =>
         insert({ type: "bookmark", props: { url: "", title: "", description: "", image: "", favicon: "", siteName: "" } } as OurPartialBlock),
+    },
+    {
+      title: "Video",
+      subtext: "Embed a YouTube / Vimeo / Loom link or video file",
+      aliases: ["video", "youtube", "vimeo", "loom", "embed", "mp4", "player", "movie"],
+      group: "Workspace",
+      icon: <Film size={18} />,
+      onItemClick: () => insert({ type: "videoEmbed", props: { url: "" } } as OurPartialBlock),
     },
     {
       title: "Columns",
@@ -333,7 +343,30 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
     return undefined;
   }, [initialBnDoc, legacyBlocks]);
 
-  const editor = useCreateBlockNote({ schema, initialContent });
+  const editor = useCreateBlockNote({
+    schema,
+    initialContent,
+    // Paste a video link (YouTube / Vimeo / Loom / Dadan / file) OR a full
+    // <iframe …> embed snippet → drop in a playable embed. Else paste normally.
+    pasteHandler: ({ event, editor: ed, defaultPasteHandler }) => {
+      const text = event.clipboardData?.getData("text/plain")?.trim() ?? "";
+      const html = event.clipboardData?.getData("text/html") ?? "";
+      // An embed snippet (from Dadan/Loom/etc.) or a single bare video URL.
+      const iframeSrc = extractIframeSrc(text) || extractIframeSrc(html);
+      const url = iframeSrc || (!/\s/.test(text) && isPlayableVideoUrl(text) ? text : "");
+      if (url) {
+        const cur = ed.getTextCursorPosition().block;
+        const isEmpty =
+          cur.type === "paragraph" &&
+          (!cur.content || (Array.isArray(cur.content) && cur.content.length === 0));
+        const videoBlock = { type: "videoEmbed", props: { url } } as OurPartialBlock;
+        if (isEmpty) ed.replaceBlocks([cur], [videoBlock]);
+        else ed.insertBlocks([videoBlock], cur, "after");
+        return true;
+      }
+      return defaultPasteHandler();
+    },
+  });
 
   // Idle-debounced save: emit onChange only after the writer pauses for
   // ~700ms. Cheaper than firing on every keystroke; the parent persists
