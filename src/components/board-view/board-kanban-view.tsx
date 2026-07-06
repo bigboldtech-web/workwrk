@@ -358,12 +358,12 @@ function KanbanCard({
           ) : null}
           {canEdit ? (
             <button type="button" onClick={(e) => { stop(e); onAddSubtask(); }} className={iconBtn} title="Add subtask" aria-label="Add subtask">
-              <Plus className="w-3 h-3" />
+              <Plus className="w-3.5 h-3.5" />
             </button>
           ) : null}
           {canEdit ? (
             <button type="button" onClick={(e) => { stop(e); startEdit(); }} className={iconBtn} title="Rename" aria-label="Rename">
-              <Pencil className="w-3 h-3" />
+              <Pencil className="w-3.5 h-3.5" />
             </button>
           ) : null}
           <ItemRowMoreMenu
@@ -402,12 +402,12 @@ function KanbanCard({
             type="button"
             disabled={!canEdit}
             onClick={() => canEdit && setDueOpen((v) => !v)}
-            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-medium ${
-              due ? (overdue ? "bg-red-50 text-red-600" : "bg-zinc-100 text-zinc-600") : "text-zinc-300 hover:text-zinc-500"
+            className={`inline-flex items-center gap-1 rounded text-[10.5px] font-medium ${
+              due ? `px-1.5 py-0.5 ${overdue ? "bg-red-50 text-red-600" : "bg-zinc-100 text-zinc-600"}` : "text-zinc-400 hover:text-zinc-600"
             }`}
             title={due ? "Edit due date" : "Set due date"}
           >
-            <CalendarPlus className="w-3 h-3" />
+            <CalendarPlus className={due ? "w-3 h-3" : "w-[17px] h-[17px]"} />
             {due ? due.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null}
           </button>
           {dueOpen && canEdit ? (
