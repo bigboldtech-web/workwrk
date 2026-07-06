@@ -1,37 +1,24 @@
 "use client";
 
-/* Notes — Notion-killer notes index for WorkwrK.
+/* Docs — ClickUp-style "All Docs" home.
  *
- *  GET  /api/docs               list
- *  POST /api/docs               { title, content }
- *  PUT  /api/docs/[id]          { title?, content? }
+ * Left panel (DocsSidebar, in apps-catalog) sets ?view=; this page reads it and
+ * renders the matching set as a rich table (Name / Location / Tags / Date
+ * updated / Date viewed / Sharing) above a row of starter Templates.
  *
- * Sections:
- *   1. Pinned (entityType === null && pinned)  — future hook
- *   2. Recent (touched in last 7 days)
- *   3. Attached to items (entityType !== null)
- *   4. Standalone notes
- *
- * Creating a note opens the Templates dialog — Blank, Meeting Notes,
- * 1:1, Project Brief, Weekly Review, Daily Standup, SOP Draft. Each
- * template injects an opinionated starting set of blocks + an emoji,
- * so the team can go from /new to writing in one click — the way
- * ClickUp Notes feels useful in day-one usage.
+ *   GET  /api/docs                list  (?archived=1 for the Archived view)
+ *   POST /api/docs                { title, content }
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
-  FileText, Plus, Sparkles, Loader2, Search, Clock, Pin, ChevronRight,
-  Type, X, ChevronDown, MoreHorizontal, LayoutGrid, List as ListIcon, ChevronUp, Star,
+  FileText, Plus, ChevronDown, MoreHorizontal, Search, ListFilter, ArrowUpDown,
+  Import as ImportIcon, Link2, Star, Pencil, Users, Rocket, NotebookPen, BookOpen, Loader2,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { NOTE_TEMPLATES, type NoteTemplate } from "@/components/docs/note-templates";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { renderNoteIcon } from "@/components/docs/note-icon";
 
@@ -41,7 +28,6 @@ type ApiDoc = {
   excerpt?: string | null;
   entityType?: string | null;
   entityId?: string | null;
-  summary?: string | null;
   emoji?: string | null;
   createdById?: string | null;
   createdBy?: { name: string | null; avatar?: string | null } | null;
@@ -50,399 +36,353 @@ type ApiDoc = {
   updatedAt: string;
 };
 
-const MS_DAY = 86400_000;
+type ViewKey = "all" | "my" | "shared" | "private" | "meeting" | "archived";
+const VIEW_LABEL: Record<ViewKey, string> = {
+  all: "All Docs",
+  my: "My Docs",
+  shared: "Shared with me",
+  private: "Private",
+  meeting: "Meeting Notes",
+  archived: "Archived",
+};
 
-function relTime(iso: string): string {
+// "Just now" / "Jun 29" / "Aug 24, 2024" — ClickUp's date column style.
+function smartDate(iso: string | null | undefined): string {
+  if (!iso) return "–";
   const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (Number.isNaN(d.getTime())) return "–";
+  if (Date.now() - d.getTime() < 60_000) return "Just now";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
-function tintFor(title: string): string {
-  const colors = [C.indigo, C.purple, C.blue, C.teal, C.green, C.orange, C.pink];
-  let h = 0;
-  for (let i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) >>> 0;
-  return colors[h % colors.length];
+// Humanize an entity anchor into a Location chip label.
+function locationLabel(entityType: string | null | undefined): string | null {
+  if (!entityType) return null;
+  return entityType.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export default function NotesPage() {
+// The three starter templates shown as cards (matches ClickUp's Docs home).
+const TEMPLATES: Array<{ key: string; title: string; hint: string; Icon: typeof Rocket; tint: string; emoji: string; verified?: boolean }> = [
+  { key: "project", title: "Project Overview", hint: "Summarize goals, scope, and milestones", Icon: Rocket, tint: "#F97316", emoji: "🚀" },
+  { key: "meeting", title: "Meeting Notes", hint: "Capture an agenda, notes, and action items", Icon: NotebookPen, tint: "#F59E0B", emoji: "📝" },
+  { key: "wiki", title: "Wiki", hint: "Organize information in one place", Icon: BookOpen, tint: "#3B82F6", emoji: "📚", verified: true },
+];
+
+export default function DocsPage() {
   const router = useRouter();
+  const params = useSearchParams();
+  const { data: session } = useSession();
+  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
+  const view = (params.get("view") as ViewKey) || "all";
+
   const [rows, setRows] = useState<ApiDoc[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [newMenu, setNewMenu] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const noteMenu = useNoteMenu();
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/docs");
+      const res = await fetch(`/api/docs${view === "archived" ? "?archived=1" : ""}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRows(data.docs ?? data.data ?? (Array.isArray(data) ? data : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
-  }, []);
+  }, [view]);
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("docs");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
-
-  // Right-click / "…" context menu shared across all cards.
-  const noteMenu = useNoteMenu();
   useEffect(() => {
     const onChange = () => { void load(); };
     window.addEventListener("workwrk:docs-changed", onChange);
     return () => window.removeEventListener("workwrk:docs-changed", onChange);
   }, [load]);
 
-  // Library-style filter tabs + the viewer's favorite ids.
-  type DocTab = "all" | "recents" | "favorites";
-  const [tab, setTab] = useState<DocTab>("all");
-  const [favIds, setFavIds] = useState<Set<string>>(new Set());
-  useEffect(() => {
-    const loadFavs = async () => {
-      try {
-        const res = await fetch("/api/preferences");
-        if (!res.ok) return;
-        const d = await res.json();
-        setFavIds(new Set<string>(d.effective?.home?.favoriteDocIds ?? []));
-      } catch { /* ignore */ }
-    };
-    void loadFavs();
-    window.addEventListener("workwrk:favs-changed", loadFavs);
-    return () => window.removeEventListener("workwrk:favs-changed", loadFavs);
-  }, []);
-
-  // Cards vs Library list view (persisted), with sortable columns.
-  const [view, setView] = useState<"cards" | "list">(
-    () => (typeof window !== "undefined" && localStorage.getItem("workwrk:docs-view") === "list" ? "list" : "cards"),
-  );
-  const setViewPersist = (v: "cards" | "list") => {
-    setView(v);
-    try { localStorage.setItem("workwrk:docs-view", v); } catch { /* ignore */ }
-  };
-  type SortCol = "title" | "createdBy" | "source" | "updated";
-  const [sort, setSort] = useState<{ col: SortCol; dir: "asc" | "desc" }>({ col: "updated", dir: "desc" });
-  const toggleSort = (col: SortCol) =>
-    setSort((s) => (s.col === col ? { col, dir: s.dir === "asc" ? "desc" : "asc" } : { col, dir: col === "updated" ? "desc" : "asc" }));
-
-  // Expand/collapse state for the list view's nested rows (persisted).
-  const LIST_EXPANDED_KEY = "workwrk:docs-list-expanded";
-  const [listExpanded, setListExpanded] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set();
-    try { return new Set<string>(JSON.parse(localStorage.getItem(LIST_EXPANDED_KEY) || "[]")); } catch { return new Set(); }
-  });
-  const toggleListExpand = (id: string) =>
-    setListExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      try { localStorage.setItem(LIST_EXPANDED_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
-      return next;
-    });
-
-  async function createFromTemplate(t: NoteTemplate) {
-    setCreating(true);
-    setTemplatesOpen(false);
-    try {
-      const res = await fetch("/api/docs", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: t.title,
-          content: { blocks: t.blocks(), meta: { icon: t.emoji } },
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        toast(`Couldn't create note${err?.error ? ` — ${err.error}` : ""}`);
-        return;
-      }
-      const data = await res.json();
-      const d: ApiDoc = data.doc ?? data.data ?? data;
-      router.push(`/docs/${d.id}`);
-    } catch { toast("Couldn't create note"); }
-    finally { setCreating(false); }
-  }
-
-  // One-click blank note creation — skips the templates dialog entirely.
-  // Used by the title bar's primary "New note" button and the empty-state
-  // CTA so the writer is never more than one click from typing.
-  async function createBlankNote() {
-    setCreating(true);
-    try {
-      const res = await fetch("/api/docs", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New doc", content: { blocks: [] } }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        toast(`Couldn't create note${err?.error ? ` — ${err.error}` : ""}`);
-        return;
-      }
-      const data = await res.json();
-      const d: ApiDoc = data.doc ?? data.data ?? data;
-      router.push(`/docs/${d.id}`);
-    } catch { toast("Couldn't create note"); }
-    finally { setCreating(false); }
-  }
-
-  const filtered = useMemo(() => {
-    let base = rows ?? [];
-    if (tab === "favorites") base = base.filter((d) => favIds.has(d.id));
-    else if (tab === "recents") base = base.filter((d) => Date.now() - new Date(d.updatedAt).getTime() < 7 * MS_DAY);
-    const q = search.trim().toLowerCase();
-    if (!q) return base;
-    return base.filter((d) =>
-      d.title.toLowerCase().includes(q) ||
-      (d.excerpt ?? "").toLowerCase().includes(q),
-    );
-  }, [rows, search, tab, favIds]);
-
-  const { recent, attached, standalone } = useMemo(() => {
-    const cutoff = Date.now() - 7 * MS_DAY;
-    const recent: ApiDoc[] = [];
-    const attached: ApiDoc[] = [];
-    const standalone: ApiDoc[] = [];
-    for (const d of filtered) {
-      if (new Date(d.updatedAt).getTime() >= cutoff) recent.push(d);
-      else if (d.entityType) attached.push(d);
-      else standalone.push(d);
-    }
-    return { recent, attached, standalone };
-  }, [filtered]);
-
-  const cmpDocs = useCallback((a: ApiDoc, b: ApiDoc) => {
-    const sgn = sort.dir === "asc" ? 1 : -1;
-    if (sort.col === "title") return sgn * (a.title || "").localeCompare(b.title || "");
-    if (sort.col === "createdBy") return sgn * (a.createdBy?.name ?? "").localeCompare(b.createdBy?.name ?? "");
-    if (sort.col === "source") return sgn * String(a.entityType ?? "").localeCompare(String(b.entityType ?? ""));
-    return sgn * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
-  }, [sort]);
-
-  const sortedRows = useMemo(() => [...filtered].sort(cmpDocs), [filtered, cmpDocs]);
-
-  // Parent→children map for the nested list view (built from all rows so
-  // nesting survives sorting; an orphan whose parent is missing → root).
-  const listByParent = useMemo(() => {
-    const m = new Map<string | null, ApiDoc[]>();
-    const ids = new Set((rows ?? []).map((r) => r.id));
+  // Child-count per doc → the little "page count" badge next to a title.
+  const childCount = useMemo(() => {
+    const m = new Map<string, number>();
     for (const d of rows ?? []) {
-      const k = d.parentId && ids.has(d.parentId) ? d.parentId : null;
-      if (!m.has(k)) m.set(k, []);
-      m.get(k)!.push(d);
+      if (d.parentId) m.set(d.parentId, (m.get(d.parentId) ?? 0) + 1);
     }
     return m;
   }, [rows]);
 
-  // Recursively render nested list rows (twisty + indent). Returns a flat
-  // array of <div> rows so it slots straight into the table body.
-  const renderTreeRows = (parentId: string | null, depth: number): React.ReactNode[] => {
-    const kids = [...(listByParent.get(parentId) ?? [])].sort(cmpDocs);
-    return kids.flatMap((d) => {
-      const hasKids = (listByParent.get(d.id) ?? []).length > 0;
-      const open = listExpanded.has(d.id);
-      const out: React.ReactNode[] = [
-        <div
-          key={d.id}
-          className="docs-tbl__row"
-          onClick={() => router.push(`/docs/${d.id}`)}
-          onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title })}
-        >
-          <div className="docs-tbl__name" style={{ paddingLeft: depth * 18 }}>
-            <button
-              type="button"
-              className={`docs-tbl__tw ${hasKids ? "" : "is-empty"}`}
-              aria-label={open ? "Collapse" : "Expand"}
-              onClick={(e) => { e.stopPropagation(); if (hasKids) toggleListExpand(d.id); }}
-            >
-              {hasKids ? (open ? <ChevronDown /> : <ChevronRight />) : null}
-            </button>
-            {d.emoji ? <span className="docs-tbl__ico">{renderNoteIcon(d.emoji)}</span> : <FileText />}
-            <span>{d.title || "Untitled note"}</span>
-          </div>
-          <CreatedBy doc={d} />
-          <div className="docs-tbl__src">{d.entityType ? d.entityType.toLowerCase().replace(/_/g, " ") : "Note"}</div>
-          <div className="docs-tbl__date">{relTime(d.updatedAt)}</div>
-          <button
-            type="button"
-            className="docs-tbl__more"
-            aria-label="Note actions"
-            onClick={(e) => { e.stopPropagation(); noteMenu.open(e, { id: d.id, title: d.title }); }}
-          >
-            <MoreHorizontal />
-          </button>
-        </div>,
-      ];
-      if (open && hasKids) out.push(...renderTreeRows(d.id, depth + 1));
-      return out;
-    });
-  };
+  const visible = useMemo(() => {
+    let base = rows ?? [];
+    if (view === "my") base = base.filter((d) => d.createdById && d.createdById === meId);
+    else if (view === "meeting") base = base.filter((d) => /meeting|minutes|stand.?up|1:1/i.test(d.title));
+    else if (view === "private") base = base.filter((d) => d.createdById === meId && !d.entityType);
+    else if (view === "shared") base = base.filter((d) => !!d.entityType);
+    const q = search.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((d) => d.title.toLowerCase().includes(q) || (d.excerpt ?? "").toLowerCase().includes(q));
+  }, [rows, view, meId, search]);
+
+  async function createDoc(template?: (typeof TEMPLATES)[number]) {
+    if (creating) return;
+    setCreating(true);
+    setNewMenu(false);
+    try {
+      const res = await fetch("/api/docs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          template
+            ? { title: template.title, content: { blocks: [], meta: { icon: template.emoji } } }
+            : { title: "New Doc", content: { blocks: [] } },
+        ),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        toast(`Couldn't create doc${err?.error ? ` — ${err.error}` : ""}`);
+        return;
+      }
+      const data = await res.json();
+      const d = data.doc ?? data.data ?? data;
+      window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+      if (d?.id) router.push(`/docs/${d.id}`);
+    } catch { toast("Couldn't create doc"); }
+    finally { setCreating(false); }
+  }
+
+  const COLS = "grid grid-cols-[minmax(220px,1fr)_150px_120px_130px_130px_90px_44px] items-center";
 
   return (
-    <>
-      <OsTitleBar
-        title="Notes"
-        Icon={FileText}
-        iconGradient={GRAD.tealGreen}
-        description={rows === null ? "Loading…" : `${rows.length} note${rows.length === 1 ? "" : "s"} · live-synced · @-mention people, tasks, KRAs, SOPs`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={9}
-      />
-
-      <div className="docs__tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === "all"} className={tab === "all" ? "is-on" : ""} onClick={() => setTab("all")}>
-          All notes
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "recents"} className={tab === "recents" ? "is-on" : ""} onClick={() => setTab("recents")}>
-          <Clock /> Recents
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "favorites"} className={tab === "favorites" ? "is-on" : ""} onClick={() => setTab("favorites")}>
-          <Star /> Favorites
-        </button>
-      </div>
-
-      <div className="docs__toolbar">
-        <div className="docs__search">
-          <Search />
-          <input
-            type="search"
-            placeholder="Search notes by title or excerpt…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="docs__viewtoggle" role="group" aria-label="View">
-          <button type="button" className={view === "cards" ? "is-on" : ""} onClick={() => setViewPersist("cards")} title="Card view" aria-label="Card view" aria-pressed={view === "cards"}>
-            <LayoutGrid />
-          </button>
-          <button type="button" className={view === "list" ? "is-on" : ""} onClick={() => setViewPersist("list")} title="List view" aria-label="List view" aria-pressed={view === "list"}>
-            <ListIcon />
-          </button>
-        </div>
-        <div className="docs__newgroup">
-          <button type="button" className="docs__new" onClick={createBlankNote} disabled={creating}>
-            {creating ? <><Loader2 className="docs__spin" /> Creating…</> : <><Plus /> New note</>}
-          </button>
+    <div className="flex flex-col h-full bg-white text-zinc-900">
+      {/* Header */}
+      <div className="px-5 pt-3.5 pb-2 flex items-center justify-between gap-3">
+        <h1 className="text-[17px] font-semibold text-zinc-900">{VIEW_LABEL[view]}</h1>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            className="docs__new-alt"
-            onClick={() => setTemplatesOpen(true)}
-            disabled={creating}
-            aria-label="Pick a template"
-            title="Pick a template"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-zinc-200 text-[12.5px] font-medium text-zinc-700 hover:bg-zinc-50"
+            onClick={() => toast("Import is coming soon")}
           >
-            <ChevronDown />
+            <ImportIcon className="w-3.5 h-3.5" /> Import
           </button>
+          <div className="relative">
+            <div className="inline-flex items-stretch rounded-md overflow-hidden shadow-sm">
+              <button
+                type="button"
+                onClick={() => void createDoc()}
+                disabled={creating}
+                className="inline-flex items-center gap-1.5 h-8 pl-3 pr-2.5 bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-60"
+              >
+                {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} New Doc
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewMenu((s) => !s)}
+                className="inline-flex items-center px-1.5 bg-zinc-900 text-white border-l border-white/15 hover:bg-zinc-800"
+                aria-label="New doc options"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {newMenu ? (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setNewMenu(false)} />
+                <div className="absolute right-0 top-9 z-50 w-[220px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
+                  <button type="button" onClick={() => void createDoc()} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50">
+                    <FileText className="w-4 h-4 text-zinc-400" /> Blank doc
+                  </button>
+                  <div className="h-px bg-zinc-100 my-1" />
+                  <div className="px-3 pt-0.5 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">From template</div>
+                  {TEMPLATES.map((t) => (
+                    <button key={t.key} type="button" onClick={() => void createDoc(t)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50">
+                      <t.Icon className="w-4 h-4" style={{ color: t.tint }} /> {t.title}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      {loadError ? (
-        <OsEmptyView Icon={FileText} iconGradient={GRAD.redPink} title="Couldn't load notes" subtitle={`API error: ${loadError}.`} cta="Retry" />
-      ) : rows === null ? (
-        <div className="docs__loading">Loading notes…</div>
-      ) : rows.length === 0 && !templatesOpen ? (
-        <div className="docs__empty-wrap">
-          <OsEmptyView Icon={FileText} iconGradient={GRAD.tealGreen} title="No notes yet" subtitle="Pick a template, mention teammates with @, embed boards and tasks. Every save creates a version." chips={["Templates", "@ mentions", "AI Write", "Block editor"]} cta="New note" />
-          <div className="docs__empty-ctas">
-            <button type="button" className="docs__empty-cta" onClick={createBlankNote} disabled={creating}>
-              <Plus /> {creating ? "Creating…" : "Blank note"}
+      {/* Templates */}
+      <div className="px-5 pb-3">
+        <div className="text-[12px] text-zinc-500 mb-1.5">Templates</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {TEMPLATES.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => void createDoc(t)}
+              className="group flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-3.5 py-3 text-left hover:border-zinc-300 hover:shadow-sm transition-all"
+            >
+              <span
+                className="inline-flex items-center justify-center w-10 h-10 rounded-lg shrink-0"
+                style={{ background: `color-mix(in srgb, ${t.tint} 15%, transparent)`, color: t.tint }}
+              >
+                <t.Icon className="w-5 h-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="flex items-center gap-1 text-[13.5px] font-semibold text-zinc-900">
+                  {t.title}
+                  {t.verified ? <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-500 text-white text-[8px]">✓</span> : null}
+                </span>
+                <span className="block text-[12px] text-zinc-500 truncate">{t.hint}</span>
+              </span>
             </button>
-            <button type="button" className="docs__empty-cta docs__empty-cta--alt" onClick={() => setTemplatesOpen(true)} disabled={creating}>
-              Pick a template
+          ))}
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="px-5 py-2 flex items-center gap-1.5 border-b border-zinc-100">
+        <button type="button" className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100">
+          <ListFilter className="w-3.5 h-3.5" /> Filters
+        </button>
+        <button type="button" className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100">
+          <ArrowUpDown className="w-3.5 h-3.5" /> Sort
+        </button>
+        <span className="w-px h-4 bg-zinc-200 mx-0.5" />
+        <span className="text-[12.5px] text-zinc-500 px-1">Tags:</span>
+        <div className="flex-1" />
+        {searchOpen ? (
+          <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200">
+            <Search className="w-3.5 h-3.5 text-zinc-400" />
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onBlur={() => { if (!search) setSearchOpen(false); }}
+              placeholder="Search docs…"
+              className="w-[160px] text-[12.5px] bg-transparent outline-none"
+            />
+          </div>
+        ) : (
+          <button type="button" onClick={() => setSearchOpen(true)} className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100">
+            <Search className="w-3.5 h-3.5" /> Search
+          </button>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Column header */}
+        <div className={`${COLS} sticky top-0 z-10 bg-white border-b border-zinc-100 px-5 h-9 text-[11.5px] font-medium text-zinc-400`}>
+          <div>Name</div>
+          <div>Location</div>
+          <div>Tags</div>
+          <div>Date updated</div>
+          <div className="inline-flex items-center gap-1">Date viewed <ChevronDown className="w-3 h-3" /></div>
+          <div>Sharing</div>
+          <div className="flex justify-center">
+            <button type="button" className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:bg-zinc-100" title="Add column" aria-label="Add column">
+              <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
-      ) : rows.length === 0 ? null : filtered.length === 0 ? (
-        <div className="docs__loading">
-          {search.trim()
-            ? `Nothing matches “${search}”.`
-            : tab === "favorites"
-              ? "No favorite notes yet — star a note to see it here."
-              : tab === "recents"
-                ? "No notes edited in the last 7 days."
-                : "No notes."}
-        </div>
-      ) : view === "list" ? (
-        <div className="docs-tbl">
-          <div className="docs-tbl__head">
-            <button type="button" className="docs-tbl__h docs-tbl__h--name" onClick={() => toggleSort("title")}>
-              Name {sort.col === "title" && (sort.dir === "asc" ? <ChevronUp /> : <ChevronDown />)}
-            </button>
-            <button type="button" className="docs-tbl__h docs-tbl__h--by" onClick={() => toggleSort("createdBy")}>
-              Created by {sort.col === "createdBy" && (sort.dir === "asc" ? <ChevronUp /> : <ChevronDown />)}
-            </button>
-            <button type="button" className="docs-tbl__h docs-tbl__h--src" onClick={() => toggleSort("source")}>
-              Source {sort.col === "source" && (sort.dir === "asc" ? <ChevronUp /> : <ChevronDown />)}
-            </button>
-            <button type="button" className="docs-tbl__h" onClick={() => toggleSort("updated")}>
-              Last edited {sort.col === "updated" && (sort.dir === "asc" ? <ChevronUp /> : <ChevronDown />)}
-            </button>
-            <span className="docs-tbl__h docs-tbl__h--act" aria-hidden />
+
+        {loadError ? (
+          <div className="px-5 py-10 text-center text-[13px] text-zinc-500">Couldn&apos;t load docs — {loadError}</div>
+        ) : rows === null ? (
+          <div className="px-5 py-10 text-center text-[13px] text-zinc-400">Loading docs…</div>
+        ) : visible.length === 0 ? (
+          <div className="px-5 py-12 text-center">
+            <FileText className="w-8 h-8 mx-auto text-zinc-300" />
+            <p className="mt-2 text-[13px] text-zinc-500">{search.trim() ? `Nothing matches “${search}”.` : `No docs in ${VIEW_LABEL[view]} yet.`}</p>
+            {!search.trim() && view !== "archived" ? (
+              <button type="button" onClick={() => void createDoc()} className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800">
+                <Plus className="w-3.5 h-3.5" /> New Doc
+              </button>
+            ) : null}
           </div>
-          {/* Searching or a tab filter → flat matches; otherwise a nested
-              tree mirroring the sidebar (rows with children get a twisty). */}
-          {search.trim() || tab !== "all"
-            ? sortedRows.map((d) => (
-                <div
-                  key={d.id}
-                  className="docs-tbl__row"
-                  onClick={() => router.push(`/docs/${d.id}`)}
-                  onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title })}
-                >
-                  <div className="docs-tbl__name">
-                    <span className="docs-tbl__tw is-empty" />
-                    {d.emoji ? <span className="docs-tbl__ico">{renderNoteIcon(d.emoji)}</span> : <FileText />}
-                    <span>{d.title || "Untitled note"}</span>
-                  </div>
-                  <CreatedBy doc={d} />
-                  <div className="docs-tbl__src">{d.entityType ? d.entityType.toLowerCase().replace(/_/g, " ") : "Note"}</div>
-                  <div className="docs-tbl__date">{relTime(d.updatedAt)}</div>
+        ) : (
+          visible.map((d) => {
+            const count = childCount.get(d.id) ?? 0;
+            const loc = locationLabel(d.entityType);
+            return (
+              <div
+                key={d.id}
+                className={`${COLS} group px-5 h-11 border-b border-zinc-50 hover:bg-zinc-50/70 cursor-pointer text-[13px]`}
+                onClick={() => router.push(`/docs/${d.id}`)}
+                onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title })}
+              >
+                {/* Name + hover actions */}
+                <div className="flex items-center gap-2 min-w-0 pr-2">
+                  <span className="inline-flex items-center justify-center w-5 h-5 shrink-0 text-blue-500">
+                    {d.emoji ? <span className="text-[15px] leading-none">{renderNoteIcon(d.emoji)}</span> : <FileText className="w-[18px] h-[18px]" />}
+                  </span>
+                  <span className="truncate text-zinc-800">{d.title || "Untitled"}</span>
+                  {count > 0 ? (
+                    <span className="inline-flex items-center gap-0.5 text-[11px] text-zinc-400 shrink-0">
+                      <FileText className="w-3 h-3" />{count}
+                    </span>
+                  ) : null}
+                  <span className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title="Copy link"
+                      onClick={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}/docs/${d.id}`); toast("Link copied"); } catch { /* ignore */ } }}>
+                      <Link2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title="Favorite"
+                      onClick={async () => { try { await fetch(`/api/me/favorites/docs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ docId: d.id, on: true }) }); window.dispatchEvent(new CustomEvent("workwrk:favs-changed")); toast("Added to favorites"); } catch { /* ignore */ } }}>
+                      <Star className="w-3.5 h-3.5" />
+                    </button>
+                    <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title="Open"
+                      onClick={() => router.push(`/docs/${d.id}`)}>
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                </div>
+
+                {/* Location */}
+                <div className="pr-2 min-w-0">
+                  {loc ? (
+                    <span className="inline-flex items-center gap-1.5 max-w-full text-[12.5px] text-zinc-600">
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-zinc-100 text-zinc-500 shrink-0 text-[9px] font-semibold">{loc[0]}</span>
+                      <span className="truncate">{loc}</span>
+                    </span>
+                  ) : <span className="text-zinc-300">–</span>}
+                </div>
+
+                {/* Tags */}
+                <div className="text-zinc-300">–</div>
+
+                {/* Date updated */}
+                <div className="text-zinc-600 text-[12.5px]">{smartDate(d.updatedAt)}</div>
+
+                {/* Date viewed (no per-viewer timestamp yet) */}
+                <div className="text-zinc-400 text-[12.5px]">–</div>
+
+                {/* Sharing */}
+                <div>
+                  {d.createdBy?.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={d.createdBy.avatar} alt="" className="w-5 h-5 rounded-full object-cover" />
+                  ) : (
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-zinc-100 text-zinc-400">
+                      <Users className="w-3 h-3" />
+                    </span>
+                  )}
+                </div>
+
+                {/* Row menu */}
+                <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
-                    className="docs-tbl__more"
-                    aria-label="Note actions"
-                    onClick={(e) => { e.stopPropagation(); noteMenu.open(e, { id: d.id, title: d.title }); }}
+                    className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-zinc-700 hover:bg-zinc-100 transition-opacity"
+                    aria-label="Doc actions"
+                    onClick={(e) => noteMenu.open(e, { id: d.id, title: d.title })}
                   >
-                    <MoreHorizontal />
+                    <MoreHorizontal className="w-4 h-4" />
                   </button>
                 </div>
-              ))
-            : renderTreeRows(null, 0)}
-        </div>
-      ) : (
-        <div className="docs">
-          {recent.length > 0 && (
-            <Section title="Recent" Icon={Clock} count={recent.length} accent={C.orange}>
-              {recent.map((d) => <DocCard key={d.id} doc={d} onMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title })} />)}
-            </Section>
-          )}
-          {attached.length > 0 && (
-            <Section title="Attached to items" Icon={Pin} count={attached.length} accent={C.purple}>
-              {attached.map((d) => <DocCard key={d.id} doc={d} onMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title })} />)}
-            </Section>
-          )}
-          {standalone.length > 0 && (
-            <Section title="Standalone notes" Icon={Type} count={standalone.length} accent={C.teal}>
-              {standalone.map((d) => <DocCard key={d.id} doc={d} onMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title })} />)}
-            </Section>
-          )}
-        </div>
-      )}
-
-      {templatesOpen && (
-        <TemplatesDialog
-          onPick={createFromTemplate}
-          onClose={() => setTemplatesOpen(false)}
-        />
-      )}
+              </div>
+            );
+          })
+        )}
+      </div>
 
       {noteMenu.menu && (
         <NoteActionMenu
@@ -453,113 +393,6 @@ export default function NotesPage() {
           onChanged={() => void load()}
         />
       )}
-    </>
-  );
-}
-
-function Section({ title, Icon, count, accent, children }: { title: string; Icon: typeof FileText; count: number; accent: string; children: React.ReactNode }) {
-  return (
-    <section className="docs__section">
-      <header className="docs__section-head">
-        <Icon className="docs__section-icon" style={{ color: accent }} />
-        <h2>{title}</h2>
-        <span className="docs__section-count">{count}</span>
-      </header>
-      <div className="docs__grid">{children}</div>
-    </section>
-  );
-}
-
-function CreatedBy({ doc }: { doc: ApiDoc }) {
-  const name = doc.createdBy?.name;
-  if (!name) return <div className="docs-tbl__by docs-tbl__by--empty">—</div>;
-  const initials = name.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase();
-  return (
-    <div className="docs-tbl__by" title={name}>
-      {doc.createdBy?.avatar ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img className="docs-tbl__avatar" src={doc.createdBy.avatar} alt="" />
-      ) : (
-        <span className="docs-tbl__avatar docs-tbl__avatar--i">{initials}</span>
-      )}
-      <span className="docs-tbl__by-name">{name}</span>
-    </div>
-  );
-}
-
-function DocCard({ doc, onMenu }: { doc: ApiDoc; onMenu?: (e: React.MouseEvent) => void }) {
-  const color = tintFor(doc.title);
-  const preview = doc.summary ?? doc.excerpt ?? "";
-  const isAi = !!doc.summary;
-  return (
-    <Link href={`/docs/${doc.id}`} className="doc-card group/doc" onContextMenu={onMenu}>
-      <header className="doc-card__head">
-        <span className="doc-card__icon" style={{ background: `color-mix(in srgb, ${color} 14%, transparent)`, color }}>
-          <FileText />
-        </span>
-        {doc.entityType && <span className="doc-card__attach">{doc.entityType.toLowerCase().replace(/_/g, " ")}</span>}
-        {onMenu && (
-          <button
-            type="button"
-            className="doc-card__more"
-            aria-label="Note actions"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(e); }}
-          >
-            <MoreHorizontal />
-          </button>
-        )}
-      </header>
-      <h3 className="doc-card__title">{doc.title || "Untitled note"}</h3>
-      {preview && (
-        <p className="doc-card__excerpt">
-          {isAi && <Sparkles className="doc-card__ai" />}
-          {preview.length > 140 ? preview.slice(0, 140) + "…" : preview}
-        </p>
-      )}
-      <footer className="doc-card__foot">
-        <span>{relTime(doc.updatedAt)}</span>
-        <ChevronRight />
-      </footer>
-    </Link>
-  );
-}
-
-// ───────── Templates dialog ─────────
-function TemplatesDialog({ onPick, onClose }: { onPick: (t: NoteTemplate) => void; onClose: () => void }) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div className="notes-tdlg" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="notes-tdlg__panel" onClick={(e) => e.stopPropagation()}>
-        <header className="notes-tdlg__head">
-          <Sparkles />
-          <div>
-            <h2>Start a new note</h2>
-            <p>Pick a template — or start blank.</p>
-          </div>
-          <button type="button" className="notes-tdlg__x" onClick={onClose} aria-label="Close">
-            <X />
-          </button>
-        </header>
-        <div className="notes-tdlg__grid">
-          {NOTE_TEMPLATES.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              className="notes-tdlg__card"
-              onClick={() => onPick(t)}
-            >
-              <span className="notes-tdlg__card-emoji">{t.emoji}</span>
-              <span className="notes-tdlg__card-title">{t.label}</span>
-              <span className="notes-tdlg__card-hint">{t.hint}</span>
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
