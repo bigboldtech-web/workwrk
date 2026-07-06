@@ -17,6 +17,8 @@ const FIELD_TYPES = [
   "SIGNATURE", "VOTING", "ACTION_ITEMS", "SUMMARY", "SENTIMENT",
   "CATEGORIZE", "TRANSLATION", "CUSTOM_TEXT", "CUSTOM_DROPDOWN",
   "KRA",
+  // connection-as-field — link a Doc / SOP to the row (see field-catalog)
+  "LINKED_DOC", "LINKED_SOP",
 ] as const;
 
 async function ctx() {

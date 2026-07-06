@@ -10,7 +10,7 @@
 // AI types render as a muted "—" placeholder until Phase 4+.
 
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X } from "lucide-react";
+import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X, Plus, Loader2 } from "lucide-react";
 import type { FieldChoice, FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 
@@ -116,6 +116,29 @@ const loadSopEntities = makeEntityLoader(async () => {
   return (data.data ?? []).map((s: { id: string; title: string | null; category: string | null }) => ({ id: s.id, label: s.title || "Untitled SOP", sub: s.category }));
 });
 
+// Create-new helpers — used by the LINKED_DOC / LINKED_SOP pickers so a row can
+// spin up a brand-new Doc/SOP and link it in one step (not only link existing).
+async function createDocEntity(title: string): Promise<EntityLite | null> {
+  const res = await fetch("/api/docs", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, content: {} }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const d = data.doc ?? data.data ?? data;
+  return d?.id ? { id: d.id, label: d.title || title } : null;
+}
+async function createSopEntity(title: string): Promise<EntityLite | null> {
+  const res = await fetch("/api/sops", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, content: { steps: [] } }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const s = data.data ?? data.sop ?? data;
+  return s?.id ? { id: s.id, label: s.title || title } : null;
+}
+
 const loadKraEntities = makeEntityLoader(async () => {
   const res = await fetch("/api/kras?scope=all", { cache: "no-store" });
   if (!res.ok) return [];
@@ -174,9 +197,9 @@ export function FieldValue(props: FieldValueProps) {
     case "KRA":
       return <KraValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "LINKED_DOC":
-      return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadDocEntities} Icon={FileText} hrefFor={(id) => `/docs/${id}`} emptyHint="No docs in this org yet." />;
+      return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadDocEntities} Icon={FileText} hrefFor={(id) => `/docs/${id}`} emptyHint="No docs in this org yet." onCreate={createDocEntity} createLabel="Doc" />;
     case "LINKED_SOP":
-      return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadSopEntities} Icon={BookOpen} hrefFor={(id) => `/sops/${id}`} emptyHint="No SOPs in this org yet." />;
+      return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadSopEntities} Icon={BookOpen} hrefFor={(id) => `/sops/${id}`} emptyHint="No SOPs in this org yet." onCreate={createSopEntity} createLabel="SOP" />;
     case "RELATIONSHIP":
       return <RelationshipValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "USER":
@@ -875,6 +898,8 @@ function LinkedEntityValue({
   Icon,
   hrefFor,
   emptyHint,
+  onCreate,
+  createLabel,
 }: {
   value: unknown;
   readOnly: boolean;
@@ -883,12 +908,32 @@ function LinkedEntityValue({
   Icon: typeof FileText;
   hrefFor?: (id: string) => string;
   emptyHint: string;
+  /** When provided, the picker offers "Create new …" which mints an entity and links it. */
+  onCreate?: (title: string) => Promise<EntityLite | null>;
+  createLabel?: string;
 }) {
   const v = typeof value === "string" ? value : "";
   const [items, setItems] = useState<EntityLite[]>(loader.peek());
   const [loading, setLoading] = useState(loader.peek().length === 0);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const create = async () => {
+    if (!onCreate || creating) return;
+    setCreating(true);
+    try {
+      const made = await onCreate(q.trim() || `New ${createLabel ?? "item"}`);
+      if (made) {
+        setItems((prev) => [made, ...prev.filter((p) => p.id !== made.id)]);
+        onChange?.(made.id);
+        setOpen(false);
+        setQ("");
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -948,6 +993,19 @@ function LinkedEntityValue({
               </button>
             ))
           )}
+          {onCreate ? (
+            <button
+              type="button"
+              onClick={create}
+              disabled={creating}
+              className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm text-[var(--os-brand)] hover:bg-zinc-50 border-t border-zinc-200 mt-1 disabled:opacity-60"
+            >
+              {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> : <Plus className="w-3.5 h-3.5 shrink-0" />}
+              <span className="truncate">
+                {creating ? "Creating…" : q.trim() ? `Create “${q.trim()}”` : `Create new ${createLabel ?? "item"}`}
+              </span>
+            </button>
+          ) : null}
           {v ? (
             <button type="button" onClick={() => { onChange?.(null); setOpen(false); }} className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1">
               Clear
