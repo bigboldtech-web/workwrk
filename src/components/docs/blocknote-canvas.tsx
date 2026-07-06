@@ -456,7 +456,14 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
           triggerCharacter="/"
           getItems={async (query) =>
             filterSuggestionItems(
-              [...getDefaultReactSlashMenuItems(editor), ...workspaceSlashItems(editor, slashDocId, onPageCreated)],
+              [
+                // Drop BlockNote's built-in "Video" item(s): they use a raw
+                // <video> tag (no YouTube/Vimeo/Loom/Dadan playback) and were
+                // showing duplicated. Our Workspace "Video" (below) replaces it
+                // and handles links, embed code, and file URLs.
+                ...getDefaultReactSlashMenuItems(editor).filter((it) => it.title !== "Video"),
+                ...workspaceSlashItems(editor, slashDocId, onPageCreated),
+              ],
               query,
             )
           }
