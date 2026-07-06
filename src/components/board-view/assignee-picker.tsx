@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { ChevronDown, Search, UserX, UserPlus } from "lucide-react";
+import { ChevronDown, Search, UserX, UserRoundPlus } from "lucide-react";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useAnchorPos } from "./use-anchor-pos";
 
@@ -121,10 +121,11 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
     </span>
   ) : (
     compact ? (
-      // The person+ glyph is less dense than the calendar/flag, so it reads
-      // small + light. Sized up to 20px AND given a heavier 2.5 stroke so it
-      // matches the calendar's presence.
-      <UserPlus className="w-5 h-5 text-zinc-400" strokeWidth={2.5} />
+      // UserRoundPlus (rounded, denser glyph) at the SAME 17px as the calendar/
+      // flag/tag affordances — the thin UserPlus read small even when enlarged,
+      // and the enlargement broke row alignment on Kanban cards. Same size for
+      // all affordance icons = one weight, aligned on one line.
+      <UserRoundPlus className="w-[17px] h-[17px] text-zinc-400" />
     ) : (
       <span className="text-xs text-zinc-500">Unassigned</span>
     )
