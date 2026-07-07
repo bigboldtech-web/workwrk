@@ -14,7 +14,7 @@
 // Settings / Share / Permissions / Hide are intentional stubs until
 // the corresponding flows land.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Lock, Globe, Archive, Settings,
@@ -25,7 +25,7 @@ import {
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
-import { MorePortal } from "./more-portal";
+import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
@@ -44,10 +44,19 @@ interface Props {
   onRequestShare?: () => void;
 }
 
-export function SpaceMoreTrigger({ space, onUpdated, onRequestShare }: Props) {
+export const SpaceMoreTrigger = forwardRef<ContextMenuHandle, Props>(function SpaceMoreTrigger(
+  { space, onUpdated, onRequestShare },
+  ref,
+) {
   const [open, setOpen] = useState(false);
+  // Cursor coords when opened via right-click; null = anchored to the "…" button.
+  const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    openAtPoint: (x, y) => { setPoint({ x, y }); setOpen(true); },
+  }), []);
 
   useEffect(() => {
     if (!open) return;
@@ -75,6 +84,7 @@ export function SpaceMoreTrigger({ space, onUpdated, onRequestShare }: Props) {
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          setPoint(null);
           setOpen((v) => !v);
         }}
         className={`p-0.5 rounded transition-colors ${
@@ -88,7 +98,7 @@ export function SpaceMoreTrigger({ space, onUpdated, onRequestShare }: Props) {
         <MoreHorizontal className="w-3 h-3" />
       </button>
 
-      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={260} open={open} placement="right">
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={260} open={open} placement="right" point={point}>
         <SpaceMoreMenu
           space={space}
           onClose={() => setOpen(false)}
@@ -98,7 +108,7 @@ export function SpaceMoreTrigger({ space, onUpdated, onRequestShare }: Props) {
       </MorePortal>
     </span>
   );
-}
+});
 
 type Mode = "menu" | "rename" | "icon";
 
@@ -268,7 +278,7 @@ function SpaceMoreMenu({
   }, [space, toast, onUpdated, router, onClose]);
 
   const del = useCallback(async () => {
-    if (!(await confirm({ title: "Delete Space", description: `Permanently delete "${space.name}" and everything in it? This can't be undone.`, destructive: true, confirmLabel: "Delete" }))) return;
+    if (!(await confirm({ title: "Delete Space", description: `Delete "${space.name}" and everything in it? It moves to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBusy("delete");
     try {
       const res = await fetch(`/api/spaces/${space.id}?hard=1`, { method: "DELETE" });

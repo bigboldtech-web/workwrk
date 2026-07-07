@@ -37,6 +37,9 @@ interface DragState {
 interface BoardGanttViewProps {
   /** Needed to append new tasks from the bottom "+ Add Task" row. */
   boardId?: string;
+  /** Active view + config — persists which date field feeds undated tasks. */
+  viewId?: string | null;
+  viewConfig?: Record<string, unknown>;
   initialItems: BoardItemRow[];
   initialFields?: FieldDef[];
   /** Per-List statuses (backbone #1) — drives the bar colors + status glyph. */
@@ -69,6 +72,8 @@ function shiftToIso(d: Date, deltaDays: number): string {
 
 export function BoardGanttView({
   boardId,
+  viewId,
+  viewConfig,
   initialItems,
   initialFields,
   statuses,
@@ -93,10 +98,28 @@ export function BoardGanttView({
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
 
-  const dateFieldKey = useMemo(
-    () => (initialFields ?? []).find((f) => f.type === "DATE" || f.type === "DATETIME")?.key ?? null,
+  // DATE/DATETIME fields — the fallback source for undated tasks. Auto (default)
+  // uses the first; the picker lets you choose a specific one (or Due-only).
+  const dateFields = useMemo(
+    () => (initialFields ?? []).filter((f) => f.type === "DATE" || f.type === "DATETIME"),
     [initialFields],
   );
+  const firstDateFieldKey = dateFields[0]?.key ?? null;
+  const rawSel = typeof viewConfig?.dateFieldKey === "string" ? (viewConfig.dateFieldKey as string) : "__auto";
+  const dateSource = rawSel === "__auto" || rawSel === "__due" || dateFields.some((f) => f.key === rawSel) ? rawSel : "__auto";
+  const [dateSourceLocal, setDateSourceLocal] = useState(dateSource);
+  const persistDateSource = useCallback((next: string) => {
+    setDateSourceLocal(next);
+    if (viewId) {
+      void fetch(`/api/boards/${boardId}/views/${viewId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: { ...(viewConfig ?? {}), dateFieldKey: next } }),
+      }).catch(() => {});
+    }
+  }, [boardId, viewId, viewConfig]);
+  // Which field feeds undated tasks: none for Due-only, else the chosen/first field.
+  const fallbackFieldKey = dateSourceLocal === "__due" ? null : dateSourceLocal === "__auto" ? firstDateFieldKey : dateSourceLocal;
 
   // Resolve EVERY non-archived item to a lane row: dated rows carry a
   // [start, end] span; undated rows carry start=end=null so they render as a
@@ -109,8 +132,8 @@ export function BoardGanttView({
       const start = it.startAt ? new Date(it.startAt) : null;
       let s = start && !Number.isNaN(start.getTime()) ? start : null;
       let e = due && !Number.isNaN(due.getTime()) ? due : null;
-      if (!s && !e && dateFieldKey) {
-        const raw = it.metadata?.[dateFieldKey];
+      if (!s && !e && fallbackFieldKey) {
+        const raw = it.metadata?.[fallbackFieldKey];
         if (typeof raw === "string" && raw) {
           const d = new Date(raw);
           if (!Number.isNaN(d.getTime())) e = d;
@@ -124,7 +147,7 @@ export function BoardGanttView({
       out.push({ item: it, start: s, end: e });
     }
     return out;
-  }, [initialItems, dateFieldKey]);
+  }, [initialItems, fallbackFieldKey]);
 
   const undatedCount = useMemo(() => rows.filter((r) => !r.start && !r.end).length, [rows]);
 
@@ -331,7 +354,23 @@ export function BoardGanttView({
         </div>
         <h2 className="text-[13px] font-semibold text-zinc-900">{rangeLabel}</h2>
         <div className="flex-1" />
-        <span className="text-[10.5px] text-zinc-400 hidden sm:inline">
+        {dateFields.length > 0 ? (
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
+            <span className="hidden sm:inline">Date field</span>
+            <select
+              value={dateSourceLocal}
+              onChange={(e) => persistDateSource(e.target.value)}
+              className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[11.5px] text-zinc-700 focus:outline-none focus:border-[var(--os-brand)]"
+            >
+              <option value="__auto">Auto (Start/Due + date fields)</option>
+              <option value="__due">Start / Due only</option>
+              {dateFields.map((f) => (
+                <option key={f.key} value={f.key}>{f.label}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <span className="text-[10.5px] text-zinc-400 hidden lg:inline">
           {undatedCount > 0
             ? `${undatedCount} unscheduled · drag or click a marker to schedule`
             : canEdit ? "Drag a bar to move it · drag an edge to resize" : "Start + Due dates render as duration bars"}

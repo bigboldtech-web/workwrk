@@ -1,22 +1,23 @@
 // PATCH  /api/boards/[id] — rename / re-color / re-folder / re-visibility
-// DELETE /api/boards/[id] — archive (soft)
+// DELETE /api/boards/[id] — archive (soft); ?hard=1 → recoverable Trash
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { archiveBoard, canEditBoard, getBoardForReader, updateBoard } from "@/lib/board";
+import { moveToTrash } from "@/lib/trash";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
+  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string; name?: string };
   if (!u.id || !u.organizationId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
+  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId, userName: u.name ?? null };
 }
 
 async function loadAndGate(boardId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
@@ -81,12 +82,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await ctx();
   if ("error" in c) return c.error;
   const { id } = await params;
   const gate = await loadAndGate(id, c);
   if ("error" in gate) return gate.error;
+  const hard = new URL(req.url).searchParams.get("hard") === "1";
+  if (hard) {
+    // Recoverable delete — snapshot the list (+ items/views/members) to Trash.
+    await moveToTrash("board", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
+    return NextResponse.json({ ok: true });
+  }
   const archived = await archiveBoard(id);
   return NextResponse.json({ board: archived });
 }

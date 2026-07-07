@@ -15,14 +15,15 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, Link2, GripVertical, MoreHorizontal, ExternalLink, Copy, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, Loader2 } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, Loader2, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   type BoardItemRow,
   type StatusOption,
   type ItemTag,
 } from "@/lib/board-items-shared";
-import type { FieldDef } from "@/lib/field-catalog";
+import { isBuiltinShown, FIELD_TYPE_BY_KEY, BUILTIN_COLUMN_BY_KEY, type FieldDef } from "@/lib/field-catalog";
+import type { LucideIcon } from "lucide-react";
 import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 import { FieldValue } from "./field-value";
 import { PriorityPicker } from "./priority-picker";
@@ -33,6 +34,9 @@ import { StatusGlyph } from "./status-glyph";
 import { itemTypeIcon } from "@/lib/item-type-icons";
 import type { FieldChoice } from "@/lib/field-catalog";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { ItemRowMoreMenu } from "./item-row-more-menu";
+import { MorePortal, type ContextMenuHandle } from "@/components/layout/os/more-portal";
+import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 
 interface BoardTableViewProps {
   boardId: string;
@@ -59,9 +63,18 @@ interface BoardTableViewProps {
   /** Opens the board's status editor — wired to the group-header "…"
    *  menu (Rename / New status / Edit statuses / Hide status). */
   onEditStatuses?: () => void;
-  /** Per-view hidden keys incl. __builtin_* — hides Owner/Priority/Type/
-   *  Tags columns from the FieldShelf "Built-in fields" toggles. */
+  /** Per-view hidden keys incl. __builtin_* — hides default-on built-in
+   *  columns (Assignee/Due/Priority) + custom fields. */
   hiddenBuiltins?: string[];
+  /** Per-view turned-on optional built-in columns (Task Type/Tags/Created/
+   *  Start date/Date updated/Task ID) — the "Properties" you opt into. */
+  extraColumns?: string[];
+  /** Column-header "Hide column" — toggles a key (custom field key or
+   *  __builtin_*) in the view's hiddenFields list. Same setter the shelf uses. */
+  onHideField?: (key: string) => void;
+  /** Called after a header-menu field mutation (delete / move) so the parent
+   *  re-fetches Board.schema.fields into its field state. */
+  onFieldsChanged?: () => void;
   /** "list" = ClickUp pills (default). "table" = Monday-style grid with
    *  full-cell colored status fills + always-on group summary. */
   gridStyle?: "list" | "table";
@@ -99,6 +112,79 @@ function compareRows(a: BoardItemRow, b: BoardItemRow, key: SortKey): number {
       return 0;
   }
 }
+
+// Header-menu sort — compares any column (built-in or custom field). Returns a
+// signed number; the caller flips it for descending. Missing values sort last
+// for ascending (Infinity / "" handled per type).
+function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses: StatusOption[]): number {
+  const val = (row: BoardItemRow): string | number => {
+    switch (key) {
+      case "name": return row.title.toLowerCase();
+      case "status": {
+        const i = statuses.findIndex((s) => s.value === row.status);
+        return i < 0 ? statuses.length : i;
+      }
+      case "owner": {
+        const o = row.owner;
+        return o ? `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim().toLowerCase() : "￿";
+      }
+      case "due": return row.dueAt ? new Date(row.dueAt).getTime() : Infinity;
+      case "created": return row.createdAt ? new Date(row.createdAt).getTime() : Infinity;
+      case "start": return row.startAt ? new Date(row.startAt).getTime() : Infinity;
+      case "updated": return row.updatedAt ? new Date(row.updatedAt).getTime() : Infinity;
+      case "taskid": return row.id;
+      case "comments": return row.commentCount ?? 0;
+      case "timeline": return row.startAt ? new Date(row.startAt).getTime() : (row.dueAt ? new Date(row.dueAt).getTime() : Infinity);
+      case "time": return row.timeTrackedMs ?? 0;
+      case "createdby": { const c = row.createdBy; return c ? `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim().toLowerCase() : "￿"; }
+      case "docs": return row.linkedDocCount ?? 0;
+      case "linked": return row.linkedTaskCount ?? 0;
+      case "sops": return row.linkedSopCount ?? 0;
+      case "priority": {
+        const i = PRIORITY_OPTIONS.findIndex((o) => o.value === row.priority);
+        return i < 0 ? PRIORITY_OPTIONS.length : i;
+      }
+      case "type": return row.itemTypeId ?? "￿";
+      case "tags": return (row.tags ?? []).map((t) => t.name).join(",").toLowerCase() || "￿";
+      default: {
+        const v = row.metadata?.[key];
+        if (v == null || v === "") return "￿";
+        return typeof v === "number" ? v : String(v).toLowerCase();
+      }
+    }
+  };
+  const av = val(a);
+  const bv = val(b);
+  if (typeof av === "number" && typeof bv === "number") return av - bv;
+  return String(av).localeCompare(String(bv));
+}
+
+// Built-in column key → the `hiddenFields` key used to hide it (shared with the
+// Fields shelf "Built-in fields" toggles). Name + Status aren't hideable here.
+const BUILTIN_HIDE_KEY: Record<string, string> = {
+  owner: "__builtin_owner", due: "__builtin_due", priority: "__builtin_priority",
+  type: "__builtin_type", tags: "__builtin_tags", created: "__builtin_created",
+  start: "__builtin_start", updated: "__builtin_updated", taskid: "__builtin_taskid",
+  comments: "__builtin_comments", timeline: "__builtin_timeline",
+  time: "__builtin_time", createdby: "__builtin_createdby",
+  docs: "__builtin_docs", linked: "__builtin_linked", sops: "__builtin_sops",
+};
+
+// What a column-header menu can do for one column. Undefined callbacks hide
+// their menu item, so each column shows only the actions that apply to it.
+type ColMenuCtx = {
+  sortDir: "asc" | "desc" | null;
+  grouped: boolean;
+  onSort: (dir: "asc" | "desc" | null) => void;
+  onGroup?: () => void;
+  onHide?: () => void;
+  onMoveStart?: () => void;
+  onMoveEnd?: () => void;
+  onEditStatuses?: () => void;
+  onEditField?: () => void;
+  onDeleteField?: () => void;
+  onAddColumn?: () => void;
+};
 
 // Rule-based filters (ported from the Personal List's funnel).
 type FilterOp = "is" | "isNot" | "contains" | "isEmpty" | "isNotEmpty";
@@ -142,22 +228,40 @@ function csvCell(v: unknown): string {
 const LEADING_W = 34;
 const ACTIONS_MIN_W = 44;
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
-  const customFields: FieldDef[] = initialFields ?? [];
+  // Custom-field columns, ordered by their saved `position` (matches the Fields
+  // shelf) so the header "Move to start / end" reorders visibly. Memoized so it
+  // doesn't churn the many downstream useMemo deps on every render.
+  const customFields: FieldDef[] = useMemo(
+    () => [...(initialFields ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    [initialFields],
+  );
   const { byId: itemTypeMap, list: itemTypeList, default: defaultItemType } = useItemTypes();
-  // Built-in column visibility (FieldShelf "Built-in fields" toggles).
+  // Built-in column visibility — one model shared with the Fields panel
+  // (isBuiltinShown): Assignee/Due/Priority default-on (hide via hiddenFields);
+  // Task Type/Tags/Created/Start/Updated/Task ID default-off (turn on via the
+  // Fields → Properties toggles, tracked in extraColumns). The List stays lean
+  // by default; users opt into the spreadsheet columns.
   const hideBuiltin = useMemo(() => new Set(hiddenBuiltins ?? []), [hiddenBuiltins]);
-  const showOwner = !hideBuiltin.has("__builtin_owner");
-  const showDue = !hideBuiltin.has("__builtin_due");
-  const showPriority = !hideBuiltin.has("__builtin_priority");
-  // A clean ClickUp-style List stays lean: Name / Assignee / Priority only.
-  // Type, Tags and Created are spreadsheet columns — show them in the Monday-
-  // style Table view, not the List.
-  const showType = !hideBuiltin.has("__builtin_type") && monday;
-  const showTags = !hideBuiltin.has("__builtin_tags") && monday;
-  const showCreated = !hideBuiltin.has("__builtin_created");
+  const extraSet = useMemo(() => new Set(extraColumns ?? []), [extraColumns]);
+  const showOwner = isBuiltinShown("__builtin_owner", hideBuiltin, extraSet);
+  const showDue = isBuiltinShown("__builtin_due", hideBuiltin, extraSet);
+  const showPriority = isBuiltinShown("__builtin_priority", hideBuiltin, extraSet);
+  const showType = isBuiltinShown("__builtin_type", hideBuiltin, extraSet);
+  const showTags = isBuiltinShown("__builtin_tags", hideBuiltin, extraSet);
+  const showCreated = isBuiltinShown("__builtin_created", hideBuiltin, extraSet);
+  const showStart = isBuiltinShown("__builtin_start", hideBuiltin, extraSet);
+  const showUpdated = isBuiltinShown("__builtin_updated", hideBuiltin, extraSet);
+  const showTaskId = isBuiltinShown("__builtin_taskid", hideBuiltin, extraSet);
+  const showComments = isBuiltinShown("__builtin_comments", hideBuiltin, extraSet);
+  const showTimeline = isBuiltinShown("__builtin_timeline", hideBuiltin, extraSet);
+  const showTime = isBuiltinShown("__builtin_time", hideBuiltin, extraSet);
+  const showCreatedBy = isBuiltinShown("__builtin_createdby", hideBuiltin, extraSet);
+  const showDocs = isBuiltinShown("__builtin_docs", hideBuiltin, extraSet);
+  const showLinked = isBuiltinShown("__builtin_linked", hideBuiltin, extraSet);
+  const showSops = isBuiltinShown("__builtin_sops", hideBuiltin, extraSet);
   // New rows default to the board's first status (its "not started").
   const firstStatus = statuses[0]?.value ?? "TO_DO";
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -257,6 +361,51 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const [query, setQuery] = useState("");
   // Sort (toolbar) — ported from the Personal List: none/title/due/created/priority.
   const [sortKey, setSortKey] = useState<SortKey>("none");
+  // Column-header sort — any column, asc/desc. Takes precedence over the toolbar
+  // sort when set. Persisted per-view alongside groupBy / colWidths.
+  const initialSortCol = (() => {
+    const raw = viewConfig?.sortCol as { key?: unknown; dir?: unknown } | null | undefined;
+    if (raw && typeof raw.key === "string" && (raw.dir === "asc" || raw.dir === "desc")) {
+      return { key: raw.key, dir: raw.dir as "asc" | "desc" };
+    }
+    return null;
+  })();
+  const [sortCol, setSortColState] = useState<{ key: string; dir: "asc" | "desc" } | null>(initialSortCol);
+  const setSortCol = useCallback((next: { key: string; dir: "asc" | "desc" } | null) => {
+    setSortColState(next);
+    persistView({ sortCol: next });
+  }, [persistView]);
+
+  // Column-header "Delete field" — drops the field def (values stay in metadata,
+  // per the existing DELETE semantics) and asks the parent to refetch fields.
+  const deleteField = useCallback(async (key: string) => {
+    const ok = await confirm({
+      title: "Delete column",
+      description: "Delete this field? Existing values stay in the item data but won't be shown.",
+      destructive: true,
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/boards/${boardId}/fields/${encodeURIComponent(key)}`, { method: "DELETE" });
+      if (res.ok) onFieldsChanged?.();
+    } catch { /* ignore — parent refetch is best-effort */ }
+  }, [boardId, confirm, onFieldsChanged]);
+
+  // Column-header "Move to start / end" — set the field's position just past the
+  // current extreme so the position-sorted column order reflects it after refetch.
+  const moveField = useCallback(async (key: string, toStart: boolean) => {
+    const positions = customFields.map((f) => f.position ?? 0);
+    const target = toStart ? Math.min(0, ...positions) - 1 : Math.max(0, ...positions) + 1;
+    try {
+      const res = await fetch(`/api/boards/${boardId}/fields/${encodeURIComponent(key)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ position: target }),
+      });
+      if (res.ok) onFieldsChanged?.();
+    } catch { /* ignore */ }
+  }, [boardId, customFields, onFieldsChanged]);
   // "Me" quick filter — only rows assigned to the viewer.
   const [mineOnly, setMineOnly] = useState(false);
   // Rule-based filters (funnel).
@@ -298,9 +447,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         return filterConnector === "OR" ? results.some(Boolean) : results.every(Boolean);
       });
     }
-    const topSorted = sortKey === "none" ? topFiltered : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
+    const topSorted = sortCol
+      ? [...topFiltered].sort((a, b) => {
+          const r = compareByColumn(a, b, sortCol.key, statuses);
+          return sortCol.dir === "desc" ? -r : r;
+        })
+      : sortKey === "none"
+        ? topFiltered
+        : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
     return { topLevel: topSorted, childrenByParent: byParent };
-  }, [items, query, sortKey, mineOnly, currentUserId, filterRules, filterConnector]);
+  }, [items, query, sortKey, sortCol, statuses, mineOnly, currentUserId, filterRules, filterConnector]);
 
   // CSV export of the currently visible (filtered/sorted) rows.
   function exportCsv() {
@@ -720,7 +876,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
   // select + name + actions (3 fixed) + optional status/owner/priority/type/
   // tags/created + custom fields.
-  const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + customFields.length;
+  const colCount = 3 + (showStatus ? 1 : 0) + (showOwner ? 1 : 0) + (showDue ? 1 : 0) + (showPriority ? 1 : 0) + (showType ? 1 : 0) + (showTags ? 1 : 0) + (showCreated ? 1 : 0) + (showStart ? 1 : 0) + (showUpdated ? 1 : 0) + (showTaskId ? 1 : 0) + (showComments ? 1 : 0) + (showTimeline ? 1 : 0) + (showTime ? 1 : 0) + (showCreatedBy ? 1 : 0) + (showDocs ? 1 : 0) + (showLinked ? 1 : 0) + (showSops ? 1 : 0) + customFields.length;
 
   // ── Column sizing ──────────────────────────────────────────────────────
   // Spreadsheet model. Dragging a column's right border grows/shrinks THAT
@@ -740,8 +896,18 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (showTags) cols.push({ key: "tags", label: "Tags", def: 150 });
     for (const f of customFields) cols.push({ key: f.key, label: f.label, def: 150 });
     if (showCreated) cols.push({ key: "created", label: "Created", def: 110 });
+    if (showStart) cols.push({ key: "start", label: "Start date", def: 100 });
+    if (showUpdated) cols.push({ key: "updated", label: "Updated", def: 110 });
+    if (showTaskId) cols.push({ key: "taskid", label: "Task ID", def: 92 });
+    if (showComments) cols.push({ key: "comments", label: "Comments", def: 96 });
+    if (showTimeline) cols.push({ key: "timeline", label: "Timeline", def: 140 });
+    if (showTime) cols.push({ key: "time", label: "Time tracked", def: 100 });
+    if (showCreatedBy) cols.push({ key: "createdby", label: "Created by", def: 120 });
+    if (showDocs) cols.push({ key: "docs", label: "Linked Docs", def: 96 });
+    if (showLinked) cols.push({ key: "linked", label: "Linked tasks", def: 100 });
+    if (showSops) cols.push({ key: "sops", label: "Linked SOPs", def: 96 });
     return cols;
-  }, [showStatus, showOwner, showDue, showPriority, showType, showTags, showCreated, customFields]);
+  }, [showStatus, showOwner, showDue, showPriority, showType, showTags, showCreated, showStart, showUpdated, showTaskId, showComments, showTimeline, showTime, showCreatedBy, showDocs, showLinked, showSops, customFields]);
   const metaSumW = metaColumns.reduce((s, c) => s + colW(c.key, c.def), 0);
   // Name default = whatever the meta columns leave, so the row fills the
   // viewport on first paint. Once the user drags a border, the saved widths win.
@@ -792,14 +958,51 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     window.addEventListener("pointerup", onUp);
   }, [persistView]);
 
+  // Build the header-menu context for one column. Options are column-kind aware:
+  // custom fields get move/edit/delete; status gets Edit statuses; owner/status/
+  // fields can group; owner/due/priority/type/tags/created + fields can hide.
+  const fieldKeys = new Set(customFields.map((f) => f.key));
+  const buildColMenu = (key: string): ColMenuCtx | undefined => {
+    if (!canEdit) return undefined;
+    const isField = fieldKeys.has(key);
+    const hideKey = BUILTIN_HIDE_KEY[key] ?? (isField ? key : undefined);
+    const canGroup = key === "status" || key === "owner" || isField;
+    return {
+      sortDir: sortCol?.key === key ? sortCol.dir : null,
+      grouped: groupBy === key,
+      onSort: (dir) => setSortCol(dir ? { key, dir } : null),
+      onGroup: canGroup ? () => setGroupBy(groupBy === key ? null : key) : undefined,
+      onHide: hideKey && onHideField ? () => onHideField(hideKey) : undefined,
+      onMoveStart: isField ? () => moveField(key, true) : undefined,
+      onMoveEnd: isField ? () => moveField(key, false) : undefined,
+      onEditStatuses: key === "status" ? onEditStatuses : undefined,
+      onEditField: isField && onOpenFields ? onOpenFields : undefined,
+      onDeleteField: isField ? () => deleteField(key) : undefined,
+      onAddColumn: onOpenFields,
+    };
+  };
+
+  // Resolve a column's colored type icon for the header (ClickUp shows the
+  // field-type icon before each label). Custom fields use their field type;
+  // built-ins (incl. Name/Status) map to their BUILTIN_COLUMNS icon.
+  const fieldByKey = new Map(customFields.map((f) => [f.key, f] as const));
+  const COL_BUILTIN: Record<string, string> = { name: "__name", status: "__builtin_status", ...BUILTIN_HIDE_KEY };
+  const colIcon = (key: string): { Icon: LucideIcon; color: string } | null => {
+    const cf = fieldByKey.get(key);
+    if (cf) { const e = FIELD_TYPE_BY_KEY[cf.type]; return e ? { Icon: e.Icon, color: e.color } : null; }
+    const bc = COL_BUILTIN[key] ? BUILTIN_COLUMN_BY_KEY[COL_BUILTIN[key]] : undefined;
+    return bc ? { Icon: bc.Icon, color: bc.color } : null;
+  };
+
   // Ordered resizable columns (Name + meta).
   const resizeCols = [
-    { key: "name", label: "Name", width: nameW, pad: "px-4" },
+    { key: "name", label: "Name", width: nameW, pad: "px-4", icon: colIcon("name") },
     ...metaColumns.map((c) => ({
       key: c.key,
       label: c.label,
       width: colW(c.key, c.def),
       pad: c.key === "status" ? "px-4" : "px-3",
+      icon: colIcon(c.key),
     })),
   ];
 
@@ -825,12 +1028,23 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         showType={showType}
         showTags={showTags}
         showCreated={showCreated}
+        showStart={showStart}
+        showUpdated={showUpdated}
+        showTaskId={showTaskId}
+        showComments={showComments}
+        showTimeline={showTimeline}
+        showTime={showTime}
+        showCreatedBy={showCreatedBy}
+        showDocs={showDocs}
+        showLinked={showLinked}
+        showSops={showSops}
         canEdit={canEdit}
         monday={monday}
         selected={selected.has(row.id)}
         onToggleSelect={toggleRow}
         onUpdate={handleUpdate}
         onArchive={handleArchive}
+        onDeleted={(id) => setItems((prev) => prev.filter((r) => r.id !== id))}
         onOpen={onOpenItem ? () => onOpenItem(row.id) : undefined}
         onDuplicate={handleDuplicate}
         onAddSubtask={() => addSubtask(row.id, row.status)}
@@ -1001,6 +1215,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                   className={c.pad}
                   canEdit={canEdit}
                   onResize={(e) => startColResize(e, c.key, c.width)}
+                  menu={buildColMenu(c.key)}
+                  icon={c.icon}
                 />
               ))}
               <th className="px-1 py-2 text-right align-middle" style={{ width: actionsW }}>
@@ -1080,14 +1296,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                     {/* Monday-style per-group summary footer — aggregates
                         every column (stacked bars, people, sums…). Table view only;
                         a clean List has no spreadsheet summary. */}
-                    {monday ? <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} /> : null}
+                    {monday ? <GroupSummaryRow rows={b.rows} customFields={customFields} statuses={statuses} railColor={b.color} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} showCreated={showCreated} showStart={showStart} showUpdated={showUpdated} showTaskId={showTaskId} showComments={showComments} showTimeline={showTimeline} showTime={showTime} showCreatedBy={showCreatedBy} showDocs={showDocs} showLinked={showLinked} showSops={showSops} /> : null}
                   </React.Fragment>
                 );
               })
             ) : (
               <>
                 {topLevel.flatMap((row) => renderRowAndSubtasks(row, 0))}
-                {monday && items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} /> : null}
+                {monday && items.length > 0 ? <GroupSummaryRow rows={items} customFields={customFields} statuses={statuses} railColor={null} showOwner={showOwner} showPriority={showPriority} showType={showType} showTags={showTags} showCreated={showCreated} showStart={showStart} showUpdated={showUpdated} showTaskId={showTaskId} showComments={showComments} showTimeline={showTimeline} showTime={showTime} showCreatedBy={showCreatedBy} showDocs={showDocs} showLinked={showLinked} showSops={showSops} /> : null}
               </>
             )}
             {/* Bottom "+ Add Task" — shown when ungrouped, OR when grouped but
@@ -1308,12 +1524,23 @@ function Row({
   showType,
   showTags,
   showCreated = true,
+  showStart = false,
+  showUpdated = false,
+  showTaskId = false,
+  showComments = false,
+  showTimeline = false,
+  showTime = false,
+  showCreatedBy = false,
+  showDocs = false,
+  showLinked = false,
+  showSops = false,
   canEdit,
   monday = false,
   selected,
   onToggleSelect,
   onUpdate,
   onArchive,
+  onDeleted,
   onOpen,
   onDuplicate,
   onAddSubtask,
@@ -1340,12 +1567,24 @@ function Row({
   showType: boolean;
   showTags: boolean;
   showCreated?: boolean;
+  showStart?: boolean;
+  showUpdated?: boolean;
+  showTaskId?: boolean;
+  showComments?: boolean;
+  showTimeline?: boolean;
+  showTime?: boolean;
+  showCreatedBy?: boolean;
+  showDocs?: boolean;
+  showLinked?: boolean;
+  showSops?: boolean;
   canEdit: boolean;
   monday?: boolean;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   onUpdate: (id: string, patch: RowPatch) => void;
   onArchive: (id: string) => void;
+  /** Local removal after a hard delete (→ Trash) succeeds. */
+  onDeleted: (id: string) => void;
   onOpen?: () => void;
   onDuplicate?: (row: BoardItemRow) => void;
   onAddSubtask?: () => void;
@@ -1363,9 +1602,17 @@ function Row({
 }) {
   // Bumped by the hover "rename" pencil to put the title cell into edit mode.
   const [editToken, setEditToken] = useState(0);
+  const moreRef = useRef<ContextMenuHandle>(null);
   return (
     <tr
       draggable={dragEnabled}
+      onContextMenu={(e) => {
+        // Let inputs / editable cells keep their native menu (e.g. while
+        // renaming a title inline); everywhere else opens the row menu.
+        if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
+        e.preventDefault();
+        moreRef.current?.openAtPoint(e.clientX, e.clientY);
+      }}
       onDragStart={(e) => {
         if (!dragEnabled) return;
         e.dataTransfer.effectAllowed = "move";
@@ -1494,13 +1741,66 @@ function Row({
           {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
+      {showStart ? (
+        <td className="px-4 py-2 text-xs text-zinc-500">
+          {row.startAt ? new Date(row.startAt).toLocaleDateString() : "—"}
+        </td>
+      ) : null}
+      {showUpdated ? (
+        <td className="px-4 py-2 text-xs text-zinc-500">
+          {row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : "—"}
+        </td>
+      ) : null}
+      {showTaskId ? (
+        <td className="px-4 py-2 text-[11px] font-mono text-zinc-400">
+          {row.id.slice(-6)}
+        </td>
+      ) : null}
+      {showComments ? (
+        <td className="px-4 py-2 text-xs text-zinc-500">
+          {row.commentCount ? (
+            <span className="inline-flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5 text-zinc-400" />{row.commentCount}</span>
+          ) : "—"}
+        </td>
+      ) : null}
+      {showTimeline ? (
+        <td className="px-4 py-2"><TimelineCell startAt={row.startAt} dueAt={row.dueAt} /></td>
+      ) : null}
+      {showTime ? (
+        <td className="px-4 py-2 text-xs text-zinc-500">
+          {row.timeTrackedMs ? <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-400" />{formatDuration(row.timeTrackedMs)}</span> : "—"}
+        </td>
+      ) : null}
+      {showCreatedBy ? (
+        <td className="px-4 py-2">
+          {row.createdBy ? (
+            <span className="inline-flex items-center gap-1.5">
+              <PersonAvatar person={{ ...row.createdBy, email: null }} size={18} />
+              <span className="text-xs text-zinc-600 truncate max-w-[90px]">{`${row.createdBy.firstName ?? ""} ${row.createdBy.lastName ?? ""}`.trim() || "—"}</span>
+            </span>
+          ) : <span className="text-xs text-zinc-400">—</span>}
+        </td>
+      ) : null}
+      {showDocs ? (
+        <td className="px-4 py-2 text-xs text-zinc-500">{row.linkedDocCount ? <span className="inline-flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-amber-600" />{row.linkedDocCount}</span> : "—"}</td>
+      ) : null}
+      {showLinked ? (
+        <td className="px-4 py-2 text-xs text-zinc-500">{row.linkedTaskCount ? <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5 text-amber-600" />{row.linkedTaskCount}</span> : "—"}</td>
+      ) : null}
+      {showSops ? (
+        <td className="px-4 py-2 text-xs text-zinc-500">{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-amber-600" />{row.linkedSopCount}</span> : "—"}</td>
+      ) : null}
       <td className="px-2 py-1.5 text-right">
         {canEdit ? (
-          <RowActionsMenu
-            itemId={row.id}
+          <ItemRowMoreMenu
+            ref={moreRef}
+            item={{ id: row.id, title: row.title }}
+            canEdit={canEdit}
             onOpen={onOpen}
+            onRename={() => setEditToken((t) => t + 1)}
             onDuplicate={onDuplicate ? () => onDuplicate(row) : undefined}
             onArchive={() => onArchive(row.id)}
+            onDeleted={() => onDeleted(row.id)}
           />
         ) : null}
       </td>
@@ -1807,6 +2107,37 @@ function CheckBox({ checked, indeterminate, onChange, className = "" }: {
 // A row's meta cell (Assignee / Due / Priority / …) — its content sits in a
 // rounded area that highlights on hover, so each cell reads as its own aligned
 // "section" like ClickUp. Content left-aligns at ~16px to match the header.
+// ms → "Xh Ym" (or "—" when nothing tracked). Mirrors the topbar timer format.
+function formatDuration(ms?: number): string {
+  if (!ms || ms <= 0) return "—";
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  return `${m}m`;
+}
+
+// Timeline cell — a compact start→due span cue (bar + short date range). Reads
+// the same startAt/dueAt the Gantt view uses, so a List can preview scheduling.
+function TimelineCell({ startAt, dueAt }: { startAt?: Date | string | null; dueAt?: Date | string | null }) {
+  const valid = (d: Date | string | null | undefined): Date | null => {
+    if (!d) return null;
+    const x = new Date(d);
+    return Number.isNaN(x.getTime()) ? null : x;
+  };
+  const s = valid(startAt);
+  const e = valid(dueAt);
+  if (!s && !e) return <span className="text-xs text-zinc-400">—</span>;
+  const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const label = s && e ? `${fmt(s)} – ${fmt(e)}` : fmt((s ?? e)!);
+  return (
+    <span className="inline-flex items-center gap-1.5" title={label}>
+      <span className="h-1.5 w-8 rounded-full bg-emerald-400/70 shrink-0" />
+      <span className="text-xs text-zinc-500 truncate">{label}</span>
+    </span>
+  );
+}
+
 function MetaCell({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   // Clicking anywhere in the cell (not just the icon) opens the cell's picker:
@@ -1817,11 +2148,11 @@ function MetaCell({ children }: { children: React.ReactNode }) {
     if (btn && t !== btn && !btn.contains(t)) btn.click();
   };
   return (
-    <td className="px-1.5 py-1 align-middle">
+    <td className="px-1.5 py-1 align-middle overflow-hidden">
       <div
         ref={ref}
         onClick={forwardClick}
-        className="flex items-center min-h-[28px] rounded-md px-2 border border-transparent cursor-pointer hover:bg-zinc-100 hover:border-zinc-300 transition-colors"
+        className="flex items-center min-w-0 min-h-[28px] rounded-md px-2 border border-transparent cursor-pointer hover:bg-zinc-100 hover:border-zinc-300 transition-colors [&>*]:min-w-0"
       >
         {children}
       </div>
@@ -1833,16 +2164,62 @@ function MetaCell({ children }: { children: React.ReactNode }) {
 // hover (ClickUp style). Dragging resizes THIS column; every column to its
 // right shifts as a block (the trailing actions column absorbs the delta), so
 // it can never collapse the layout.
-function ResizableTh({ label, width, className, canEdit, onResize }: {
+function ResizableTh({ label, width, className, canEdit, onResize, menu, icon }: {
   label: string;
   width: number;
   className?: string;
   canEdit: boolean;
   onResize: (e: React.PointerEvent) => void;
+  /** Column-header menu (sort / group / hide / move / edit-delete field). When
+   *  present, a caret appears on hover and right-clicking the header opens it. */
+  menu?: ColMenuCtx;
+  /** Colored field-type icon shown before the label (ClickUp parity). */
+  icon?: { Icon: LucideIcon; color: string } | null;
 }) {
+  const [open, setOpen] = useState(false);
+  const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("mousedown", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
-    <th className={`relative group/th py-2 font-medium ${className ?? "px-3"}`} style={{ width }}>
-      <span className="block truncate">{label}</span>
+    <th
+      className={`relative group/th py-2 font-medium ${className ?? "px-3"}`}
+      style={{ width }}
+      onContextMenu={menu ? (e) => { e.preventDefault(); setPoint({ x: e.clientX, y: e.clientY }); setOpen(true); } : undefined}
+    >
+      <div className="flex items-center gap-1.5 min-w-0">
+        {icon ? <icon.Icon className="w-3.5 h-3.5 shrink-0" style={{ color: icon.color }} aria-hidden /> : null}
+        <span className="block truncate">{label}</span>
+        {menu ? (
+          <button
+            ref={btnRef}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setPoint(null); setOpen((v) => !v); }}
+            className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200 transition-opacity ${open ? "opacity-100" : "opacity-0 group-hover/th:opacity-100"}`}
+            title="Column options"
+            aria-label="Column options"
+            aria-haspopup="menu"
+            aria-expanded={open}
+          >
+            <ChevronDown className="w-3 h-3" />
+          </button>
+        ) : null}
+      </div>
       {canEdit ? (
         <span
           onPointerDown={onResize}
@@ -1855,7 +2232,49 @@ function ResizableTh({ label, width, className, canEdit, onResize }: {
           <span className="w-[2px] h-full bg-transparent group-hover/th:bg-[var(--os-brand)] transition-colors" />
         </span>
       ) : null}
+      {menu ? (
+        <MorePortal anchorRef={btnRef} panelRef={panelRef} width={212} open={open} placement="below" point={point}>
+          <ColumnMenu ctx={menu} close={() => setOpen(false)} />
+        </MorePortal>
+      ) : null}
     </th>
+  );
+}
+
+// The column-header dropdown. Renders only the actions its ctx enables.
+function ColumnMenu({ ctx, close }: { ctx: ColMenuCtx; close: () => void }) {
+  const run = (fn?: () => void) => { fn?.(); close(); };
+  const hasFieldOps = !!(ctx.onEditField || ctx.onMoveStart || ctx.onHide || ctx.onDeleteField);
+  return (
+    <MenuList className="min-w-[212px]" onClick={(e) => e.stopPropagation()}>
+      <MenuItem icon={ArrowUp} label="Sort ascending" onClick={() => run(() => ctx.onSort("asc"))} />
+      <MenuItem icon={ArrowDown} label="Sort descending" onClick={() => run(() => ctx.onSort("desc"))} />
+      {ctx.sortDir ? <MenuItem icon={X} label="Clear sort" onClick={() => run(() => ctx.onSort(null))} /> : null}
+      {ctx.onGroup ? (
+        <>
+          <MenuSeparator />
+          <MenuItem icon={Layers} label={ctx.grouped ? "Ungroup" : "Group by this column"} onClick={() => run(ctx.onGroup)} />
+        </>
+      ) : null}
+      {ctx.onEditStatuses ? (
+        <>
+          <MenuSeparator />
+          <MenuItem icon={Settings2} label="Edit statuses" onClick={() => run(ctx.onEditStatuses)} />
+        </>
+      ) : null}
+      {hasFieldOps ? <MenuSeparator /> : null}
+      {ctx.onEditField ? <MenuItem icon={Pencil} label="Edit field" onClick={() => run(ctx.onEditField)} /> : null}
+      {ctx.onMoveStart ? <MenuItem icon={ChevronsLeft} label="Move to start" onClick={() => run(ctx.onMoveStart)} /> : null}
+      {ctx.onMoveEnd ? <MenuItem icon={ChevronsRight} label="Move to end" onClick={() => run(ctx.onMoveEnd)} /> : null}
+      {ctx.onHide ? <MenuItem icon={EyeOff} label="Hide column" onClick={() => run(ctx.onHide)} /> : null}
+      {ctx.onDeleteField ? <MenuItem icon={Trash2} label="Delete field" destructive onClick={() => run(ctx.onDeleteField)} /> : null}
+      {ctx.onAddColumn ? (
+        <>
+          <MenuSeparator />
+          <MenuItem icon={Plus} label="Add column" onClick={() => run(ctx.onAddColumn)} />
+        </>
+      ) : null}
+    </MenuList>
   );
 }
 
@@ -2209,6 +2628,17 @@ function GroupSummaryRow({
   showPriority = true,
   showType = true,
   showTags = true,
+  showCreated = false,
+  showStart = false,
+  showUpdated = false,
+  showTaskId = false,
+  showComments = false,
+  showTimeline = false,
+  showTime = false,
+  showCreatedBy = false,
+  showDocs = false,
+  showLinked = false,
+  showSops = false,
 }: {
   rows: BoardItemRow[];
   customFields: FieldDef[];
@@ -2218,6 +2648,17 @@ function GroupSummaryRow({
   showPriority?: boolean;
   showType?: boolean;
   showTags?: boolean;
+  showCreated?: boolean;
+  showStart?: boolean;
+  showUpdated?: boolean;
+  showTaskId?: boolean;
+  showComments?: boolean;
+  showTimeline?: boolean;
+  showTime?: boolean;
+  showCreatedBy?: boolean;
+  showDocs?: boolean;
+  showLinked?: boolean;
+  showSops?: boolean;
 }) {
   // Status + priority stacked bars.
   const statusSegs = useMemo<BarSeg[]>(() => {
@@ -2312,8 +2753,18 @@ function GroupSummaryRow({
       {customFields.map((f) => (
         <td key={f.key} className="px-4 py-1.5"><CustomFieldSummary field={f} rows={rows} /></td>
       ))}
-      {/* Created + actions spacers */}
-      <td className="px-4 py-1.5" />
+      {/* Optional built-in column spacers (match the data-row columns) + actions */}
+      {showCreated ? <td className="px-4 py-1.5" /> : null}
+      {showStart ? <td className="px-4 py-1.5" /> : null}
+      {showUpdated ? <td className="px-4 py-1.5" /> : null}
+      {showTaskId ? <td className="px-4 py-1.5" /> : null}
+      {showComments ? <td className="px-4 py-1.5" /> : null}
+      {showTimeline ? <td className="px-4 py-1.5" /> : null}
+      {showTime ? <td className="px-4 py-1.5" /> : null}
+      {showCreatedBy ? <td className="px-4 py-1.5" /> : null}
+      {showDocs ? <td className="px-4 py-1.5" /> : null}
+      {showLinked ? <td className="px-4 py-1.5" /> : null}
+      {showSops ? <td className="px-4 py-1.5" /> : null}
       <td className="px-2 py-1.5" />
     </tr>
   );
@@ -2350,75 +2801,6 @@ function GroupStatusBreakdown({ rows, statuses }: { rows: BoardItemRow[]; status
             </div>
           );
         })}
-      </div>
-    </details>
-  );
-}
-
-function RowActionsMenu({
-  itemId,
-  onOpen,
-  onDuplicate,
-  onArchive,
-}: {
-  itemId: string;
-  onOpen?: () => void;
-  onDuplicate?: () => void;
-  onArchive: () => void;
-}) {
-  const copyLink = async () => {
-    try {
-      const url = `${window.location.origin}${window.location.pathname}?item=${itemId}`;
-      await navigator.clipboard.writeText(url);
-    } catch {}
-  };
-  return (
-    <details className="relative inline-block">
-      <summary
-        className="list-none cursor-pointer opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 select-none"
-        title="More actions"
-        aria-label="More actions"
-      >
-        <MoreHorizontal className="w-3.5 h-3.5" />
-      </summary>
-      <div className="absolute right-0 top-full mt-1 z-50 w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
-        {onOpen ? (
-          <button
-            type="button"
-            onClick={onOpen}
-            className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-zinc-700 hover:bg-zinc-50"
-          >
-            <ExternalLink className="w-3 h-3 text-zinc-400" />
-            Open
-          </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={copyLink}
-          className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-zinc-700 hover:bg-zinc-50"
-        >
-          <Link2 className="w-3 h-3 text-zinc-400" />
-          Copy link
-        </button>
-        {onDuplicate ? (
-          <button
-            type="button"
-            onClick={onDuplicate}
-            className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-zinc-700 hover:bg-zinc-50"
-          >
-            <Copy className="w-3 h-3 text-zinc-400" />
-            Duplicate
-          </button>
-        ) : null}
-        <div className="h-px bg-zinc-100 my-1" />
-        <button
-          type="button"
-          onClick={onArchive}
-          className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-red-600 hover:bg-red-50"
-        >
-          <Trash2 className="w-3 h-3" />
-          Archive
-        </button>
       </div>
     </details>
   );

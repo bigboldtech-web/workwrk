@@ -8,11 +8,11 @@
 //   Rename → PATCH /api/tables/[id] { name }
 //   Delete → DELETE /api/tables/[id]  (hard delete — rows cascade)
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Edit2, Trash2, Loader2 } from "lucide-react";
 import { useOsToast } from "./toast";
-import { MorePortal } from "./more-portal";
+import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
@@ -26,10 +26,18 @@ interface Props {
   onUpdated?: () => void;
 }
 
-export function TableMoreTrigger({ table, onUpdated }: Props) {
+export const TableMoreTrigger = forwardRef<ContextMenuHandle, Props>(function TableMoreTrigger(
+  { table, onUpdated },
+  ref,
+) {
   const [open, setOpen] = useState(false);
+  const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    openAtPoint: (x, y) => { setPoint({ x, y }); setOpen(true); },
+  }), []);
 
   useEffect(() => {
     if (!open) return;
@@ -55,6 +63,7 @@ export function TableMoreTrigger({ table, onUpdated }: Props) {
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          setPoint(null);
           setOpen((v) => !v);
         }}
         className={`p-1 rounded transition-colors ${
@@ -67,7 +76,7 @@ export function TableMoreTrigger({ table, onUpdated }: Props) {
       >
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
-      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={220} open={open} placement="below">
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={220} open={open} placement="below" point={point}>
         <TableMoreMenu
           table={table}
           onClose={() => setOpen(false)}
@@ -76,7 +85,7 @@ export function TableMoreTrigger({ table, onUpdated }: Props) {
       </MorePortal>
     </span>
   );
-}
+});
 
 type Mode = "menu" | "rename";
 
@@ -118,7 +127,7 @@ function TableMoreMenu({
   };
 
   const remove = async () => {
-    if (!(await confirm({ title: "Delete table", description: `Delete "${table.name}"? Rows will be deleted permanently.`, destructive: true, confirmLabel: "Delete" }))) return;
+    if (!(await confirm({ title: "Delete table", description: `Delete "${table.name}"? It and its rows move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBusy("delete");
     try {
       const res = await fetch(`/api/tables/${table.id}`, { method: "DELETE" });

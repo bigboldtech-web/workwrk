@@ -1,24 +1,25 @@
 // GET    /api/spaces/[id]         — read; visibility check enforced
 // PATCH  /api/spaces/[id]         — edit; SpaceMember OWNER/ADMIN or org admin
-// DELETE /api/spaces/[id]         — archive (soft-delete); ?hard=1 permanently
-//                                    deletes the Space + its boards/folders.
+// DELETE /api/spaces/[id]         — archive (soft-delete); ?hard=1 → recoverable
+//                                    Trash (Space + its boards/folders/items).
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveSpace, canEditSpace, deleteSpace, getSpaceForReader, updateSpace } from "@/lib/space";
+import { archiveSpace, canEditSpace, getSpaceForReader, updateSpace } from "@/lib/space";
+import { moveToTrash } from "@/lib/trash";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
+  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string; name?: string };
   if (!u.id || !u.organizationId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
+  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId, userName: u.name ?? null };
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -84,7 +85,8 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const hard = new URL(req.url).searchParams.get("hard") === "1";
   if (hard) {
     try {
-      await deleteSpace(id);
+      // Recoverable delete — snapshot the whole Space subtree to Trash.
+      await moveToTrash("space", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
       return NextResponse.json({ ok: true });
     } catch {
       return NextResponse.json({ error: "Couldn't delete this Space" }, { status: 400 });

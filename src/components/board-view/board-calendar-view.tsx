@@ -15,6 +15,9 @@ import type { FieldDef } from "@/lib/field-catalog";
 
 interface BoardCalendarViewProps {
   boardId: string;
+  /** Active view + its config — used to persist which date field drives the grid. */
+  viewId?: string | null;
+  viewConfig?: Record<string, unknown>;
   initialItems: BoardItemRow[];
   initialFields?: FieldDef[];
   /** Per-List statuses (backbone #1) — drives the chip dot colors. */
@@ -33,7 +36,7 @@ function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function BoardCalendarView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged }: BoardCalendarViewProps) {
+export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged }: BoardCalendarViewProps) {
   const now = new Date();
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   const [month, setMonth] = useState<{ y: number; m: number }>({ y: now.getFullYear(), m: now.getMonth() });
@@ -43,26 +46,39 @@ export function BoardCalendarView({ boardId, initialItems, initialFields, status
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverDay, setDragOverDay] = useState<string | null>(null);
 
-  // First DATE/DATETIME field key — metadata fallback for legacy rows.
-  const dateFieldKey = useMemo(
-    () => (initialFields ?? []).find((f) => f.type === "DATE" || f.type === "DATETIME")?.key ?? null,
+  // The board's DATE/DATETIME custom fields — the choices for which date drives
+  // the grid. Auto (default) = Due date, then the first date field (legacy).
+  const dateFields = useMemo(
+    () => (initialFields ?? []).filter((f) => f.type === "DATE" || f.type === "DATETIME"),
     [initialFields],
   );
+  const firstDateFieldKey = dateFields[0]?.key ?? null;
+  const rawSel = typeof viewConfig?.dateFieldKey === "string" ? (viewConfig.dateFieldKey as string) : "__auto";
+  // Keep only valid selections (config might reference a deleted field).
+  const dateSource = rawSel === "__auto" || rawSel === "__due" || dateFields.some((f) => f.key === rawSel) ? rawSel : "__auto";
+  const [dateSourceLocal, setDateSourceLocal] = useState(dateSource);
+  const persistDateSource = useCallback((next: string) => {
+    setDateSourceLocal(next);
+    if (viewId) {
+      void fetch(`/api/boards/${boardId}/views/${viewId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: { ...(viewConfig ?? {}), dateFieldKey: next } }),
+      }).catch(() => {});
+    }
+  }, [boardId, viewId, viewConfig]);
 
   const resolveDate = useCallback((it: BoardItemRow): Date | null => {
-    if (it.dueAt) {
-      const d = new Date(it.dueAt);
-      if (!Number.isNaN(d.getTime())) return d;
-    }
-    if (dateFieldKey) {
-      const raw = it.metadata?.[dateFieldKey];
-      if (typeof raw === "string" && raw) {
-        const d = new Date(raw);
-        if (!Number.isNaN(d.getTime())) return d;
-      }
-    }
-    return null;
-  }, [dateFieldKey]);
+    const parse = (raw: unknown): Date | null => {
+      if (!raw) return null;
+      const d = new Date(raw as string);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    if (dateSourceLocal === "__due") return parse(it.dueAt);
+    if (dateSourceLocal !== "__auto") return parse(it.metadata?.[dateSourceLocal]);
+    // Auto: Due date first, then the first DATE field (legacy fallback).
+    return parse(it.dueAt) ?? (firstDateFieldKey ? parse(it.metadata?.[firstDateFieldKey]) : null);
+  }, [dateSourceLocal, firstDateFieldKey]);
 
   const buckets = useMemo(() => {
     const map = new Map<string, BoardItemRow[]>();
@@ -195,8 +211,24 @@ export function BoardCalendarView({ boardId, initialItems, initialFields, status
         </div>
         <h2 className="text-[13px] font-semibold text-zinc-900">{monthLabel}</h2>
         <div className="flex-1" />
-        <span className="text-[10.5px] text-zinc-400 hidden sm:inline">
-          {datedCount} dated item{datedCount === 1 ? "" : "s"} · set a Due date (or a DATE field) to place items
+        {dateFields.length > 0 ? (
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
+            <span className="hidden sm:inline">Date field</span>
+            <select
+              value={dateSourceLocal}
+              onChange={(e) => persistDateSource(e.target.value)}
+              className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[11.5px] text-zinc-700 focus:outline-none focus:border-[var(--os-brand)]"
+            >
+              <option value="__auto">Auto (Due + date fields)</option>
+              <option value="__due">Due date</option>
+              {dateFields.map((f) => (
+                <option key={f.key} value={f.key}>{f.label}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <span className="text-[10.5px] text-zinc-400 hidden lg:inline">
+          {datedCount} dated item{datedCount === 1 ? "" : "s"}
         </span>
       </div>
 

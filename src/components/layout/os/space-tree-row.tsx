@@ -23,6 +23,7 @@ import { SpaceCreateTrigger } from "./space-create-popover";
 import { BoardMoreTrigger } from "./board-more-menu";
 import { FolderMoreTrigger } from "./folder-more-menu";
 import { TableMoreTrigger } from "./table-more-menu";
+import { type ContextMenuHandle } from "./more-portal";
 import { SidebarQuickStar } from "./sidebar-quick-star";
 
 // ---------------------------------------------------------------------------
@@ -165,6 +166,7 @@ export function SpaceTreeRow({
   const [data, setData] = useState<ChildrenPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [rootDragOver, setRootDragOver] = useState(false);
+  const moreRef = useRef<ContextMenuHandle>(null);
 
   const loadChildren = () => {
     setLoading(true);
@@ -227,6 +229,7 @@ export function SpaceTreeRow({
           const ok = await moveTreeItem(p, { folderId: null, spaceId: space.id });
           if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); refreshSidebar(); }
         }}
+        onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-7 items-center gap-2 px-2 rounded-md ${
           rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
         }`}
@@ -259,6 +262,7 @@ export function SpaceTreeRow({
         <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/space:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="space" id={space.id} />
           <SpaceMoreTrigger
+            ref={moreRef}
             space={space}
             onUpdated={onReloadSpaces}
             onRequestShare={onRequestShareSpace}
@@ -331,6 +335,7 @@ function FolderTreeRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const moreRef = useRef<ContextMenuHandle>(null);
   const hasChildren =
     folder.boards.length > 0 ||
     folder.docs.length > 0 ||
@@ -353,6 +358,7 @@ function FolderTreeRow({
           const ok = await moveTreeItem(p, { folderId: folder.id, spaceId });
           if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
+        onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
       >
         <button
@@ -388,6 +394,7 @@ function FolderTreeRow({
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/folderrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
+            ref={moreRef}
             folder={{ id: folder.id, name: folder.name, icon: folder.icon, color: folder.color }}
             onUpdated={onChanged}
           />
@@ -432,11 +439,13 @@ function BoardTreeRow({
   onChanged: () => void;
 }) {
   const router = useRouter();
+  const moreRef = useRef<ContextMenuHandle>(null);
   return (
     <li className="group/boardrow relative">
       <div
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "board", id: board.id })}
+        onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
       >
         <button
@@ -453,6 +462,7 @@ function BoardTreeRow({
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/boardrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="board" id={board.id} />
           <BoardMoreTrigger
+            ref={moreRef}
             board={{ id: board.id, name: board.name, slug: board.slug, icon: board.icon, color: board.color }}
             onUpdated={onChanged}
           />
@@ -470,9 +480,13 @@ function TableTreeRow({
   onChanged: () => void;
 }) {
   const router = useRouter();
+  const moreRef = useRef<ContextMenuHandle>(null);
   return (
     <li className="group/tablerow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80">
+      <div
+        onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
+        className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80"
+      >
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
@@ -483,7 +497,7 @@ function TableTreeRow({
         </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/tablerow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="table" id={table.id} />
-          <TableMoreTrigger table={{ id: table.id, name: table.name }} onUpdated={onChanged} />
+          <TableMoreTrigger ref={moreRef} table={{ id: table.id, name: table.name }} onUpdated={onChanged} />
         </span>
       </div>
     </li>

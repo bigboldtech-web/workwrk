@@ -11,7 +11,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CircleDot, Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
-import type { FieldDef } from "@/lib/field-catalog";
+import { BUILTIN_COLUMN_BY_KEY, type FieldDef } from "@/lib/field-catalog";
 import { BoardTableView } from "./board-table-view";
 import { BoardKanbanView } from "./board-kanban-view";
 import { BoardCalendarView } from "./board-calendar-view";
@@ -117,23 +117,55 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     const raw = viewConfig?.hiddenFields;
     return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
   });
+  // Optional built-in columns turned ON for this view (View.config.extraColumns) —
+  // the default-off "Properties" like Task Type / Start date / Task ID.
+  const [extraColumns, setExtraColumns] = useState<string[]>(() => {
+    const raw = viewConfig?.extraColumns;
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  });
+  const persistCols = useCallback((hiddenNext: string[], extraNext: string[]) => {
+    if (!viewId) return;
+    void fetch(`/api/boards/${boardId}/views/${viewId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ config: { ...(viewConfig ?? {}), hiddenFields: hiddenNext, extraColumns: extraNext } }),
+    }).catch(() => {});
+  }, [boardId, viewId, viewConfig]);
   const toggleHiddenField = useCallback((key: string) => {
     setHiddenFields((prev) => {
       const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
-      if (viewId) {
-        void fetch(`/api/boards/${boardId}/views/${viewId}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ config: { ...(viewConfig ?? {}), hiddenFields: next } }),
-        }).catch(() => {});
-      }
+      persistCols(next, extraColumns);
       return next;
     });
-  }, [boardId, viewId, viewConfig]);
+  }, [persistCols, extraColumns]);
+  const toggleExtraColumn = useCallback((key: string) => {
+    setExtraColumns((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      persistCols(hiddenFields, next);
+      return next;
+    });
+  }, [persistCols, hiddenFields]);
+  // Single entry point for the Fields panel + column-header menu: default-off
+  // built-ins toggle via extraColumns; everything else (default-on built-ins +
+  // custom fields) toggles via hiddenFields.
+  const toggleColumn = useCallback((key: string) => {
+    const col = BUILTIN_COLUMN_BY_KEY[key];
+    if (col && !col.locked && !col.defaultShown) toggleExtraColumn(key);
+    else toggleHiddenField(key);
+  }, [toggleExtraColumn, toggleHiddenField]);
   const visibleFields = useMemo(
     () => fields.filter((f) => !hiddenFields.includes(f.key)),
     [fields, hiddenFields],
   );
+
+  // Re-pull Board.schema.fields after a column-header field mutation (delete /
+  // move to start-end) so the table reflects it. Mirrors FieldShelf's refetch.
+  const refetchFields = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/boards/${boardId}/fields`, { cache: "no-store" });
+      if (res.ok) { const d = await res.json(); setFields((d.fields ?? []) as FieldDef[]); }
+    } catch { /* best-effort */ }
+  }, [boardId]);
 
   // Per-view filters (View.config.filters), applied to every renderer. The
   // search + filter UI was pulled out (it's moving to a new spot), so there's no
@@ -202,6 +234,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           currentUserId={currentUserId}
           toolbarActions={toolbarActions}
           hiddenBuiltins={hiddenFields}
+          extraColumns={extraColumns}
+          onHideField={viewId ? toggleColumn : undefined}
+          onFieldsChanged={refetchFields}
           gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
         />
       ) : viewType === "KANBAN" ? (
@@ -216,6 +251,8 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       ) : viewType === "CALENDAR" ? (
         <BoardCalendarView
           boardId={boardId}
+          viewId={viewId}
+          viewConfig={viewConfig}
           initialItems={filteredItems}
           initialFields={fields}
           statuses={statuses}
@@ -227,6 +264,8 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       ) : viewType === "GANTT" ? (
         <BoardGanttView
           boardId={boardId}
+          viewId={viewId}
+          viewConfig={viewConfig}
           initialItems={filteredItems}
           initialFields={fields}
           statuses={statuses}
@@ -340,7 +379,8 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         canEdit={canEdit}
         fields={fields}
         hiddenFields={hiddenFields}
-        onToggleHidden={viewId ? toggleHiddenField : undefined}
+        extraColumns={extraColumns}
+        onToggleColumn={viewId ? toggleColumn : undefined}
         onClose={() => { setShelfOpen(false); stripPanel(); }}
         onFieldsChanged={setFields}
       />

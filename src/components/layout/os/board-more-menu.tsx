@@ -10,7 +10,7 @@
 //   Share             → opens ShareBoardDialog (hoisted callback)
 //   Archive Board     → DELETE /api/boards/[id]  (soft-archive)
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Share2, Archive, Loader2, Star, PanelLeft, PanelTop,
@@ -21,7 +21,7 @@ import {
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
-import { MorePortal } from "./more-portal";
+import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
@@ -39,10 +39,18 @@ interface Props {
   onRequestShare?: () => void;
 }
 
-export function BoardMoreTrigger({ board, onUpdated, onRequestShare }: Props) {
+export const BoardMoreTrigger = forwardRef<ContextMenuHandle, Props>(function BoardMoreTrigger(
+  { board, onUpdated, onRequestShare },
+  ref,
+) {
   const [open, setOpen] = useState(false);
+  const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    openAtPoint: (x, y) => { setPoint({ x, y }); setOpen(true); },
+  }), []);
 
   useEffect(() => {
     if (!open) return;
@@ -68,6 +76,7 @@ export function BoardMoreTrigger({ board, onUpdated, onRequestShare }: Props) {
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          setPoint(null);
           setOpen((v) => !v);
         }}
         className={`p-1 rounded transition-colors ${
@@ -80,7 +89,7 @@ export function BoardMoreTrigger({ board, onUpdated, onRequestShare }: Props) {
       >
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
-      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={240} open={open} placement="below">
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={240} open={open} placement="below" point={point}>
         <BoardMoreMenu
           board={board}
           onClose={() => setOpen(false)}
@@ -90,7 +99,7 @@ export function BoardMoreTrigger({ board, onUpdated, onRequestShare }: Props) {
       </MorePortal>
     </span>
   );
-}
+});
 
 type Mode = "menu" | "rename" | "icon";
 
@@ -242,6 +251,25 @@ function BoardMoreMenu({
     }
   };
 
+  const del = async () => {
+    if (!(await confirm({ title: "Delete List", description: `Delete "${board.name}"? It and its tasks move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
+    setBusy("delete");
+    try {
+      const res = await fetch(`/api/boards/${board.id}?hard=1`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast(data?.error ?? "Delete failed");
+        return;
+      }
+      toast(`${board.name} deleted`);
+      onUpdated?.();
+      router.refresh();
+      onClose();
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (mode === "rename") {
     return (
       <div className="bg-white rounded-xl border border-zinc-200 shadow-2xl p-3">
@@ -377,7 +405,7 @@ function BoardMoreMenu({
       <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
       <MenuItem icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
       <MenuItem icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
-      <MenuItem icon={Trash2}         label="Delete"    destructive disabled title="Coming soon" />
+      <MenuItem icon={Trash2}         label="Delete"    destructive busy={busy === "delete"} onClick={del} />
 
       <MenuSeparator />
 

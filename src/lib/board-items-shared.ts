@@ -128,6 +128,14 @@ export interface BoardItemRow {
    *  skip the groupBy queries. */
   commentCount?: number;
   attachmentCount?: number;
+  /** Fields-panel "Properties" aggregates (surfaced by listBoardItems).
+   *  Optional — cheaper item-fetch paths skip the extra groupBy queries. */
+  timeTrackedMs?: number;
+  linkedDocCount?: number;
+  linkedTaskCount?: number;
+  linkedSopCount?: number;
+  /** Resolved creator (from the CREATED ItemActivity). Mirrors `owner`. */
+  createdBy?: { id: string; firstName: string; lastName: string; avatar: string | null } | null;
   /** Phase 72 — subtask self-relation. null = top-level item. */
   parentItemId?: string | null;
   /** Phase 72 — count of direct children. 0 for leaf items. */

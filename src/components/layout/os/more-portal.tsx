@@ -16,6 +16,13 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
+/**
+ * Imperative handle exposed by the "…" MoreTrigger components (Space / Folder /
+ * Board / Table / item row). A tree row holds a ref to its trigger and calls
+ * `openAtPoint` from its `onContextMenu` to open the same menu at the cursor.
+ */
+export type ContextMenuHandle = { openAtPoint: (x: number, y: number) => void };
+
 interface Props {
   anchorRef: RefObject<HTMLElement | null>;
   width: number;
@@ -24,6 +31,12 @@ interface Props {
   children: ReactNode;
   /** "right" puts the panel to the right of the anchor; "below" places it under. */
   placement?: "right" | "below";
+  /**
+   * When set, the panel is positioned at this viewport point (cursor) instead
+   * of relative to the anchor — used for right-click context menus. Same flip/
+   * clamp math keeps it on-screen. Null/omitted = anchor-relative (default).
+   */
+  point?: { x: number; y: number } | null;
 }
 
 export function MorePortal({
@@ -33,6 +46,7 @@ export function MorePortal({
   panelRef,
   children,
   placement = "right",
+  point = null,
 }: Props) {
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
   const localRef = useRef<HTMLDivElement>(null);
@@ -41,11 +55,14 @@ export function MorePortal({
   useEffect(() => {
     if (!open) return;
     const compute = () => {
-      const anchor = anchorRef.current;
-      if (!anchor) return;
-      const rect = anchor.getBoundingClientRect();
       const gap = 6;
       const margin = 8; // viewport edge buffer
+      // Cursor mode: treat the click point as a zero-size anchor, so the panel
+      // drops just below-right of the pointer and flips near viewport edges.
+      const rect = point
+        ? ({ left: point.x, right: point.x, top: point.y, bottom: point.y } as DOMRect)
+        : anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
       let left = placement === "right" ? rect.right + gap : rect.left;
       let top = placement === "right" ? rect.top : rect.bottom + gap;
 
@@ -73,7 +90,7 @@ export function MorePortal({
       window.removeEventListener("resize", compute);
       window.removeEventListener("scroll", compute, true);
     };
-  }, [open, anchorRef, width, placement]);
+  }, [open, anchorRef, width, placement, point]);
 
   if (!open || !coords || typeof document === "undefined") return null;
 

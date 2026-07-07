@@ -9,10 +9,38 @@
 // TSHIRT_SIZE, URL, EMAIL, PHONE, MONEY, PERCENT, RATING). Tier 2 /
 // AI types render as a muted "—" placeholder until Phase 4+.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X, Plus, Loader2 } from "lucide-react";
 import type { FieldChoice, FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
+import { useAnchorPos } from "./use-anchor-pos";
+
+// Cell-picker dropdown. Uses position:fixed (via useAnchorPos) so it escapes the
+// table's horizontal-scroll container — otherwise the menu is clipped at the
+// row's edge (that's the "search box cut off at the bottom" bug). Stays a DOM
+// child of the trigger, so each picker's existing click-outside logic still works.
+function CellPopover({
+  anchorRef, open, width = 260, maxH = 340, onMouseLeave, children,
+}: {
+  anchorRef: RefObject<HTMLElement | null>;
+  open: boolean;
+  width?: number;
+  maxH?: number;
+  onMouseLeave?: () => void;
+  children: ReactNode;
+}) {
+  const pos = useAnchorPos(anchorRef, open, width);
+  if (!open || !pos) return null;
+  return (
+    <div
+      style={{ position: "fixed", top: pos.top, left: pos.left, width, maxHeight: maxH }}
+      className="z-[60] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1"
+      onMouseLeave={onMouseLeave}
+    >
+      {children}
+    </div>
+  );
+}
 
 // Tiny module-level cache for KRA lookups — every KRA cell on the
 // page shares one fetch instead of N parallel requests.
@@ -267,6 +295,7 @@ function PeopleValue({
   const ids = Array.isArray(value) ? (value as string[]).filter((x) => typeof x === "string") : [];
   const users = useOrgUsers();
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
   const selected = ids.map((id) => users.find((u) => u.id === id)).filter((u): u is PersonRef => !!u);
 
   const stack = ids.length === 0 ? (
@@ -288,37 +317,32 @@ function PeopleValue({
     onChange?.(next);
   };
   return (
-    <div className="relative inline-block">
+    <div ref={anchorRef} className="relative inline-block">
       <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 -mx-1 hover:bg-zinc-100">
         {stack}
         <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
-      {open ? (
-        <div
-          className="absolute z-10 mt-1 left-0 min-w-[220px] max-h-[260px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1"
-          onMouseLeave={() => setOpen(false)}
-        >
-          {users.length === 0 ? (
-            <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
-          ) : (
-            users.map((p) => {
-              const on = ids.includes(p.id);
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => toggle(p.id)}
-                  className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
-                >
-                  <PersonAvatar person={p} size={20} />
-                  <span className="flex-1 truncate">{`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email}</span>
-                  {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
-                </button>
-              );
-            })
-          )}
-        </div>
-      ) : null}
+      <CellPopover anchorRef={anchorRef} open={open} width={220} maxH={260} onMouseLeave={() => setOpen(false)}>
+        {users.length === 0 ? (
+          <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+        ) : (
+          users.map((p) => {
+            const on = ids.includes(p.id);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => toggle(p.id)}
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+              >
+                <PersonAvatar person={p} size={20} />
+                <span className="flex-1 truncate">{`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email}</span>
+                {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
+              </button>
+            );
+          })
+        )}
+      </CellPopover>
     </div>
   );
 }
@@ -345,7 +369,7 @@ function ProgressValue({
   );
   if (readOnly) return bar;
   return (
-    <span className="inline-flex items-center gap-2 w-full max-w-[200px]">
+    <span className="flex items-center gap-2 w-full min-w-0 max-w-[200px]">
       <input
         type="range"
         min={0}
@@ -353,7 +377,7 @@ function ProgressValue({
         step={5}
         value={n ?? 0}
         onChange={(e) => onChange?.(Number(e.target.value))}
-        className="flex-1 accent-[var(--os-brand)]"
+        className="flex-1 min-w-0 accent-[var(--os-brand)]"
       />
       <span className="text-xs text-zinc-600 tabular-nums w-8 text-right">{n == null ? "0%" : `${n}%`}</span>
     </span>
@@ -684,6 +708,7 @@ function DropdownValue({
   const v = typeof value === "string" ? value : "";
   const current = choices.find((c) => c.value === v) ?? null;
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   const pill = current ? (
     <span
@@ -698,42 +723,40 @@ function DropdownValue({
 
   if (readOnly) return pill;
   return (
-    <div className="relative inline-block">
+    <div ref={anchorRef} className="relative inline-block">
       <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
         {pill}
         <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
-      {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
-          {choices.length === 0 ? (
-            <div className="px-2 py-1 text-xs text-zinc-500">No options yet</div>
-          ) : (
-            choices.map((c) => (
-              <button
-                key={c.value}
-                type="button"
-                onClick={() => { onChange?.(c.value); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+      <CellPopover anchorRef={anchorRef} open={open} width={200} maxH={300} onMouseLeave={() => setOpen(false)}>
+        {choices.length === 0 ? (
+          <div className="px-2 py-1 text-xs text-zinc-500">No options yet</div>
+        ) : (
+          choices.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => { onChange?.(c.value); setOpen(false); }}
+              className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+            >
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                style={{ background: `${c.color ?? "#94a3b8"}22`, color: c.color ?? "#475569" }}
               >
-                <span
-                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                  style={{ background: `${c.color ?? "#94a3b8"}22`, color: c.color ?? "#475569" }}
-                >
-                  {c.label}
-                </span>
-                {c.value === v ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
-              </button>
-            ))
-          )}
-          <button
-            type="button"
-            onClick={() => { onChange?.(null); setOpen(false); }}
-            className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50"
-          >
-            Clear
-          </button>
-        </div>
-      ) : null}
+                {c.label}
+              </span>
+              {c.value === v ? <Check className="w-3.5 h-3.5 ml-auto text-[var(--os-brand)]" /> : null}
+            </button>
+          ))
+        )}
+        <button
+          type="button"
+          onClick={() => { onChange?.(null); setOpen(false); }}
+          className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50"
+        >
+          Clear
+        </button>
+      </CellPopover>
     </div>
   );
 }
@@ -818,6 +841,7 @@ function KraValue({
   const [kras, setKras] = useState<KraLite[]>(_krasCache?.items ?? []);
   const [loading, setLoading] = useState(!_krasCache);
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -841,48 +865,43 @@ function KraValue({
 
   if (readOnly) return display;
   return (
-    <div className="relative inline-block">
+    <div ref={anchorRef} className="relative inline-block">
       <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
         {display}
         <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
-      {open ? (
-        <div
-          className="absolute z-10 mt-1 left-0 min-w-[260px] max-h-[320px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1"
-          onMouseLeave={() => setOpen(false)}
-        >
-          {loading ? (
-            <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
-          ) : kras.length === 0 ? (
-            <div className="px-2 py-2 text-xs text-zinc-500">No KRAs in this org yet.</div>
-          ) : (
-            kras.map((k) => (
-              <button
-                key={k.id}
-                type="button"
-                onClick={() => { onChange?.(k.id); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
-              >
-                <Target className="w-3.5 h-3.5 text-zinc-500" />
-                <span className="flex-1 truncate">
-                  {k.name}
-                  {k.category ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
-                </span>
-                {k.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
-              </button>
-            ))
-          )}
-          {v ? (
+      <CellPopover anchorRef={anchorRef} open={open} width={260} maxH={320} onMouseLeave={() => setOpen(false)}>
+        {loading ? (
+          <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+        ) : kras.length === 0 ? (
+          <div className="px-2 py-2 text-xs text-zinc-500">No KRAs in this org yet.</div>
+        ) : (
+          kras.map((k) => (
             <button
+              key={k.id}
               type="button"
-              onClick={() => { onChange?.(null); setOpen(false); }}
-              className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1"
+              onClick={() => { onChange?.(k.id); setOpen(false); }}
+              className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
             >
-              Clear
+              <Target className="w-3.5 h-3.5 text-zinc-500" />
+              <span className="flex-1 truncate">
+                {k.name}
+                {k.category ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
+              </span>
+              {k.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>
-          ) : null}
-        </div>
-      ) : null}
+          ))
+        )}
+        {v ? (
+          <button
+            type="button"
+            onClick={() => { onChange?.(null); setOpen(false); }}
+            className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1"
+          >
+            Clear
+          </button>
+        ) : null}
+      </CellPopover>
     </div>
   );
 }
@@ -916,6 +935,7 @@ function LinkedEntityValue({
   const [items, setItems] = useState<EntityLite[]>(loader.peek());
   const [loading, setLoading] = useState(loader.peek().length === 0);
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
 
@@ -964,55 +984,84 @@ function LinkedEntityValue({
   const filtered = q.trim() ? items.filter((it) => it.label.toLowerCase().includes(q.trim().toLowerCase())) : items;
 
   return (
-    <div className="relative inline-block">
-      <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
-        {chip}
-        <ChevronDown className="w-3 h-3 text-zinc-500" />
-      </button>
-      {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[280px] max-h-[340px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
-          <div className="px-2 pb-1.5 pt-1">
-            <div className="flex items-center gap-1.5 h-7 px-2 rounded border border-zinc-200">
-              <Search className="w-3 h-3 text-zinc-400" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="flex-1 text-xs bg-transparent outline-none" autoFocus />
-            </div>
-          </div>
-          {loading ? (
-            <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
-          ) : filtered.length === 0 ? (
-            <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? emptyHint : "No matches."}</div>
-          ) : (
-            filtered.map((it) => (
-              <button key={it.id} type="button" onClick={() => { onChange?.(it.id); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
-                <Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-                <span className="flex-1 truncate">
-                  {it.label}
-                  {it.sub ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
-                </span>
-                {it.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
-              </button>
-            ))
-          )}
-          {onCreate ? (
-            <button
-              type="button"
-              onClick={create}
-              disabled={creating}
-              className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm text-[var(--os-brand)] hover:bg-zinc-50 border-t border-zinc-200 mt-1 disabled:opacity-60"
-            >
-              {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> : <Plus className="w-3.5 h-3.5 shrink-0" />}
-              <span className="truncate">
-                {creating ? "Creating…" : q.trim() ? `Create “${q.trim()}”` : `Create new ${createLabel ?? "item"}`}
-              </span>
-            </button>
-          ) : null}
+    <div ref={anchorRef} className="relative inline-block">
+      {current ? (
+        // Linked: the chip opens the doc/SOP; the caret opens the picker to change.
+        <span className="inline-flex items-center gap-0.5">
+          {hrefFor ? (
+            <a href={hrefFor(current.id)} onClick={(e) => e.stopPropagation()} className="no-underline" title={`Open ${createLabel ?? "item"}`}>
+              {chip}
+            </a>
+          ) : chip}
+          <button
+            type="button"
+            onClick={() => setOpen((x) => !x)}
+            className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+            title="Change" aria-label="Change"
+          >
+            <ChevronDown className="w-3 h-3" />
+          </button>
+        </span>
+      ) : (
+        // Empty (or unresolved): a clearly-clickable "Link a Doc…" affordance.
+        <button
+          type="button"
+          onClick={() => setOpen((x) => !x)}
+          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs border border-dashed border-zinc-200 text-zinc-400 hover:text-[var(--os-brand)] hover:border-[var(--os-brand)] transition-colors"
+        >
           {v ? (
-            <button type="button" onClick={() => { onChange?.(null); setOpen(false); }} className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1">
-              Clear
-            </button>
-          ) : null}
+            <span>{loading ? "Loading…" : "Unknown"}</span>
+          ) : (
+            <>
+              <Icon className="w-3 h-3" />
+              <span>Link a {createLabel ?? "item"}…</span>
+            </>
+          )}
+          <ChevronDown className="w-3 h-3 opacity-60" />
+        </button>
+      )}
+      <CellPopover anchorRef={anchorRef} open={open} width={280} maxH={340} onMouseLeave={() => setOpen(false)}>
+        <div className="px-2 pb-1.5 pt-1">
+          <div className="flex items-center gap-1.5 h-7 px-2 rounded border border-zinc-200">
+            <Search className="w-3 h-3 text-zinc-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="flex-1 text-xs bg-transparent outline-none" autoFocus />
+          </div>
         </div>
-      ) : null}
+        {loading ? (
+          <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? emptyHint : "No matches."}</div>
+        ) : (
+          filtered.map((it) => (
+            <button key={it.id} type="button" onClick={() => { onChange?.(it.id); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
+              <Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+              <span className="flex-1 truncate">
+                {it.label}
+                {it.sub ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
+              </span>
+              {it.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
+            </button>
+          ))
+        )}
+        {onCreate ? (
+          <button
+            type="button"
+            onClick={create}
+            disabled={creating}
+            className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm text-[var(--os-brand)] hover:bg-zinc-50 border-t border-zinc-200 mt-1 disabled:opacity-60"
+          >
+            {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> : <Plus className="w-3.5 h-3.5 shrink-0" />}
+            <span className="truncate">
+              {creating ? "Creating…" : q.trim() ? `Create “${q.trim()}”` : `Create new ${createLabel ?? "item"}`}
+            </span>
+          </button>
+        ) : null}
+        {v ? (
+          <button type="button" onClick={() => { onChange?.(null); setOpen(false); }} className="block w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1">
+            Clear
+          </button>
+        ) : null}
+      </CellPopover>
     </div>
   );
 }
@@ -1051,6 +1100,7 @@ function RelationshipValue({
 }) {
   const rel = parseRelation(value);
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
   const [kind, setKind] = useState<RelationKind>(rel?.kind ?? "DOC");
   const [q, setQ] = useState("");
   const active = RELATION_KINDS.find((r) => r.kind === kind) ?? RELATION_KINDS[0];
@@ -1088,50 +1138,72 @@ function RelationshipValue({
   const filtered = q.trim() ? items.filter((it) => it.label.toLowerCase().includes(q.trim().toLowerCase())) : items;
 
   return (
-    <div className="relative inline-block">
-      <button type="button" onClick={() => setOpen((x) => !x)} className="inline-flex items-center gap-1.5">
-        {chip}
-        <ChevronDown className="w-3 h-3 text-zinc-500" />
-      </button>
-      {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[300px] max-h-[360px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
-          {/* Kind toggle */}
-          <div className="flex items-center gap-1 px-2 pb-1.5 pt-1 border-b border-zinc-100">
-            {RELATION_KINDS.map((r) => (
-              <button key={r.kind} type="button" onClick={() => { setKind(r.kind); setQ(""); }} className={`flex-1 inline-flex items-center justify-center gap-1 h-6 rounded text-[11px] font-medium ${kind === r.kind ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>
-                <r.Icon className="w-3 h-3" /> {r.label}
-              </button>
-            ))}
-          </div>
-          <div className="px-2 py-1.5">
-            <div className="flex items-center gap-1.5 h-7 px-2 rounded border border-zinc-200">
-              <Search className="w-3 h-3 text-zinc-400" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${active.label.toLowerCase()}…`} className="flex-1 text-xs bg-transparent outline-none" autoFocus />
-            </div>
-          </div>
-          {loading ? (
-            <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
-          ) : filtered.length === 0 ? (
-            <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? `No ${active.label.toLowerCase()} yet.` : "No matches."}</div>
-          ) : (
-            filtered.map((it) => (
-              <button key={it.id} type="button" onClick={() => { onChange?.({ kind, id: it.id }); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
-                <active.Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-                <span className="flex-1 truncate">
-                  {it.label}
-                  {it.sub ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
-                </span>
-                {rel && rel.kind === kind && rel.id === it.id ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
-              </button>
-            ))
-          )}
-          {rel ? (
-            <button type="button" onClick={() => { onChange?.(null); setOpen(false); }} className="flex items-center gap-1 w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1">
-              <X className="w-3 h-3" /> Clear
+    <div ref={anchorRef} className="relative inline-block">
+      {rel ? (
+        // Linked: chip opens the related item; caret opens the picker.
+        <span className="inline-flex items-center gap-0.5">
+          {relCfg?.hrefFor ? (
+            <a href={relCfg.hrefFor(rel.id)} onClick={(e) => e.stopPropagation()} className="no-underline" title="Open">
+              {chip}
+            </a>
+          ) : chip}
+          <button
+            type="button"
+            onClick={() => setOpen((x) => !x)}
+            className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+            title="Change" aria-label="Change"
+          >
+            <ChevronDown className="w-3 h-3" />
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen((x) => !x)}
+          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs border border-dashed border-zinc-200 text-zinc-400 hover:text-[var(--os-brand)] hover:border-[var(--os-brand)] transition-colors"
+        >
+          <RelIcon className="w-3 h-3" />
+          <span>Link…</span>
+          <ChevronDown className="w-3 h-3 opacity-60" />
+        </button>
+      )}
+      <CellPopover anchorRef={anchorRef} open={open} width={300} maxH={360} onMouseLeave={() => setOpen(false)}>
+        {/* Kind toggle */}
+        <div className="flex items-center gap-1 px-2 pb-1.5 pt-1 border-b border-zinc-100">
+          {RELATION_KINDS.map((r) => (
+            <button key={r.kind} type="button" onClick={() => { setKind(r.kind); setQ(""); }} className={`flex-1 inline-flex items-center justify-center gap-1 h-6 rounded text-[11px] font-medium ${kind === r.kind ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>
+              <r.Icon className="w-3 h-3" /> {r.label}
             </button>
-          ) : null}
+          ))}
         </div>
-      ) : null}
+        <div className="px-2 py-1.5">
+          <div className="flex items-center gap-1.5 h-7 px-2 rounded border border-zinc-200">
+            <Search className="w-3 h-3 text-zinc-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${active.label.toLowerCase()}…`} className="flex-1 text-xs bg-transparent outline-none" autoFocus />
+          </div>
+        </div>
+        {loading ? (
+          <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? `No ${active.label.toLowerCase()} yet.` : "No matches."}</div>
+        ) : (
+          filtered.map((it) => (
+            <button key={it.id} type="button" onClick={() => { onChange?.({ kind, id: it.id }); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
+              <active.Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+              <span className="flex-1 truncate">
+                {it.label}
+                {it.sub ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
+              </span>
+              {rel && rel.kind === kind && rel.id === it.id ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
+            </button>
+          ))
+        )}
+        {rel ? (
+          <button type="button" onClick={() => { onChange?.(null); setOpen(false); }} className="flex items-center gap-1 w-full px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-50 border-t border-zinc-200 mt-1">
+            <X className="w-3 h-3" /> Clear
+          </button>
+        ) : null}
+      </CellPopover>
     </div>
   );
 }

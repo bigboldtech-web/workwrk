@@ -8,7 +8,10 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import { isS3Configured, deleteObject } from "@/lib/s3";
 
-export type TrashType = "note" | "sop" | "whiteboard" | "table" | "file" | "policy" | "contract";
+export type TrashType =
+  | "note" | "sop" | "whiteboard" | "table" | "file" | "policy" | "contract"
+  // Project hierarchy — "board" is the ClickUp "List", "item" is a Task.
+  | "space" | "folder" | "board" | "item";
 
 // Best-effort: free the underlying file blob (local dev file or S3 object) so
 // storage is actually reclaimed on PERMANENT deletion. Never throws.
@@ -36,11 +39,14 @@ export async function freeTrashStorage(entityType: string, snapshot: unknown): P
 export const TRASH_LABEL: Record<TrashType, string> = {
   note: "Note", sop: "SOP", whiteboard: "Whiteboard", table: "Table",
   file: "File", policy: "Policy", contract: "Contract",
+  space: "Space", folder: "Folder", board: "List", item: "Task",
 };
 
 export const TRASH_HREF: Record<TrashType, string> = {
   note: "/library", sop: "/sops", whiteboard: "/library", table: "/library",
   file: "/library", policy: "/policies", contract: "/agreements",
+  // Hierarchy rows live in the home sidebar tree; a bare href is informational.
+  space: "/", folder: "/", board: "/", item: "/",
 };
 
 type Row = Record<string, unknown>;
@@ -55,6 +61,77 @@ type Entry = {
   capture: (id: string) => Promise<{ label: string; snapshot: Snapshot } | null>;
   restore: (s: Snapshot) => Promise<void>;
 };
+
+// Self-referencing tables (Item.parentItemId, Folder.parentFolderId) must be
+// re-created parents-first or the FK insert fails. Insert in generations: each
+// pass creates every row whose parent already exists (or lives outside the set),
+// then repeats on the remainder. A final catch-all inserts any cycle leftovers.
+async function createTreeParentsFirst(
+  rows: Row[],
+  parentKey: string,
+  create: (batch: Row[]) => Promise<void>,
+): Promise<void> {
+  if (!rows.length) return;
+  const inSet = new Set(rows.map((r) => r.id as string));
+  const done = new Set<string>();
+  let remaining = rows;
+  while (remaining.length) {
+    const ready = remaining.filter((r) => {
+      const parent = r[parentKey] as string | null | undefined;
+      return !parent || !inSet.has(parent) || done.has(parent);
+    });
+    if (!ready.length) { await create(remaining); return; } // cycle safety
+    await create(ready);
+    for (const r of ready) done.add(r.id as string);
+    const readyIds = new Set(ready.map((r) => r.id as string));
+    remaining = remaining.filter((r) => !readyIds.has(r.id as string));
+  }
+}
+
+const createItemsParentsFirst = (rows: Row[]) =>
+  createTreeParentsFirst(rows, "parentItemId", (batch) =>
+    prisma.item.createMany({ data: asData(batch), skipDuplicates: true }).then(() => {}));
+
+const createFoldersParentsFirst = (rows: Row[]) =>
+  createTreeParentsFirst(rows, "parentFolderId", (batch) =>
+    prisma.folder.createMany({ data: asData(batch), skipDuplicates: true }).then(() => {}));
+
+// Capture every descendant subtask of an item (BFS, level by level so the
+// returned array is already parent-before-child).
+async function captureItemSubtree(rootId: string): Promise<Row[]> {
+  const out: Row[] = [];
+  let frontier = [rootId];
+  while (frontier.length) {
+    const kids = await prisma.item.findMany({ where: { parentItemId: { in: frontier } } });
+    if (!kids.length) break;
+    out.push(...(kids as unknown as Row[]));
+    frontier = kids.map((k) => k.id);
+  }
+  return out;
+}
+
+// Capture the boards of a Space/Folder plus their items/views/members — the
+// shared child bundle for the "board" / "folder" / "space" registry entries.
+async function captureBoardBundle(boardIds: string[]): Promise<{ items: Row[]; views: Row[]; members: Row[] }> {
+  if (!boardIds.length) return { items: [], views: [], members: [] };
+  const [items, views, members] = await Promise.all([
+    prisma.item.findMany({ where: { boardId: { in: boardIds } } }),
+    prisma.view.findMany({ where: { boardId: { in: boardIds } } }),
+    prisma.boardMember.findMany({ where: { boardId: { in: boardIds } } }),
+  ]);
+  return { items: items as unknown as Row[], views: views as unknown as Row[], members: members as unknown as Row[] };
+}
+
+// Re-create a board's children from a snapshot bundle (views + members flat,
+// items parents-first). Boards themselves must already exist.
+async function restoreBoardChildren(s: Snapshot): Promise<void> {
+  const views = s.children?.views ?? [];
+  const members = s.children?.members ?? [];
+  const items = s.children?.items ?? [];
+  if (views.length) await prisma.view.createMany({ data: asData(views), skipDuplicates: true });
+  if (members.length) await prisma.boardMember.createMany({ data: asData(members), skipDuplicates: true });
+  if (items.length) await createItemsParentsFirst(items);
+}
 
 const REGISTRY: Record<TrashType, Entry> = {
   note: {
@@ -118,6 +195,86 @@ const REGISTRY: Record<TrashType, Entry> = {
       if (parties.length) await prisma.agreementParty.createMany({ data: asData(parties), skipDuplicates: true });
     },
   },
+
+  // A Task. Snapshot the item + its whole subtask subtree; the live delete
+  // cascades the subtasks (Item.parentItem onDelete: Cascade), so restore
+  // rebuilds the root then its descendants parents-first.
+  item: {
+    capture: async (id) => {
+      const row = await prisma.item.findUnique({ where: { id } });
+      if (!row) return null;
+      const subtasks = await captureItemSubtree(id);
+      return { label: row.title || "Untitled task", snapshot: { row, children: { subtasks } } };
+    },
+    restore: async (s) => {
+      await createItemsParentsFirst([s.row, ...(s.children?.subtasks ?? [])]);
+    },
+  },
+
+  // A List (Board). Deleting cascades its Items/Views/BoardMembers, so we
+  // snapshot all three, then delete just the board.
+  board: {
+    capture: async (id) => {
+      const row = await prisma.board.findUnique({ where: { id } });
+      if (!row) return null;
+      const bundle = await captureBoardBundle([id]);
+      return { label: row.name || "Untitled list", snapshot: { row, children: bundle } };
+    },
+    restore: async (s) => {
+      await prisma.board.create({ data: asData(s.row) });
+      await restoreBoardChildren(s);
+    },
+  },
+
+  // A Folder + the boards it holds. Board.folder is onDelete:SetNull, so the
+  // live delete (in moveToTrash) removes the boards explicitly in a transaction.
+  folder: {
+    capture: async (id) => {
+      const row = await prisma.folder.findUnique({ where: { id } });
+      if (!row) return null;
+      const boards = await prisma.board.findMany({ where: { folderId: id } });
+      const bundle = await captureBoardBundle(boards.map((b) => b.id));
+      return {
+        label: row.name || "Untitled folder",
+        snapshot: { row, children: { boards: boards as unknown as Row[], ...bundle } },
+      };
+    },
+    restore: async (s) => {
+      await prisma.folder.create({ data: asData(s.row) });
+      const boards = s.children?.boards ?? [];
+      if (boards.length) await prisma.board.createMany({ data: asData(boards), skipDuplicates: true });
+      await restoreBoardChildren(s);
+    },
+  },
+
+  // A whole Space — folders + boards + all their children. Mirrors deleteSpace
+  // (src/lib/space.ts) but snapshots first so it's recoverable.
+  space: {
+    capture: async (id) => {
+      const row = await prisma.space.findUnique({ where: { id } });
+      if (!row) return null;
+      const [folders, boards] = await Promise.all([
+        prisma.folder.findMany({ where: { spaceId: id } }),
+        prisma.board.findMany({ where: { spaceId: id } }),
+      ]);
+      const bundle = await captureBoardBundle(boards.map((b) => b.id));
+      return {
+        label: row.name || "Untitled space",
+        snapshot: {
+          row,
+          children: { folders: folders as unknown as Row[], boards: boards as unknown as Row[], ...bundle },
+        },
+      };
+    },
+    restore: async (s) => {
+      await prisma.space.create({ data: asData(s.row) });
+      const folders = s.children?.folders ?? [];
+      if (folders.length) await createFoldersParentsFirst(folders); // folders can nest
+      const boards = s.children?.boards ?? [];
+      if (boards.length) await prisma.board.createMany({ data: asData(boards), skipDuplicates: true });
+      await restoreBoardChildren(s);
+    },
+  },
 };
 
 // Snapshot the row (+ children) into TrashItem and delete it from its table.
@@ -148,6 +305,26 @@ export async function moveToTrash(
     case "file": await prisma.fileEntry.delete({ where: { id } }); break;
     case "policy": await prisma.policy.delete({ where: { id } }); break;
     case "contract": await prisma.agreement.delete({ where: { id } }); break;
+    // Item + Board cascade their children (subtasks / items+views+members).
+    case "item": await prisma.item.delete({ where: { id } }); break;
+    case "board": await prisma.board.delete({ where: { id } }); break;
+    // Folder: boards reference folderId with onDelete:SetNull, so drop them
+    // explicitly (their own children cascade) then the folder row.
+    case "folder":
+      await prisma.$transaction(async (tx) => {
+        await tx.board.deleteMany({ where: { folderId: id } });
+        await tx.folder.delete({ where: { id } });
+      });
+      break;
+    // Space: boards + folders reference spaceId (SetNull / Cascade); mirror
+    // deleteSpace — remove boards + folders first, then the space.
+    case "space":
+      await prisma.$transaction(async (tx) => {
+        await tx.board.deleteMany({ where: { spaceId: id } });
+        await tx.folder.deleteMany({ where: { spaceId: id } });
+        await tx.space.delete({ where: { id } });
+      });
+      break;
   }
   return true;
 }

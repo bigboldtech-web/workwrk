@@ -14,12 +14,22 @@
 import {
   Type, AlignLeft, Hash, Calendar as CalIcon, CalendarClock,
   ChevronDown, ListChecks, CheckSquare, Link as LinkIcon, AtSign,
-  Phone, DollarSign, Percent, Star, Tag, User as UserIcon,
+  Phone, DollarSign, Percent, Star, Tag, User as UserIcon, Users,
   Paperclip, Sigma, ArrowRightLeft, ToggleLeft, PenLine,
-  MapPin, GaugeCircle, Activity, Languages, FileText,
+  MapPin, GaugeCircle, Gauge, Activity, Languages, FileText, ScrollText,
   CheckCheck, Shirt, ThumbsUp, Sparkles, ListFilter, Target, BookOpen,
+  Flag, Box, CircleDot, MessageSquare, GanttChart, Clock, Link2,
+  CalendarCheck, GitPullRequest,
   type LucideIcon,
 } from "lucide-react";
+
+// Per-type icon colors — grouped into ClickUp's families so the Fields panel
+// reads as one system (blue = text, green = number/date/choice, pink = contact/
+// people, violet = boolean/rating/AI, orange = progress, amber = connections).
+const C = {
+  blue: "#3B82F6", green: "#10B981", pink: "#EC4899", violet: "#8B5CF6",
+  orange: "#F97316", amber: "#B45309", indigo: "#6366F1",
+} as const;
 
 export type FieldType =
   // text / number
@@ -50,6 +60,8 @@ export interface FieldCatalogEntry {
   type: FieldType;
   label: string;
   Icon: LucideIcon;
+  /** Icon tint (ClickUp-style colored field icons). */
+  color: string;
   group: "Common" | "AI" | "Advanced" | "WorkwrK";
   /** Whether this phase ships a real renderer (true) or a stub (false). */
   tier1: boolean;
@@ -58,55 +70,127 @@ export interface FieldCatalogEntry {
 
 export const FIELD_CATALOG: FieldCatalogEntry[] = [
   // ── Common ──────────────────────────────────────────────────
-  { type: "TEXT",        label: "Text",          Icon: Type,        group: "Common", tier1: true },
-  { type: "LONG_TEXT",   label: "Long text",     Icon: AlignLeft,   group: "Common", tier1: true },
-  { type: "NUMBER",      label: "Number",        Icon: Hash,        group: "Common", tier1: true },
-  { type: "DATE",        label: "Date",          Icon: CalIcon,     group: "Common", tier1: true },
-  { type: "DATETIME",    label: "Date & time",   Icon: CalendarClock, group: "Common", tier1: true },
-  { type: "DROPDOWN",    label: "Dropdown",      Icon: ChevronDown, group: "Common", tier1: true },
-  { type: "MULTI_SELECT",label: "Multi-select",  Icon: ListChecks,  group: "Common", tier1: true },
-  { type: "CHECKBOX",    label: "Checkbox",      Icon: CheckSquare, group: "Common", tier1: true },
-  { type: "LABELS",      label: "Labels",        Icon: Tag,         group: "Common", tier1: true },
-  { type: "URL",         label: "Website",       Icon: LinkIcon,    group: "Common", tier1: true },
-  { type: "EMAIL",       label: "Email",         Icon: AtSign,      group: "Common", tier1: true },
-  { type: "PHONE",       label: "Phone",         Icon: Phone,       group: "Common", tier1: true },
-  { type: "MONEY",       label: "Money",         Icon: DollarSign,  group: "Common", tier1: true },
-  { type: "PERCENT",     label: "Percent",       Icon: Percent,     group: "Common", tier1: true },
-  { type: "RATING",      label: "Rating",        Icon: Star,        group: "Common", tier1: true },
-  { type: "USER",        label: "Person",        Icon: UserIcon,    group: "Common", tier1: true },
-  { type: "PEOPLE",      label: "People",        Icon: UserIcon,    group: "Common", tier1: true, description: "Multiple people on one row" },
-  { type: "FILES",       label: "Files",         Icon: Paperclip,   group: "Common", tier1: true },
+  { type: "TEXT",        label: "Text",          Icon: Type,        color: C.blue,   group: "Common", tier1: true,  description: "A short line of text" },
+  { type: "LONG_TEXT",   label: "Long text",     Icon: AlignLeft,   color: C.blue,   group: "Common", tier1: true,  description: "A multi-line text area" },
+  { type: "NUMBER",      label: "Number",        Icon: Hash,        color: C.green,  group: "Common", tier1: true,  description: "A numeric value" },
+  { type: "DATE",        label: "Date",          Icon: CalIcon,     color: C.green,  group: "Common", tier1: true,  description: "A single date" },
+  { type: "DATETIME",    label: "Date & time",   Icon: CalendarClock, color: C.green, group: "Common", tier1: true, description: "A date with a time" },
+  { type: "DROPDOWN",    label: "Dropdown",      Icon: ChevronDown, color: C.green,  group: "Common", tier1: true,  description: "Pick one option from a list" },
+  { type: "MULTI_SELECT",label: "Multi-select",  Icon: ListChecks,  color: C.green,  group: "Common", tier1: true,  description: "Pick several options from a list" },
+  { type: "CHECKBOX",    label: "Checkbox",      Icon: CheckSquare, color: C.violet, group: "Common", tier1: true,  description: "A simple yes / no checkbox" },
+  { type: "LABELS",      label: "Labels",        Icon: Tag,         color: C.green,  group: "Common", tier1: true,  description: "Multiple colored labels" },
+  { type: "URL",         label: "Website",       Icon: LinkIcon,    color: C.pink,   group: "Common", tier1: true,  description: "A web link" },
+  { type: "EMAIL",       label: "Email",         Icon: AtSign,      color: C.pink,   group: "Common", tier1: true,  description: "An email address" },
+  { type: "PHONE",       label: "Phone",         Icon: Phone,       color: C.pink,   group: "Common", tier1: true,  description: "A phone number" },
+  { type: "MONEY",       label: "Money",         Icon: DollarSign,  color: C.green,  group: "Common", tier1: true,  description: "A currency amount" },
+  { type: "PERCENT",     label: "Percent",       Icon: Percent,     color: C.green,  group: "Common", tier1: true,  description: "A percentage value" },
+  { type: "RATING",      label: "Rating",        Icon: Star,        color: C.violet, group: "Common", tier1: true,  description: "A star rating" },
+  { type: "USER",        label: "Person",        Icon: UserIcon,    color: C.pink,   group: "Common", tier1: true,  description: "A single person" },
+  { type: "PEOPLE",      label: "People",        Icon: Users,       color: C.pink,   group: "Common", tier1: true, description: "Multiple people on one row" },
+  { type: "FILES",       label: "Files",         Icon: Paperclip,   color: C.violet, group: "Common", tier1: true,  description: "Attach files to the row" },
 
   // ── AI ──────────────────────────────────────────────────────
-  { type: "SUMMARY",       label: "Summary",       Icon: FileText,   group: "AI", tier1: false, description: "AI summary of the row" },
-  { type: "SENTIMENT",     label: "Sentiment",     Icon: Activity,   group: "AI", tier1: false },
-  { type: "CATEGORIZE",    label: "Categorize",    Icon: Sparkles,   group: "AI", tier1: false },
-  { type: "TRANSLATION",   label: "Translation",   Icon: Languages,  group: "AI", tier1: false },
-  { type: "CUSTOM_TEXT",   label: "Custom text",   Icon: Sparkles,   group: "AI", tier1: false, description: "Free-form AI text on the row" },
-  { type: "CUSTOM_DROPDOWN", label: "Custom dropdown", Icon: Sparkles, group: "AI", tier1: false },
+  { type: "SUMMARY",       label: "Summary",       Icon: ScrollText, color: C.violet, group: "AI", tier1: false, description: "AI summary of the row" },
+  { type: "SENTIMENT",     label: "Sentiment",     Icon: Activity,   color: C.violet, group: "AI", tier1: false, description: "AI sentiment score" },
+  { type: "CATEGORIZE",    label: "Categorize",    Icon: Sparkles,   color: C.violet, group: "AI", tier1: false, description: "AI auto-categorization" },
+  { type: "TRANSLATION",   label: "Translation",   Icon: Languages,  color: C.violet, group: "AI", tier1: false, description: "AI translation of text" },
+  { type: "CUSTOM_TEXT",   label: "Custom text",   Icon: Sparkles,   color: C.violet, group: "AI", tier1: false, description: "Free-form AI text on the row" },
+  { type: "CUSTOM_DROPDOWN", label: "Custom dropdown", Icon: Sparkles, color: C.violet, group: "AI", tier1: false, description: "AI-picked option from a list" },
 
   // ── WorkwrK AI-OS ───────────────────────────────────────────
-  { type: "KRA", label: "KRA tag", Icon: Target, group: "WorkwrK", tier1: true, description: "Tag this row with an organizational KRA" },
-  { type: "LINKED_DOC", label: "Linked Doc", Icon: FileText, group: "WorkwrK", tier1: true, description: "Link a Doc to this row" },
-  { type: "LINKED_SOP", label: "Linked SOP", Icon: BookOpen, group: "WorkwrK", tier1: true, description: "Link an SOP to this row" },
+  { type: "KRA", label: "KRA tag", Icon: Target, color: C.amber, group: "WorkwrK", tier1: true, description: "Tag this row with an organizational KRA" },
+  { type: "LINKED_DOC", label: "Linked Doc", Icon: FileText, color: C.amber, group: "WorkwrK", tier1: true, description: "Link a Doc to this row" },
+  { type: "LINKED_SOP", label: "Linked SOP", Icon: BookOpen, color: C.amber, group: "WorkwrK", tier1: true, description: "Link an SOP to this row" },
 
   // ── Advanced ────────────────────────────────────────────────
-  { type: "FORMULA",          label: "Formula",         Icon: Sigma,         group: "Advanced", tier1: false },
-  { type: "ROLLUP",           label: "Rollup",          Icon: ListFilter,    group: "Advanced", tier1: false },
-  { type: "RELATIONSHIP",     label: "Relationship",    Icon: ArrowRightLeft,group: "Advanced", tier1: true, description: "Link any Doc, SOP, KRA or Form" },
-  { type: "LOCATION",         label: "Location",        Icon: MapPin,        group: "Advanced", tier1: true },
-  { type: "PROGRESS_AUTO",    label: "Progress (auto)", Icon: GaugeCircle,   group: "Advanced", tier1: false },
-  { type: "PROGRESS_MANUAL",  label: "Progress (manual)", Icon: GaugeCircle, group: "Advanced", tier1: true },
-  { type: "BUTTON",           label: "Button",          Icon: ToggleLeft,    group: "Advanced", tier1: false },
-  { type: "SIGNATURE",        label: "Signature",       Icon: PenLine,       group: "Advanced", tier1: false },
-  { type: "VOTING",           label: "Voting",          Icon: ThumbsUp,      group: "Advanced", tier1: true },
-  { type: "ACTION_ITEMS",     label: "Action items",    Icon: CheckCheck,    group: "Advanced", tier1: false },
-  { type: "TSHIRT_SIZE",      label: "T-shirt size",    Icon: Shirt,         group: "Advanced", tier1: true },
+  { type: "FORMULA",          label: "Formula",         Icon: Sigma,         color: C.green,  group: "Advanced", tier1: false, description: "Compute a value from other fields" },
+  { type: "ROLLUP",           label: "Rollup",          Icon: ListFilter,    color: C.amber,  group: "Advanced", tier1: false, description: "Aggregate values from linked rows" },
+  { type: "RELATIONSHIP",     label: "Relationship",    Icon: ArrowRightLeft, color: C.amber, group: "Advanced", tier1: true, description: "Link any Doc, SOP, KRA or Form" },
+  { type: "LOCATION",         label: "Location",        Icon: MapPin,        color: C.pink,   group: "Advanced", tier1: true, description: "An address or place" },
+  { type: "PROGRESS_AUTO",    label: "Progress (auto)", Icon: Gauge,         color: C.orange, group: "Advanced", tier1: false, description: "Progress computed automatically" },
+  { type: "PROGRESS_MANUAL",  label: "Progress (manual)", Icon: GaugeCircle, color: C.orange, group: "Advanced", tier1: true, description: "A manual progress bar" },
+  { type: "BUTTON",           label: "Button",          Icon: ToggleLeft,    color: C.indigo, group: "Advanced", tier1: false, description: "A button that runs an action" },
+  { type: "SIGNATURE",        label: "Signature",       Icon: PenLine,       color: C.pink,   group: "Advanced", tier1: false, description: "Capture a signature" },
+  { type: "VOTING",           label: "Voting",          Icon: ThumbsUp,      color: C.violet, group: "Advanced", tier1: true, description: "Let people upvote the row" },
+  { type: "ACTION_ITEMS",     label: "Action items",    Icon: CheckCheck,    color: C.green,  group: "Advanced", tier1: false, description: "A checklist of action items" },
+  { type: "TSHIRT_SIZE",      label: "T-shirt size",    Icon: Shirt,         color: C.amber,  group: "Advanced", tier1: true, description: "Sizing from XS to XL" },
 ];
 
 export const FIELD_TYPE_BY_KEY: Record<FieldType, FieldCatalogEntry> = Object.fromEntries(
   FIELD_CATALOG.map((e) => [e.type, e]),
 ) as Record<FieldType, FieldCatalogEntry>;
+
+// ── Built-in columns (ClickUp "Properties") ────────────────────
+// The fixed, non-custom-field columns the table can show. Visibility per view:
+//   defaultShown  → shown unless its key is in View.config.hiddenFields
+//   !defaultShown → shown only if its key is in View.config.extraColumns
+// `locked` columns (Task Name, Status) are always shown and can't be toggled.
+// This single list drives the Fields panel's Shown/Properties split AND the
+// table's column set, so there's one source of truth.
+export interface BuiltinColumn {
+  key: string;
+  label: string;
+  Icon: LucideIcon;
+  color: string;
+  defaultShown: boolean;
+  locked?: boolean;
+  /** No backing data yet — shown in the Properties list but disabled ("Soon"),
+   *  like ClickUp greys out Duration. Never renders as a real column. */
+  soon?: boolean;
+}
+
+export const BUILTIN_COLUMNS: BuiltinColumn[] = [
+  { key: "__name",            label: "Task Name",    Icon: Type,          color: C.blue,     defaultShown: true, locked: true },
+  { key: "__builtin_status",  label: "Status",       Icon: CircleDot,     color: C.violet,   defaultShown: true, locked: true },
+  { key: "__builtin_owner",   label: "Assignee",     Icon: UserIcon,      color: C.pink,     defaultShown: true },
+  { key: "__builtin_due",     label: "Due date",     Icon: CalIcon,       color: C.green,    defaultShown: true },
+  { key: "__builtin_priority",label: "Priority",     Icon: Flag,          color: C.orange,   defaultShown: true },
+  { key: "__builtin_type",    label: "Task Type",    Icon: Box,           color: C.amber,    defaultShown: false },
+  { key: "__builtin_tags",    label: "Tags",         Icon: Tag,           color: C.green,    defaultShown: false },
+  { key: "__builtin_created", label: "Date created", Icon: CalIcon,       color: C.green,    defaultShown: false },
+  { key: "__builtin_updated", label: "Date updated", Icon: CalIcon,       color: C.green,    defaultShown: false },
+  { key: "__builtin_start",   label: "Start date",   Icon: CalendarClock, color: C.green,    defaultShown: false },
+  { key: "__builtin_taskid",  label: "Task ID",      Icon: Hash,          color: "#94A3B8",  defaultShown: false },
+  { key: "__builtin_comments",label: "Comments",     Icon: MessageSquare, color: C.violet,   defaultShown: false },
+  { key: "__builtin_timeline",label: "Timeline",     Icon: GanttChart,    color: C.green,    defaultShown: false },
+  { key: "__builtin_time",    label: "Time tracked", Icon: Clock,         color: C.orange,   defaultShown: false },
+  { key: "__builtin_createdby",label: "Created by",  Icon: UserIcon,      color: C.pink,     defaultShown: false },
+  { key: "__builtin_docs",    label: "Linked Docs",  Icon: FileText,      color: C.amber,    defaultShown: false },
+  { key: "__builtin_linked",  label: "Linked tasks", Icon: Link2,         color: C.amber,    defaultShown: false },
+  { key: "__builtin_sops",    label: "Linked SOPs",  Icon: BookOpen,      color: C.amber,    defaultShown: false },
+
+  // "Soon" — full ClickUp property list for parity; no backing data yet, so
+  // these render disabled in the Fields panel (never a real column).
+  { key: "__soon_assigned_comments", label: "Assigned Comments", Icon: MessageSquare,  color: C.violet,   defaultShown: false, soon: true },
+  { key: "__soon_custom_task_id",    label: "Custom Task ID",    Icon: Hash,           color: "#94A3B8",  defaultShown: false, soon: true },
+  { key: "__soon_date_closed",       label: "Date closed",       Icon: CalIcon,        color: C.green,    defaultShown: false, soon: true },
+  { key: "__soon_date_done",         label: "Date done",         Icon: CalendarCheck,  color: C.green,    defaultShown: false, soon: true },
+  { key: "__soon_dependencies",      label: "Dependencies",      Icon: Link2,          color: C.amber,    defaultShown: false, soon: true },
+  { key: "__soon_duration",          label: "Duration",          Icon: Clock,          color: C.orange,   defaultShown: false, soon: true },
+  { key: "__soon_latest_comment",    label: "Latest comment",    Icon: MessageSquare,  color: C.violet,   defaultShown: false, soon: true },
+  { key: "__soon_lists",             label: "Lists",             Icon: ListChecks,     color: C.green,    defaultShown: false, soon: true },
+  { key: "__soon_pull_requests",     label: "Pull Requests",     Icon: GitPullRequest, color: C.indigo,   defaultShown: false, soon: true },
+  { key: "__soon_sprint_points",     label: "Sprint points",     Icon: Target,         color: C.amber,    defaultShown: false, soon: true },
+  { key: "__soon_sprints",           label: "Sprints",           Icon: GaugeCircle,    color: C.amber,    defaultShown: false, soon: true },
+  { key: "__soon_time_estimate",     label: "Time estimate",     Icon: Clock,          color: C.orange,   defaultShown: false, soon: true },
+];
+
+export const BUILTIN_COLUMN_BY_KEY: Record<string, BuiltinColumn> = Object.fromEntries(
+  BUILTIN_COLUMNS.map((c) => [c.key, c]),
+);
+
+/** Effective visibility of a built-in column for a view. */
+export function isBuiltinShown(
+  key: string,
+  hidden: Iterable<string>,
+  extra: Iterable<string>,
+): boolean {
+  const col = BUILTIN_COLUMN_BY_KEY[key];
+  if (!col) return false;
+  if (col.locked) return true;
+  if (col.soon) return false; // no data yet — never a real column
+  return col.defaultShown ? !new Set(hidden).has(key) : new Set(extra).has(key);
+}
 
 // ── FieldDef stored in Board.schema.fields ─────────────────────
 

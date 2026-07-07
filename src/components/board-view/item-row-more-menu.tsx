@@ -6,26 +6,17 @@
 // Duplicate / Start timer / Archive / Delete) and stubs the rest with a toast so
 // the menu reads complete without pretending unbuilt features work.
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   MoreHorizontal, Copy, Pencil, Trash2, Archive, Clock, Star,
   CornerUpRight, ExternalLink, Box,
 } from "lucide-react";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
-import { MorePortal } from "@/components/layout/os/more-portal";
+import { MorePortal, type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
-export function ItemRowMoreMenu({
-  item,
-  canEdit,
-  onOpen,
-  onRename,
-  onDuplicate,
-  onArchive,
-  onDeleted,
-  className,
-}: {
+export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
   item: { id: string; boardId?: string | null; title: string };
   canEdit: boolean;
   onOpen?: () => void;
@@ -36,13 +27,28 @@ export function ItemRowMoreMenu({
   /** Local removal after a hard delete succeeds. */
   onDeleted?: () => void;
   className?: string;
-}) {
+}>(function ItemRowMoreMenu({
+  item,
+  canEdit,
+  onOpen,
+  onRename,
+  onDuplicate,
+  onArchive,
+  onDeleted,
+  className,
+}, ref) {
   const [open, setOpen] = useState(false);
+  // Cursor coords when opened via right-click; null = anchored to the "…" button.
+  const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const { toast } = useOsToast();
   const confirm = useConfirm();
+
+  useImperativeHandle(ref, () => ({
+    openAtPoint: (x, y) => { setPoint({ x, y }); setOpen(true); },
+  }), []);
 
   useEffect(() => {
     if (!open) return;
@@ -93,7 +99,7 @@ export function ItemRowMoreMenu({
     close();
     const ok = await confirm({
       title: "Delete task",
-      description: `Permanently delete "${item.title}"? This can't be undone.`,
+      description: `Delete "${item.title}"? It moves to Trash and can be restored for 60 days.`,
       destructive: true,
       confirmLabel: "Delete",
     });
@@ -112,7 +118,7 @@ export function ItemRowMoreMenu({
       <button
         ref={btnRef}
         type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPoint(null); setOpen((v) => !v); }}
         className={`${className ?? "inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"} transition-opacity ${open ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
         title="More actions"
         aria-label="More actions"
@@ -121,7 +127,7 @@ export function ItemRowMoreMenu({
       >
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
-      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={236} open={open} placement="below">
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={236} open={open} placement="below" point={point}>
         <MenuList className="min-w-[236px]" onClick={(e) => e.stopPropagation()}>
           {/* Copy trio (ClickUp header row) */}
           <div className="flex items-stretch gap-1 px-2 pb-1.5">
@@ -148,4 +154,4 @@ export function ItemRowMoreMenu({
       </MorePortal>
     </span>
   );
-}
+});

@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Trash2, Loader2, RotateCcw, BookCopy, ShieldCheck, FileText, Table as TableIcon,
-  Paperclip, PenLine, FileSignature,
+  Paperclip, PenLine, FileSignature, Boxes, Folder, ListChecks, CheckSquare,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -29,6 +29,10 @@ const TYPE_META: Record<string, { label: string; Icon: typeof FileText }> = {
   policy: { label: "Policy", Icon: ShieldCheck },
   contract: { label: "Contract", Icon: FileSignature },
   template: { label: "Contract template", Icon: FileSignature },
+  space: { label: "Space", Icon: Boxes },
+  folder: { label: "Folder", Icon: Folder },
+  board: { label: "List", Icon: ListChecks },
+  item: { label: "Task", Icon: CheckSquare },
 };
 
 function daysLeft(deletedAt: string): number {
@@ -91,7 +95,7 @@ export default function TrashPage() {
           <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center">
             <Trash2 className="mx-auto h-8 w-8 text-zinc-300" />
             <div className="mt-3 text-sm font-medium text-zinc-700">Trash is empty</div>
-            <div className="mt-1 text-[13px] text-zinc-500">Deleted documents (SOPs, Tables, Files, Policies …) appear here and are recoverable for 60 days.</div>
+            <div className="mt-1 text-[13px] text-zinc-500">Deleted Spaces, Lists, Tasks and documents (SOPs, Tables, Files …) appear here and are recoverable for 60 days.</div>
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">

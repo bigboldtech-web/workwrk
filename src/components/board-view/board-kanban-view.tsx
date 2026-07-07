@@ -8,7 +8,7 @@
 // when empty), and a hover action rail top-right (Mark complete / Add subtask /
 // Rename / "..." menu). Native HTML5 drag re-statuses a card between columns.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPlus, CheckCircle2, Network, Pencil, Plus, X } from "lucide-react";
 import { isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -17,6 +17,7 @@ import { AssigneePicker } from "./assignee-picker";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
 import { ItemRowMoreMenu } from "./item-row-more-menu";
+import { type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardKanbanViewProps {
@@ -33,8 +34,11 @@ interface BoardKanbanViewProps {
 
 export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem }: BoardKanbanViewProps) {
   const confirm = useConfirm();
+  // Show all choice-type custom fields as chips on cards (capped so a card with
+  // many fields doesn't sprawl) — so switching List → Board keeps custom data
+  // visible.
   const chipFields = useMemo(
-    () => (initialFields ?? []).filter((f) => f.type === "DROPDOWN" || f.type === "LABELS" || f.type === "MULTI_SELECT").slice(0, 2),
+    () => (initialFields ?? []).filter((f) => f.type === "DROPDOWN" || f.type === "LABELS" || f.type === "MULTI_SELECT").slice(0, 6),
     [initialFields],
   );
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -292,6 +296,7 @@ function KanbanCard({
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(card.title);
   const [dueOpen, setDueOpen] = useState(false);
+  const moreRef = useRef<ContextMenuHandle>(null);
   // Seed the input from the current title only when entering edit mode — avoids
   // a prop-sync effect (which cascades renders).
   const startEdit = () => { setTitle(card.title); setEditing(true); };
@@ -323,6 +328,7 @@ function KanbanCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={() => { if (!editing) onOpen?.(); }}
+      onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
       className={`group relative rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-sm ${
         canEdit && !editing ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
       } ${isDragging ? "opacity-40" : ""} hover:shadow-sm transition-shadow`}
@@ -367,6 +373,7 @@ function KanbanCard({
             </button>
           ) : null}
           <ItemRowMoreMenu
+            ref={moreRef}
             item={{ id: card.id, boardId, title: card.title }}
             canEdit={canEdit}
             onOpen={onOpen}

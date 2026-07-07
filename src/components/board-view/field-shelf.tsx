@@ -16,35 +16,66 @@
 // onFieldsChanged so the board re-renders.
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, Plus, Search, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, Lock, Plus, Search, Trash2, X } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import {
   FIELD_CATALOG,
+  FIELD_TYPE_BY_KEY,
+  BUILTIN_COLUMNS,
+  isBuiltinShown,
   type FieldChoice,
   type FieldDef,
   type FieldType,
   type FieldCatalogEntry,
+  type BuiltinColumn,
 } from "@/lib/field-catalog";
 
 const CHOICE_TYPES: ReadonlySet<string> = new Set(["DROPDOWN", "MULTI_SELECT", "LABELS", "TSHIRT_SIZE", "CUSTOM_DROPDOWN"]);
 
-// "Suggested" quick-add — the field types teams reach for most. Rendered
-// as the first group in Create-new (context-agnostic v1).
-const SUGGESTED_TYPES: ReadonlySet<string> = new Set([
-  "DROPDOWN", "DATE", "PEOPLE", "MONEY", "PROGRESS_MANUAL", "RATING", "LINKED_DOC",
-]);
-
-// Built-in columns that can be shown/hidden per view. Status/Name stay
-// (always rendered). The key namespace (__builtin_*) lives in the same
-// View.config.hiddenFields set the custom-field toggles use, so the table
-// reads one source of truth.
-export const BUILTIN_FIELD_TOGGLES: { key: string; label: string }[] = [
-  { key: "__builtin_owner", label: "Owner" },
-  { key: "__builtin_priority", label: "Priority" },
-  { key: "__builtin_type", label: "Task Type" },
-  { key: "__builtin_tags", label: "Tags" },
+// "Popular" quick-add — the everyday field types teams reach for (ClickUp's
+// Popular section). The rest live under "All".
+const POPULAR_TYPES: FieldType[] = [
+  "DROPDOWN", "TEXT", "DATE", "LONG_TEXT", "NUMBER", "LABELS",
+  "MONEY", "PEOPLE", "CHECKBOX", "FILES", "RATING", "LINKED_DOC",
 ];
+
+// Colored, per-type field icon (aligns the Fields panel with ClickUp).
+function FieldTypeIcon({ type, className }: { type: FieldType; className?: string }) {
+  const e = FIELD_TYPE_BY_KEY[type];
+  if (!e) return null;
+  const I = e.Icon;
+  return <I className={className ?? "w-4 h-4"} style={{ color: e.color }} />;
+}
+
+// AI field-name suggestions — cached per board per session so the "AI Suggestions"
+// section costs at most one LLM call per board, not one per panel open. Fails
+// soft (empty array) so the section simply hides when AI isn't available.
+type FieldSuggestion = { label: string; type: FieldType };
+const _suggestCache = new Map<string, FieldSuggestion[]>();
+const _suggestInFlight = new Map<string, Promise<FieldSuggestion[]>>();
+async function loadFieldSuggestions(boardId: string): Promise<FieldSuggestion[]> {
+  if (_suggestCache.has(boardId)) return _suggestCache.get(boardId)!;
+  if (_suggestInFlight.has(boardId)) return _suggestInFlight.get(boardId)!;
+  const p = (async (): Promise<FieldSuggestion[]> => {
+    try {
+      const res = await fetch(`/api/boards/${boardId}/fields/suggest`, { method: "POST" });
+      if (!res.ok) return [];
+      const d = await res.json();
+      const list: FieldSuggestion[] = Array.isArray(d.suggestions)
+        ? d.suggestions.filter((s: { label?: unknown; type?: unknown }) => typeof s?.label === "string" && typeof s?.type === "string")
+        : [];
+      _suggestCache.set(boardId, list);
+      return list;
+    } catch {
+      return [];
+    } finally {
+      _suggestInFlight.delete(boardId);
+    }
+  })();
+  _suggestInFlight.set(boardId, p);
+  return p;
+}
 
 /** ClickUp-ish 8-swatch palette for choice pills. */
 const SWATCHES = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#94a3b8"];
@@ -54,18 +85,21 @@ interface FieldShelfProps {
   open: boolean;
   canEdit: boolean;
   fields: FieldDef[];
-  /** Per-view hidden field keys (View.config.hiddenFields). */
+  /** Per-view hidden field keys (View.config.hiddenFields) — default-on cols + custom. */
   hiddenFields?: string[];
-  /** Toggle a field's visibility on the active view. Absent when the
-   *  board has no persisted view yet — the toggles hide themselves. */
-  onToggleHidden?: (key: string) => void;
+  /** Per-view turned-on optional built-in columns (View.config.extraColumns). */
+  extraColumns?: string[];
+  /** Toggle any column's visibility — a custom field key OR a __builtin_* key.
+   *  The parent routes to hiddenFields vs extraColumns. Absent when the board
+   *  has no persisted view yet (toggles hide themselves). */
+  onToggleColumn?: (key: string) => void;
   onClose: () => void;
   onFieldsChanged: (fields: FieldDef[]) => void;
 }
 
 type Tab = "create" | "existing";
 
-export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onToggleHidden, onClose, onFieldsChanged }: FieldShelfProps) {
+export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, extraColumns, onToggleColumn, onClose, onFieldsChanged }: FieldShelfProps) {
   const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>("create");
   const [query, setQuery] = useState("");
@@ -76,24 +110,28 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const hidden = useMemo(() => new Set(hiddenFields ?? []), [hiddenFields]);
+  const extra = useMemo(() => new Set(extraColumns ?? []), [extraColumns]);
   const ordered = useMemo(() => [...fields].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)), [fields]);
   const shownFields = ordered.filter((f) => !hidden.has(f.key));
   const hiddenList = ordered.filter((f) => hidden.has(f.key));
+  const q = query.trim().toLowerCase();
+
+  // Built-in columns split into currently-shown vs available (Properties),
+  // filtered by the search box. Locked columns (Name/Status) sit atop Shown.
+  const matchQ = (label: string) => !q || label.toLowerCase().includes(q);
+  const lockedCols = BUILTIN_COLUMNS.filter((c) => c.locked && matchQ(c.label));
+  const shownBuiltins = BUILTIN_COLUMNS.filter((c) => !c.locked && !c.soon && matchQ(c.label) && isBuiltinShown(c.key, hidden, extra));
+  const availableBuiltins = BUILTIN_COLUMNS.filter((c) => !c.locked && !c.soon && matchQ(c.label) && !isBuiltinShown(c.key, hidden, extra));
+  // "Soon" properties (no backing data yet) — listed for ClickUp parity but
+  // disabled. Sorted alphabetically alongside the available ones below.
+  const soonBuiltins = BUILTIN_COLUMNS.filter((c) => c.soon && matchQ(c.label));
+  const properties = [...availableBuiltins, ...soonBuiltins].sort((a, b) => a.label.localeCompare(b.label));
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return FIELD_CATALOG;
-    return FIELD_CATALOG.filter((e) => e.label.toLowerCase().includes(q));
+    const term = query.trim().toLowerCase();
+    if (!term) return FIELD_CATALOG;
+    return FIELD_CATALOG.filter((e) => e.label.toLowerCase().includes(term));
   }, [query]);
-
-  const grouped = useMemo(() => {
-    const out: Record<string, FieldCatalogEntry[]> = { Suggested: [], Common: [], WorkwrK: [], AI: [], Advanced: [] };
-    for (const e of filtered) {
-      if (SUGGESTED_TYPES.has(e.type)) out.Suggested.push(e);
-      out[e.group].push(e);
-    }
-    return out;
-  }, [filtered]);
 
   const refetchFields = async () => {
     const res = await fetch(`/api/boards/${boardId}/fields`, { cache: "no-store" });
@@ -193,7 +231,7 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
     field: f,
     canEdit,
     isHidden: hidden.has(f.key),
-    onToggleHidden: onToggleHidden ? () => onToggleHidden(f.key) : undefined,
+    onToggleHidden: onToggleColumn ? () => onToggleColumn(f.key) : undefined,
     expanded: expandedKey === f.key,
     onToggleExpand: CHOICE_TYPES.has(f.type)
       ? () => setExpandedKey((k) => (k === f.key ? null : f.key))
@@ -264,69 +302,66 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
 
             <div className="flex-1 overflow-y-auto px-3 pb-4">
               {tab === "create" ? (
-                <CreateNewTab grouped={grouped} busy={busy} canEdit={canEdit} onPick={(t, l) => void addField(t, l)} />
+                /* Create new — the field-type catalog only (Popular + All). */
+                <CreateNewTab boardId={boardId} query={query} catalog={filtered} busy={busy} canEdit={canEdit} onPick={(t, l) => void addField(t, l)} />
               ) : (
-                <ExistingTab
-                  boardId={boardId}
-                  open={open}
-                  query={query}
-                  busy={busy}
-                  canEdit={canEdit}
-                  existingFields={fields}
-                  onPick={(c) => void addField(c.field.type as FieldType, c.field.label, c.field.options)}
-                />
-              )}
-
-              {ordered.length > 0 ? (
-                <section className="mt-6 px-2">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">
-                    {onToggleHidden ? "Shown" : "On this board"}
-                  </h3>
-                  <ul className="space-y-1">
+                /* Add existing — ClickUp's Shown / Properties / Custom-Fields model. */
+                <div className="space-y-6 pt-1">
+                  {/* Shown — locked (Name/Status) + currently-visible columns. */}
+                  <ShelfSection title="Shown" count={lockedCols.length + shownBuiltins.length + shownFields.length}>
+                    {lockedCols.map((c) => (
+                      <BuiltinRow key={c.key} col={c} shown locked />
+                    ))}
+                    {shownBuiltins.map((c) => (
+                      <BuiltinRow key={c.key} col={c} shown onToggle={onToggleColumn ? () => onToggleColumn(c.key) : undefined} />
+                    ))}
                     {shownFields.map((f) => (
                       <FieldRow key={f.key} {...fieldRowProps(f)} />
                     ))}
-                    {shownFields.length === 0 ? (
-                      <li className="px-2 py-1.5 text-xs text-zinc-400">All fields are hidden on this view</li>
+                    {lockedCols.length + shownBuiltins.length + shownFields.length === 0 ? (
+                      <li className="px-2 py-1.5 text-xs text-zinc-400 list-none">No matching columns</li>
                     ) : null}
-                  </ul>
-                  {onToggleHidden && hiddenList.length > 0 ? (
-                    <>
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2 mt-5">Hidden</h3>
-                      <ul className="space-y-1">
-                        {hiddenList.map((f) => (
-                          <FieldRow key={f.key} {...fieldRowProps(f)} />
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                </section>
-              ) : null}
+                  </ShelfSection>
 
-              {/* Built-in fields — show/hide the fixed columns per view. */}
-              {onToggleHidden ? (
-                <section className="mt-6 px-2">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Built-in fields</h3>
-                  <ul className="space-y-1">
-                    {BUILTIN_FIELD_TOGGLES.map((b) => {
-                      const isHidden = hidden.has(b.key);
-                      return (
-                        <li key={b.key} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50">
-                          <span className="text-sm flex-1 text-zinc-700">{b.label}</span>
-                          <button
-                            type="button"
-                            onClick={() => onToggleHidden(b.key)}
-                            className="inline-flex items-center justify-center w-6 h-6 rounded text-zinc-400 hover:text-zinc-700"
-                            title={isHidden ? "Show column" : "Hide column"}
-                          >
-                            {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </section>
-              ) : null}
+                  {/* Properties — built-in columns you can turn on (+ "Soon" ones
+                      with no data yet). These are shared/structural: hide-only,
+                      never deletable. */}
+                  {properties.length > 0 ? (
+                    <ShelfSection title="Properties" count={properties.length}>
+                      {properties.map((c) => (
+                        <BuiltinRow
+                          key={c.key}
+                          col={c}
+                          shown={false}
+                          soon={c.soon}
+                          onToggle={!c.soon && onToggleColumn ? () => onToggleColumn(c.key) : undefined}
+                        />
+                      ))}
+                    </ShelfSection>
+                  ) : null}
+
+                  {/* Hidden fields — custom fields hidden on this view. Unlike
+                      Properties these are yours: hide/show AND delete. */}
+                  {hiddenList.length > 0 ? (
+                    <ShelfSection title="Hidden fields" count={hiddenList.length}>
+                      {hiddenList.map((f) => (
+                        <FieldRow key={f.key} {...fieldRowProps(f)} />
+                      ))}
+                    </ShelfSection>
+                  ) : null}
+
+                  {/* Custom Fields in Workspace — reuse a field from a sibling board. */}
+                  <WorkspaceFieldsSection
+                    boardId={boardId}
+                    open={open}
+                    query={query}
+                    busy={busy}
+                    canEdit={canEdit}
+                    existingFields={fields}
+                    onPick={(c) => void addField(c.field.type as FieldType, c.field.label, c.field.options)}
+                  />
+                </div>
+              )}
             </div>
           </div>
         ) : null}
@@ -335,52 +370,139 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, onTog
   );
 }
 
+// Section header with a ClickUp-style "(N)" count.
+function ShelfSection({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+  return (
+    <section className="px-2">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2 flex items-center gap-1.5">
+        {title}
+        {count != null ? <span className="text-zinc-300 font-medium">{count}</span> : null}
+      </h3>
+      <ul className="space-y-1">{children}</ul>
+    </section>
+  );
+}
+
+// A built-in "Property" row — colored icon + label + show/hide (or Locked, or
+// disabled "Soon" when the data isn't wired yet).
+function BuiltinRow({ col, shown, locked, soon, onToggle }: { col: BuiltinColumn; shown: boolean; locked?: boolean; soon?: boolean; onToggle?: () => void }) {
+  const I = col.Icon;
+  return (
+    <li className={`group flex items-center gap-2.5 px-2 py-1.5 rounded-md ${soon ? "opacity-60" : "hover:bg-zinc-50"}`}>
+      <I className="w-4 h-4 shrink-0" style={{ color: col.color }} />
+      <span className="text-sm flex-1 text-zinc-700 truncate">{col.label}</span>
+      {soon ? (
+        <span className="inline-flex items-center gap-1.5" title="Coming soon — no data for this yet">
+          <span className="text-[10px] uppercase tracking-wide text-zinc-400">Soon</span>
+          <EyeOff className="w-4 h-4 text-zinc-300" aria-hidden />
+        </span>
+      ) : locked ? (
+        <Lock className="w-3.5 h-3.5 text-zinc-300" aria-label="Always shown" />
+      ) : onToggle ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="inline-flex items-center justify-center w-6 h-6 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+          title={shown ? "Hide column" : "Show column"}
+          aria-label={shown ? "Hide column" : "Show column"}
+        >
+          {shown ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+        </button>
+      ) : null}
+    </li>
+  );
+}
+
 function CreateNewTab({
-  grouped,
+  boardId,
+  query,
+  catalog,
   busy,
   canEdit,
   onPick,
 }: {
-  grouped: Record<string, FieldCatalogEntry[]>;
+  boardId: string;
+  query: string;
+  catalog: FieldCatalogEntry[];
   busy: boolean;
   canEdit: boolean;
   onPick: (type: FieldType, label: string) => void;
 }) {
+  const inCatalog = new Set(catalog.map((e) => e.type));
+  const popular = POPULAR_TYPES.map((t) => FIELD_TYPE_BY_KEY[t]).filter((e) => e && inCatalog.has(e.type));
+  const all = [...catalog].sort((a, b) => a.label.localeCompare(b.label));
+
+  // AI Suggestions — contextual field names from the board (cached per session).
+  // Only fetched when the viewer can create fields; hidden while searching.
+  const [suggestions, setSuggestions] = useState<FieldSuggestion[]>([]);
+  useEffect(() => {
+    if (!canEdit || !boardId) return;
+    let active = true;
+    void loadFieldSuggestions(boardId).then((s) => { if (active) setSuggestions(s); });
+    return () => { active = false; };
+  }, [boardId, canEdit]);
+  const showSuggestions = !query.trim() && suggestions.length > 0;
+
+  const Row = (e: FieldCatalogEntry) => (
+    <li key={e.type}>
+      <button
+        type="button"
+        onClick={() => onPick(e.type, e.label)}
+        disabled={busy || !canEdit}
+        title={e.description}
+        className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
+      >
+        <e.Icon className="w-4 h-4 shrink-0" style={{ color: e.color }} />
+        <span className="text-sm flex-1 truncate">{e.label}</span>
+        {!e.tier1 ? <span className="text-[10px] uppercase tracking-wide text-zinc-400">Soon</span> : null}
+        <span className="text-[11px] text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
+          <Plus className="w-3 h-3" /> Create
+        </span>
+      </button>
+    </li>
+  );
+
   return (
-    <div className="space-y-4">
-      {(["Suggested", "Common", "WorkwrK", "AI", "Advanced"] as const).map((group) => {
-        const items = grouped[group] ?? [];
-        if (items.length === 0) return null;
-        return (
-          <section key={group}>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 px-2 mb-1">{group === "AI" ? "AI fields" : group}</h3>
-            <ul className="space-y-0.5">
-              {items.map((e) => (
-                <li key={e.type}>
-                  <button
-                    type="button"
-                    onClick={() => onPick(e.type, e.label)}
-                    disabled={busy || !canEdit}
-                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
-                  >
-                    <e.Icon className="w-4 h-4 text-zinc-500" />
-                    <span className="text-sm flex-1">{e.label}</span>
-                    {!e.tier1 ? (
-                      <span className="text-[10px] uppercase tracking-wide text-zinc-500">Soon</span>
-                    ) : null}
-                    <Plus className="w-3.5 h-3.5 text-zinc-500 opacity-0 group-hover:opacity-100" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        );
-      })}
+    <div className="space-y-4 pt-1">
+      {showSuggestions ? (
+        <section className="px-1">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">AI Suggestions</h3>
+          <ul className="space-y-0.5">
+            {suggestions.map((s) => (
+              <li key={`${s.type}:${s.label}`}>
+                <button
+                  type="button"
+                  onClick={() => onPick(s.type, s.label)}
+                  disabled={busy || !canEdit}
+                  title={`Create a ${FIELD_TYPE_BY_KEY[s.type]?.label ?? "field"} field`}
+                  className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
+                >
+                  <FieldTypeIcon type={s.type} className="w-4 h-4 shrink-0" />
+                  <span className="text-sm flex-1 truncate">{s.label}</span>
+                  <span className="text-[11px] text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
+                    <Plus className="w-3 h-3" /> Create
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {popular.length > 0 ? (
+        <section className="px-1">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">Popular</h3>
+          <ul className="space-y-0.5">{popular.map(Row)}</ul>
+        </section>
+      ) : null}
+      <section className="px-1">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">All</h3>
+        <ul className="space-y-0.5">{all.map(Row)}</ul>
+      </section>
     </div>
   );
 }
 
-// ── Add existing — copy a field def from a sibling board ──────────
+// ── Custom Fields in Workspace — copy a field def from a sibling board ────
 
 interface AvailableCandidate {
   boardId: string;
@@ -388,7 +510,7 @@ interface AvailableCandidate {
   field: { key: string; label: string; type: string; options?: unknown };
 }
 
-function ExistingTab({
+function WorkspaceFieldsSection({
   boardId,
   open,
   query,
@@ -425,34 +547,30 @@ function ExistingTab({
       (!q || c.field.label.toLowerCase().includes(q)),
   );
 
-  if (candidates === null) {
-    return <div className="px-4 py-6 text-sm text-zinc-500 text-center">Loading fields from this Space…</div>;
-  }
-  if (list.length === 0) {
-    return (
-      <div className="px-4 py-6 text-sm text-zinc-500 text-center">
-        No reusable fields found on other boards in this Space.
-      </div>
-    );
-  }
   return (
-    <ul className="space-y-0.5 px-1">
-      {list.map((c) => (
-        <li key={`${c.boardId}:${c.field.key}`}>
-          <button
-            type="button"
-            disabled={busy || !canEdit}
-            onClick={() => onPick(c)}
-            className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
-          >
-            <span className="text-sm flex-1 truncate">{c.field.label}</span>
-            <span className="text-[10px] uppercase tracking-wide text-zinc-400">{c.field.type.replace(/_/g, " ").toLowerCase()}</span>
-            <span className="text-[11px] text-zinc-500 truncate max-w-[110px]">from {c.boardName}</span>
-            <Plus className="w-3.5 h-3.5 text-zinc-500" />
-          </button>
-        </li>
-      ))}
-    </ul>
+    <ShelfSection title="Custom Fields in Workspace" count={candidates === null ? undefined : list.length}>
+      {candidates === null ? (
+        <li className="px-2 py-1.5 text-xs text-zinc-400 list-none">Loading fields from this Space…</li>
+      ) : list.length === 0 ? (
+        <li className="px-2 py-1.5 text-xs text-zinc-400 list-none">No reusable fields on other boards in this Space.</li>
+      ) : (
+        list.map((c) => (
+          <li key={`${c.boardId}:${c.field.key}`}>
+            <button
+              type="button"
+              disabled={busy || !canEdit}
+              onClick={() => onPick(c)}
+              className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
+            >
+              <FieldTypeIcon type={c.field.type as FieldType} className="w-4 h-4 shrink-0" />
+              <span className="text-sm flex-1 truncate">{c.field.label}</span>
+              <span className="text-[11px] text-zinc-500 truncate max-w-[100px]">from {c.boardName}</span>
+              <Plus className="w-3.5 h-3.5 text-zinc-400 opacity-0 group-hover:opacity-100" />
+            </button>
+          </li>
+        ))
+      )}
+    </ShelfSection>
   );
 }
 
@@ -521,9 +639,7 @@ function FieldRow({
             <GripVertical className="w-3 h-3" />
           </span>
         ) : null}
-        <span className="text-xs text-zinc-500 uppercase tracking-wide w-[60px] flex-shrink-0 truncate">
-          {field.type.replace(/_/g, " ").toLowerCase()}
-        </span>
+        <FieldTypeIcon type={field.type} className="w-4 h-4 shrink-0" />
         {canEdit && editing ? (
           <input
             type="text"

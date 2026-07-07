@@ -5,7 +5,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveBoardItem, deleteBoardItem, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board-items";
+import { archiveBoardItem, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board-items";
+import { moveToTrash } from "@/lib/trash";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { getBoardStatuses } from "@/lib/board-items-shared";
@@ -85,11 +86,11 @@ async function ctx() {
   if (!session?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
+  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string; name?: string };
   if (!u.id || !u.organizationId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
+  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId, userName: u.name ?? null };
 }
 
 async function loadAndGate(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
@@ -155,7 +156,8 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const url = new URL(req.url);
   const hard = url.searchParams.get("hard") === "1";
   if (hard) {
-    await deleteBoardItem(id);
+    // Recoverable delete — snapshot to Trash, then remove (subtasks cascade).
+    await moveToTrash("item", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
     return NextResponse.json({ ok: true });
   }
   const archived = await archiveBoardItem(id, c.userId);

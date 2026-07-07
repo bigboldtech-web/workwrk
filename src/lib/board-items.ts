@@ -175,10 +175,10 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
   const itemIds = rows.map((r) => r.id);
   const ownerIds = Array.from(new Set(rows.map((r) => r.ownerId).filter((x): x is string => !!x)));
 
-  // Parallel batches — owners + comment counts + attachment counts + tags.
-  // Comments + attachments are polymorphic (entityType + entityId /
-  // sourceType + sourceId) so we groupBy the matching column.
-  const [owners, commentGroups, attachmentGroups, tagsById] = await Promise.all([
+  // Parallel batches — owners + comment counts + links (by type) + tags +
+  // time-tracked sum + creator activity. All polymorphic aggregates key off
+  // (entityType/entityId or sourceType/sourceId) via groupBy, so no N+1.
+  const [owners, commentGroups, linkGroups, tagsById, timeGroups, createdActs] = await Promise.all([
     ownerIds.length
       ? prisma.user.findMany({
           where: { id: { in: ownerIds } },
@@ -194,17 +194,59 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
       : Promise.resolve([] as { entityId: string; _count: { _all: number } }[]),
     itemIds.length
       ? prisma.entityLink.groupBy({
-          by: ["sourceId"],
+          by: ["sourceId", "targetType"],
           where: { sourceType: "BOARD_ITEM", sourceId: { in: itemIds } },
           _count: { _all: true },
         })
-      : Promise.resolve([] as { sourceId: string; _count: { _all: number } }[]),
+      : Promise.resolve([] as { sourceId: string; targetType: string; _count: { _all: number } }[]),
     tagsForItems(itemIds),
+    itemIds.length
+      ? prisma.timerSession.groupBy({
+          by: ["entityId"],
+          where: { entityType: "BOARD_ITEM", entityId: { in: itemIds } },
+          _sum: { durationMs: true },
+        })
+      : Promise.resolve([] as { entityId: string; _sum: { durationMs: number | null } }[]),
+    itemIds.length
+      ? prisma.itemActivity.findMany({
+          where: { entityType: "BOARD_ITEM", entityId: { in: itemIds }, action: "CREATED" },
+          select: { entityId: true, actorId: true },
+        })
+      : Promise.resolve([] as { entityId: string; actorId: string | null }[]),
   ]);
 
   const ownerById = new Map(owners.map((o) => [o.id, o] as const));
   const commentCountById = new Map(commentGroups.map((g) => [g.entityId, g._count._all] as const));
-  const attachmentCountById = new Map(attachmentGroups.map((g) => [g.sourceId, g._count._all] as const));
+
+  // Links split by target type — total (attachmentCount) + typed counts.
+  const attachmentCountById = new Map<string, number>();
+  const linkedDocById = new Map<string, number>();
+  const linkedTaskById = new Map<string, number>();
+  const linkedSopById = new Map<string, number>();
+  for (const g of linkGroups) {
+    const n = g._count._all;
+    attachmentCountById.set(g.sourceId, (attachmentCountById.get(g.sourceId) ?? 0) + n);
+    if (g.targetType === "DOC") linkedDocById.set(g.sourceId, n);
+    else if (g.targetType === "BOARD_ITEM") linkedTaskById.set(g.sourceId, n);
+    else if (g.targetType === "SOP") linkedSopById.set(g.sourceId, n);
+  }
+  const timeById = new Map(timeGroups.map((g) => [g.entityId, g._sum.durationMs ?? 0] as const));
+
+  // Creator = the actor on the item's CREATED activity. Resolve any creators
+  // not already in the owner batch with one extra lookup.
+  const creatorIdByItem = new Map<string, string>();
+  for (const a of createdActs) {
+    if (a.actorId && !creatorIdByItem.has(a.entityId)) creatorIdByItem.set(a.entityId, a.actorId);
+  }
+  const creatorUserById = new Map(ownerById);
+  const extraCreatorIds = Array.from(new Set([...creatorIdByItem.values()])).filter((id) => !creatorUserById.has(id));
+  if (extraCreatorIds.length) {
+    const extra = await prisma.user.findMany({
+      where: { id: { in: extraCreatorIds } },
+      select: { id: true, firstName: true, lastName: true, avatar: true },
+    });
+    for (const u of extra) creatorUserById.set(u.id, u);
+  }
 
   // Subtask counts derived from the same fetched rows — no extra query.
   // Top-level item (parentItemId = null) gets count of its direct children.
@@ -220,6 +262,12 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
     base.commentCount = commentCountById.get(r.id) ?? 0;
     base.attachmentCount = attachmentCountById.get(r.id) ?? 0;
     base.subtaskCount = subtaskCountByParent.get(r.id) ?? 0;
+    base.timeTrackedMs = timeById.get(r.id) ?? 0;
+    base.linkedDocCount = linkedDocById.get(r.id) ?? 0;
+    base.linkedTaskCount = linkedTaskById.get(r.id) ?? 0;
+    base.linkedSopCount = linkedSopById.get(r.id) ?? 0;
+    const cid = creatorIdByItem.get(r.id);
+    base.createdBy = cid ? creatorUserById.get(cid) ?? null : null;
     return base;
   });
 }
