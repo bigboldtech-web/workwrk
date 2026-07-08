@@ -36,15 +36,31 @@ const providers = [
         throw new Error("Invalid credentials");
       }
 
-      // Block sign-in for users whose org has been soft-deleted. The
-      // org admin scheduled the destruction; sign-ins during the
-      // grace window would just create new audit clutter for data
-      // that's about to disappear.
-      if (user.organization.status === "SUSPENDED") {
+      // If the user's anchored org is unusable (self-scheduled deletion or a
+      // support suspension) but they belong to OTHER workspaces, move them into
+      // a healthy one instead of locking them out. Deleting your *current*
+      // workspace should just drop you into another — not trap you, since the
+      // only person who could undo the deletion would otherwise be the one
+      // person who can't sign in.
+      let org = user.organization;
+      if (org.status === "CANCELLED" || org.status === "SUSPENDED") {
+        const alt = await prisma.organizationMembership.findFirst({
+          where: { userId: user.id, organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } } },
+          include: { organization: true },
+          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+        });
+        if (alt) {
+          await prisma.user.update({ where: { id: user.id }, data: { organizationId: alt.organizationId } });
+          org = alt.organization; // sign in under the healthy workspace
+        }
+      }
+
+      // No healthy workspace to fall back to — block with a clear, honest reason.
+      if (org.status === "SUSPENDED") {
         throw new Error("This workspace is suspended. Please contact WorkwrK support.");
       }
-      if (user.organization.status === "CANCELLED") {
-        throw new Error("This organization has been scheduled for deletion. Contact your administrator if this was a mistake.");
+      if (org.status === "CANCELLED") {
+        throw new Error("This workspace is scheduled for deletion. It's recoverable for 30 days — contact WorkwrK support to restore it.");
       }
 
       return {
@@ -54,8 +70,8 @@ const providers = [
         firstName: user.firstName,
         lastName: user.lastName,
         accessLevel: user.accessLevel,
-        organizationId: user.organizationId,
-        organizationName: user.organization.name,
+        organizationId: org.id,
+        organizationName: org.name,
         avatar: user.avatar,
       };
     },

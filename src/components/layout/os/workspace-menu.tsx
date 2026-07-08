@@ -135,6 +135,9 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
   }, [open, onClose, deleteOpen]);
 
   const current = memberships?.find((m) => m.isCurrent)?.organization ?? null;
+  // A workspace to fall into after deleting the current one, so the user isn't
+  // logged out (deleting one of several workspaces should leave the rest).
+  const otherOrg = memberships?.find((m) => !m.isCurrent)?.organization ?? null;
 
   const switchTo = useCallback(
     async (orgId: string, isCurrent: boolean) => {
@@ -398,6 +401,8 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
         ? createPortal(
             <DeleteWorkspaceModal
               org={current}
+              switchToOrg={otherOrg}
+              onSwitchAway={(id) => switchTo(id, false)}
               toast={toast}
               onClose={() => setDeleteOpen(false)}
             />,
@@ -415,10 +420,15 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
 
 function DeleteWorkspaceModal({
   org,
+  switchToOrg,
+  onSwitchAway,
   toast,
   onClose,
 }: {
   org: OrgLite;
+  /** Another workspace to land in after deletion (so the user isn't logged out). */
+  switchToOrg?: OrgLite | null;
+  onSwitchAway?: (orgId: string) => void;
   toast: ReturnType<typeof useToast>;
   onClose: () => void;
 }) {
@@ -450,6 +460,13 @@ function DeleteWorkspaceModal({
       if (!res.ok) {
         toast.error("Couldn't delete workspace", body?.error ?? "Please try again.");
         setSubmitting(false);
+        return;
+      }
+      // If the user has another workspace, drop them straight into it rather
+      // than logging them out — deleting one of several should leave the rest.
+      if (switchToOrg && onSwitchAway) {
+        toast.success("Workspace scheduled for deletion", `Switched you to ${switchToOrg.name}.`);
+        onSwitchAway(switchToOrg.id);
         return;
       }
       setDoneMessage(body?.message ?? "Workspace scheduled for deletion.");
@@ -498,10 +515,12 @@ function DeleteWorkspaceModal({
               <h2 className="text-[16px] font-semibold text-zinc-900 dark:text-zinc-100">Delete this workspace?</h2>
             </div>
             <p className="mt-2 text-[13px] text-zinc-600 dark:text-zinc-300">
-              This schedules{" "}
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{org.name}</span> for deletion.
-              Sign-in is blocked right away and all data is permanently removed after a 30-day
-              grace period. It stays recoverable until then.
+              This schedules the entire{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{org.name}</span> workspace —
+              and all of its data — for deletion. It stays recoverable for a 30-day grace period, then is
+              permanently removed. {switchToOrg
+                ? `You'll be moved to your ${switchToOrg.name} workspace.`
+                : "You'll be signed out."}
             </p>
 
             <label className="mt-4 block text-[12.5px] font-medium text-zinc-700 dark:text-zinc-200">

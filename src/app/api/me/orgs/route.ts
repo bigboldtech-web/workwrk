@@ -17,7 +17,11 @@ export async function GET() {
   const currentOrgId = getOrgId(session);
 
   const memberships = await prisma.organizationMembership.findMany({
-    where: { userId },
+    // Hide workspaces that are scheduled for deletion (CANCELLED) or suspended —
+    // a "deleted" workspace shouldn't linger in the switcher during its grace
+    // window. The membership row survives (for a possible restore) but the org
+    // is filtered out of the user-facing list.
+    where: { userId, organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } } },
     include: {
       organization: { select: { id: true, name: true, slug: true, logo: true } },
     },
