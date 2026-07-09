@@ -43,6 +43,11 @@ type ApiKra = {
   updatedAt?: string;
 };
 
+// Real-work rollup from /api/alignment/rollup — how many tagged tasks
+// back each KRA/KPI and how many are done.
+type RollupBucket = { total: number; done: number };
+type RollupData = { kra: Record<string, RollupBucket>; kpi: Record<string, RollupBucket> };
+
 const CATEGORY_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
 function categoryColor(name: string): string {
   let h = 0;
@@ -56,6 +61,7 @@ const FREQ_LABELS: Record<string, string> = {
 
 export default function KraKpiPage() {
   const [kras, setKras] = useState<ApiKra[] | null>(null);
+  const [rollup, setRollup] = useState<RollupData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -71,6 +77,11 @@ export default function KraKpiPage() {
       const list: ApiKra[] = data?.data?.items ?? data?.data?.data ?? data?.items ?? (Array.isArray(data?.data) ? data.data : []) ?? (Array.isArray(data) ? data : []);
       setKras(list);
       setLoadError(null);
+      // Best-effort: real-work rollup (never blocks the KRA list).
+      fetch("/api/alignment/rollup")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d && (d.kra || d.kpi)) setRollup({ kra: d.kra ?? {}, kpi: d.kpi ?? {} }); })
+        .catch(() => {});
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -194,7 +205,7 @@ export default function KraKpiPage() {
                 <span className="kra__group-line" />
               </header>
               <div className="kra__grid">
-                {g.items.map((k) => <KraCard key={k.id} kra={k} />)}
+                {g.items.map((k) => <KraCard key={k.id} kra={k} rollup={rollup} />)}
               </div>
             </section>
           ))
@@ -212,10 +223,26 @@ export default function KraKpiPage() {
   );
 }
 
-function KraCard({ kra: k }: { kra: ApiKra }) {
+function WorkBar({ done, total, color, width = 56 }: { done: number; total: number; color: string; width?: number }) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  return (
+    <span
+      title={`${done} of ${total} linked task${total === 1 ? "" : "s"} complete`}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+    >
+      <span style={{ width, height: 6, borderRadius: 4, background: "rgba(0,0,0,0.08)", overflow: "hidden", display: "inline-block", flexShrink: 0 }}>
+        <span style={{ display: "block", height: "100%", width: `${pct}%`, background: color, borderRadius: 4 }} />
+      </span>
+      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--os-fg-subtle, #71717a)" }}>{done}/{total}</span>
+    </span>
+  );
+}
+
+function KraCard({ kra: k, rollup }: { kra: ApiKra; rollup: RollupData | null }) {
   const cat = k.category ?? "Uncategorized";
   const color = categoryColor(cat);
   const kpis = k.kpis ?? [];
+  const kraWork = rollup?.kra[k.id] ?? null;
   return (
     <article className="kra__card" style={{ ["--card-c" as unknown as string]: color }}>
       <header className="kra__card-head">
@@ -227,23 +254,33 @@ function KraCard({ kra: k }: { kra: ApiKra }) {
         <div className="kra__kpis-list">
           <div className="kra__kpis-label"><Layers /> {kpis.length} KPI{kpis.length === 1 ? "" : "s"}</div>
           <ul>
-            {kpis.slice(0, 4).map((p) => (
-              <li key={p.id} className="kra__kpi-item">
-                {p.lowerIsBetter ? <TrendingDown /> : <TrendingUp />}
-                <span className="kra__kpi-name">{p.name}</span>
-                {p.targetValue != null && p.targetValue !== "" && (
-                  <span className="kra__kpi-target">{p.targetValue}{p.unit ? ` ${p.unit}` : ""}</span>
-                )}
-                {p.frequency && <span className="kra__kpi-freq">{FREQ_LABELS[p.frequency] ?? p.frequency}</span>}
-              </li>
-            ))}
+            {kpis.slice(0, 4).map((p) => {
+              const work = rollup?.kpi[p.id] ?? null;
+              return (
+                <li key={p.id} className="kra__kpi-item">
+                  {p.lowerIsBetter ? <TrendingDown /> : <TrendingUp />}
+                  <span className="kra__kpi-name">{p.name}</span>
+                  {p.targetValue != null && p.targetValue !== "" && (
+                    <span className="kra__kpi-target">{p.targetValue}{p.unit ? ` ${p.unit}` : ""}</span>
+                  )}
+                  {p.frequency && <span className="kra__kpi-freq">{FREQ_LABELS[p.frequency] ?? p.frequency}</span>}
+                  {work && work.total > 0
+                    ? <span style={{ marginLeft: "auto" }}><WorkBar done={work.done} total={work.total} color={color} width={40} /></span>
+                    : null}
+                </li>
+              );
+            })}
             {kpis.length > 4 && <li className="kra__kpi-more">+{kpis.length - 4} more</li>}
           </ul>
         </div>
       )}
       <footer className="kra__card-foot">
         <span><Users /> {k._count?.assignments ?? 0} assigned</span>
-        <ChevronRight className="kra__card-arrow" />
+        {rollup
+          ? (kraWork && kraWork.total > 0
+              ? <WorkBar done={kraWork.done} total={kraWork.total} color={color} />
+              : <span style={{ fontSize: 12, color: "var(--os-fg-subtle, #a1a1aa)" }}>No linked work</span>)
+          : <ChevronRight className="kra__card-arrow" />}
       </footer>
     </article>
   );

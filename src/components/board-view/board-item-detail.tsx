@@ -8,8 +8,8 @@
 // hide-empty), description, subtasks, checklist, relations, linked
 // attachments, time tracking, comments/activity.
 
-import { useMemo, useState } from "react";
-import { Check, ChevronDown, Search, EyeOff, Eye, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, Search, EyeOff, Eye, X, Target, Flag, Ban } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker } from "./assignee-picker";
@@ -113,6 +113,9 @@ export function BoardItemDetail({
         <Row label="Due date">
           <DateField value={item.dueAt ?? null} canEdit={canEdit} onSave={(v) => onPatch({ dueAt: v })} />
         </Row>
+        <Row label="Alignment">
+          <AlignmentField item={item} canEdit={canEdit} onPatch={onPatch} />
+        </Row>
       </div>
 
       {/* Custom fields with search + hide-empty */}
@@ -187,6 +190,131 @@ export function Row({ label, children }: { label: string; children: React.ReactN
     <div className="flex items-baseline gap-3">
       <span className="text-xs text-zinc-500 w-[88px] flex-shrink-0">{label}</span>
       <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
+}
+
+// Alignment — the KRA/KPI this task serves. KPI-first: picking a KPI
+// carries its parent KRA; a KRA can be chosen alone. Persisted into
+// Item.metadata.kraId / .kpiId (the server replaces metadata wholesale,
+// so we always spread the existing object). Mirrors the create-task modal.
+type KraLite = { id: string; name: string; category?: string | null };
+type KpiLite = { id: string; name: string; kra: { id: string; name: string } | null };
+
+function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdit: boolean; onPatch: (b: DetailPatch) => void }) {
+  const kraId = typeof item.metadata?.kraId === "string" ? (item.metadata.kraId as string) : null;
+  const kpiId = typeof item.metadata?.kpiId === "string" ? (item.metadata.kpiId as string) : null;
+  const [open, setOpen] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [kras, setKras] = useState<KraLite[]>([]);
+  const [kpis, setKpis] = useState<KpiLite[]>([]);
+  const [q, setQ] = useState("");
+  const loadedRef = useRef(false);
+
+  // Load once when there's a tag to name, or when the picker opens. The
+  // ref guards the fetch (no synchronous setState in the effect body);
+  // state is only set from the async resolution.
+  useEffect(() => {
+    if (loadedRef.current || (!open && !kraId && !kpiId)) return;
+    loadedRef.current = true;
+    Promise.all([
+      fetch("/api/kras?scope=all&limit=200").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/kpis").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([kr, kp]) => {
+      setKras(Array.isArray(kr?.data) ? kr.data : Array.isArray(kr) ? kr : []);
+      setKpis(Array.isArray(kp) ? kp : Array.isArray(kp?.data) ? kp.data : []);
+      setReady(true);
+    });
+  }, [open, kraId, kpiId]);
+
+  const kpiName = kpiId ? kpis.find((k) => k.id === kpiId)?.name ?? null : null;
+  const kraName = kraId ? kras.find((k) => k.id === kraId)?.name ?? null : null;
+
+  const commit = (nextKra: string | null, nextKpi: string | null) => {
+    const md = { ...(item.metadata as Record<string, unknown> | undefined ?? {}) };
+    if (nextKra) md.kraId = nextKra; else delete md.kraId;
+    if (nextKpi) md.kpiId = nextKpi; else delete md.kpiId;
+    onPatch({ metadata: md });
+    setOpen(false);
+    setQ("");
+  };
+
+  const needle = q.trim().toLowerCase();
+  const fKpis = !needle ? kpis : kpis.filter((k) => k.name.toLowerCase().includes(needle) || (k.kra?.name ?? "").toLowerCase().includes(needle));
+  const fKras = !needle ? kras : kras.filter((k) => k.name.toLowerCase().includes(needle) || (k.category ?? "").toLowerCase().includes(needle));
+
+  const summary = (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {kpiId ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium" style={{ background: "#a78b8022", color: "#8e7165" }}>
+          <Target className="w-3 h-3" />{kpiName ?? "KPI"}
+        </span>
+      ) : null}
+      {kraId ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-600">
+          <Flag className="w-3 h-3" />{kraName ?? "KRA"}
+        </span>
+      ) : null}
+      {!kraId && !kpiId ? <span className="text-xs text-zinc-400">Not set</span> : null}
+    </span>
+  );
+
+  if (!canEdit) return summary;
+
+  return (
+    <div className="relative inline-block">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1.5 hover:opacity-80">
+        {summary}
+        <ChevronDown className="w-3 h-3 text-zinc-500" />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="absolute z-20 mt-1 left-0 w-[300px] rounded-xl border border-zinc-200 bg-white shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] p-2">
+            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
+              <Search className="w-3.5 h-3.5 text-zinc-400" />
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
+            </div>
+            <div className="max-h-[240px] overflow-y-auto">
+              <div className="px-1 pb-1 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">KPIs</div>
+              {fKpis.length === 0 ? (
+                <div className="px-2 py-1.5 text-[12px] text-zinc-400">{ready ? "No KPIs — pick a KRA below." : "Loading…"}</div>
+              ) : (
+                fKpis.map((k) => (
+                  <button key={k.id} type="button" onClick={() => commit(k.kra?.id ?? null, k.id)} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded">
+                    <Target className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate text-zinc-700">{k.name}</span>
+                      {k.kra ? <span className="block text-[11px] text-zinc-400 truncate">KRA · {k.kra.name}</span> : null}
+                    </span>
+                    {kpiId === k.id ? <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" /> : null}
+                  </button>
+                ))
+              )}
+              <div className="px-1 pt-2 pb-1 mt-1 border-t border-zinc-100 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">KRA only</div>
+              {fKras.length === 0 ? (
+                <div className="px-2 py-1.5 text-[12px] text-zinc-400">{ready ? "No KRAs available." : "Loading…"}</div>
+              ) : (
+                fKras.map((k) => (
+                  <button key={k.id} type="button" onClick={() => commit(k.id, null)} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded">
+                    <Flag className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate text-zinc-700">{k.name}</span>
+                      {k.category ? <span className="block text-[11px] text-zinc-400 truncate">{k.category}</span> : null}
+                    </span>
+                    {kraId === k.id && !kpiId ? <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" /> : null}
+                  </button>
+                ))
+              )}
+            </div>
+            {(kraId || kpiId) ? (
+              <button type="button" onClick={() => commit(null, null)} className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 pt-1.5 text-left text-[13px] text-zinc-500 hover:bg-zinc-50 rounded border-t border-zinc-100">
+                <Ban className="w-3.5 h-3.5 text-zinc-400" /> Clear alignment
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

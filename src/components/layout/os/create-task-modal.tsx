@@ -35,6 +35,7 @@ import {
   Save,
   Cloud,
   FileText,
+  Target,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { usePrompt } from "@/components/ui/dialog-provider";
@@ -119,8 +120,13 @@ type ChecklistItem = { text: string; done: boolean };
 type ExtraKey = "TIME_ESTIMATE" | "DEPENDENCIES" | "SUBTASKS" | "CHECKLIST";
 type MenuKey =
   | "list" | "type" | "status" | "assignee" | "due"
-  | "priority" | "tags" | "more" | "attach" | "followers"
+  | "priority" | "tags" | "align" | "more" | "attach" | "followers"
   | "templates" | "createMenu";
+
+// Alignment options — a task can be tagged with the KPI it moves (which
+// carries its parent KRA) or, when no specific number applies, a KRA alone.
+type KraOpt = { id: string; name: string; category?: string | null };
+type KpiOpt = { id: string; name: string; kra: { id: string; name: string } | null };
 
 function firstActiveKey(list: StatusDef[]): string {
   return (list.find((s) => s.group === "ACTIVE") ?? list[0])?.key ?? "TO_DO";
@@ -246,6 +252,12 @@ export function CreateTaskModal() {
   const [orgTags, setOrgTags] = useState<WorkspaceTag[] | null>(null);
   const [creatingTag, setCreatingTag] = useState(false);
   const [followers, setFollowers] = useState<string[]>([]);
+  // Alignment (KPI-first, KRA auto-fills). Both persisted into Item.metadata.
+  const [kras, setKras] = useState<KraOpt[]>([]);
+  const [kpis, setKpis] = useState<KpiOpt[]>([]);
+  const [kraId, setKraId] = useState<string | null>(null);
+  const [kpiId, setKpiId] = useState<string | null>(null);
+  const [alignSearch, setAlignSearch] = useState("");
   const [timeEstimate, setTimeEstimate] = useState<{ h: string; m: string }>({ h: "", m: "" });
   const [subtasks, setSubtasks] = useState<string[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
@@ -331,12 +343,17 @@ export function CreateTaskModal() {
       fetch("/api/users?scope=all&limit=200", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { data: [] })),
       fetch("/api/item-templates", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { templates: [] })),
       fetch("/api/item-types", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { types: [] })),
+      fetch("/api/kras?scope=all&limit=200", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { data: [] })),
+      fetch("/api/kpis", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { data: [] })),
     ])
-      .then(([s, b, u, t, it]) => {
+      .then(([s, b, u, t, it, kr, kp]) => {
         setSpaces(Array.isArray(s.spaces) ? s.spaces : []);
         setBoards(Array.isArray(b.boards) ? b.boards : []);
         setPeople(Array.isArray(u.data) ? u.data : []);
         setTemplates(Array.isArray(t.templates) ? t.templates : []);
+        // /api/kras is paginated ({ data: [...] }); /api/kpis returns a raw array.
+        setKras(Array.isArray(kr?.data) ? kr.data : Array.isArray(kr) ? kr : []);
+        setKpis(Array.isArray(kp) ? kp : Array.isArray(kp?.data) ? kp.data : []);
         const types: ItemTypeOpt[] = Array.isArray(it.types) ? it.types : [];
         setItemTypes(types);
         // Default the picker to the org's default type unless a template
@@ -383,6 +400,7 @@ export function CreateTaskModal() {
     setChecklist([]);
     setTimeEstimate({ h: "", m: "" });
     setExtras([]);
+    setKraId(null); setKpiId(null); setAlignSearch("");
     setTagDraft(""); setSubtaskDraft(""); setChecklistDraft("");
     if (!keepIdentity) {
       setItemTypeId(itemTypes.find((t) => t.isDefault)?.id ?? null);
@@ -419,6 +437,23 @@ export function CreateTaskModal() {
       boards: list.sort((a, b) => a.name.localeCompare(b.name)),
     }));
   }, [boards, spaces, listSearch]);
+
+  // Alignment: KPI-first picker. Selecting a KPI carries its parent KRA;
+  // a KRA can also be chosen alone when no specific number applies.
+  const alignQ = alignSearch.trim().toLowerCase();
+  const filteredKpis = useMemo(
+    () => (!alignQ ? kpis : kpis.filter((k) => k.name.toLowerCase().includes(alignQ) || (k.kra?.name ?? "").toLowerCase().includes(alignQ))),
+    [kpis, alignQ],
+  );
+  const filteredKras = useMemo(
+    () => (!alignQ ? kras : kras.filter((k) => k.name.toLowerCase().includes(alignQ) || (k.category ?? "").toLowerCase().includes(alignQ))),
+    [kras, alignQ],
+  );
+  const alignLabel = useMemo(() => {
+    if (kpiId) return kpis.find((k) => k.id === kpiId)?.name ?? "KPI";
+    if (kraId) return kras.find((k) => k.id === kraId)?.name ?? "KRA";
+    return "Alignment";
+  }, [kpiId, kraId, kpis, kras]);
 
   // Build the calendar grid (6 weeks) for the current calMonth.
   const calGrid = useMemo(() => {
@@ -481,6 +516,8 @@ export function CreateTaskModal() {
     const mins = (parseInt(timeEstimate.h || "0", 10) || 0) * 60 + (parseInt(timeEstimate.m || "0", 10) || 0);
     if (mins > 0) md.timeEstimate = mins;
     if (checklist.length) md.checklist = checklist;
+    if (kraId) md.kraId = kraId;
+    if (kpiId) md.kpiId = kpiId;
     return md;
   }
 
@@ -568,6 +605,8 @@ export function CreateTaskModal() {
       timeEstimate: { h: timeEstimate.h, m: timeEstimate.m },
       checklist,
       subtasks,
+      kraId,
+      kpiId,
     };
   }
 
@@ -585,6 +624,8 @@ export function CreateTaskModal() {
     setChecklist(cl);
     const st = Array.isArray(cfg.subtasks) ? (cfg.subtasks as string[]) : [];
     setSubtasks(st);
+    setKraId(typeof cfg.kraId === "string" ? cfg.kraId : null);
+    setKpiId(typeof cfg.kpiId === "string" ? cfg.kpiId : null);
     const ex: ExtraKey[] = [];
     if (te.h || te.m) ex.push("TIME_ESTIMATE");
     if (st.length) ex.push("SUBTASKS");
@@ -634,6 +675,8 @@ export function CreateTaskModal() {
     const mins = (parseInt(te.h || "0", 10) || 0) * 60 + (parseInt(te.m || "0", 10) || 0);
     if (mins > 0) md.timeEstimate = mins;
     if (Array.isArray(cfg.checklist) && cfg.checklist.length) md.checklist = cfg.checklist;
+    if (typeof cfg.kraId === "string") md.kraId = cfg.kraId;
+    if (typeof cfg.kpiId === "string") md.kpiId = cfg.kpiId;
     if (me) md.followers = [me.id];
     const status = (cfg.status as string) ?? selectedStatus;
     const tagIds = Array.isArray(cfg.tags)
@@ -749,7 +792,7 @@ export function CreateTaskModal() {
       setSubmitting(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedList, taskName, selectedStatus, assigneeId, startAt, dueAt, subtasks, itemTypeId, description, priority, tags, followers, timeEstimate, checklist]);
+  }, [selectedList, taskName, selectedStatus, assigneeId, startAt, dueAt, subtasks, itemTypeId, description, priority, tags, followers, timeEstimate, checklist, kraId, kpiId]);
 
   type Variant = "default" | "open" | "another" | "duplicate";
   const handleCreate = useCallback(async (variant: Variant) => {
@@ -1199,6 +1242,65 @@ export function CreateTaskModal() {
                         );
                       })}
                     </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Alignment (KPI-first · KRA auto-fills) */}
+            <div className="relative">
+              <Chip onClick={() => setOpenMenu(openMenu === "align" ? null : "align")} active={!!(kraId || kpiId)}>
+                <Target className="w-3.5 h-3.5 text-zinc-400" />
+                <span className="truncate max-w-[140px]">{alignLabel}</span>
+              </Chip>
+              {openMenu === "align" && (
+                <div className="absolute bottom-full left-0 mb-1 w-[300px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] p-2">
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
+                    <Search className="w-3.5 h-3.5 text-zinc-400" />
+                    <input autoFocus value={alignSearch} onChange={(e) => setAlignSearch(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
+                  </div>
+                  <div className="max-h-[240px] overflow-y-auto">
+                    <div className="px-1 pb-1 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">KPIs</div>
+                    {filteredKpis.length === 0 ? (
+                      <div className="px-2 py-1.5 text-[12px] text-zinc-400">No KPIs — pick a KRA below.</div>
+                    ) : (
+                      filteredKpis.map((k) => {
+                        const active = kpiId === k.id;
+                        return (
+                          <button key={k.id} type="button" onClick={() => { setKpiId(k.id); setKraId(k.kra?.id ?? null); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded">
+                            <Target className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />
+                            <span className="flex-1 min-w-0">
+                              <span className="block truncate text-zinc-700">{k.name}</span>
+                              {k.kra ? <span className="block text-[11px] text-zinc-400 truncate">KRA · {k.kra.name}</span> : null}
+                            </span>
+                            {active && <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />}
+                          </button>
+                        );
+                      })
+                    )}
+                    <div className="px-1 pt-2 pb-1 mt-1 border-t border-zinc-100 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">KRA only</div>
+                    {filteredKras.length === 0 ? (
+                      <div className="px-2 py-1.5 text-[12px] text-zinc-400">No KRAs available.</div>
+                    ) : (
+                      filteredKras.map((k) => {
+                        const active = kraId === k.id && !kpiId;
+                        return (
+                          <button key={k.id} type="button" onClick={() => { setKraId(k.id); setKpiId(null); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded">
+                            <Flag className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span className="flex-1 min-w-0">
+                              <span className="block truncate text-zinc-700">{k.name}</span>
+                              {k.category ? <span className="block text-[11px] text-zinc-400 truncate">{k.category}</span> : null}
+                            </span>
+                            {active && <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  {(kraId || kpiId) && (
+                    <button type="button" onClick={() => { setKraId(null); setKpiId(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 pt-1.5 text-left text-[13px] text-zinc-500 hover:bg-zinc-50 rounded border-t border-zinc-100">
+                      <Ban className="w-3.5 h-3.5 text-zinc-400" /> Clear alignment
+                    </button>
                   )}
                 </div>
               )}

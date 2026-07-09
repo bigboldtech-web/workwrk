@@ -3,7 +3,8 @@
 // NewSpaceDialog — two-step Space creation wizard.
 //
 // Step 1 — Basics: icon + name + description + default permission + privacy.
-// Step 2 — Define your workflow: preset, owner, KRAs, views, statuses, modules.
+// Step 2 — Define your workflow: preset, owner, views, statuses, modules.
+// (Alignment — KRA/KPI — is tagged per-task, not per-Space.)
 //
 // Posts to POST /api/spaces with the assembled payload. On success it
 // calls onCreated(space) so the caller can refresh the sidebar tree.
@@ -19,7 +20,7 @@ import { Info, Users } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { SPACE_COLOR_PALETTE } from "./space-icon-catalog";
-import { SpaceWizardStep2, type Step2SubScreen, type UserOption, type KraOption } from "./space-wizard-step2";
+import { SpaceWizardStep2, type Step2SubScreen, type UserOption } from "./space-wizard-step2";
 import { workflowFromPreset } from "./space-wizard-presets";
 import type { WorkflowConfig } from "./space-wizard-types";
 import type { Visibility } from "@/generated/prisma";
@@ -77,11 +78,9 @@ export function NewSpaceDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
-  const [kras, setKras] = useState<KraOption[]>([]);
-  // Loading flags default to true so the very first paint of Step 2
+  // Loading flag defaults to true so the very first paint of Step 2
   // shows the loading state without a synchronous setState in the effect.
   const [loadingUsers, setLoadingUsers] = useState(true);
-  const [loadingKras, setLoadingKras] = useState(true);
   const fetchedRef = useRef(false);
 
   useEffect(() => {
@@ -97,15 +96,6 @@ export function NewSpaceDialog({
       })
       .catch(() => { if (active) setUsers([]); })
       .finally(() => { if (active) setLoadingUsers(false); });
-    fetch("/api/kras?scope=all&limit=200")
-      .then((r) => r.json())
-      .then((data) => {
-        if (!active) return;
-        const rows: KraOption[] = Array.isArray(data?.data) ? data.data : [];
-        setKras(rows);
-      })
-      .catch(() => { if (active) setKras([]); })
-      .finally(() => { if (active) setLoadingKras(false); });
     return () => { active = false; };
   }, [state.step]);
 
@@ -117,9 +107,7 @@ export function NewSpaceDialog({
     setError(null);
     setSubmitting(false);
     setLoadingUsers(true);
-    setLoadingKras(true);
     setUsers([]);
-    setKras([]);
     fetchedRef.current = false;
   };
 
@@ -160,7 +148,6 @@ export function NewSpaceDialog({
           icon: state.iconName ?? undefined,
           color: state.color,
           ownerId: state.workflow.ownerId ?? undefined,
-          linkedKraIds: state.workflow.linkedKraIds,
           settings: {
             defaultPermission: state.defaultPermission,
             workflow: state.workflow,
@@ -200,9 +187,7 @@ export function NewSpaceDialog({
             error={error}
             submitting={submitting}
             users={users}
-            kras={kras}
             loadingUsers={loadingUsers}
-            loadingKras={loadingKras}
             onChange={(w) => set("workflow", w)}
             onSubScreen={(s) => set("subScreen", s)}
             onBack={() => set("step", 1)}

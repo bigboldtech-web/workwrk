@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeft, ChevronRight, Plus, X, GripVertical, Layers, Target, Settings2, Users, Flag, Search, Check } from "lucide-react";
+import { ArrowLeft, ChevronRight, Plus, X, GripVertical, Layers, Target, Settings2, Users, Search, Check } from "lucide-react";
 import { DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
   PRESETS,
@@ -18,7 +18,7 @@ import type {
   WorkflowConfig,
 } from "./space-wizard-types";
 
-export type Step2SubScreen = null | "owner" | "kras" | "views" | "statuses" | "modules";
+export type Step2SubScreen = null | "owner" | "views" | "statuses" | "modules";
 
 export interface UserOption {
   id: string;
@@ -30,13 +30,6 @@ export interface UserOption {
   department?: { name: string | null } | null;
 }
 
-export interface KraOption {
-  id: string;
-  name: string;
-  category?: string | null;
-  description?: string | null;
-}
-
 interface Step2Props {
   workflow: WorkflowConfig;
   subScreen: Step2SubScreen;
@@ -44,9 +37,7 @@ interface Step2Props {
   error: string | null;
   submitting: boolean;
   users: UserOption[];
-  kras: KraOption[];
   loadingUsers: boolean;
-  loadingKras: boolean;
   onChange: (next: WorkflowConfig) => void;
   onSubScreen: (next: Step2SubScreen) => void;
   onBack: () => void;
@@ -64,19 +55,6 @@ export function SpaceWizardStep2(props: Step2Props) {
         loading={props.loadingUsers}
         ownerId={workflow.ownerId}
         onChange={(id) => props.onChange({ ...workflow, ownerId: id })}
-        onClose={() => props.onSubScreen(null)}
-      />
-    );
-  }
-
-  if (subScreen === "kras") {
-    return (
-      <KrasSubScreen
-        accent={props.accent}
-        kras={props.kras}
-        loading={props.loadingKras}
-        linkedIds={workflow.linkedKraIds}
-        onChange={(ids) => props.onChange({ ...workflow, linkedKraIds: ids })}
         onClose={() => props.onSubScreen(null)}
       />
     );
@@ -135,7 +113,6 @@ function Step2Main({
   error,
   submitting,
   users,
-  kras,
   onChange,
   onSubScreen,
   onBack,
@@ -158,16 +135,6 @@ function Step2Main({
     if (!u) return "Selected";
     return userDisplayName(u);
   }, [workflow.ownerId, users]);
-
-  const krasLabel = useMemo(() => {
-    if (workflow.linkedKraIds.length === 0) return "None linked";
-    const names = workflow.linkedKraIds
-      .map((id) => kras.find((k) => k.id === id)?.name)
-      .filter(Boolean);
-    if (names.length === 0) return `${workflow.linkedKraIds.length} linked`;
-    if (names.length <= 2) return names.join(", ");
-    return `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
-  }, [workflow.linkedKraIds, kras]);
 
   const statusPreview = useMemo(() => workflow.statuses.slice(0, 3), [workflow.statuses]);
   const moduleCount = workflow.modules.length;
@@ -214,12 +181,6 @@ function Step2Main({
               label="Space owner"
               value={ownerLabel}
               onClick={() => onSubScreen("owner")}
-            />
-            <CustomizeRow
-              icon={<Flag className="h-3.5 w-3.5" />}
-              label="Linked KRAs"
-              value={krasLabel}
-              onClick={() => onSubScreen("kras")}
             />
             <CustomizeRow
               icon={<Layers className="h-3.5 w-3.5" />}
@@ -419,101 +380,6 @@ function OwnerSubScreen({
       </div>
 
       <SubFooter accent={accent} onDone={onClose} />
-    </>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Sub-screen: Linked KRAs
-// ────────────────────────────────────────────────────────────────────
-
-function KrasSubScreen({
-  accent,
-  kras,
-  loading,
-  linkedIds,
-  onChange,
-  onClose,
-}: {
-  accent: string;
-  kras: KraOption[];
-  loading: boolean;
-  linkedIds: string[];
-  onChange: (ids: string[]) => void;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return kras;
-    return kras.filter((k) => {
-      if (k.name.toLowerCase().includes(q)) return true;
-      if (k.category?.toLowerCase().includes(q)) return true;
-      return false;
-    });
-  }, [kras, query]);
-
-  const toggle = (id: string) => {
-    if (linkedIds.includes(id)) onChange(linkedIds.filter((x) => x !== id));
-    else onChange([...linkedIds, id]);
-  };
-
-  return (
-    <>
-      <SubHeader title="Linked KRAs" subtitle="What this Space is accountable for. Links the Space into the org goal tree." onClose={onClose} />
-
-      <div className="px-6 pb-2 max-h-[60vh] overflow-y-auto">
-        <div className="relative mb-3">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
-          <input
-            type="text"
-            placeholder="Search KRAs…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full h-9 pl-8 pr-2 rounded-md border border-border bg-surface text-[12.5px] focus:outline-none focus:border-[color:var(--accent)]"
-            autoFocus
-          />
-        </div>
-
-        {loading ? (
-          <div className="text-[12px] text-muted py-6 text-center">Loading KRAs…</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-[12px] text-muted py-6 text-center">
-            {query ? `No match for "${query}"` : "No KRAs available — create some from Goals first."}
-          </div>
-        ) : (
-          <div className="rounded-lg border border-border divide-y divide-border">
-            {filtered.map((k) => {
-              const selected = linkedIds.includes(k.id);
-              return (
-                <button
-                  key={k.id}
-                  type="button"
-                  onClick={() => toggle(k.id)}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-3 transition ${
-                    selected ? "bg-surface-2" : "hover:bg-surface-2"
-                  }`}
-                >
-                  <span
-                    className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
-                      selected ? "border-transparent" : "border-border bg-surface"
-                    }`}
-                    style={{ backgroundColor: selected ? accent : undefined }}
-                  >
-                    {selected ? <Check className="h-3 w-3 text-white" strokeWidth={3} /> : null}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-[12.5px] font-medium truncate">{k.name}</span>
-                    {k.category ? <span className="block text-[11px] text-muted truncate">{k.category}</span> : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <SubFooter accent={accent} onDone={onClose} doneLabel={`Done${linkedIds.length ? ` · ${linkedIds.length} linked` : ""}`} />
     </>
   );
 }
