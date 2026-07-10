@@ -9,11 +9,16 @@ function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] ?? c));
 }
 
-type DueReminder = { id: string; userId: string; title: string; body: string | null; notifyEmail: boolean };
+type DueReminder = {
+  id: string; userId: string; title: string; body: string | null; notifyEmail: boolean;
+  entityType?: string | null; entityId?: string | null;
+};
 
 export async function fireReminder(r: DueReminder) {
+  // Task reminders deep-link to the task; personal reminders open /today.
+  const link = r.entityType === "BOARD_ITEM" && r.entityId ? `/item/${r.entityId}` : "/today";
   await prisma.notification.create({
-    data: { userId: r.userId, type: "reminder", title: "Reminder", message: r.title, link: "/today" },
+    data: { userId: r.userId, type: "reminder", title: "Reminder", message: r.title, link },
   });
   if (r.notifyEmail) {
     const user = await prisma.user.findUnique({ where: { id: r.userId }, select: { email: true } });

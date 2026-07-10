@@ -27,6 +27,7 @@ import { ProfileMenu } from "./profile-menu";
 import { PROFILE_TOOL_MAP, type ToolAction } from "./profile-tools";
 import { useOsToast } from "./toast";
 import { ActiveTimerPill } from "./active-timer-pill";
+import { RemindersBell } from "./reminders-bell";
 
 // Initials for the active workspace badge, e.g. "Test 2" -> "T2".
 function orgInitials(name: string): string {
@@ -142,6 +143,7 @@ export function ClickTopbar() {
           {pinnedTools.length > 0 ? (
             <span aria-hidden className="w-px h-3.5 bg-zinc-200 mx-0.5" />
           ) : null}
+          <RemindersBell />
           <Link
             href="/inbox"
             aria-label="Inbox"

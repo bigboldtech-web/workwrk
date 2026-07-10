@@ -9,7 +9,8 @@ import { archiveBoardItem, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board
 import { moveToTrash } from "@/lib/trash";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { parseBoardSchema } from "@/lib/field-catalog";
-import { getBoardStatuses } from "@/lib/board-items-shared";
+import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
+import { parseRecurrence, advanceDate } from "@/lib/recurrence";
 import { prisma } from "@/lib/prisma";
 
 async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
@@ -108,6 +109,44 @@ async function loadAndGate(itemId: string, c: { userId: string; accessLevel: str
   return { item };
 }
 
+// Recurrence ("Repeat") roll-forward. Called after a status change: when the
+// item now sits in a done status AND carries a recurrence rule, advance its
+// dates by one cycle, reset it to the first open status, and re-arm any
+// task-linked reminders. Returns the rolled-forward row, or null when nothing
+// recurred (so the caller keeps the plain update result).
+async function rollForwardIfRecurring(itemId: string, actorId: string) {
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    include: { board: { select: { statuses: true } } },
+  });
+  if (!item) return null;
+  const rule = parseRecurrence(item.metadata);
+  if (!rule) return null;
+  const statuses = getBoardStatuses(item.board);
+  // Only roll forward when the task just entered a done/closed status.
+  if (!isDoneStatus(statuses, item.status)) return null;
+
+  const patch: Parameters<typeof updateBoardItem>[1] = {};
+  if (item.dueAt) patch.dueAt = advanceDate(item.dueAt, rule).toISOString();
+  if (item.startAt) patch.startAt = advanceDate(item.startAt, rule).toISOString();
+  const firstOpen = statuses.find((s) => s.group === "ACTIVE") ?? statuses[0];
+  if (firstOpen) patch.status = firstOpen.value;
+
+  const rolled = await updateBoardItem(itemId, patch, actorId);
+
+  // Re-arm this task's reminders for the next cycle (advance by the same rule).
+  const reminders = await prisma.reminder.findMany({
+    where: { entityType: "BOARD_ITEM", entityId: itemId },
+  });
+  for (const rem of reminders) {
+    await prisma.reminder.update({
+      where: { id: rem.id },
+      data: { remindAt: advanceDate(rem.remindAt, rule), status: "PENDING", firedAt: null },
+    });
+  }
+  return rolled;
+}
+
 const patchSchema = z.object({
   title: z.string().min(1).max(280).optional(),
   status: z.string().max(40).nullable().optional(),
@@ -138,6 +177,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   try {
     const updated = await updateBoardItem(id, parsed.data, c.userId);
+    // A recurring task completed → roll it forward instead of leaving it done.
+    if (parsed.data.status !== undefined) {
+      const rolled = await rollForwardIfRecurring(id, c.userId);
+      if (rolled) return NextResponse.json({ item: rolled, recurred: true });
+    }
     return NextResponse.json({ item: updated });
   } catch (err) {
     return NextResponse.json(

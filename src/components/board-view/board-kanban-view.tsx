@@ -99,7 +99,11 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         headers: { "content-type": "application/json" },
         body: JSON.stringify(apiBody),
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d?.error ?? "Update failed"); await refetch(); }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d?.error ?? "Update failed"); await refetch(); return; }
+      // Recurring task completed → server rolled it forward (reset status +
+      // advanced dates). Apply the returned row so the card visibly recurs.
+      const d = await res.json().catch(() => null);
+      if (d?.recurred && d.item) setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...d.item } : r)));
     } catch (e) { setError(e instanceof Error ? e.message : "Update failed"); await refetch(); }
   }, [canEdit, refetch]);
 

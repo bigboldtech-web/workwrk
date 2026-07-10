@@ -854,7 +854,11 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         // Refetch on failure to revert optimistic state.
         const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
         if (fresh?.items) setItems(fresh.items);
+        return;
       }
+      // Recurring task completed → apply the server's rolled-forward row.
+      const data = await res.json().catch(() => null);
+      if (data?.recurred && data.item) setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...data.item } : r)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save change");
     }

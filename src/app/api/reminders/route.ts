@@ -18,15 +18,29 @@ const createSchema = z.object({
   body: z.string().max(2000).optional(),
   remindAt: z.string(),
   notifyEmail: z.boolean().optional(),
+  // Optional entity link — task reminders pass entityType "BOARD_ITEM" + the
+  // item id so the bell can deep-link and recurrence can re-arm them.
+  entityType: z.string().max(40).optional(),
+  entityId: z.string().max(64).optional(),
 });
 
-export async function GET() {
+export async function GET(req: Request) {
   const c = await ctx();
   if (!c) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Optional ?entityType=&entityId= scopes to one entity's reminders (used by
+  // the task Schedule → Reminder tab); no filter = all my pending reminders
+  // (the topbar bell).
+  const url = new URL(req.url);
+  const entityType = url.searchParams.get("entityType");
+  const entityId = url.searchParams.get("entityId");
   const reminders = await prisma.reminder.findMany({
-    where: { userId: c.userId, status: "PENDING" },
+    where: {
+      userId: c.userId,
+      status: "PENDING",
+      ...(entityType && entityId ? { entityType, entityId } : {}),
+    },
     orderBy: { remindAt: "asc" },
-    take: 50,
+    take: 100,
   });
   return NextResponse.json({ reminders });
 }
@@ -43,6 +57,8 @@ export async function POST(req: Request) {
       organizationId: c.orgId, userId: c.userId,
       title: parsed.data.title, body: parsed.data.body ?? null,
       remindAt, notifyEmail: parsed.data.notifyEmail ?? false,
+      entityType: parsed.data.entityType ?? null,
+      entityId: parsed.data.entityId ?? null,
     },
   });
   return NextResponse.json({ reminder }, { status: 201 });

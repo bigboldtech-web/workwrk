@@ -9,7 +9,7 @@
 // attachments, time tracking, comments/activity.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Search, EyeOff, Eye, X, Target, Flag, Ban } from "lucide-react";
+import { Check, ChevronDown, Search, EyeOff, Eye, Target, Flag, Ban } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker } from "./assignee-picker";
@@ -22,6 +22,7 @@ import { TimeTracker } from "./time-tracker";
 import { ItemTypePicker } from "./item-type-picker";
 import { ItemSubtasks } from "./item-subtasks";
 import { ItemChecklist } from "./item-checklist";
+import { DatePlanner } from "./date-planner";
 
 export type DetailPatch = Partial<Pick<BoardItemRow, "title" | "status">> & {
   metadata?: Record<string, unknown>;
@@ -123,11 +124,8 @@ export function BoardItemDetail({
             <TagPicker value={item.tags ?? []} canEdit={canEdit} onChange={(tags) => onPatch({ tagIds: tags.map((t) => t.id) }, { tags })} />
           </Row>
         ) : null}
-        <Row label="Start date">
-          <DateField value={item.startAt ?? null} canEdit={canEdit} onSave={(v) => onPatch({ startAt: v })} />
-        </Row>
-        <Row label="Due date">
-          <DateField value={item.dueAt ?? null} canEdit={canEdit} onSave={(v) => onPatch({ dueAt: v })} />
+        <Row label="Schedule">
+          <DatePlanner item={item} canEdit={canEdit} onPatch={onPatch} />
         </Row>
         <Row label="Alignment">
           <AlignmentField item={item} canEdit={canEdit} onPatch={onPatch} />
@@ -333,33 +331,6 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
           </div>
         </>
       ) : null}
-    </div>
-  );
-}
-
-function DateField({ value, canEdit, onSave }: { value: Date | string | null; canEdit: boolean; onSave: (iso: string | null) => void }) {
-  const toInputValue = (v: Date | string | null): string => {
-    if (!v) return "";
-    const d = v instanceof Date ? v : new Date(v);
-    if (Number.isNaN(d.getTime())) return "";
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-  const inputValue = toInputValue(value);
-  if (!canEdit) {
-    return <span className="text-sm text-zinc-700">{inputValue ? new Date(inputValue).toLocaleDateString() : <span className="text-xs text-zinc-400">Not set</span>}</span>;
-  }
-  return (
-    <div className="inline-flex items-center gap-1.5">
-      <input
-        type="date"
-        value={inputValue}
-        onChange={(e) => { const v = e.target.value; onSave(v ? `${v}T00:00:00.000Z` : null); }}
-        className="h-7 px-2 text-sm border border-zinc-200 rounded bg-white focus:outline-none focus:border-zinc-400"
-      />
-      {inputValue ? <button type="button" onClick={() => onSave(null)} className="text-xs text-zinc-400 hover:text-zinc-700" aria-label="Clear date" title="Clear"><X className="w-3 h-3" /></button> : null}
     </div>
   );
 }

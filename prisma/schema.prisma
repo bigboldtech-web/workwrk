@@ -1808,9 +1808,12 @@ enum ReminderStatus {
   DISMISSED
 }
 
-// Personal quick reminder created from the topbar quick-tools. Fires as an
-// in-app Notification (+ optional email) at remindAt via /api/reminders/tick
-// (while the app is open) or /api/cron/reminders (scheduled).
+// Personal quick reminder created from the topbar quick-tools OR scheduled on a
+// task (Schedule → Reminder tab). Fires as an in-app Notification (+ optional
+// email) at remindAt via /api/reminders/tick (while the app is open) or
+// /api/cron/reminders (scheduled). When entityType/entityId are set the reminder
+// belongs to that entity (e.g. BOARD_ITEM) so it can deep-link + be re-armed by
+// recurrence; null = a standalone personal reminder.
 model Reminder {
   id             String         @id @default(cuid())
   organizationId String
@@ -1821,11 +1824,15 @@ model Reminder {
   status         ReminderStatus @default(PENDING)
   notifyEmail    Boolean        @default(false)
   firedAt        DateTime?
+  // Optional entity link — e.g. entityType "BOARD_ITEM", entityId = Item.id.
+  entityType     String?
+  entityId       String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   @@index([userId, status, remindAt])
   @@index([status, remindAt])
+  @@index([entityType, entityId])
 }
 
 // ==========================================
