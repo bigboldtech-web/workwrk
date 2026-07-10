@@ -33,6 +33,9 @@ export type DetailPatch = Partial<Pick<BoardItemRow, "title" | "status">> & {
   itemTypeId?: string | null;
 };
 
+/** Space-module gating for the item surfaces. Each false hides that capability. */
+export type ItemModuleGating = { priority: boolean; tags: boolean; timeTracking: boolean; customFields: boolean };
+
 interface BoardItemDetailProps {
   item: BoardItemRow;
   canEdit: boolean;
@@ -44,6 +47,9 @@ interface BoardItemDetailProps {
   layout?: "drawer" | "page";
   /** When set, clicking a subtask navigates instead of doing nothing. */
   onOpenItem?: (itemId: string) => void;
+  /** Space-module gating — hides Priority / Tags / custom fields / TimeTracker
+   *  when their module is off. Absent = all shown (legacy / non-board context). */
+  moduleGating?: ItemModuleGating;
 }
 
 function isEmptyValue(v: unknown): boolean {
@@ -62,7 +68,13 @@ export function BoardItemDetail({
   onPatch,
   layout = "drawer",
   onOpenItem,
+  moduleGating,
 }: BoardItemDetailProps) {
+  // Absent gating (legacy / non-board context) = everything shown.
+  const priorityOn = moduleGating ? moduleGating.priority : true;
+  const tagsOn = moduleGating ? moduleGating.tags : true;
+  const timeTrackingOn = moduleGating ? moduleGating.timeTracking : true;
+  const customFieldsOn = moduleGating ? moduleGating.customFields : true;
   const [fieldSearch, setFieldSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(false);
 
@@ -101,12 +113,16 @@ export function BoardItemDetail({
             }
           />
         </Row>
-        <Row label="Priority">
-          <PriorityPicker value={item.priority ?? null} canEdit={canEdit} onChange={(priority) => onPatch({ priority })} />
-        </Row>
-        <Row label="Tags">
-          <TagPicker value={item.tags ?? []} canEdit={canEdit} onChange={(tags) => onPatch({ tagIds: tags.map((t) => t.id) }, { tags })} />
-        </Row>
+        {priorityOn ? (
+          <Row label="Priority">
+            <PriorityPicker value={item.priority ?? null} canEdit={canEdit} onChange={(priority) => onPatch({ priority })} />
+          </Row>
+        ) : null}
+        {tagsOn ? (
+          <Row label="Tags">
+            <TagPicker value={item.tags ?? []} canEdit={canEdit} onChange={(tags) => onPatch({ tagIds: tags.map((t) => t.id) }, { tags })} />
+          </Row>
+        ) : null}
         <Row label="Start date">
           <DateField value={item.startAt ?? null} canEdit={canEdit} onSave={(v) => onPatch({ startAt: v })} />
         </Row>
@@ -119,7 +135,7 @@ export function BoardItemDetail({
       </div>
 
       {/* Custom fields with search + hide-empty */}
-      {customFields.length > 0 ? (
+      {customFieldsOn && customFields.length > 0 ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-xs uppercase tracking-wide text-zinc-500">Fields</h3>
@@ -175,7 +191,9 @@ export function BoardItemDetail({
       <LinkedAttachments sourceType="BOARD_ITEM" sourceId={item.id} spaceId={item.spaceId ?? null} canEdit={canEdit} />
 
       {/* Time tracking */}
-      <TimeTracker entityType="BOARD_ITEM" entityId={item.id} canEdit={canEdit} />
+      {timeTrackingOn ? (
+        <TimeTracker entityType="BOARD_ITEM" entityId={item.id} canEdit={canEdit} />
+      ) : null}
 
       {/* Comments + Activity */}
       <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statusOptions} />

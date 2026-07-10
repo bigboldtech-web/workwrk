@@ -75,6 +75,8 @@ interface BoardTableViewProps {
   /** Called after a header-menu field mutation (delete / move) so the parent
    *  re-fetches Board.schema.fields into its field state. */
   onFieldsChanged?: () => void;
+  /** Time Tracking module — hides the row menu's "Start timer" when false. */
+  timeTrackingEnabled?: boolean;
   /** "list" = ClickUp pills (default). "table" = Monday-style grid with
    *  full-cell colored status fills + always-on group summary. */
   gridStyle?: "list" | "table";
@@ -228,7 +230,7 @@ function csvCell(v: unknown): string {
 const LEADING_W = 34;
 const ACTIONS_MIN_W = 44;
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, timeTrackingEnabled = true, gridStyle = "list" }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   // Custom-field columns, ordered by their saved `position` (matches the Fields
@@ -1045,6 +1047,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         onUpdate={handleUpdate}
         onArchive={handleArchive}
         onDeleted={(id) => setItems((prev) => prev.filter((r) => r.id !== id))}
+        timeTrackingEnabled={timeTrackingEnabled}
         onOpen={onOpenItem ? () => onOpenItem(row.id) : undefined}
         onDuplicate={handleDuplicate}
         onAddSubtask={() => addSubtask(row.id, row.status)}
@@ -1541,6 +1544,7 @@ function Row({
   onUpdate,
   onArchive,
   onDeleted,
+  timeTrackingEnabled = true,
   onOpen,
   onDuplicate,
   onAddSubtask,
@@ -1583,6 +1587,7 @@ function Row({
   onToggleSelect: (id: string) => void;
   onUpdate: (id: string, patch: RowPatch) => void;
   onArchive: (id: string) => void;
+  timeTrackingEnabled?: boolean;
   /** Local removal after a hard delete (→ Trash) succeeds. */
   onDeleted: (id: string) => void;
   onOpen?: () => void;
@@ -1801,6 +1806,7 @@ function Row({
             onDuplicate={onDuplicate ? () => onDuplicate(row) : undefined}
             onArchive={() => onArchive(row.id)}
             onDeleted={() => onDeleted(row.id)}
+            timeTrackingEnabled={timeTrackingEnabled}
           />
         ) : null}
       </td>

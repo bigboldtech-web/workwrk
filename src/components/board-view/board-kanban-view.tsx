@@ -30,9 +30,13 @@ interface BoardKanbanViewProps {
   statuses: StatusOption[];
   canEdit: boolean;
   onOpenItem?: (itemId: string) => void;
+  /** Space-module gating — hides the card's Priority / Tags / Start-timer when off. */
+  priorityEnabled?: boolean;
+  tagsEnabled?: boolean;
+  timeTrackingEnabled?: boolean;
 }
 
-export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem }: BoardKanbanViewProps) {
+export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true }: BoardKanbanViewProps) {
   const confirm = useConfirm();
   // Show all choice-type custom fields as chips on cards (capped so a card with
   // many fields doesn't sprawl) — so switching List → Board keeps custom data
@@ -238,6 +242,9 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     onDuplicate={() => duplicateCard(card)}
                     onArchive={() => archiveCard(card.id)}
                     onDeleted={() => removeLocal(card.id)}
+                    priorityEnabled={priorityEnabled}
+                    tagsEnabled={tagsEnabled}
+                    timeTrackingEnabled={timeTrackingEnabled}
                   />
                 ))}
                 {canEdit ? (
@@ -275,6 +282,9 @@ function KanbanCard({
   onDuplicate,
   onArchive,
   onDeleted,
+  priorityEnabled = true,
+  tagsEnabled = true,
+  timeTrackingEnabled = true,
 }: {
   boardId: string;
   card: BoardItemRow;
@@ -292,6 +302,9 @@ function KanbanCard({
   onDuplicate: () => void;
   onArchive: () => void;
   onDeleted: () => void;
+  priorityEnabled?: boolean;
+  tagsEnabled?: boolean;
+  timeTrackingEnabled?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(card.title);
@@ -381,6 +394,7 @@ function KanbanCard({
             onDuplicate={onDuplicate}
             onArchive={onArchive}
             onDeleted={onDeleted}
+            timeTrackingEnabled={timeTrackingEnabled}
           />
         </div>
       </div>
@@ -430,14 +444,18 @@ function KanbanCard({
         </span>
 
         {/* Priority */}
-        <span className={card.priority ? "inline-flex" : "hidden group-hover:inline-flex"}>
-          <PriorityPicker value={card.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onPatch(card.id, { priority }, { priority })} />
-        </span>
+        {priorityEnabled ? (
+          <span className={card.priority ? "inline-flex" : "hidden group-hover:inline-flex"}>
+            <PriorityPicker value={card.priority ?? null} canEdit={canEdit} compact onChange={(priority) => onPatch(card.id, { priority }, { priority })} />
+          </span>
+        ) : null}
 
         {/* Tags */}
-        <span className={tags.length > 0 ? "inline-flex" : "hidden group-hover:inline-flex"}>
-          <TagPicker value={tags} canEdit={canEdit} compact onChange={(next) => onPatch(card.id, { tagIds: next.map((t) => t.id) }, { tags: next })} />
-        </span>
+        {tagsEnabled ? (
+          <span className={tags.length > 0 ? "inline-flex" : "hidden group-hover:inline-flex"}>
+            <TagPicker value={tags} canEdit={canEdit} compact onChange={(next) => onPatch(card.id, { tagIds: next.map((t) => t.id) }, { tags: next })} />
+          </span>
+        ) : null}
 
         {fieldChips.map((f) => (
           <FieldValue key={f.key} field={f} value={card.metadata?.[f.key]} mode="display" />

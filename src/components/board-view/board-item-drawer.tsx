@@ -18,7 +18,7 @@ import { Trash2, X, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
-import { BoardItemDetail, type DetailPatch } from "./board-item-detail";
+import { BoardItemDetail, type DetailPatch, type ItemModuleGating } from "./board-item-detail";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardItemDrawerProps {
@@ -38,6 +38,9 @@ interface BoardItemDrawerProps {
   onItemArchived?: (itemId: string) => void;
   /** Navigate the drawer to another item (used by the subtask list). */
   onOpenItem?: (itemId: string) => void;
+  /** Space-module gating — threaded to BoardItemDetail to hide
+   *  Priority / Tags / custom fields / TimeTracker when off. */
+  moduleGating?: ItemModuleGating;
 }
 
 export function BoardItemDrawer({
@@ -50,6 +53,7 @@ export function BoardItemDrawer({
   onItemChanged,
   onItemArchived,
   onOpenItem,
+  moduleGating,
 }: BoardItemDrawerProps) {
   const confirm = useConfirm();
   const customFields: FieldDef[] = fields ?? [];
@@ -221,6 +225,7 @@ export function BoardItemDrawer({
                     onPatch={patch}
                     layout="drawer"
                     onOpenItem={onOpenItem}
+                    moduleGating={moduleGating}
                   />
                 </div>
               </div>

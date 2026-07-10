@@ -54,10 +54,10 @@ interface BoardCanvasProps {
   /** The "+ Task" affordance, rendered on the right of the single toolbar row
    *  (ClickUp keeps create + filters + Statuses/Fields on one line). */
   addTaskSlot?: ReactNode;
-  /** Module ("ClickApp") gating from the board's Space. `hiddenBuiltins` is the
-   *  set of built-in columns to force-hide (Priority/Tags/Time when their module
-   *  is off); `customFields=false` hides all custom fields + the Fields shelf. */
-  moduleGating?: { hiddenBuiltins: string[]; customFields: boolean };
+  /** Module ("ClickApp") gating from the board's Space. Each false hides that
+   *  capability across the board's surfaces (columns, kanban card, drawer,
+   *  timer). Absent = ungated (legacy Space → all on). */
+  moduleGating?: { priority: boolean; tags: boolean; timeTracking: boolean; customFields: boolean };
 }
 
 export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId, addTaskSlot, moduleGating }: BoardCanvasProps) {
@@ -164,12 +164,20 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
 
   // Module ("ClickApp") gating from the Space. Custom Fields off → no custom
   // columns + no Fields shelf; Priority/Tags/Time off → their built-in column
-  // is force-hidden (merged into the table's hidden-builtins set).
+  // is force-hidden AND the same capability is hidden on cards / drawer / menu.
   const customFieldsOn = moduleGating?.customFields !== false;
+  const priorityOn = moduleGating?.priority !== false;
+  const tagsOn = moduleGating?.tags !== false;
+  const timeTrackingOn = moduleGating?.timeTracking !== false;
   const gatedFields = customFieldsOn ? visibleFields : [];
   const tableHiddenBuiltins = useMemo(
-    () => [...hiddenFields, ...(moduleGating?.hiddenBuiltins ?? [])],
-    [hiddenFields, moduleGating],
+    () => [
+      ...hiddenFields,
+      ...(priorityOn ? [] : ["__builtin_priority"]),
+      ...(tagsOn ? [] : ["__builtin_tags"]),
+      ...(timeTrackingOn ? [] : ["__builtin_time"]),
+    ],
+    [hiddenFields, priorityOn, tagsOn, timeTrackingOn],
   );
 
   // Re-pull Board.schema.fields after a column-header field mutation (delete /
@@ -253,6 +261,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           extraColumns={extraColumns}
           onHideField={viewId ? toggleColumn : undefined}
           onFieldsChanged={refetchFields}
+          timeTrackingEnabled={timeTrackingOn}
           gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
         />
       ) : viewType === "KANBAN" ? (
@@ -263,6 +272,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
+          priorityEnabled={priorityOn}
+          tagsEnabled={tagsOn}
+          timeTrackingEnabled={timeTrackingOn}
         />
       ) : viewType === "CALENDAR" ? (
         <BoardCalendarView
@@ -375,6 +387,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         currentUserId={currentUserId}
         fields={fields}
         statuses={statuses}
+        moduleGating={{ priority: priorityOn, tags: tagsOn, timeTracking: timeTrackingOn, customFields: customFieldsOn }}
         onClose={closeDrawer}
         onItemChanged={handleItemChanged}
         onItemArchived={handleItemArchived}

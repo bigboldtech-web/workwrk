@@ -203,12 +203,9 @@ export default async function BoardPage(props: {
             />
           }
           moduleGating={{
-            // Force-hide the built-in column when its Space module is off.
-            hiddenBuiltins: [
-              ...(hasModule(board.space.settings, "PRIORITY") ? [] : ["__builtin_priority"]),
-              ...(hasModule(board.space.settings, "TAGS") ? [] : ["__builtin_tags"]),
-              ...(hasModule(board.space.settings, "TIME_TRACKING") ? [] : ["__builtin_time"]),
-            ],
+            priority: hasModule(board.space.settings, "PRIORITY"),
+            tags: hasModule(board.space.settings, "TAGS"),
+            timeTracking: hasModule(board.space.settings, "TIME_TRACKING"),
             customFields: hasModule(board.space.settings, "CUSTOM_FIELDS"),
           }}
         />

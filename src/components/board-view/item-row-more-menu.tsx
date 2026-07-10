@@ -26,6 +26,8 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
   onArchive?: () => void;
   /** Local removal after a hard delete succeeds. */
   onDeleted?: () => void;
+  /** Time Tracking module — hides "Start timer" when false. */
+  timeTrackingEnabled?: boolean;
   className?: string;
 }>(function ItemRowMoreMenu({
   item,
@@ -35,6 +37,7 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
   onDuplicate,
   onArchive,
   onDeleted,
+  timeTrackingEnabled = true,
   className,
 }, ref) {
   const [open, setOpen] = useState(false);
@@ -142,7 +145,7 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
           {canEdit ? <MenuItem icon={CornerUpRight} label="Move to" onClick={() => soon("Move to")} /> : null}
           {canEdit && onDuplicate ? <MenuItem icon={Copy} label="Duplicate" onClick={() => { onDuplicate(); close(); }} /> : null}
           {canEdit ? <MenuItem icon={Box} label="Task type" onClick={() => soon("Task type")} /> : null}
-          {canEdit ? <MenuItem icon={Clock} label="Start timer" onClick={startTimer} busy={busy === "timer"} /> : null}
+          {canEdit && timeTrackingEnabled ? <MenuItem icon={Clock} label="Start timer" onClick={startTimer} busy={busy === "timer"} /> : null}
           {canEdit ? (
             <>
               <MenuSeparator />
