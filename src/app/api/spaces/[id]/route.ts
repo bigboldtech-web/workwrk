@@ -42,6 +42,8 @@ const patchSchema = z.object({
   visibility: z.enum(["PRIVATE", "WORKSPACE", "ORG"]).optional(),
   displayOrder: z.number().int().min(0).max(1_000_000).optional(),
   parentSpaceId: z.string().min(1).nullable().optional(),
+  // Enabled modules ("ClickApps") — merged into settings.workflow.modules.
+  modules: z.array(z.string().max(40)).max(50).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

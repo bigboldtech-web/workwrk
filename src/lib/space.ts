@@ -310,6 +310,9 @@ export interface UpdateSpaceInput {
   visibility?: Visibility;
   displayOrder?: number;
   parentSpaceId?: string | null;
+  /** Toggle the Space's enabled modules ("ClickApps"). Merged into
+   *  settings.workflow.modules — only that array is touched. */
+  modules?: string[];
 }
 
 export async function updateSpace(spaceId: string, patch: UpdateSpaceInput) {
@@ -325,6 +328,16 @@ export async function updateSpace(spaceId: string, patch: UpdateSpaceInput) {
   if (patch.visibility !== undefined) data.visibility = patch.visibility;
   if (patch.displayOrder !== undefined) data.displayOrder = patch.displayOrder;
   if (patch.parentSpaceId !== undefined) data.parentSpaceId = patch.parentSpaceId;
+
+  // Modules live inside the settings JSON (settings.workflow.modules). Read the
+  // current blob and merge so we only touch the modules array — statuses,
+  // views, defaultView, etc. are preserved.
+  if (patch.modules !== undefined) {
+    const current = await prisma.space.findUnique({ where: { id: spaceId }, select: { settings: true } });
+    const settings = (current?.settings && typeof current.settings === "object" ? current.settings : {}) as Record<string, unknown>;
+    const workflow = (settings.workflow && typeof settings.workflow === "object" ? settings.workflow : {}) as Record<string, unknown>;
+    data.settings = { ...settings, workflow: { ...workflow, modules: patch.modules } };
+  }
 
   return prisma.space.update({ where: { id: spaceId }, data });
 }

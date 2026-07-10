@@ -20,9 +20,10 @@ import {
   MoreHorizontal, Edit2, Palette, Lock, Globe, Archive, Settings,
   Share2, EyeOff, Loader2, Star, Link as LinkIcon, PanelLeft, PanelTop,
   Plus, Zap, Tag, CircleDot, Download, Files, ArrowRightLeft, Copy, Trash2, Save,
-  FileText, FolderPlus, ListChecks,
+  FileText, FolderPlus, ListChecks, Blocks,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
+import { SpaceModulesModal } from "./space-modules-modal";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
@@ -51,6 +52,8 @@ export const SpaceMoreTrigger = forwardRef<ContextMenuHandle, Props>(function Sp
   const [open, setOpen] = useState(false);
   // Cursor coords when opened via right-click; null = anchored to the "…" button.
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
+  // Modules manager modal — lives on the trigger so it survives the menu closing.
+  const [modulesOpen, setModulesOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -104,8 +107,12 @@ export const SpaceMoreTrigger = forwardRef<ContextMenuHandle, Props>(function Sp
           onClose={() => setOpen(false)}
           onUpdated={onUpdated}
           onRequestShare={onRequestShare}
+          onOpenModules={() => setModulesOpen(true)}
         />
       </MorePortal>
+      {modulesOpen ? (
+        <SpaceModulesModal spaceId={space.id} onClose={() => setModulesOpen(false)} />
+      ) : null}
     </span>
   );
 });
@@ -117,11 +124,13 @@ function SpaceMoreMenu({
   onClose,
   onUpdated,
   onRequestShare,
+  onOpenModules,
 }: {
   space: SpaceRowLike;
   onClose: () => void;
   onUpdated?: () => void;
   onRequestShare?: () => void;
+  onOpenModules?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -468,6 +477,7 @@ function SpaceMoreMenu({
         busy={busy === "visibility"}
         onClick={() => patch({ visibility: isPrivate ? "WORKSPACE" : "PRIVATE" }, "visibility")}
       />
+      <MenuItem icon={Blocks}    label="Modules"       onClick={() => { onClose(); onOpenModules?.(); }} />
       <MenuItem icon={Zap}       label="Automations"   onClick={() => toast("Automations are coming soon")} />
       <MenuItem icon={Tag}       label="Custom Fields" onClick={() => toast("Custom Fields are set per List")} />
       <MenuItem icon={CircleDot} label="Task statuses" onClick={() => toast("Task statuses are set per List")} />

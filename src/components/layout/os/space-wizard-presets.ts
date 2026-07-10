@@ -1,3 +1,9 @@
+import {
+  Target, TrendingUp, BookOpen, FileText, PenTool, Clock, Calendar, Star,
+  Award, MessageSquare, ClipboardList, Megaphone, DollarSign, Network,
+  UserPlus, Flag, Tag, SlidersHorizontal, Hourglass, Repeat, GitBranch,
+  Users, Gauge, AlertTriangle, Mail, type LucideIcon,
+} from "lucide-react";
 import type {
   ModuleKey,
   PresetId,
@@ -5,6 +11,12 @@ import type {
   ViewKey,
   WorkflowConfig,
 } from "./space-wizard-types";
+
+// Icon color families (shared with the Fields catalog look).
+const MC = {
+  blue: "#3B82F6", green: "#10B981", pink: "#EC4899", violet: "#8B5CF6",
+  orange: "#F97316", amber: "#B45309",
+} as const;
 
 export interface PresetDef {
   id: PresetId;
@@ -50,41 +62,45 @@ export interface ModuleCatalogEntry {
   label: string;
   blurb: string;
   group: "WORKWRK_NATIVE" | "PROJECT_MGMT";
-  /** Whether the wizard shows this in the MVP catalog. Hidden modules are
+  Icon: LucideIcon;
+  color: string;
+  /** Whether the wizard/settings shows this in the catalog. Hidden modules are
    *  still valid and can be enabled programmatically or via presets. */
   shownInWizard: boolean;
+  /** No backing feature yet — shown for parity but disabled ("Soon"). */
+  soon?: boolean;
 }
 
 export const MODULE_CATALOG: ModuleCatalogEntry[] = [
   // ── WorkwrK-native ────────────────────────────────────────────
-  { key: "KRA", label: "KRAs", blurb: "Key result areas this Space owns", group: "WORKWRK_NATIVE", shownInWizard: true },
-  { key: "KPI", label: "KPIs", blurb: "Metrics members are scored on", group: "WORKWRK_NATIVE", shownInWizard: true },
-  { key: "SOP", label: "SOPs", blurb: "Required reading + acknowledgements", group: "WORKWRK_NATIVE", shownInWizard: true },
-  { key: "NOTES", label: "Notes", blurb: "Embedded docs across tasks", group: "WORKWRK_NATIVE", shownInWizard: true },
-  { key: "WHITEBOARDS", label: "Whiteboards", blurb: "Excalidraw canvases anywhere", group: "WORKWRK_NATIVE", shownInWizard: true },
-  { key: "TIME_TRACKING", label: "Time Tracking", blurb: "Timers + manual entries", group: "WORKWRK_NATIVE", shownInWizard: true },
-  { key: "CALENDAR_VIEW", label: "Calendar view", blurb: "Hierarchical work-visibility calendar", group: "WORKWRK_NATIVE", shownInWizard: true },
-  { key: "REVIEWS", label: "Performance Reviews", blurb: "Weekly + quarterly cycles", group: "WORKWRK_NATIVE", shownInWizard: false },
-  { key: "KUDOS", label: "Kudos", blurb: "Peer recognition", group: "WORKWRK_NATIVE", shownInWizard: false },
-  { key: "CANDOR", label: "Candor", blurb: "Anonymous feedback", group: "WORKWRK_NATIVE", shownInWizard: false },
-  { key: "SURVEYS", label: "Surveys", blurb: "Pulse + engagement", group: "WORKWRK_NATIVE", shownInWizard: false },
-  { key: "ANNOUNCEMENTS", label: "Announcements", blurb: "Broadcast to the team", group: "WORKWRK_NATIVE", shownInWizard: false },
-  { key: "COMPENSATION", label: "Compensation", blurb: "Comp bands + adjustments", group: "WORKWRK_NATIVE", shownInWizard: false },
-  { key: "ORG_CHART", label: "Org Chart", blurb: "Reports-to visualization", group: "WORKWRK_NATIVE", shownInWizard: false },
-  { key: "HIRING", label: "Hiring Pipeline", blurb: "Candidate tracking", group: "WORKWRK_NATIVE", shownInWizard: false },
+  { key: "KRA", label: "KRAs", blurb: "Key result areas this Space owns", group: "WORKWRK_NATIVE", Icon: Target, color: MC.amber, shownInWizard: true },
+  { key: "KPI", label: "KPIs", blurb: "Metrics members are scored on", group: "WORKWRK_NATIVE", Icon: TrendingUp, color: MC.green, shownInWizard: true },
+  { key: "SOP", label: "SOPs", blurb: "Required reading + acknowledgements", group: "WORKWRK_NATIVE", Icon: BookOpen, color: MC.amber, shownInWizard: true },
+  { key: "NOTES", label: "Notes", blurb: "Embedded docs across tasks", group: "WORKWRK_NATIVE", Icon: FileText, color: MC.blue, shownInWizard: true },
+  { key: "WHITEBOARDS", label: "Whiteboards", blurb: "Excalidraw canvases anywhere", group: "WORKWRK_NATIVE", Icon: PenTool, color: MC.violet, shownInWizard: true },
+  { key: "TIME_TRACKING", label: "Time Tracking", blurb: "Timers + manual entries", group: "WORKWRK_NATIVE", Icon: Clock, color: MC.orange, shownInWizard: true },
+  { key: "CALENDAR_VIEW", label: "Calendar view", blurb: "Hierarchical work-visibility calendar", group: "WORKWRK_NATIVE", Icon: Calendar, color: MC.green, shownInWizard: true },
+  { key: "REVIEWS", label: "Performance Reviews", blurb: "Weekly + quarterly cycles", group: "WORKWRK_NATIVE", Icon: Star, color: MC.violet, shownInWizard: false },
+  { key: "KUDOS", label: "Kudos", blurb: "Peer recognition", group: "WORKWRK_NATIVE", Icon: Award, color: MC.pink, shownInWizard: false },
+  { key: "CANDOR", label: "Candor", blurb: "Anonymous feedback", group: "WORKWRK_NATIVE", Icon: MessageSquare, color: MC.violet, shownInWizard: false },
+  { key: "SURVEYS", label: "Surveys", blurb: "Pulse + engagement", group: "WORKWRK_NATIVE", Icon: ClipboardList, color: MC.green, shownInWizard: false },
+  { key: "ANNOUNCEMENTS", label: "Announcements", blurb: "Broadcast to the team", group: "WORKWRK_NATIVE", Icon: Megaphone, color: MC.pink, shownInWizard: false },
+  { key: "COMPENSATION", label: "Compensation", blurb: "Comp bands + adjustments", group: "WORKWRK_NATIVE", Icon: DollarSign, color: MC.green, shownInWizard: false },
+  { key: "ORG_CHART", label: "Org Chart", blurb: "Reports-to visualization", group: "WORKWRK_NATIVE", Icon: Network, color: MC.blue, shownInWizard: false },
+  { key: "HIRING", label: "Hiring Pipeline", blurb: "Candidate tracking", group: "WORKWRK_NATIVE", Icon: UserPlus, color: MC.pink, shownInWizard: false },
 
-  // ── Generic project mgmt ──────────────────────────────────────
-  { key: "PRIORITY", label: "Priority", blurb: "Low / Normal / High / Urgent", group: "PROJECT_MGMT", shownInWizard: true },
-  { key: "TAGS", label: "Tags", blurb: "Lightweight labels", group: "PROJECT_MGMT", shownInWizard: true },
-  { key: "CUSTOM_FIELDS", label: "Custom Fields", blurb: "30-type field shelf", group: "PROJECT_MGMT", shownInWizard: false },
-  { key: "TIME_ESTIMATES", label: "Time Estimates", blurb: "Forecast effort", group: "PROJECT_MGMT", shownInWizard: false },
-  { key: "SPRINTS", label: "Sprints", blurb: "Time-boxed iterations", group: "PROJECT_MGMT", shownInWizard: false },
-  { key: "SPRINT_POINTS", label: "Sprint Points", blurb: "Estimation poker", group: "PROJECT_MGMT", shownInWizard: false },
-  { key: "DEPENDENCIES", label: "Dependencies", blurb: "Blocked-by + blocks", group: "PROJECT_MGMT", shownInWizard: false },
-  { key: "MULTIPLE_ASSIGNEES", label: "Multiple Assignees", blurb: "Shared ownership", group: "PROJECT_MGMT", shownInWizard: false },
-  { key: "WIP_LIMITS", label: "WIP Limits", blurb: "Caps per status", group: "PROJECT_MGMT", shownInWizard: false },
-  { key: "INCOMPLETE_WARNING", label: "Incomplete Warning", blurb: "Block close until complete", group: "PROJECT_MGMT", shownInWizard: false },
-  { key: "EMAIL", label: "Email", blurb: "Email-to-task ingest", group: "PROJECT_MGMT", shownInWizard: false },
+  // ── Generic project mgmt (the ClickUp "ClickApp" set) ─────────
+  { key: "PRIORITY", label: "Priority", blurb: "Low / Normal / High / Urgent", group: "PROJECT_MGMT", Icon: Flag, color: MC.orange, shownInWizard: true },
+  { key: "TAGS", label: "Tags", blurb: "Lightweight labels", group: "PROJECT_MGMT", Icon: Tag, color: MC.green, shownInWizard: true },
+  { key: "CUSTOM_FIELDS", label: "Custom Fields", blurb: "30-type field shelf", group: "PROJECT_MGMT", Icon: SlidersHorizontal, color: MC.blue, shownInWizard: true },
+  { key: "TIME_ESTIMATES", label: "Time Estimates", blurb: "Forecast effort", group: "PROJECT_MGMT", Icon: Hourglass, color: MC.amber, shownInWizard: true, soon: true },
+  { key: "SPRINTS", label: "Sprints", blurb: "Time-boxed iterations", group: "PROJECT_MGMT", Icon: Repeat, color: MC.violet, shownInWizard: true, soon: true },
+  { key: "SPRINT_POINTS", label: "Sprint Points", blurb: "Estimation poker", group: "PROJECT_MGMT", Icon: Star, color: MC.violet, shownInWizard: true, soon: true },
+  { key: "DEPENDENCIES", label: "Dependencies", blurb: "Blocked-by + blocks", group: "PROJECT_MGMT", Icon: GitBranch, color: MC.amber, shownInWizard: true, soon: true },
+  { key: "MULTIPLE_ASSIGNEES", label: "Multiple Assignees", blurb: "Shared ownership", group: "PROJECT_MGMT", Icon: Users, color: MC.pink, shownInWizard: true, soon: true },
+  { key: "WIP_LIMITS", label: "WIP Limits", blurb: "Caps per status", group: "PROJECT_MGMT", Icon: Gauge, color: MC.orange, shownInWizard: true, soon: true },
+  { key: "INCOMPLETE_WARNING", label: "Incomplete Warning", blurb: "Block close until complete", group: "PROJECT_MGMT", Icon: AlertTriangle, color: MC.orange, shownInWizard: true, soon: true },
+  { key: "EMAIL", label: "Email", blurb: "Email-to-task ingest", group: "PROJECT_MGMT", Icon: Mail, color: MC.pink, shownInWizard: true, soon: true },
 ];
 
 // ── Status palettes ──────────────────────────────────────────────

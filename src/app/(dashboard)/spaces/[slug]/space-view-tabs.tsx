@@ -19,10 +19,10 @@ const VIEW_TABS: { key: string; label: string; Icon: LucideIcon; tile: string }[
   { key: "gantt", label: "Gantt", Icon: GanttChart, tile: "#EF4444" },
 ];
 
-export function SpaceViewTabs({ view, spaceSlug }: { view: string; spaceSlug: string }) {
+export function SpaceViewTabs({ view, spaceSlug, hiddenViews = [] }: { view: string; spaceSlug: string; hiddenViews?: string[] }) {
   return (
     <ViewTabStrip className="px-6">
-      {VIEW_TABS.map((t) => (
+      {VIEW_TABS.filter((t) => !hiddenViews.includes(t.key)).map((t) => (
         <ViewTab
           key={t.key}
           icon={t.Icon}

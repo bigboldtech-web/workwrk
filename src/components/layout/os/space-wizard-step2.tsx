@@ -615,7 +615,7 @@ function ColorSwatch({ color, onChange }: { color: string; onChange: (c: string)
 // Sub-screen: Modules
 // ────────────────────────────────────────────────────────────────────
 
-function ModulesSubScreen({
+export function ModulesSubScreen({
   accent,
   modules,
   onChange,
@@ -631,6 +631,8 @@ function ModulesSubScreen({
   const pm = visible.filter((m) => m.group === "PROJECT_MGMT");
 
   const toggle = (k: ModuleKey) => {
+    // "Soon" modules aren't toggleable (no backing feature yet).
+    if (visible.find((m) => m.key === k)?.soon) return;
     if (modules.includes(k)) onChange(modules.filter((m) => m !== k));
     else onChange([...modules, k]);
   };
@@ -649,7 +651,7 @@ function ModulesSubScreen({
           </div>
           <Toggle
             value={turnOffAll}
-            onChange={(v) => onChange(v ? visible.map((m) => m.key) : [])}
+            onChange={(v) => onChange(v ? visible.filter((m) => !m.soon).map((m) => m.key) : [])}
             accent={accent}
           />
         </label>
@@ -681,20 +683,31 @@ function ModuleGroup({
       <div className="text-[11px] uppercase tracking-wide text-muted-2 mb-2">{title}</div>
       <div className="grid grid-cols-2 gap-2">
         {entries.map((m) => {
-          const enabled = modules.includes(m.key);
+          const enabled = modules.includes(m.key) && !m.soon;
           return (
             <button
               key={m.key}
               type="button"
+              disabled={m.soon}
               onClick={() => onToggle(m.key)}
-              className="text-left rounded-lg border bg-surface p-3 transition hover:bg-surface-2"
+              className={`text-left rounded-lg border bg-surface p-3 transition ${m.soon ? "opacity-60 cursor-not-allowed" : "hover:bg-surface-2"}`}
               style={{
                 borderColor: enabled ? accent : "var(--border, #e4e4e7)",
                 boxShadow: enabled ? `0 0 0 2px ${accent}20` : undefined,
               }}
             >
-              <div className="text-[12.5px] font-semibold">{m.label}</div>
-              <div className="text-[11px] text-muted mt-0.5 leading-snug">{m.blurb}</div>
+              <div className="flex items-start gap-2.5">
+                <m.Icon className="w-4 h-4 shrink-0 mt-0.5" style={{ color: m.color }} />
+                <div className="min-w-0">
+                  <div className="text-[12.5px] font-semibold flex items-center gap-1.5">
+                    {m.label}
+                    {m.soon ? (
+                      <span className="text-[9px] uppercase tracking-wide text-muted-2 border border-border rounded px-1 leading-4">Soon</span>
+                    ) : null}
+                  </div>
+                  <div className="text-[11px] text-muted mt-0.5 leading-snug">{m.blurb}</div>
+                </div>
+              </div>
             </button>
           );
         })}

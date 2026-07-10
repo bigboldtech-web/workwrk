@@ -31,6 +31,7 @@ import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceViewTabs } from "./space-view-tabs";
 import { SpaceListItemsTable } from "./space-list-items";
 import type { StatusOption } from "@/lib/board-items-shared";
+import { hasModule } from "@/lib/space-modules";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
@@ -133,7 +134,7 @@ export default async function SpacePage(props: {
   const { slug } = await props.params;
   const sp = await props.searchParams;
   const rawView = sp.view ?? "overview";
-  const view: SpaceView = (VIEW_TABS.find((t) => t.key === rawView && t.enabled)?.key ?? "overview") as SpaceView;
+  let view: SpaceView = (VIEW_TABS.find((t) => t.key === rawView && t.enabled)?.key ?? "overview") as SpaceView;
   const listSort: ListSort = (LIST_SORTS.find((s) => s.key === sp.sort)?.key ?? "updated") as ListSort;
   const listStatusFilter = sp.status
     ? new Set(sp.status.split(",").map((s) => s.trim()).filter(Boolean))
@@ -205,6 +206,13 @@ export default async function SpacePage(props: {
   const spaceCanEdit = isAdmin || isSpaceOwner || !!membership;
 
   const workflow = readWorkflow(space.settings);
+
+  // Module gating: the Calendar view is available only when the CALENDAR_VIEW
+  // module is enabled for this Space. Backward-compatible — a Space with no
+  // modules config counts as "all on", so existing Spaces keep every tab.
+  const calendarModuleOn = hasModule(space.settings, "CALENDAR_VIEW");
+  const hiddenViews = calendarModuleOn ? [] : ["calendar"];
+  if (view === "calendar" && !calendarModuleOn) view = "overview";
 
   // Collect every board under this Space (root + folder-nested) so the
   // dashboard cards can scope their queries without an extra round
@@ -590,7 +598,7 @@ export default async function SpacePage(props: {
       {/* View tabs — matches ClickUp's Space-level view switcher.
           Overview + List are functional; others stub until the
           cross-board renderers ship. */}
-      <SpaceViewTabs view={view} spaceSlug={space.slug} />
+      <SpaceViewTabs view={view} spaceSlug={space.slug} hiddenViews={hiddenViews} />
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
