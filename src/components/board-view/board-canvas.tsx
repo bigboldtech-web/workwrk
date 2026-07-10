@@ -54,9 +54,13 @@ interface BoardCanvasProps {
   /** The "+ Task" affordance, rendered on the right of the single toolbar row
    *  (ClickUp keeps create + filters + Statuses/Fields on one line). */
   addTaskSlot?: ReactNode;
+  /** Module ("ClickApp") gating from the board's Space. `hiddenBuiltins` is the
+   *  set of built-in columns to force-hide (Priority/Tags/Time when their module
+   *  is off); `customFields=false` hides all custom fields + the Fields shelf. */
+  moduleGating?: { hiddenBuiltins: string[]; customFields: boolean };
 }
 
-export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId, addTaskSlot }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId, addTaskSlot, moduleGating }: BoardCanvasProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -158,6 +162,16 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     [fields, hiddenFields],
   );
 
+  // Module ("ClickApp") gating from the Space. Custom Fields off → no custom
+  // columns + no Fields shelf; Priority/Tags/Time off → their built-in column
+  // is force-hidden (merged into the table's hidden-builtins set).
+  const customFieldsOn = moduleGating?.customFields !== false;
+  const gatedFields = customFieldsOn ? visibleFields : [];
+  const tableHiddenBuiltins = useMemo(
+    () => [...hiddenFields, ...(moduleGating?.hiddenBuiltins ?? [])],
+    [hiddenFields, moduleGating],
+  );
+
   // Re-pull Board.schema.fields after a column-header field mutation (delete /
   // move to start-end) so the table reflects it. Mirrors FieldShelf's refetch.
   const refetchFields = useCallback(async () => {
@@ -198,14 +212,16 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <CircleDot className="w-3.5 h-3.5" />
         Statuses <span className="text-xs text-zinc-500">({statuses.length})</span>
       </button>
-      <button
-        type="button"
-        onClick={() => setShelfOpen(true)}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
-      >
-        <Settings2 className="w-3.5 h-3.5" />
-        Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
-      </button>
+      {customFieldsOn ? (
+        <button
+          type="button"
+          onClick={() => setShelfOpen(true)}
+          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+          Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
+        </button>
+      ) : null}
       {addTaskSlot}
     </>
   );
@@ -225,15 +241,15 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           viewId={viewId}
           viewConfig={viewConfig}
           initialItems={filteredItems}
-          initialFields={visibleFields}
+          initialFields={gatedFields}
           statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           onEditStatuses={() => setStatusEditorOpen(true)}
-          onOpenFields={() => setShelfOpen(true)}
+          onOpenFields={customFieldsOn ? () => setShelfOpen(true) : undefined}
           currentUserId={currentUserId}
           toolbarActions={toolbarActions}
-          hiddenBuiltins={hiddenFields}
+          hiddenBuiltins={tableHiddenBuiltins}
           extraColumns={extraColumns}
           onHideField={viewId ? toggleColumn : undefined}
           onFieldsChanged={refetchFields}
@@ -243,7 +259,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardKanbanView
           boardId={boardId}
           initialItems={filteredItems}
-          initialFields={visibleFields}
+          initialFields={gatedFields}
           statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
@@ -373,17 +389,19 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         onClose={() => { setStatusEditorOpen(false); stripPanel(); }}
       />
 
-      <FieldShelf
-        boardId={boardId}
-        open={shelfOpen}
-        canEdit={canEdit}
-        fields={fields}
-        hiddenFields={hiddenFields}
-        extraColumns={extraColumns}
-        onToggleColumn={viewId ? toggleColumn : undefined}
-        onClose={() => { setShelfOpen(false); stripPanel(); }}
-        onFieldsChanged={setFields}
-      />
+      {customFieldsOn ? (
+        <FieldShelf
+          boardId={boardId}
+          open={shelfOpen}
+          canEdit={canEdit}
+          fields={fields}
+          hiddenFields={hiddenFields}
+          extraColumns={extraColumns}
+          onToggleColumn={viewId ? toggleColumn : undefined}
+          onClose={() => { setShelfOpen(false); stripPanel(); }}
+          onFieldsChanged={setFields}
+        />
+      ) : null}
     </>
   );
 }

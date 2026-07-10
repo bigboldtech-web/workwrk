@@ -18,6 +18,7 @@ import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { ensureCoreListViews } from "@/lib/board";
 import { canEditSpace } from "@/lib/space";
+import { hasModule } from "@/lib/space-modules";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
 import { parseBoardSchema } from "@/lib/field-catalog";
@@ -38,7 +39,7 @@ export default async function BoardPage(props: {
   const board = await prisma.board.findFirst({
     where: { slug, organizationId: u.organizationId },
     include: {
-      space: { select: { id: true, slug: true, name: true, visibility: true, icon: true, color: true } },
+      space: { select: { id: true, slug: true, name: true, visibility: true, icon: true, color: true, settings: true } },
       folder: { select: { id: true, name: true, icon: true, color: true } },
       views: { orderBy: [{ displayOrder: "asc" }, { name: "asc" }] },
     },
@@ -201,6 +202,15 @@ export default async function BoardPage(props: {
               spaceId={board.space.id}
             />
           }
+          moduleGating={{
+            // Force-hide the built-in column when its Space module is off.
+            hiddenBuiltins: [
+              ...(hasModule(board.space.settings, "PRIORITY") ? [] : ["__builtin_priority"]),
+              ...(hasModule(board.space.settings, "TAGS") ? [] : ["__builtin_tags"]),
+              ...(hasModule(board.space.settings, "TIME_TRACKING") ? [] : ["__builtin_time"]),
+            ],
+            customFields: hasModule(board.space.settings, "CUSTOM_FIELDS"),
+          }}
         />
       </div>
     </div>
