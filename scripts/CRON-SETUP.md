@@ -33,6 +33,7 @@ For each row below, set:
 | KPI score reminders | `0 9 * * 1-5` (9 AM weekdays) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/kpi-reminders` |
 | Announcements publish | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/announcements-publish` |
 | Autonomous agents | `*/10 * * * *` | `curl -fsS --max-time 290 -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/run-due-agents` |
+| Recurring tasks spawn | `0 * * * *` (hourly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/recurring-tasks` |
 
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
 or 500 lands in the cron log.

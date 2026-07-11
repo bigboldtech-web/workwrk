@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search, EyeOff, Eye, Target, Flag, Ban } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
+import type { RecurrenceRule } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker } from "./assignee-picker";
 import { FieldValue } from "./field-value";
@@ -32,6 +33,7 @@ export type DetailPatch = Partial<Pick<BoardItemRow, "title" | "status">> & {
   priority?: string | null;
   tagIds?: string[];
   itemTypeId?: string | null;
+  recurRule?: RecurrenceRule | null;
 };
 
 /** Space-module gating for the item surfaces. Each false hides that capability. */

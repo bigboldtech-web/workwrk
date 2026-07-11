@@ -57,9 +57,9 @@ function fmtDay(v: Date | string | null | undefined): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-const FREQ_LABEL: Record<RecurFreq, string> = { DAY: "Daily", WEEK: "Weekly", MONTH: "Monthly", YEAR: "Yearly" };
-const FREQ_UNIT: Record<RecurFreq, string> = { DAY: "day", WEEK: "week", MONTH: "month", YEAR: "year" };
-const FREQS: RecurFreq[] = ["DAY", "WEEK", "MONTH", "YEAR"];
+const FREQ_LABEL: Record<RecurFreq, string> = { DAY: "Daily", WEEK: "Weekly", MONTH: "Monthly", QUARTER: "Quarterly", YEAR: "Yearly" };
+const FREQ_UNIT: Record<RecurFreq, string> = { DAY: "day", WEEK: "week", MONTH: "month", QUARTER: "quarter", YEAR: "year" };
+const FREQS: RecurFreq[] = ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"];
 
 export function DatePlanner({
   item, canEdit, onPatch,
@@ -76,7 +76,7 @@ export function DatePlanner({
 
   const [reminders, setReminders] = useState<TaskReminder[]>([]);
   const [remLoading, setRemLoading] = useState(false);
-  const recurrence = parseRecurrence(item.metadata);
+  const recurrence = parseRecurrence(item.recurRule);
 
   const loadReminders = useCallback(async () => {
     setRemLoading(true);
@@ -138,9 +138,7 @@ export function DatePlanner({
   };
 
   const setRecurrence = (rule: RecurrenceRule | null) => {
-    const meta = { ...(item.metadata ?? {}) } as Record<string, unknown>;
-    if (rule) meta.recurrence = rule; else delete meta.recurrence;
-    onPatch({ metadata: meta }, { metadata: meta });
+    onPatch({ recurRule: rule }, { recurRule: rule });
   };
 
   // ── trigger summary ──────────────────────────────────────────────
@@ -328,7 +326,7 @@ function RepeatTab({ rule, onChange }: { rule: RecurrenceRule | null; onChange: 
         />
         {FREQ_UNIT[freq]}{interval > 1 ? "s" : ""}
       </label>
-      <p className="text-[11.5px] text-zinc-400">Repeats when the task is marked complete — its dates roll forward automatically.</p>
+      <p className="text-[11.5px] text-zinc-400">A fresh copy of this task, with its subtasks, is created automatically each cycle so every period has its own record.</p>
       <div className="flex items-center justify-between pt-1 border-t border-zinc-100">
         <span className="text-[12px] text-zinc-500">{rule ? describeRecurrence(rule) : "Doesn't repeat"}</span>
         {rule ? (

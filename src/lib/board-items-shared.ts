@@ -8,6 +8,8 @@
 // stay in board-items.ts and continue to import this file for the
 // shared types so the API surface stays unified.
 
+import type { RecurrenceRule } from "@/lib/recurrence";
+
 // ── Per-List statuses (ClickUp parity backbone #1) ─────────────────
 //
 // Every status belongs to a group that drives completion logic:
@@ -140,6 +142,11 @@ export interface BoardItemRow {
   parentItemId?: string | null;
   /** Phase 72 — count of direct children. 0 for leaf items. */
   subtaskCount?: number;
+  /** Recurring tasks — the series rule on the anchor task, or null. Set only
+   *  on the anchor; spawned copies carry null. */
+  recurRule?: RecurrenceRule | null;
+  /** When the cron spawns the next copy (anchor only). */
+  recurNextAt?: Date | string | null;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

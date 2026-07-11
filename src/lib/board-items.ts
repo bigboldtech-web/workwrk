@@ -20,6 +20,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/item-thread";
+import { parseRecurrence } from "@/lib/recurrence";
 import {
   DEFAULT_STATUS_OPTIONS,
   PRIORITY_OPTIONS,
@@ -63,6 +64,8 @@ function rowFrom(it: {
   priority?: string | null;
   itemTypeId?: string | null;
   parentItemId?: string | null;
+  recurRule?: unknown;
+  recurNextAt?: Date | null;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -80,6 +83,8 @@ function rowFrom(it: {
     priority: it.priority ?? null,
     itemTypeId: it.itemTypeId ?? null,
     parentItemId: it.parentItemId ?? null,
+    recurRule: parseRecurrence(it.recurRule),
+    recurNextAt: it.recurNextAt ?? null,
     archivedAt: it.archivedAt,
     createdAt: it.createdAt,
     updatedAt: it.updatedAt,
@@ -378,6 +383,11 @@ export interface UpdateBoardItemInput {
   itemTypeId?: string | null;
   /** Task-system phase 2 — full replacement set of workspace Tag ids. */
   tagIds?: string[];
+  /** Recurring tasks — the series rule ({freq,interval}) or null to stop
+   *  repeating. recurNextAt is computed server-side, never set by callers. */
+  recurRule?: Record<string, unknown> | null;
+  /** Internal: the cron + PATCH route set the next spawn time directly. */
+  recurNextAt?: Date | null;
 }
 
 export async function updateBoardItem(
@@ -406,6 +416,8 @@ export async function updateBoardItem(
   if (patch.dueAt !== undefined) data.dueAt = patch.dueAt === null ? null : new Date(patch.dueAt);
   if (patch.priority !== undefined) data.priority = normalizePriority(patch.priority);
   if (patch.itemTypeId !== undefined) data.itemTypeId = patch.itemTypeId;
+  if (patch.recurRule !== undefined) data.recurRule = patch.recurRule ?? null;
+  if (patch.recurNextAt !== undefined) data.recurNextAt = patch.recurNextAt;
 
   const updated = await prisma.item.update({ where: { id: itemId }, data });
   const owner = updated.ownerId

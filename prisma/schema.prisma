@@ -5055,6 +5055,14 @@ model Item {
   // null = the org's default type. Migrated from metadata.taskType.
   itemTypeId     String?
   metadata       Json         @default("{}")
+  // 🆕 Recurring tasks (spawn model). Set only on the SERIES ANCHOR task:
+  //   recurRule   = { freq: DAY|WEEK|MONTH|QUARTER|YEAR, interval: number }
+  //   recurNextAt = when the cron spawns the next fresh copy (indexed scan).
+  // Spawned copies get neither (so they never become anchors → no runaway).
+  // /api/cron/recurring-tasks claims due anchors, clones the task + its
+  // subtask tree as a fresh open task, and advances recurNextAt.
+  recurRule      Json?
+  recurNextAt    DateTime?
   // 🆕 Phase 72 — subtask self-relation. Top-level items have parentItemId
   // = null; subtasks point to their parent. Cascade delete so removing
   // the parent drops the whole tree (ClickUp + Linear pattern).
@@ -5071,6 +5079,7 @@ model Item {
   @@index([boardId, dueAt])
   @@index([boardId, priority])
   @@index([boardId, parentItemId])
+  @@index([recurNextAt])
   @@index([itemType])
   @@index([itemTypeId])
   @@index([ownerId])

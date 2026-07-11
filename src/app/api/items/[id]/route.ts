@@ -9,8 +9,8 @@ import { archiveBoardItem, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board
 import { moveToTrash } from "@/lib/trash";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { parseBoardSchema } from "@/lib/field-catalog";
-import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
-import { parseRecurrence, advanceDate } from "@/lib/recurrence";
+import { getBoardStatuses } from "@/lib/board-items-shared";
+import { nextOccurrence, type RecurrenceRule } from "@/lib/recurrence";
 import { prisma } from "@/lib/prisma";
 
 async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
@@ -63,6 +63,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       priority: gate.item.priority,
       itemTypeId: gate.item.itemTypeId,
       parentItemId: gate.item.parentItemId,
+      recurRule: gate.item.recurRule,
+      recurNextAt: gate.item.recurNextAt,
       tags: tagAssignments.filter((a) => !a.tag.archived).map((a) => ({ id: a.tag.id, name: a.tag.name, color: a.tag.color })),
       archivedAt: gate.item.archivedAt,
       createdAt: gate.item.createdAt,
@@ -109,43 +111,30 @@ async function loadAndGate(itemId: string, c: { userId: string; accessLevel: str
   return { item };
 }
 
-// Recurrence ("Repeat") roll-forward. Called after a status change: when the
-// item now sits in a done status AND carries a recurrence rule, advance its
-// dates by one cycle, reset it to the first open status, and re-arm any
-// task-linked reminders. Returns the rolled-forward row, or null when nothing
-// recurred (so the caller keeps the plain update result).
-async function rollForwardIfRecurring(itemId: string, actorId: string) {
+// Recurrence ("Repeat") config. After a patch sets/clears recurRule, compute the
+// anchor's recurNextAt (the cron uses it to spawn fresh copies). Seed it to the
+// first cycle strictly after the anchor's own due date AND after now, so the
+// anchor covers the current cycle and the first spawned copy is the next one.
+// Clearing the rule clears recurNextAt too. Returns the re-updated row or null.
+async function applyRecurrenceSchedule(itemId: string, rule: RecurrenceRule | null | undefined, actorId: string) {
   const item = await prisma.item.findUnique({
     where: { id: itemId },
-    include: { board: { select: { statuses: true } } },
+    select: { dueAt: true, startAt: true },
   });
   if (!item) return null;
-  const rule = parseRecurrence(item.metadata);
-  if (!rule) return null;
-  const statuses = getBoardStatuses(item.board);
-  // Only roll forward when the task just entered a done/closed status.
-  if (!isDoneStatus(statuses, item.status)) return null;
-
-  const patch: Parameters<typeof updateBoardItem>[1] = {};
-  if (item.dueAt) patch.dueAt = advanceDate(item.dueAt, rule).toISOString();
-  if (item.startAt) patch.startAt = advanceDate(item.startAt, rule).toISOString();
-  const firstOpen = statuses.find((s) => s.group === "ACTIVE") ?? statuses[0];
-  if (firstOpen) patch.status = firstOpen.value;
-
-  const rolled = await updateBoardItem(itemId, patch, actorId);
-
-  // Re-arm this task's reminders for the next cycle (advance by the same rule).
-  const reminders = await prisma.reminder.findMany({
-    where: { entityType: "BOARD_ITEM", entityId: itemId },
-  });
-  for (const rem of reminders) {
-    await prisma.reminder.update({
-      where: { id: rem.id },
-      data: { remindAt: advanceDate(rem.remindAt, rule), status: "PENDING", firedAt: null },
-    });
+  let recurNextAt: Date | null = null;
+  if (rule) {
+    const base = item.dueAt ?? item.startAt ?? new Date();
+    const threshold = new Date(Math.max(Date.now(), new Date(base).getTime()));
+    recurNextAt = nextOccurrence(base, rule, threshold);
   }
-  return rolled;
+  return updateBoardItem(itemId, { recurNextAt }, actorId);
 }
+
+const recurRuleSchema = z.object({
+  freq: z.enum(["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"]),
+  interval: z.number().int().min(1).max(365),
+});
 
 const patchSchema = z.object({
   title: z.string().min(1).max(280).optional(),
@@ -162,6 +151,9 @@ const patchSchema = z.object({
   tagIds: z.array(z.string().min(1)).max(20).optional(),
   // Task Types — re-skin this row as an ItemType (null = default).
   itemTypeId: z.string().min(1).nullable().optional(),
+  // Recurring tasks — the series rule, or null to stop repeating. recurNextAt
+  // is derived server-side, never accepted from the client.
+  recurRule: recurRuleSchema.nullable().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -177,10 +169,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   try {
     const updated = await updateBoardItem(id, parsed.data, c.userId);
-    // A recurring task completed → roll it forward instead of leaving it done.
-    if (parsed.data.status !== undefined) {
-      const rolled = await rollForwardIfRecurring(id, c.userId);
-      if (rolled) return NextResponse.json({ item: rolled, recurred: true });
+    // Repeat turned on/off/changed → (re)compute the anchor's spawn schedule.
+    if (parsed.data.recurRule !== undefined) {
+      const rescheduled = await applyRecurrenceSchedule(id, parsed.data.recurRule ?? null, c.userId);
+      if (rescheduled) return NextResponse.json({ item: rescheduled });
     }
     return NextResponse.json({ item: updated });
   } catch (err) {
