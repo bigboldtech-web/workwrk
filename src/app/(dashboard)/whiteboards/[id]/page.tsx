@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, CheckCircle2, Cloud } from "lucide-react";
 import { WhiteboardFavoriteButton } from "@/components/board-view/whiteboard-favorite-button";
+import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = dynamic(
@@ -128,7 +129,10 @@ export default function WhiteboardCanvasPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: renameValue.trim() }),
     });
-    if (res.ok) setBoard({ ...board, name: renameValue.trim() });
+    if (res.ok) {
+      setBoard({ ...board, name: renameValue.trim() });
+      refreshSidebar(); // tell the Spaces sidebar to re-fetch so the tree shows the new name without a reload
+    }
   }
 
   if (loading || !board) return <CanvasLoader />;
