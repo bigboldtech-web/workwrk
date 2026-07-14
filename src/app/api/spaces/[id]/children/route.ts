@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getSpaceForReader } from "@/lib/space";
+import { folderVisibleTo } from "@/lib/folder";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -39,6 +40,7 @@ const BOARD_SELECT = {
 
 const FOLDER_INNER_SELECT = {
   id: true, name: true, icon: true, color: true, position: true,
+  visibility: true, ownerId: true,
   _count: { select: { boards: true, childFolders: true } },
   boards: {
     where: { archivedAt: null },
@@ -121,7 +123,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     console.error("[spaces/children] whiteboards query failed:", whiteboardsR.reason);
   }
 
-  const folders = foldersR.status === "fulfilled" ? foldersR.value : [];
+  const rawFolders = foldersR.status === "fulfilled" ? foldersR.value : [];
 
   // Walk the tree to collect every folder ID for the docs batch query.
   type FolderShape = {
@@ -130,10 +132,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     icon: string | null;
     color: string | null;
     position: number;
+    visibility: "PRIVATE" | "WORKSPACE" | "ORG";
+    ownerId: string | null;
     _count: { boards: number; childFolders: number };
     boards: Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: "PRIVATE" | "WORKSPACE" | "ORG" }>;
     childFolders?: FolderShape[];
   };
+
+  // Drop PRIVATE folders (and their whole subtree) the viewer can't see. A
+  // private folder hides its boards too — they live under it in the tree.
+  function prune(nodes: FolderShape[]): FolderShape[] {
+    return nodes
+      .filter((n) => folderVisibleTo(n, c.userId, c.accessLevel))
+      .map((n) => ({ ...n, childFolders: n.childFolders ? prune(n.childFolders) : [] }));
+  }
+  const folders = prune(rawFolders as FolderShape[]);
 
   function collectIds(nodes: FolderShape[], acc: string[]) {
     for (const n of nodes) {
@@ -142,7 +155,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     }
   }
   const allFolderIds: string[] = [];
-  collectIds(folders as FolderShape[], allFolderIds);
+  collectIds(folders, allFolderIds);
 
   let folderDocs: { id: string; title: string; entityId: string | null }[] = [];
   if (allFolderIds.length > 0) {

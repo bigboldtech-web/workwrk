@@ -27,6 +27,7 @@ import { getEffectivePreferences } from "@/lib/preferences";
 import { ShareBoardButton } from "@/components/layout/os/share-board-button";
 import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
 import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
+import { folderVisibleTo } from "@/lib/folder";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceViewTabs } from "./space-view-tabs";
 import { SpaceListItemsTable } from "./space-list-items";
@@ -200,6 +201,8 @@ export default async function SpacePage(props: {
   });
   if (!isAdmin && space.visibility !== "ORG" && !membership) notFound();
   const isSpaceOwner = membership?.role === "OWNER";
+  // Drop PRIVATE folders (and their boards) the viewer can't see.
+  const visibleFolders = space.folders.filter((f) => folderVisibleTo(f, u.id, u.accessLevel));
   // Optimistic edit-rights for the in-place item popup on the List tab — the
   // item PATCH is still gated per-board on the server, so this only governs the
   // editor UI.
@@ -222,7 +225,7 @@ export default async function SpacePage(props: {
   // class of leak Phase 22b closed on the Library APIs.
   const allBoards = [
     ...space.boards,
-    ...space.folders.flatMap((f) => f.boards),
+    ...visibleFolders.flatMap((f) => f.boards),
   ];
 
   // Build a boardId → date-field key map for the Calendar tab. Each
@@ -295,7 +298,7 @@ export default async function SpacePage(props: {
   ]);
 
   const hasContent =
-    space.folders.length > 0 ||
+    visibleFolders.length > 0 ||
     space.boards.length > 0 ||
     recentDocs.length > 0 ||
     spaceTables.length > 0 ||
@@ -734,11 +737,11 @@ export default async function SpacePage(props: {
                 ),
                 folders: (
                   <OverviewCard title="Folders" action={<FolderCardCreate spaceId={space.id} />}>
-                    {space.folders.length === 0 ? (
+                    {visibleFolders.length === 0 ? (
                       <p className="text-xs text-zinc-500 px-2 py-3">No folders yet.</p>
                     ) : (
                       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                        {space.folders.map((f) => (
+                        {visibleFolders.map((f) => (
                           <li
                             key={f.id}
                             className="group/folder flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 transition-colors"

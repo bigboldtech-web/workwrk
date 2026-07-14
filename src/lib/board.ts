@@ -410,12 +410,23 @@ export async function getBoardForReader(
 ) {
   const board = await prisma.board.findUnique({
     where: { id: boardId },
-    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true },
+    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
   });
   if (!board) return null;
 
   // Org admins always read.
   if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return board;
+
+  // Private-folder cascade: a board inside a PRIVATE folder is hidden from
+  // everyone but the folder owner (admins already returned above), regardless
+  // of the board's own visibility.
+  if (board.folderId) {
+    const folder = await prisma.folder.findUnique({
+      where: { id: board.folderId },
+      select: { visibility: true, ownerId: true },
+    });
+    if (folder && folder.visibility === "PRIVATE" && folder.ownerId !== userId) return null;
+  }
 
   if (board.visibility === "ORG") return board;
 

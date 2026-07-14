@@ -49,6 +49,7 @@ export function NewFolderDialog({
   const [description, setDescription] = useState("");
   const [color, setColor] = useState<string | null>(null);
   const [colorOpen, setColorOpen] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +58,7 @@ export function NewFolderDialog({
     setDescription("");
     setColor(null);
     setColorOpen(false);
+    setIsPrivate(false);
     setError(null);
     setSubmitting(false);
   };
@@ -84,6 +86,7 @@ export function NewFolderDialog({
           name: trimmed,
           description: description.trim() || undefined,
           color: color ?? undefined,
+          private: isPrivate,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -178,23 +181,20 @@ export function NewFolderDialog({
                 <div className="text-[13px] font-medium text-zinc-800">Statuses</div>
                 <div className="text-[11.5px] text-zinc-500">Use Space statuses</div>
               </div>
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500">Soon</span>
             </div>
           </div>
 
-          {/* Make private (needs folder-level access control — surfaced honestly) */}
+          {/* Make private — a PRIVATE folder + its boards are visible only to
+              you and org admins. */}
           <div className="flex items-center gap-3">
             <span className="w-8 h-8 rounded-md bg-zinc-100 flex items-center justify-center flex-shrink-0">
               <Lock className="w-4 h-4 text-zinc-500" />
             </span>
             <div className="flex-1 min-w-0">
-              <div className="text-[13px] font-medium text-zinc-800 flex items-center gap-1.5">
-                Make private
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500">Soon</span>
-              </div>
+              <div className="text-[13px] font-medium text-zinc-800">Make private</div>
               <div className="text-[11.5px] text-zinc-500">Only you and invited members have access</div>
             </div>
-            <Switch checked={false} disabled aria-label="Make private" />
+            <Switch checked={isPrivate} onChange={setIsPrivate} aria-label="Make private" />
           </div>
 
           {error ? <div className="text-[12px] text-red-500">{error}</div> : null}

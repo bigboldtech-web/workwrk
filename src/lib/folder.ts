@@ -8,6 +8,22 @@ import { prisma } from "@/lib/prisma";
 
 const MAX_FOLDER_DEPTH = 6;
 
+export type FolderVisibility = "PRIVATE" | "WORKSPACE" | "ORG";
+
+const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+
+/** Can this viewer see a folder? A PRIVATE folder is visible only to its owner
+ *  and org admins; WORKSPACE/ORG folders are gated by the Space, not here. */
+export function folderVisibleTo(
+  folder: { visibility: string | null; ownerId: string | null },
+  userId: string | null | undefined,
+  accessLevel: string | null | undefined,
+): boolean {
+  if (folder.visibility !== "PRIVATE") return true;
+  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
+  return !!userId && folder.ownerId === userId;
+}
+
 export interface FolderSummary {
   id: string;
   name: string;
@@ -17,6 +33,7 @@ export interface FolderSummary {
   spaceId: string;
   parentFolderId: string | null;
   ownerId: string | null;
+  visibility: FolderVisibility;
   position: number;
   archivedAt: Date | null;
   childCount: number;
@@ -43,6 +60,7 @@ export async function listFoldersInSpace(spaceId: string, opts: { includeArchive
       spaceId: true,
       parentFolderId: true,
       ownerId: true,
+      visibility: true,
       position: true,
       archivedAt: true,
       _count: { select: { childFolders: true, boards: true } },
@@ -57,6 +75,7 @@ export async function listFoldersInSpace(spaceId: string, opts: { includeArchive
     spaceId: f.spaceId,
     parentFolderId: f.parentFolderId,
     ownerId: f.ownerId,
+    visibility: f.visibility as FolderVisibility,
     position: f.position,
     archivedAt: f.archivedAt,
     childCount: f._count.childFolders,
@@ -91,6 +110,7 @@ export interface CreateFolderInput {
   description?: string;
   icon?: string;
   color?: string;
+  visibility?: FolderVisibility;
   userId: string;
 }
 
@@ -125,16 +145,17 @@ export async function createFolder(input: CreateFolderInput): Promise<FolderSumm
       icon: input.icon ?? null,
       color: input.color ?? null,
       ownerId: input.userId,
+      visibility: input.visibility ?? "WORKSPACE",
       position,
     },
     select: {
       id: true, name: true, description: true, icon: true, color: true,
-      spaceId: true, parentFolderId: true, ownerId: true, position: true,
+      spaceId: true, parentFolderId: true, ownerId: true, visibility: true, position: true,
       archivedAt: true,
     },
   });
 
-  return { ...created, childCount: 0, boardCount: 0 };
+  return { ...created, visibility: created.visibility as FolderVisibility, childCount: 0, boardCount: 0 };
 }
 
 export interface UpdateFolderInput {

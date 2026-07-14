@@ -5124,6 +5124,9 @@ model Folder {
   icon           String?
   color          String?
   ownerId        String?
+  // 🆕 Make private — a PRIVATE folder (and its boards) is visible only to its
+  // owner + org admins. WORKSPACE (default) inherits the Space's rules.
+  visibility     Visibility   @default(WORKSPACE)
   position       Float        @default(0) // fractional ordering — Linear pattern, no renumber on drop
   archivedAt     DateTime?
   settings       Json         @default("{}")

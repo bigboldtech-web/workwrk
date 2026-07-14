@@ -42,6 +42,7 @@ const createSchema = z.object({
   description: z.string().max(280).optional(),
   icon: z.string().max(40).optional(),
   color: z.string().max(20).optional(),
+  private: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -67,6 +68,7 @@ export async function POST(req: Request) {
       description: parsed.data.description,
       icon: parsed.data.icon,
       color: parsed.data.color,
+      visibility: parsed.data.private ? "PRIVATE" : "WORKSPACE",
       userId: c.userId,
     });
     return NextResponse.json({ folder }, { status: 201 });
