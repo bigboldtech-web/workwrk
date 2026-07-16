@@ -20,11 +20,17 @@ import { useRouter } from "next/navigation";
 import { Pencil, Copy, Link2, Star, Trash2, ExternalLink, FileText } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 
 export type NoteTarget = { id: string; title: string; favorite?: boolean };
 
 export function dispatchDocsChanged() {
-  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+  if (typeof window === "undefined") return;
+  // Update the flat docs lists (Docs app, docs-sidebar) AND the Spaces tree.
+  // The tree only listens to the sidebar-refresh bus, so without this a
+  // rename/trash wouldn't show there until a manual reload.
+  window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+  refreshSidebar();
 }
 
 export function useNoteMenu() {
