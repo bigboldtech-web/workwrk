@@ -131,13 +131,28 @@ export default function WhiteboardCanvasPage() {
   }, [flushSave]);
 
   // Once Excalidraw is ready, fit the view to the loaded content so a board
-  // saved with an off-screen scroll position doesn't open looking blank.
+  // saved with an off-screen scroll position doesn't open looking blank. The
+  // API can become ready a beat before initialData is applied, so poll briefly
+  // for elements and fit as soon as they appear. Fully guarded — this runs in
+  // an effect, never in render, so it can't take the page down.
   useEffect(() => {
     if (!api) return;
-    const els = api.getSceneElements();
-    if (els.length > 0) {
-      try { api.scrollToContent(els, { fitToContent: true, animate: false }); } catch { /* ignore */ }
-    }
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries += 1;
+      try {
+        const els = api.getSceneElements();
+        if (els.length > 0) {
+          api.scrollToContent(els, { fitToContent: true, animate: false });
+          clearInterval(iv);
+        } else if (tries > 20) {
+          clearInterval(iv);
+        }
+      } catch {
+        clearInterval(iv);
+      }
+    }, 100);
+    return () => clearInterval(iv);
   }, [api]);
 
   // Safety net: retry any still-unsaved changes on an interval (covers a save
@@ -180,22 +195,11 @@ export default function WhiteboardCanvasPage() {
   if (loading || !board) return <CanvasLoader />;
 
   const initialData = board.scene && Object.keys(board.scene).length > 0
-    ? (() => {
-        // Strip any stale saved viewport (scroll/zoom) so Excalidraw's
-        // scrollToContent can fit the scene cleanly — a board saved scrolled
-        // off its content is exactly what made it look like an empty/black canvas.
-        const appState = { ...(board.scene?.appState ?? {}), collaborators: new Map() } as Record<string, unknown>;
-        delete appState.scrollX;
-        delete appState.scrollY;
-        delete appState.zoom;
-        return {
-          elements: (board.scene.elements as never[]) ?? [],
-          appState: appState as never,
-          files: (board.scene.files as Record<string, never>) ?? undefined,
-          // Excalidraw fits the view to the content on load (race-free).
-          scrollToContent: true,
-        };
-      })()
+    ? {
+        elements: (board.scene.elements as never[]) ?? [],
+        appState: { ...(board.scene.appState ?? {}), collaborators: new Map() } as never,
+        files: (board.scene.files as Record<string, never>) ?? undefined,
+      }
     : undefined;
 
   return (
