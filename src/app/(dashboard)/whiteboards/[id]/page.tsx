@@ -180,11 +180,22 @@ export default function WhiteboardCanvasPage() {
   if (loading || !board) return <CanvasLoader />;
 
   const initialData = board.scene && Object.keys(board.scene).length > 0
-    ? {
-        elements: (board.scene.elements as never[]) ?? [],
-        appState: { ...(board.scene.appState ?? {}), collaborators: new Map() } as never,
-        files: (board.scene.files as Record<string, never>) ?? undefined,
-      }
+    ? (() => {
+        // Strip any stale saved viewport (scroll/zoom) so Excalidraw's
+        // scrollToContent can fit the scene cleanly — a board saved scrolled
+        // off its content is exactly what made it look like an empty/black canvas.
+        const appState = { ...(board.scene?.appState ?? {}), collaborators: new Map() } as Record<string, unknown>;
+        delete appState.scrollX;
+        delete appState.scrollY;
+        delete appState.zoom;
+        return {
+          elements: (board.scene.elements as never[]) ?? [],
+          appState: appState as never,
+          files: (board.scene.files as Record<string, never>) ?? undefined,
+          // Excalidraw fits the view to the content on load (race-free).
+          scrollToContent: true,
+        };
+      })()
     : undefined;
 
   return (
