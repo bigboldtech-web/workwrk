@@ -392,6 +392,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       };
       const res = await fetch(`/api/docs/${docId}`, {
         method: "PUT",
+        // Let the save complete even if the tab is closing / navigating away —
+        // otherwise the browser can abort an in-flight save-on-nav and lose it.
+        keepalive: true,
         headers: {
           "Content-Type": "application/json",
           // Conflict-detection precondition — server returns 409 when the

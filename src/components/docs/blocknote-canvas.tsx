@@ -418,7 +418,23 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
 
   useEffect(() => {
     const unsub = editor.onChange(emit);
-    return () => { unsub?.(); if (saveTimer.current) clearTimeout(saveTimer.current); };
+    return () => {
+      unsub?.();
+      // A pending debounced save at unmount = the writer edited within the last
+      // ~700ms and is now navigating away (e.g. to a Space). FLUSH it instead of
+      // dropping it, or that last paste/edit is lost. This mirrors the subpage
+      // flush; the parent's PUT uses keepalive so it completes across the nav.
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        try {
+          const bnDoc = editor.document as OurPartialBlock[];
+          const mirror = bnToLegacyMirror(bnDoc);
+          const plainText = mirror.map((b) => ("text" in b ? (b as { text: string }).text : "")).join(" ").trim();
+          onChangeRef.current(bnDoc as unknown as BnDocJSON, mirror, plainText);
+        } catch { /* editor tearing down — nothing safe to flush */ }
+      }
+    };
   }, [editor, emit]);
 
   // Persist the current document immediately (bypassing the idle debounce).
