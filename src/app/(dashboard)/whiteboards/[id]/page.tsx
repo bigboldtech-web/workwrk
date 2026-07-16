@@ -37,7 +37,15 @@ type Whiteboard = {
   updatedAt: string;
 };
 
+// Minimal slice of the Excalidraw imperative API we use (kept local so we don't
+// depend on the package's type-export path, which moves between versions).
+type ExcalidrawAPI = {
+  getSceneElements: () => readonly unknown[];
+  scrollToContent: (target?: unknown, opts?: { fitToContent?: boolean; animate?: boolean }) => void;
+};
+
 const AUTOSAVE_DEBOUNCE_MS = 3000;
+const SAVE_RETRY_MS = 15000;
 
 export default function WhiteboardCanvasPage() {
   const params = useParams<{ id: string }>();
@@ -48,11 +56,16 @@ export default function WhiteboardCanvasPage() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [api, setApi] = useState<ExcalidrawAPI | null>(null);
 
   // Latest scene captured from Excalidraw onChange — flushed by autosave.
   const pendingSceneRef = useRef<SceneShape | null>(null);
   const dirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Excalidraw fires onChange once right after mount echoing the loaded scene;
+  // that first call isn't a user edit, so we skip it (no dirty, no save).
+  const firstChangeRef = useRef(true);
 
   // Initial load
   useEffect(() => {
@@ -81,18 +94,30 @@ export default function WhiteboardCanvasPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scene: pendingSceneRef.current }),
+        // Let the request finish even if the tab is closing/navigating away —
+        // otherwise the browser aborts an in-flight save-on-close.
+        keepalive: true,
       });
       if (res.ok) {
         dirtyRef.current = false;
         setDirty(false);
+        setSaveError(false);
         setLastSavedAt(new Date());
+      } else {
+        // Keep it dirty so the periodic retry / next edit tries again, and
+        // surface it instead of failing silently.
+        setSaveError(true);
       }
+    } catch {
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
   }, [params?.id]);
 
   const onCanvasChange = useCallback((elements: readonly unknown[], appState: unknown, files: unknown) => {
+    // Ignore Excalidraw's initial post-mount echo of the loaded scene.
+    if (firstChangeRef.current) { firstChangeRef.current = false; return; }
     pendingSceneRef.current = {
       elements: elements as unknown[],
       appState: appState as Record<string, unknown>,
@@ -103,6 +128,23 @@ export default function WhiteboardCanvasPage() {
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => { flushSave(); }, AUTOSAVE_DEBOUNCE_MS);
+  }, [flushSave]);
+
+  // Once Excalidraw is ready, fit the view to the loaded content so a board
+  // saved with an off-screen scroll position doesn't open looking blank.
+  useEffect(() => {
+    if (!api) return;
+    const els = api.getSceneElements();
+    if (els.length > 0) {
+      try { api.scrollToContent(els, { fitToContent: true, animate: false }); } catch { /* ignore */ }
+    }
+  }, [api]);
+
+  // Safety net: retry any still-unsaved changes on an interval (covers a save
+  // that failed from a network blip without needing another edit to re-trigger).
+  useEffect(() => {
+    const iv = setInterval(() => { if (dirtyRef.current) void flushSave(); }, SAVE_RETRY_MS);
+    return () => clearInterval(iv);
   }, [flushSave]);
 
   // Save on tab close / unmount
@@ -169,6 +211,10 @@ export default function WhiteboardCanvasPage() {
             <span className="wbc__status-saving">
               <Loader2 className="wbc__spin" /> Saving…
             </span>
+          ) : saveError ? (
+            <span className="wbc__status-dirty" title="We'll keep retrying. Don't close until it saves.">
+              <Cloud /> Save failed — retrying
+            </span>
           ) : dirty ? (
             <span className="wbc__status-dirty">
               <Cloud /> Unsaved changes
@@ -188,6 +234,7 @@ export default function WhiteboardCanvasPage() {
       {/* Canvas */}
       <div className="wbc__canvas">
         <Excalidraw
+          excalidrawAPI={(a) => setApi(a as unknown as ExcalidrawAPI)}
           initialData={initialData}
           onChange={onCanvasChange}
           UIOptions={{
