@@ -396,6 +396,7 @@ function FolderTreeRow({
           <FolderMoreTrigger
             ref={moreRef}
             folder={{ id: folder.id, name: folder.name, icon: folder.icon, color: folder.color }}
+            spaceId={spaceId}
             onUpdated={onChanged}
           />
           <FolderAddTrigger

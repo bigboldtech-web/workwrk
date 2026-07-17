@@ -751,6 +751,7 @@ export default async function SpacePage(props: {
                             <span className="opacity-0 group-hover/folder:opacity-100 transition-opacity">
                               <FolderMoreTrigger
                                 folder={{ id: f.id, name: f.name, icon: f.icon, color: f.color }}
+                                spaceId={space.id}
                               />
                             </span>
                           </li>

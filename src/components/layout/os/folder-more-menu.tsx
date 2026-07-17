@@ -15,12 +15,14 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Archive, Loader2, Star, PanelLeft, PanelTop,
-  Link as LinkIcon, Zap,
+  Link as LinkIcon, Zap, Plus, ListChecks, FileText, Brush,
+  SlidersHorizontal, CircleDot, Boxes,
   Download, Files, ArrowRightLeft, Copy, Trash2, Share2,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
+import { refreshSidebar } from "./sidebar-refresh";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -34,11 +36,13 @@ interface FolderRowLike {
 
 interface Props {
   folder: FolderRowLike;
+  /** Parent Space id — lets "Create new" drop a List/Doc/Whiteboard in this folder. */
+  spaceId?: string;
   onUpdated?: () => void;
 }
 
 export const FolderMoreTrigger = forwardRef<ContextMenuHandle, Props>(function FolderMoreTrigger(
-  { folder, onUpdated },
+  { folder, spaceId, onUpdated },
   ref,
 ) {
   const [open, setOpen] = useState(false);
@@ -87,8 +91,8 @@ export const FolderMoreTrigger = forwardRef<ContextMenuHandle, Props>(function F
       >
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
-      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={240} open={open} placement="below" point={point}>
-        <FolderMoreMenu folder={folder} onClose={() => setOpen(false)} onUpdated={onUpdated} />
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={244} open={open} placement="below" point={point}>
+        <FolderMoreMenu folder={folder} spaceId={spaceId} onClose={() => setOpen(false)} onUpdated={onUpdated} />
       </MorePortal>
     </span>
   );
@@ -98,10 +102,12 @@ type Mode = "menu" | "rename" | "icon";
 
 function FolderMoreMenu({
   folder,
+  spaceId,
   onClose,
   onUpdated,
 }: {
   folder: FolderRowLike;
+  spaceId?: string;
   onClose: () => void;
   onUpdated?: () => void;
 }) {
@@ -177,6 +183,59 @@ function FolderMoreMenu({
     }
   }, [folder.id, toast]);
 
+  const soon = (label: string) => { toast(`${label} — coming soon`); onClose(); };
+
+  // Create new — drops a List / Doc / Whiteboard inside this folder. Lists +
+  // Docs anchor to the folder; whiteboards have no folderId so they land in the
+  // Space. Fire-and-forget with a toast on failure, then jump into the new item.
+  const createList = async () => {
+    onClose();
+    if (!spaceId) { toast("Couldn't create list"); return; }
+    try {
+      const res = await fetch("/api/boards", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ spaceId, folderId: folder.id, name: "New List" }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { toast(d?.error ?? "Couldn't create list"); return; }
+      refreshSidebar();
+      const slug = d?.board?.slug ?? d?.slug;
+      if (slug) router.push(`/boards/${slug}`);
+    } catch { toast("Couldn't create list"); }
+  };
+  const createDoc = async () => {
+    onClose();
+    try {
+      const res = await fetch("/api/docs", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Untitled doc",
+          content: { type: "doc", content: [{ type: "paragraph" }] },
+          entityType: "FOLDER", entityId: folder.id,
+        }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { toast(d?.error ?? "Couldn't create doc"); return; }
+      refreshSidebar();
+      const id = d?.doc?.id ?? d?.id;
+      if (id) router.push(`/docs/${id}`);
+    } catch { toast("Couldn't create doc"); }
+  };
+  const createWhiteboard = async () => {
+    onClose();
+    try {
+      const res = await fetch("/api/whiteboards", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Untitled whiteboard", ...(spaceId ? { spaceId } : {}) }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { toast(d?.error ?? "Couldn't create whiteboard"); return; }
+      refreshSidebar();
+      const id = d?.whiteboard?.id ?? d?.id;
+      if (id) router.push(`/whiteboards/${id}`);
+    } catch { toast("Couldn't create whiteboard"); }
+  };
+
   const patch = async (body: Record<string, unknown>, kind: string): Promise<boolean> => {
     setBusy(kind);
     try {
@@ -191,6 +250,7 @@ function FolderMoreMenu({
         return false;
       }
       onUpdated?.();
+      refreshSidebar();
       router.refresh();
       return true;
     } finally {
@@ -210,6 +270,7 @@ function FolderMoreMenu({
       }
       toast(`${folder.name} archived`);
       onUpdated?.();
+      refreshSidebar();
       router.refresh();
       onClose();
     } finally {
@@ -229,6 +290,7 @@ function FolderMoreMenu({
       }
       toast(`${folder.name} deleted`);
       onUpdated?.();
+      refreshSidebar();
       router.refresh();
       onClose();
     } finally {
@@ -352,24 +414,46 @@ function FolderMoreMenu({
       <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
       <MenuItem icon={LinkIcon} label="Copy link" onClick={copyLink} />
 
+      <MenuSeparator />
+
+      <MenuSubmenu icon={Plus} label="Create new">
+        <MenuItem icon={ListChecks} label="List" onClick={createList} />
+        <MenuItem icon={FileText}   label="Doc" onClick={createDoc} />
+        <MenuItem icon={Brush}      label="Whiteboard" onClick={createWhiteboard} />
+      </MenuSubmenu>
       <MenuItem icon={Palette} label="Folder color" onClick={() => setMode("icon")} submenu />
+      <MenuItem icon={Zap} label="Automations" onClick={() => soon("Automations")} />
+      <MenuItem icon={SlidersHorizontal} label="Custom Fields" onClick={() => soon("Custom Fields")} />
+      <MenuItem icon={CircleDot} label="Task statuses" onClick={() => soon("Task statuses")} />
+      <MenuSubmenu icon={MoreHorizontal} label="More">
+        <MenuItem icon={Boxes} label="Convert to Space" onClick={() => soon("Convert to Space")} />
+      </MenuSubmenu>
 
       <MenuSeparator />
 
-      <MenuItem icon={Zap}        label="Automations"    onClick={() => toast("Automations are coming soon")} />
+      <MenuItem icon={Download} label="Imports" onClick={() => soon("Imports")} />
+      <MenuItem icon={Files} label="Templates" onClick={() => { onClose(); openTemplateCenter({ kind: "FOLDER" }); }} />
 
       <MenuSeparator />
 
-      <MenuItem icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
-      <MenuItem icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ kind: "FOLDER" }); }} />
-      <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
-      <MenuItem icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
-      <MenuItem icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
-      <MenuItem icon={Trash2}         label="Delete"    destructive busy={busy === "delete"} onClick={del} />
+      <MenuItem icon={ArrowRightLeft} label="Move" onClick={() => soon("Move")} />
+      <MenuItem icon={Copy} label="Duplicate" onClick={() => soon("Duplicate")} />
+      <MenuItem icon={Archive} label="Archive" busy={busy === "archive"} onClick={archive} />
+      <MenuItem icon={Trash2} label="Delete" destructive busy={busy === "delete"} onClick={del} />
 
       <MenuSeparator />
 
-      <MenuItem icon={Share2} label="Sharing & Permissions" onClick={() => toast("Folder sharing is coming soon")} />
+      {/* Sharing & Permissions — bottom accent button, like ClickUp */}
+      <div className="px-1.5 pt-1 pb-0.5">
+        <button
+          type="button"
+          onClick={() => soon("Sharing & Permissions")}
+          className="w-full h-8 rounded-md text-[12.5px] font-medium text-white flex items-center justify-center gap-1.5 hover:opacity-90"
+          style={{ backgroundColor: "var(--os-brand, #0073EA)" }}
+        >
+          <Share2 className="w-3.5 h-3.5" /> Sharing &amp; Permissions
+        </button>
+      </div>
     </MenuList>
   );
 }
