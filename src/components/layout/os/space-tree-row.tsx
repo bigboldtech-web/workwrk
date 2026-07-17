@@ -16,6 +16,7 @@ import { refreshSidebar, onSidebarRefresh } from "./sidebar-refresh";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen, Loader2,
   Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, ListChecks,
+  BarChart3, ClipboardCheck, Download, Files,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceMoreTrigger } from "./space-more-menu";
@@ -23,7 +24,10 @@ import { SpaceCreateTrigger } from "./space-create-popover";
 import { BoardMoreTrigger } from "./board-more-menu";
 import { FolderMoreTrigger } from "./folder-more-menu";
 import { TableMoreTrigger } from "./table-more-menu";
-import { type ContextMenuHandle } from "./more-portal";
+import { MorePortal, type ContextMenuHandle } from "./more-portal";
+import { MenuList, MenuItem, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
+import { useOsToast } from "./toast";
+import { useOsShell } from "./shell-context";
 import { SidebarQuickStar } from "./sidebar-quick-star";
 
 // ---------------------------------------------------------------------------
@@ -561,111 +565,128 @@ function FolderAddTrigger({
   onCreated: () => void;
 }) {
   const router = useRouter();
+  const { toast } = useOsToast();
+  const { openTemplateCenter } = useOsShell();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Close on click-outside / Escape (MorePortal only handles positioning).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const close = () => setOpen(false);
+  const soon = (label: string) => { toast(`${label} — coming soon`); close(); };
+
+  const createList = async () => {
+    if (creating) return;
+    setCreating("list"); close();
+    try {
+      const res = await fetch("/api/boards", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ spaceId, folderId, name: "New List" }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { toast(d?.error ?? "Couldn't create list"); return; }
+      onCreated(); refreshSidebar();
+      const slug = d?.board?.slug ?? d?.slug;
+      if (slug) router.push(`/boards/${slug}`);
+    } catch { toast("Couldn't create list"); }
+    finally { setCreating(null); }
+  };
 
   const createDoc = async () => {
     if (creating) return;
-    setCreating("doc");
+    setCreating("doc"); close();
     try {
       const res = await fetch("/api/docs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
+        method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title: "Untitled",
-          entityType: "FOLDER",
-          entityId: folderId,
+          content: { type: "doc", content: [{ type: "paragraph" }] },
+          entityType: "FOLDER", entityId: folderId,
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        const id = data?.doc?.id ?? data?.id;
-        onCreated();
-        setOpen(false);
-        if (id) router.push(`/docs/${id}`);
-      }
-    } finally {
-      setCreating(null);
-    }
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { toast(d?.error ?? "Couldn't create doc"); return; }
+      onCreated(); refreshSidebar();
+      const id = d?.doc?.id ?? d?.id;
+      if (id) router.push(`/docs/${id}`);
+    } catch { toast("Couldn't create doc"); }
+    finally { setCreating(null); }
+  };
+
+  const createWhiteboard = async () => {
+    if (creating) return;
+    setCreating("whiteboard"); close();
+    try {
+      const res = await fetch("/api/whiteboards", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Untitled whiteboard", spaceId }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { toast(d?.error ?? "Couldn't create whiteboard"); return; }
+      onCreated(); refreshSidebar();
+      const id = d?.whiteboard?.id ?? d?.id;
+      if (id) router.push(`/whiteboards/${id}`);
+    } catch { toast("Couldn't create whiteboard"); }
+    finally { setCreating(null); }
   };
 
   const createSubFolder = async () => {
     if (creating) return;
-    setCreating("folder");
+    setCreating("folder"); close();
     try {
       const res = await fetch("/api/folders", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          spaceId,
-          parentFolderId: folderId,
-          name: "New Folder",
-        }),
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ spaceId, parentFolderId: folderId, name: "New Folder" }),
       });
-      if (res.ok) {
-        onCreated();
-        setOpen(false);
-      }
-    } finally {
-      setCreating(null);
-    }
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { toast(d?.error ?? "Couldn't create folder"); return; }
+      onCreated(); refreshSidebar();
+    } catch { toast("Couldn't create folder"); }
+    finally { setCreating(null); }
   };
 
   return (
-    <span className="relative">
+    <span className="relative inline-flex">
       <button
+        ref={btnRef}
         type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }}
         aria-label="Create inside folder"
         title="Create"
+        aria-haspopup="menu"
+        aria-expanded={open}
         className="p-0.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 inline-flex items-center justify-center"
       >
         <Plus className="h-3 w-3" />
       </button>
-      {open ? (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
-          <ul className="absolute right-0 top-full mt-1 z-40 w-44 bg-white border border-zinc-200 rounded-md shadow-lg py-1">
-            <li>
-              <button
-                type="button"
-                onClick={createDoc}
-                disabled={Boolean(creating)}
-                className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
-              >
-                <FileText className="w-3.5 h-3.5 text-blue-500" />
-                Doc
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                onClick={createSubFolder}
-                disabled={Boolean(creating)}
-                className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-zinc-50 inline-flex items-center gap-2 disabled:opacity-50"
-              >
-                <FolderIcon className="w-3.5 h-3.5 text-amber-500" />
-                Folder
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                disabled
-                title="Use the Space + menu for now"
-                className="w-full text-left px-3 py-1.5 text-[12px] text-zinc-400 inline-flex items-center gap-2 cursor-not-allowed"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                List (use Space +)
-              </button>
-            </li>
-          </ul>
-        </>
-      ) : null}
+      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={260} open={open} placement="below">
+        <MenuList className="min-w-[260px]">
+          <MenuSectionLabel>Create</MenuSectionLabel>
+          <MenuItem icon={ListChecks}      iconClassName="text-emerald-500" label="List" onClick={createList} />
+          <MenuItem icon={FileText}        iconClassName="text-blue-500"    label="Doc" onClick={createDoc} />
+          <MenuItem icon={BarChart3}       iconClassName="text-violet-500"  label="Dashboard" onClick={() => soon("Dashboard")} />
+          <MenuItem icon={WhiteboardIcon}  iconClassName="text-amber-500"   label="Whiteboard" onClick={createWhiteboard} />
+          <MenuItem icon={ClipboardCheck}  iconClassName="text-indigo-500"  label="Form" onClick={() => soon("Form")} />
+          <MenuItem icon={FolderIcon}      iconClassName="text-amber-500"   label="Folder" onClick={createSubFolder} />
+          <MenuSeparator />
+          <MenuItem icon={Download} label="Imports" onClick={() => soon("Imports")} />
+          <MenuItem icon={Files} label="Templates" onClick={() => { close(); openTemplateCenter({ kind: "FOLDER" }); }} />
+        </MenuList>
+      </MorePortal>
     </span>
   );
 }
