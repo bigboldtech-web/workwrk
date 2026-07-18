@@ -14,7 +14,9 @@ import { useOsShell } from "./shell-context";
 const BTN =
   "inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors";
 
-export function FolderCardCreate({ spaceId }: { spaceId: string }) {
+// parentFolderId → create the new folder nested inside a folder (from a Folder
+// page); null/omitted → at the Space root (the Space Overview card).
+export function FolderCardCreate({ spaceId, parentFolderId = null }: { spaceId: string; parentFolderId?: string | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   return (
@@ -33,20 +35,21 @@ export function FolderCardCreate({ spaceId }: { spaceId: string }) {
         open={open}
         onOpenChange={setOpen}
         spaceId={spaceId}
-        parentFolderId={null}
+        parentFolderId={parentFolderId}
         onCreated={() => router.refresh()}
       />
     </>
   );
 }
 
-export function ListCardCreate({ spaceId }: { spaceId: string }) {
+// folderId → the created List lands inside that folder; omitted → Space root.
+export function ListCardCreate({ spaceId, folderId }: { spaceId: string; folderId?: string }) {
   const { openCreateList } = useOsShell();
   return (
     <button
       type="button"
       onMouseDown={(e) => e.stopPropagation()}
-      onClick={() => openCreateList({ spaceId })}
+      onClick={() => openCreateList({ spaceId, folderId })}
       className={BTN}
       title="New List"
       aria-label="New List"

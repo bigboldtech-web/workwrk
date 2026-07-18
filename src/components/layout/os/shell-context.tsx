@@ -112,10 +112,10 @@ type ShellState = {
   createTaskPreselect: CreateTaskPreselect | null;
 
   createListOpen: boolean;
-  openCreateList: (preselect?: { spaceId?: string } | null) => void;
+  openCreateList: (preselect?: { spaceId?: string; folderId?: string } | null) => void;
   closeCreateList: () => void;
   /** Space to preselect in the create-list modal; null = derive from route. */
-  createListPreselect: { spaceId?: string } | null;
+  createListPreselect: { spaceId?: string; folderId?: string } | null;
 
   // 🆕 Template Center — the OS-wide template browser/apply modal.
   // Mounted once at OsShell level; opened from the "+" menu, the
@@ -221,7 +221,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [createTaskPreselect, setCreateTaskPreselect] = useState<CreateTaskPreselect | null>(null);
   const [createListOpen, setCreateListOpen] = useState(false);
-  const [createListPreselect, setCreateListPreselect] = useState<{ spaceId?: string } | null>(null);
+  const [createListPreselect, setCreateListPreselect] = useState<{ spaceId?: string; folderId?: string } | null>(null);
   const [templateCenterOpen, setTemplateCenterOpen] = useState(false);
   const [templateCenterOpts, setTemplateCenterOpts] = useState<TemplateCenterOpts | null>(null);
   const [lens, setLensState] = useState<Lens>("me");
@@ -453,7 +453,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     setCreateTaskOpen(false);
     setCreateTaskPreselect(null);
   }, []);
-  const openCreateList = useCallback((preselect?: { spaceId?: string } | null) => {
+  const openCreateList = useCallback((preselect?: { spaceId?: string; folderId?: string } | null) => {
     setCreateListPreselect(preselect ?? null);
     setCreateListOpen(true);
   }, []);

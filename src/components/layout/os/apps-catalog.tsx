@@ -405,6 +405,35 @@ function HomeSidebar() {
       .catch(() => {});
   }, []);
 
+  // Drag-reorder: move `draggedId` to just before/after `targetId`. Updates the
+  // list optimistically, then persists the new displayOrder to the server; a
+  // failure reloads from the server so the UI never drifts from the truth.
+  const reorderSpaces = useCallback(
+    (draggedId: string, targetId: string, place: "before" | "after") => {
+      setSpaces((prev) => {
+        const from = prev.findIndex((s) => s.id === draggedId);
+        const targetIdx = prev.findIndex((s) => s.id === targetId);
+        if (from < 0 || targetIdx < 0 || draggedId === targetId) return prev;
+        const arr = [...prev];
+        const [moved] = arr.splice(from, 1);
+        let insertAt = arr.findIndex((s) => s.id === targetId);
+        if (place === "after") insertAt += 1;
+        arr.splice(insertAt, 0, moved);
+        const items = arr.map((s, i) => ({ id: s.id, displayOrder: i }));
+        fetch("/api/spaces/reorder", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ items }),
+          keepalive: true,
+        })
+          .then((r) => { if (!r.ok) reload(); })
+          .catch(() => reload());
+        return arr;
+      });
+    },
+    [reload],
+  );
+
   useEffect(() => {
     reload();
   }, [reload]);
@@ -696,6 +725,9 @@ function HomeSidebar() {
                 onRequestShareSpace={() => setShareDialogSpace(s)}
                 onRequestNewBoard={() => setBoardDialogSpaceId(s.id)}
                 onRequestNewFolder={() => setFolderDialogSpaceId(s.id)}
+                // Reordering only makes sense on the full, unfiltered list.
+                reorderable={!q}
+                onReorderSpace={(draggedId, place) => reorderSpaces(draggedId, s.id, place)}
               />
             );
           })}

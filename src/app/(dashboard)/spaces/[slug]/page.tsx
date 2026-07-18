@@ -742,13 +742,15 @@ export default async function SpacePage(props: {
                     ) : (
                       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                         {visibleFolders.map((f) => (
-                          <li
-                            key={f.id}
-                            className="group/folder flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 transition-colors"
-                          >
-                            <FolderIcon className="w-4 h-4 text-zinc-500 shrink-0" />
-                            <span className="text-sm text-zinc-900 truncate flex-1">{f.name}</span>
-                            <span className="opacity-0 group-hover/folder:opacity-100 transition-opacity">
+                          <li key={f.id} className="group/folder relative">
+                            <Link
+                              href={`/folders/${f.id}`}
+                              className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 transition-colors"
+                            >
+                              <FolderIcon className="w-4 h-4 text-zinc-500 shrink-0" style={f.color ? { color: f.color } : undefined} />
+                              <span className="text-sm text-zinc-900 truncate flex-1">{f.name}</span>
+                            </Link>
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/folder:opacity-100 transition-opacity">
                               <FolderMoreTrigger
                                 folder={{ id: f.id, name: f.name, icon: f.icon, color: f.color }}
                                 spaceId={space.id}

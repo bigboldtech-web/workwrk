@@ -65,6 +65,8 @@ export function CreateListModal() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           spaceId,
+          // When opened from a Folder page, drop the new List into that folder.
+          ...(createListPreselect?.folderId ? { folderId: createListPreselect.folderId } : {}),
           name: listName.trim(),
           visibility: isPrivate ? "PRIVATE" : "WORKSPACE",
         }),

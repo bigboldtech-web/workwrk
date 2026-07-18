@@ -42,7 +42,27 @@ interface DragPayload { kind: DragKind; id: string }
 
 function startTreeDrag(e: DragEvent, payload: DragPayload) {
   e.dataTransfer.setData(DND_MIME, JSON.stringify(payload));
+  // A per-kind marker type: getData() is blocked during dragover, but `types`
+  // is readable — so this lets a drop target know it's a folder (vs a board/doc)
+  // mid-hover and offer before/after reorder zones accordingly.
+  e.dataTransfer.setData(`${DND_MIME}-${payload.kind}`, "1");
   e.dataTransfer.effectAllowed = "move";
+}
+
+// Readable during dragover: is the thing being dragged a folder?
+function isFolderDrag(e: DragEvent): boolean {
+  return e.dataTransfer.types.includes(`${DND_MIME}-folder`);
+}
+
+// Reorder a folder to sit directly before/after `targetId` as a sibling.
+async function reorderFolder(movedId: string, targetId: string, place: "before" | "after"): Promise<boolean> {
+  const res = await fetch("/api/folders/reorder", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ movedId, targetId, place }),
+    keepalive: true,
+  });
+  return res.ok;
 }
 
 function readTreeDrag(e: DragEvent): DragPayload | null {
@@ -55,6 +75,26 @@ function readTreeDrag(e: DragEvent): DragPayload | null {
 // even though getData() is not.
 function isTreeDrag(e: DragEvent): boolean {
   return e.dataTransfer.types.includes(DND_MIME);
+}
+
+// ---------------------------------------------------------------------------
+// Space reorder: dragging a top-level Space row up/down to change its position
+// in the sidebar. Kept on a SEPARATE MIME from the tree-item move above so a
+// Space drag never triggers the "drop item into Space root" zone and vice versa.
+// ---------------------------------------------------------------------------
+const SPACE_MIME = "application/x-wwrk-space-reorder";
+
+function startSpaceDrag(e: DragEvent, spaceId: string) {
+  e.dataTransfer.setData(SPACE_MIME, spaceId);
+  e.dataTransfer.effectAllowed = "move";
+}
+
+function readSpaceDrag(e: DragEvent): string | null {
+  return e.dataTransfer.getData(SPACE_MIME) || null;
+}
+
+function isSpaceDrag(e: DragEvent): boolean {
+  return e.dataTransfer.types.includes(SPACE_MIME);
 }
 
 // Persist a move. dest.folderId === null means the Space root; dest.spaceId is
@@ -155,6 +195,10 @@ interface Props {
   onRequestShareSpace: () => void;
   onRequestNewBoard: () => void;
   onRequestNewFolder: () => void;
+  // Drag-reorder a Space above/below this one. Omitted (e.g. while searching)
+  // disables reordering. `place` is relative to THIS row's midpoint.
+  onReorderSpace?: (draggedSpaceId: string, place: "before" | "after") => void;
+  reorderable?: boolean;
 }
 
 export function SpaceTreeRow({
@@ -164,12 +208,16 @@ export function SpaceTreeRow({
   onRequestShareSpace,
   onRequestNewBoard,
   onRequestNewFolder,
+  onReorderSpace,
+  reorderable = false,
 }: Props) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [data, setData] = useState<ChildrenPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [rootDragOver, setRootDragOver] = useState(false);
+  // Reorder drop indicator: which edge of this row the dragged Space would land on.
+  const [spaceDropEdge, setSpaceDropEdge] = useState<"before" | "after" | null>(null);
   const moreRef = useRef<ContextMenuHandle>(null);
 
   const loadChildren = () => {
@@ -222,9 +270,34 @@ export function SpaceTreeRow({
   return (
     <li className="group/space relative">
       <div
-        onDragOver={(e) => { if (isTreeDrag(e)) { e.preventDefault(); setRootDragOver(true); } }}
-        onDragLeave={() => setRootDragOver(false)}
+        draggable={reorderable}
+        onDragStart={(e) => {
+          if (!reorderable) return;
+          e.stopPropagation();
+          startSpaceDrag(e, space.id);
+        }}
+        onDragOver={(e) => {
+          if (isSpaceDrag(e)) {
+            // Reorder: pick before/after based on cursor vs row midpoint.
+            e.preventDefault();
+            const rect = e.currentTarget.getBoundingClientRect();
+            setSpaceDropEdge(e.clientY < rect.top + rect.height / 2 ? "before" : "after");
+            return;
+          }
+          if (isTreeDrag(e)) { e.preventDefault(); setRootDragOver(true); }
+        }}
+        onDragLeave={() => { setRootDragOver(false); setSpaceDropEdge(null); }}
         onDrop={async (e) => {
+          if (isSpaceDrag(e)) {
+            e.preventDefault();
+            const draggedId = readSpaceDrag(e);
+            const edge = spaceDropEdge;
+            setSpaceDropEdge(null);
+            if (draggedId && draggedId !== space.id && edge) {
+              onReorderSpace?.(draggedId, edge);
+            }
+            return;
+          }
           if (!isTreeDrag(e)) return;
           e.preventDefault();
           setRootDragOver(false);
@@ -236,8 +309,15 @@ export function SpaceTreeRow({
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-7 items-center gap-2 px-2 rounded-md ${
           rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
-        }`}
+        } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""}`}
       >
+        {spaceDropEdge ? (
+          <span
+            className={`pointer-events-none absolute left-1 right-1 h-0.5 rounded-full bg-[#0073EA] ${
+              spaceDropEdge === "before" ? "-top-px" : "-bottom-px"
+            }`}
+          />
+        ) : null}
         <button
           type="button"
           onClick={toggle}
@@ -338,7 +418,9 @@ function FolderTreeRow({
   onChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
+  // Which drop zone the cursor is in: "inside" nests, "before"/"after" reorder
+  // this folder relative to the dragged one. null = not a drop target right now.
+  const [dropZone, setDropZone] = useState<"before" | "inside" | "after" | null>(null);
   const moreRef = useRef<ContextMenuHandle>(null);
   const hasChildren =
     folder.boards.length > 0 ||
@@ -351,20 +433,49 @@ function FolderTreeRow({
       <div
         draggable
         onDragStart={(e) => { e.stopPropagation(); startTreeDrag(e, { kind: "folder", id: folder.id }); }}
-        onDragOver={(e) => { if (isTreeDrag(e)) { e.preventDefault(); e.stopPropagation(); setDragOver(true); } }}
-        onDragLeave={() => setDragOver(false)}
+        onDragOver={(e) => {
+          if (!isTreeDrag(e)) return;
+          e.preventDefault(); e.stopPropagation();
+          // Folder-over-folder gets three zones: top edge = drop ABOVE,
+          // bottom edge = drop BELOW, middle = nest inside. Anything else
+          // (board/doc) only ever nests, so it's always "inside".
+          if (isFolderDrag(e)) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const edge = rect.height * 0.3;
+            setDropZone(y < edge ? "before" : y > rect.height - edge ? "after" : "inside");
+          } else {
+            setDropZone("inside");
+          }
+        }}
+        onDragLeave={() => setDropZone(null)}
         onDrop={async (e) => {
           if (!isTreeDrag(e)) return;
           e.preventDefault(); e.stopPropagation();
-          setDragOver(false);
+          const zone = dropZone;
+          setDropZone(null);
           const p = readTreeDrag(e);
           if (!p) return;
+          // Reorder above/below only applies folder-to-folder; everything else nests.
+          if ((zone === "before" || zone === "after") && p.kind === "folder") {
+            if (p.id === folder.id) return;
+            const ok = await reorderFolder(p.id, folder.id, zone);
+            if (ok) { onChanged(); refreshSidebar(); }
+            return;
+          }
           const ok = await moveTreeItem(p, { folderId: folder.id, spaceId });
           if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
+        className={`relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dropZone === "inside" ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
       >
+        {dropZone === "before" || dropZone === "after" ? (
+          <span
+            className={`pointer-events-none absolute left-1 right-1 h-0.5 rounded-full bg-[#0073EA] ${
+              dropZone === "before" ? "-top-px" : "-bottom-px"
+            }`}
+          />
+        ) : null}
         <button
           type="button"
           onClick={() => hasChildren && setExpanded((v) => !v)}
@@ -388,13 +499,15 @@ function FolderTreeRow({
             </span>
           ) : null}
         </button>
-        <button
-          type="button"
-          onClick={() => hasChildren && setExpanded((v) => !v)}
-          className="min-w-0 flex-1 truncate text-[12px] text-zinc-700 text-left"
+        {/* Name navigates INTO the folder page (ClickUp parity — a folder
+            opens its own view). The chevron button above still toggles the
+            inline tree expansion. */}
+        <Link
+          href={`/folders/${folder.id}`}
+          className="min-w-0 flex-1 truncate text-[12px] text-zinc-700 text-left hover:text-zinc-900"
         >
           {folder.name}
-        </button>
+        </Link>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/folderrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
