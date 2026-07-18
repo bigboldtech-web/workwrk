@@ -100,6 +100,8 @@ export function FullScreenDocEditor({ docId, onClose, breadcrumbs }: Props) {
       const res = await fetch(`/api/docs/${docId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        // Let the unmount/navigate flush complete instead of being aborted.
+        keepalive: true,
         body: JSON.stringify({
           title: liveRef.current.title || "Untitled note",
           content: { html: liveRef.current.html },

@@ -39,6 +39,9 @@ export function NotepadPanel() {
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Holds the not-yet-saved PATCH so a tab-close / navigate within the debounce
+  // window can still flush it (with keepalive) instead of dropping the edit.
+  const pendingRef = useRef<{ id: string; body: string } | null>(null);
 
   const loadList = useCallback(() => {
     fetch("/api/docs?standaloneOnly=1")
@@ -79,15 +82,37 @@ export function NotepadPanel() {
     if (!activeId) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaving(true);
+    const body = JSON.stringify({ title: firstLine(next), content: textToContent(next), excerpt: next.slice(0, 200) });
+    pendingRef.current = { id: activeId, body };
     saveTimer.current = setTimeout(async () => {
+      pendingRef.current = null;
       await fetch(`/api/docs/${activeId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: firstLine(next), content: textToContent(next), excerpt: next.slice(0, 200) }),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, keepalive: true, body,
       }).catch(() => {});
       setSaving(false);
       loadList();
     }, 700);
   }
+
+  // Flush any pending note save when the tab is hidden/closing, so a quick note
+  // typed and then navigated away from within the debounce window isn't lost.
+  useEffect(() => {
+    const flush = () => {
+      const p = pendingRef.current;
+      if (!p) return;
+      pendingRef.current = null;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      fetch(`/api/docs/${p.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, keepalive: true, body: p.body,
+      }).catch(() => {});
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("visibilitychange", flush);
+    };
+  }, []);
 
   if (!open) return null;
 
