@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 import { getSpaceForReader } from "@/lib/space";
+import { recordSnapshot } from "@/lib/snapshots";
 
 async function checkSpaceVisible(spaceId: string | null, userId: string, accessLevel: string | null | undefined): Promise<boolean> {
   if (!spaceId) return true;
@@ -69,6 +70,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     },
     select: { id: true, name: true, updatedAt: true, lastEditedAt: true },
   });
+
+  // Version history — snapshot the scene after a successful save (best-effort,
+  // throttled, never affects the save above).
+  if (parsed.data.scene !== undefined) {
+    await recordSnapshot("WHITEBOARD", id, ctx.orgId, parsed.data.scene, ctx.userId);
+  }
 
   return NextResponse.json({ whiteboard });
 }

@@ -6164,6 +6164,27 @@ model Whiteboard {
   @@index([productSlug])
 }
 
+// 🆕 Content version history — the "never lose it" safety net. A generic
+// point-in-time snapshot of a piece of user content (whiteboard scene, doc
+// body). Written server-side AFTER a successful save (best-effort, throttled),
+// so it can never regress the save itself. Restore = copy a snapshot's content
+// back onto the live record. Pruned to the most recent N per entity.
+//   entityType: "WHITEBOARD" | "DOC"
+//   content:    the same JSON shape the live record stores (scene / doc content)
+model ContentSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String
+  entityType     String
+  entityId       String
+  content        Json
+  // Who triggered the save that produced this snapshot (nullable = system).
+  createdById    String?
+  createdAt      DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([organizationId, createdAt])
+}
+
 // User-created dashboards (the sidebar "+" menu → Dashboard). v1 stores
 // the widget list as opaque JSON; the widget-canvas renderer lands with
 // the Dashboard view phase (docs/plans/views-catalog.md §B).
