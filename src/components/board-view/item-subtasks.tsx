@@ -15,11 +15,18 @@ export function ItemSubtasks({
   canEdit,
   statuses,
   onOpenItem,
+  onCountChange,
+  autoFocus = false,
 }: {
   item: BoardItemRow;
   canEdit: boolean;
   statuses: StatusOption[];
   onOpenItem?: (itemId: string) => void;
+  /** Reports the loaded subtask count so a parent can collapse/expand the
+   *  section (null while still loading — never reported until the first load). */
+  onCountChange?: (n: number) => void;
+  /** Focus the add-input on mount (used when revealed from an action row). */
+  autoFocus?: boolean;
 }) {
   const boardId = item.boardId ?? null;
   const [rows, setRows] = useState<BoardItemRow[] | null>(null);
@@ -27,6 +34,11 @@ export function ItemSubtasks({
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Report count to the parent whenever the loaded set changes (setState with
+  // the same number is a no-op upstream, so this can't loop).
+  useEffect(() => { if (rows !== null) onCountChange?.(rows.length); }, [rows, onCountChange]);
+  useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
 
   const load = useCallback(async () => {
     if (!boardId) { setRows([]); return; }

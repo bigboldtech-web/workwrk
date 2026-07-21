@@ -42,14 +42,25 @@ interface Props {
    *  primitives) can omit this. */
   spaceId?: string | null;
   canEdit: boolean;
+  /** Reports the total number of linked items so a parent can collapse the
+   *  whole block into an action row when empty. Not called until first load. */
+  onCountChange?: (n: number) => void;
 }
 
-export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit }: Props) {
+export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCountChange }: Props) {
   const [notes, setNotes] = useState<HydratedLink[] | null>(null);
   const [boards, setBoards] = useState<HydratedLink[] | null>(null);
   const [files, setFiles] = useState<HydratedLink[] | null>(null);
   const [tables, setTables] = useState<HydratedLink[] | null>(null);
   const [sops, setSops] = useState<HydratedLink[] | null>(null);
+
+  // Report the total linked count once anything has loaded (all-null = still
+  // loading, so we don't flash "empty" before the fetch resolves).
+  useEffect(() => {
+    if ([notes, boards, files, tables, sops].every((x) => x === null)) return;
+    const total = (notes?.length ?? 0) + (boards?.length ?? 0) + (files?.length ?? 0) + (tables?.length ?? 0) + (sops?.length ?? 0);
+    onCountChange?.(total);
+  }, [notes, boards, files, tables, sops, onCountChange]);
 
   const load = useCallback(() => {
     Promise.all([

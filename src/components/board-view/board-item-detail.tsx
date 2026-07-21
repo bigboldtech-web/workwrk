@@ -9,7 +9,7 @@
 // attachments, time tracking, comments/activity.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Search, EyeOff, Eye, Target, Flag, Ban } from "lucide-react";
+import { Check, ChevronDown, Search, EyeOff, Eye, Target, Flag, Ban, Pencil, GitBranch, Link2, ClipboardList, Paperclip } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { RecurrenceRule } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -92,6 +92,31 @@ export function BoardItemDetail({
 
   const pageWide = layout === "page";
 
+  // ClickUp-style collapse: empty lower sections show as a single action row;
+  // a section expands when it has content or the user clicks its row. Subtasks
+  // and attachments report their loaded count so we know which to collapse.
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [subtaskCount, setSubtaskCount] = useState<number | null>(null);
+  const [attachCount, setAttachCount] = useState<number | null>(null);
+  const reveal = (s: string) => setRevealed((prev) => new Set(prev).add(s));
+
+  const checklistItems = Array.isArray(item.metadata?.checklist) ? (item.metadata!.checklist as unknown[]) : [];
+  const hasCustomFields = customFieldsOn && customFields.length > 0;
+  const hasFieldValues = hasCustomFields && customFields.some((f) => !isEmptyValue(item.metadata?.[f.key]));
+  const showFields = hasCustomFields && (revealed.has("fields") || hasFieldValues);
+  const showSubtasks = revealed.has("subtasks") || (subtaskCount ?? 0) > 0;
+  const showChecklist = revealed.has("checklist") || checklistItems.length > 0;
+  const showAttach = revealed.has("attach") || (attachCount ?? 0) > 0;
+
+  // The ClickUp action-row list, in order, for whichever sections are collapsed.
+  const actionRows = [
+    hasCustomFields && !showFields ? { key: "fields", icon: Pencil, label: "Add fields", onClick: () => reveal("fields") } : null,
+    !showSubtasks ? { key: "subtasks", icon: GitBranch, label: "Add subtask", onClick: () => reveal("subtasks") } : null,
+    !showAttach ? { key: "related", icon: Link2, label: "Relate items or add dependencies", onClick: () => reveal("attach") } : null,
+    !showChecklist ? { key: "checklist", icon: ClipboardList, label: "Create checklist", onClick: () => reveal("checklist") } : null,
+    !showAttach ? { key: "attach", icon: Paperclip, label: "Attach file", onClick: () => reveal("attach") } : null,
+  ].filter((r): r is { key: string; icon: typeof Pencil; label: string; onClick: () => void } => r !== null);
+
   return (
     <div className={`space-y-5 ${pageWide ? "max-w-[760px]" : ""}`}>
       <TitleField item={item} canEdit={canEdit} onSave={(t) => onPatch({ title: t })} />
@@ -134,8 +159,16 @@ export function BoardItemDetail({
         </Row>
       </div>
 
-      {/* Custom fields with search + hide-empty */}
-      {customFieldsOn && customFields.length > 0 ? (
+      <div className="space-y-1 text-[11px] text-zinc-400">
+        <div>Created {new Date(item.createdAt).toLocaleString()}</div>
+        <div>Updated {new Date(item.updatedAt).toLocaleString()}</div>
+      </div>
+
+      {/* Description */}
+      <DescriptionField item={item} canEdit={canEdit} onSave={(desc) => onPatch({ metadata: { ...item.metadata, description: desc } })} />
+
+      {/* Custom fields — revealed via the "Add fields" row or auto when a value is set. */}
+      {showFields ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-xs uppercase tracking-wide text-zinc-500">Fields</h3>
@@ -173,22 +206,46 @@ export function BoardItemDetail({
         </div>
       ) : null}
 
-      <div className="space-y-1 text-[11px] text-zinc-400">
-        <div>Created {new Date(item.createdAt).toLocaleString()}</div>
-        <div>Updated {new Date(item.updatedAt).toLocaleString()}</div>
+      {/* Subtasks — always mounted so it can report its count; hidden until it
+          has content or is revealed. */}
+      <div className={showSubtasks ? "" : "hidden"}>
+        <ItemSubtasks
+          item={item}
+          canEdit={canEdit}
+          statuses={statusOptions}
+          onOpenItem={onOpenItem}
+          onCountChange={setSubtaskCount}
+          autoFocus={revealed.has("subtasks")}
+        />
       </div>
 
-      {/* Description */}
-      <DescriptionField item={item} canEdit={canEdit} onSave={(desc) => onPatch({ metadata: { ...item.metadata, description: desc } })} />
-
-      {/* Subtasks */}
-      <ItemSubtasks item={item} canEdit={canEdit} statuses={statusOptions} onOpenItem={onOpenItem} />
-
       {/* Checklist (metadata-backed) */}
-      <ItemChecklist item={item} canEdit={canEdit} onSave={(checklist) => onPatch({ metadata: { ...item.metadata, checklist } })} />
+      {showChecklist ? (
+        <ItemChecklist item={item} canEdit={canEdit} onSave={(checklist) => onPatch({ metadata: { ...item.metadata, checklist } })} />
+      ) : null}
 
-      {/* Linked notes + whiteboards + files + relations */}
-      <LinkedAttachments sourceType="BOARD_ITEM" sourceId={item.id} spaceId={item.spaceId ?? null} canEdit={canEdit} />
+      {/* Linked notes + whiteboards + files + relations — always mounted for the
+          count; hidden until it has content or is revealed. */}
+      <div className={showAttach ? "" : "hidden"}>
+        <LinkedAttachments sourceType="BOARD_ITEM" sourceId={item.id} spaceId={item.spaceId ?? null} canEdit={canEdit} onCountChange={setAttachCount} />
+      </div>
+
+      {/* ClickUp action rows for the still-collapsed sections. */}
+      {canEdit && actionRows.length > 0 ? (
+        <div className="grid max-w-[380px] gap-0.5 text-[13px] text-zinc-700">
+          {actionRows.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              onClick={r.onClick}
+              className="flex h-8 items-center gap-2 rounded-md px-1.5 text-left hover:bg-zinc-50"
+            >
+              <r.icon className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+              {r.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {/* Time tracking */}
       {timeTrackingOn ? (
