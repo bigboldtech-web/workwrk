@@ -182,6 +182,8 @@ export function SpaceListItemsTable({
         onClose={() => setOpenItemId(null)}
         onItemChanged={() => router.refresh()}
         onItemArchived={() => { setOpenItemId(null); router.refresh(); }}
+        // Let subtasks (and their subtasks) open in-place within the drawer.
+        onOpenItem={(id) => setOpenItemId(id)}
       />
     </>
   );

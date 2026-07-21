@@ -117,6 +117,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     void patchCard(card.id, { status: next }, { status: next });
   }, [statuses, firstStatus, doneStatusValue, patchCard]);
 
+  // Newly-created card/subtask id to drop straight into title-edit (with the
+  // placeholder text selected) so the user types the name — no click-to-rename.
+  const [autoEditId, setAutoEditId] = useState<string | null>(null);
+
   const addCard = useCallback(async (status: string) => {
     if (!canEdit) return;
     try {
@@ -128,6 +132,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
       const data = await res.json();
       if (!res.ok) { setError(data?.error ?? "Failed to add card"); return; }
       setItems((prev) => [...prev, data.item as BoardItemRow]);
+      if (data?.item?.id) setAutoEditId(data.item.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add card");
     }
@@ -142,8 +147,11 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         body: JSON.stringify({ title: "New subtask", status: status ?? firstStatus, parentItemId: parentId }),
       });
       const data = await res.json();
-      if (res.ok && data?.item) setItems((prev) => [...prev, data.item as BoardItemRow]);
-    } catch {}
+      if (!res.ok) { setError(data?.error ?? "Failed to add subtask"); return; }
+      if (data?.item) { setItems((prev) => [...prev, data.item as BoardItemRow]); setAutoEditId(data.item.id); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add subtask");
+    }
   }, [boardId, canEdit, firstStatus]);
 
   const duplicateCard = useCallback(async (card: BoardItemRow) => {
@@ -246,6 +254,8 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     onDuplicate={() => duplicateCard(card)}
                     onArchive={() => archiveCard(card.id)}
                     onDeleted={() => removeLocal(card.id)}
+                    autoEdit={autoEditId === card.id}
+                    onAutoEditHandled={() => setAutoEditId(null)}
                     priorityEnabled={priorityEnabled}
                     tagsEnabled={tagsEnabled}
                     timeTrackingEnabled={timeTrackingEnabled}
@@ -286,6 +296,8 @@ function KanbanCard({
   onDuplicate,
   onArchive,
   onDeleted,
+  autoEdit = false,
+  onAutoEditHandled,
   priorityEnabled = true,
   tagsEnabled = true,
   timeTrackingEnabled = true,
@@ -306,6 +318,8 @@ function KanbanCard({
   onDuplicate: () => void;
   onArchive: () => void;
   onDeleted: () => void;
+  autoEdit?: boolean;
+  onAutoEditHandled?: () => void;
   priorityEnabled?: boolean;
   tagsEnabled?: boolean;
   timeTrackingEnabled?: boolean;
@@ -317,6 +331,13 @@ function KanbanCard({
   // Seed the input from the current title only when entering edit mode — avoids
   // a prop-sync effect (which cascades renders).
   const startEdit = () => { setTitle(card.title); setEditing(true); };
+
+  // Just-created card/subtask: drop into edit mode with the placeholder text
+  // selected (the input's onFocus selects) so the user types the name directly.
+  useEffect(() => {
+    if (autoEdit && canEdit) { startEdit(); onAutoEditHandled?.(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoEdit, canEdit]);
 
   const done = isDoneStatus(statuses, card.status);
   const due = card.dueAt ? new Date(card.dueAt) : null;
@@ -359,6 +380,7 @@ function KanbanCard({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onClick={stop}
+              onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); else if (e.key === "Escape") { setTitle(card.title); setEditing(false); } }}
               onBlur={saveTitle}
               className="w-full bg-white border border-[var(--os-brand)] rounded px-1 py-0.5 text-sm text-zinc-900 focus:outline-none"

@@ -53,6 +53,7 @@ export {
 
 function rowFrom(it: {
   id: string;
+  boardId?: string | null;
   title: string;
   status: string | null;
   ownerId: string | null;
@@ -69,9 +70,15 @@ function rowFrom(it: {
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-}, owner?: { id: string; firstName: string; lastName: string; avatar: string | null } | null, tags?: ItemTag[]): BoardItemRow {
+}, owner?: { id: string; firstName: string; lastName: string; avatar: string | null } | null, tags?: ItemTag[], spaceId?: string | null): BoardItemRow {
   return {
     id: it.id,
+    // boardId + spaceId MUST survive here: the detail drawer/page overwrite
+    // their cached item with this object after every PATCH/POST. Dropping them
+    // (the old bug) made the *first* edit blank out boardId → subtask-add and
+    // attachment widgets silently died until a full reload.
+    boardId: it.boardId ?? null,
+    spaceId: spaceId ?? null,
     title: it.title,
     status: it.status,
     ownerId: it.ownerId,
@@ -344,6 +351,7 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
       metadata: (input.metadata ?? {}) as object,
       parentItemId: input.parentItemId ?? null,
     },
+    include: { board: { select: { spaceId: true } } },
   });
   const tags = input.tagIds?.length
     ? await syncItemTags(input.organizationId, created.id, input.tagIds, input.actorId ?? null)
@@ -363,7 +371,7 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
     meta: { title: trimmed, status: created.status },
   });
 
-  return rowFrom(created, owner, tags);
+  return rowFrom(created, owner, tags, created.board.spaceId);
 }
 
 export interface UpdateBoardItemInput {
@@ -419,7 +427,11 @@ export async function updateBoardItem(
   if (patch.recurRule !== undefined) data.recurRule = patch.recurRule ?? null;
   if (patch.recurNextAt !== undefined) data.recurNextAt = patch.recurNextAt;
 
-  const updated = await prisma.item.update({ where: { id: itemId }, data });
+  const updated = await prisma.item.update({
+    where: { id: itemId },
+    data,
+    include: { board: { select: { spaceId: true } } },
+  });
   const owner = updated.ownerId
     ? await prisma.user.findUnique({
         where: { id: updated.ownerId },
@@ -479,13 +491,14 @@ export async function updateBoardItem(
     }
   }
 
-  return rowFrom(updated, owner, tags);
+  return rowFrom(updated, owner, tags, updated.board.spaceId);
 }
 
 export async function archiveBoardItem(itemId: string, actorId: string | null = null): Promise<BoardItemRow> {
   const updated = await prisma.item.update({
     where: { id: itemId },
     data: { archivedAt: new Date() },
+    include: { board: { select: { spaceId: true } } },
   });
   await logActivity({
     organizationId: updated.organizationId,
@@ -494,7 +507,7 @@ export async function archiveBoardItem(itemId: string, actorId: string | null = 
     action: "ARCHIVED",
     meta: {},
   });
-  return rowFrom(updated);
+  return rowFrom(updated, null, [], updated.board.spaceId);
 }
 
 export async function deleteBoardItem(itemId: string): Promise<void> {

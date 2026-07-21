@@ -513,30 +513,52 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit, firstStatus]);
 
-  const addSubtask = useCallback(async (parentId: string, parentStatus: string | null) => {
-    if (!canEdit) return;
+  // Type-first: the inline subtask row passes the title the user typed — no
+  // "New subtask" placeholder to rename afterward. Returns {ok,error} so the
+  // inline row can surface failures and keep the cursor for the next one.
+  const addSubtask = useCallback(async (
+    parentId: string,
+    parentStatus: string | null,
+    title: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!canEdit) return { ok: false, error: "You don't have edit access to this list" };
+    const trimmed = title.trim();
+    if (!trimmed) return { ok: false };
     setAdding(true);
+    setError(null);
     try {
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "New subtask",
+          title: trimmed,
           status: parentStatus ?? firstStatus,
           parentItemId: parentId,
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.item) {
-          setItems((prev) => [...prev, data.item]);
-          setExpandedParents((prev) => new Set(prev).add(parentId));
-        }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data?.error ?? `Save failed (HTTP ${res.status})`;
+        setError(msg);
+        return { ok: false, error: msg };
       }
+      if (data?.item) {
+        setItems((prev) => [...prev, data.item]);
+        setExpandedParents((prev) => new Set(prev).add(parentId));
+      }
+      return { ok: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to add subtask";
+      setError(msg);
+      return { ok: false, error: msg };
     } finally {
       setAdding(false);
     }
   }, [boardId, canEdit, firstStatus]);
+
+  // Which parent's inline subtask input should grab focus next (set by the
+  // hover "Add subtask" button, which also expands the parent).
+  const [autoFocusSubtaskFor, setAutoFocusSubtaskFor] = useState<string | null>(null);
 
   // Re-sync if the parent ever passes a refreshed initial set.
   useEffect(() => { setItems(initialItems); }, [initialItems]);
@@ -1054,7 +1076,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         timeTrackingEnabled={timeTrackingEnabled}
         onOpen={onOpenItem ? () => onOpenItem(row.id) : undefined}
         onDuplicate={handleDuplicate}
-        onAddSubtask={() => addSubtask(row.id, row.status)}
+        onAddSubtask={() => {
+          // Expand the parent and focus its inline subtask input so the user
+          // types the name directly (instead of getting a "New subtask" row).
+          setExpandedParents((prev) => new Set(prev).add(row.id));
+          setAutoFocusSubtaskFor(row.id);
+        }}
         dragEnabled={canEdit && !buckets && indent === 0}
         isDragging={dragId === row.id}
         isDragOver={dragOverId === row.id && dragId !== null && dragId !== row.id}
@@ -1083,7 +1110,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             parentId={row.id}
             indent={indent + 1}
             colCount={colCount}
-            onAdd={() => addSubtask(row.id, row.status)}
+            autoFocus={autoFocusSubtaskFor === row.id}
+            onAutoFocusHandled={() => setAutoFocusSubtaskFor(null)}
+            onCreate={(title) => addSubtask(row.id, row.status, title)}
           />,
         );
       }
@@ -2288,29 +2317,84 @@ function ColumnMenu({ ctx, close }: { ctx: ColMenuCtx; close: () => void }) {
   );
 }
 
+// Inline, type-first subtask add. Collapsed = a "+ Add subtask" affordance;
+// click (or the row's hover "Add subtask" button, via autoFocus) opens an
+// input where you type the name and press Enter. Stays open after each save
+// for rapid-fire entry — no "New subtask" placeholder to rename.
 function AddSubtaskRow({
   parentId,
   indent,
   colCount,
-  onAdd,
+  autoFocus = false,
+  onAutoFocusHandled,
+  onCreate,
 }: {
   parentId: string;
   indent: number;
   colCount: number;
-  onAdd: () => void;
+  autoFocus?: boolean;
+  onAutoFocusHandled?: () => void;
+  onCreate: (title: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pad = 60 + indent * 20;
+
+  // The hover "Add subtask" button opens + focuses this row via autoFocus.
+  useEffect(() => {
+    if (autoFocus) {
+      setOpen(true);
+      onAutoFocusHandled?.();
+    }
+  }, [autoFocus, onAutoFocusHandled]);
+  useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
+
+  const save = async () => {
+    const t = title.trim();
+    if (!t || busy) { if (!t) { setOpen(false); setFailed(null); } return; }
+    setBusy(true);
+    setFailed(null);
+    const res = await onCreate(t);
+    setBusy(false);
+    if (res.ok) { setTitle(""); inputRef.current?.focus(); }
+    else setFailed(res.error ?? "Couldn't add subtask");
+  };
+
   return (
     <tr className="hover:bg-zinc-50" data-parent-id={parentId}>
       <td colSpan={colCount} className="py-1.5 pr-4">
-        <button
-          type="button"
-          onClick={onAdd}
-          className="inline-flex items-center gap-1.5 text-[12px] text-zinc-400 hover:text-zinc-700"
-          style={{ paddingLeft: 60 + indent * 20 }}
-        >
-          <Plus className="w-3 h-3" />
-          Add subtask
-        </button>
+        {open ? (
+          <div className="flex items-center gap-2" style={{ paddingLeft: pad }}>
+            <Plus className="w-3 h-3 text-zinc-400 shrink-0" />
+            <input
+              ref={inputRef}
+              value={title}
+              onChange={(e) => { setTitle(e.target.value); if (failed) setFailed(null); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); void save(); }
+                if (e.key === "Escape") { setTitle(""); setFailed(null); setOpen(false); }
+              }}
+              onBlur={() => { if (!title.trim() && !busy) setOpen(false); }}
+              placeholder="Type a subtask and press Enter…"
+              className="flex-1 text-[12.5px] bg-transparent outline-none placeholder:text-zinc-400"
+            />
+            {busy ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0" /> : null}
+            {failed ? <span className="text-[11px] text-red-500 shrink-0">{failed}</span> : null}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-1.5 text-[12px] text-zinc-400 hover:text-zinc-700"
+            style={{ paddingLeft: pad }}
+          >
+            <Plus className="w-3 h-3" />
+            Add subtask
+          </button>
+        )}
       </td>
     </tr>
   );
@@ -2878,7 +2962,7 @@ function TitleCell({
     setSyncedTitle(row.title);
     setDraft(row.title);
   }
-  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+  useEffect(() => { if (editing) { inputRef.current?.focus(); inputRef.current?.select(); } }, [editing]);
 
   const commit = () => {
     const trimmed = draft.trim();
