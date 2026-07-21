@@ -2344,9 +2344,13 @@ function AddSubtaskRow({
   const pad = 60 + indent * 20;
 
   // The hover "Add subtask" button opens + focuses this row via autoFocus.
+  // Focus directly here too: if the row is already open (e.g. holds typed-but-
+  // unsubmitted text), setOpen(true) is a no-op so the open→focus effect below
+  // wouldn't re-fire — focus the input now so the cursor still lands.
   useEffect(() => {
     if (autoFocus) {
       setOpen(true);
+      inputRef.current?.focus();
       onAutoFocusHandled?.();
     }
   }, [autoFocus, onAutoFocusHandled]);
