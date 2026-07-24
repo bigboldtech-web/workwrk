@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
 
   const body = await req.json();
-  const { name, description, type, unit, frequency, kraId, targetValue, lowerIsBetter } = body;
+  const { name, description, type, unit, frequency, kraId, targetValue, targetLabel, lowerIsBetter, ownership, formula, baselineValue, baselineLabel } = body;
 
   if (!name) return jsonError("KPI name is required");
 
@@ -48,7 +48,13 @@ export async function POST(req: NextRequest) {
       unit,
       frequency: frequency || "MONTHLY",
       targetValue: targetValue != null ? Number(targetValue) : null,
+      targetLabel: targetLabel ?? null,
       lowerIsBetter: lowerIsBetter === true,
+      // 🆕 Operating core — owned vs shared, formula, baseline.
+      ownership: ownership === "SHARED" ? "SHARED" : "OWNED",
+      formula: formula ?? null,
+      baselineValue: baselineValue != null ? Number(baselineValue) : null,
+      baselineLabel: baselineLabel ?? null,
       kraId,
       organizationId: getOrgId(session),
     },
@@ -64,7 +70,7 @@ export async function PATCH(req: NextRequest) {
   if (denied) return denied;
 
   const body = await req.json();
-  const { id, name, description, type, unit, frequency, kraId, targetValue, lowerIsBetter } = body;
+  const { id, name, description, type, unit, frequency, kraId, targetValue, targetLabel, lowerIsBetter, ownership, formula, baselineValue, baselineLabel } = body;
 
   if (!id) return jsonError("KPI id is required");
 
@@ -83,7 +89,13 @@ export async function PATCH(req: NextRequest) {
       ...(frequency !== undefined && { frequency }),
       ...(kraId !== undefined && { kraId: kraId || null }),
       ...(targetValue !== undefined && { targetValue: targetValue != null ? Number(targetValue) : null }),
+      ...(targetLabel !== undefined && { targetLabel: targetLabel || null }),
       ...(lowerIsBetter !== undefined && { lowerIsBetter: lowerIsBetter === true }),
+      // 🆕 Operating core fields.
+      ...(ownership !== undefined && { ownership: ownership === "SHARED" ? "SHARED" : "OWNED" }),
+      ...(formula !== undefined && { formula: formula || null }),
+      ...(baselineValue !== undefined && { baselineValue: baselineValue != null ? Number(baselineValue) : null }),
+      ...(baselineLabel !== undefined && { baselineLabel: baselineLabel || null }),
     },
   });
 

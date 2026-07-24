@@ -173,6 +173,13 @@ model Organization {
   weeklyReviews        WeeklyReview[]
   // 🆕 Phase 7 — universal polymorphic graph edges
   entityLinks          EntityLink[]
+  // 🆕 Operating core — role-definition primitives
+  scopes                Scope[]
+  roleInstances         RoleInstance[]
+  ownershipAreas        OwnershipArea[]
+  roleBoundaries        RoleBoundary[]
+  thresholds            Threshold[]
+  roleInstanceOverrides RoleInstanceOverride[]
 
   @@index([slug])
 }
@@ -550,6 +557,8 @@ model User {
   // 🆕 Phase 5 — weekly review heartbeat
   weeklyReviewsAsSubject WeeklyReview[]   @relation("WeeklyReviewSubject")
   weeklyReviewsAsManager WeeklyReview[]   @relation("WeeklyReviewManager")
+  // 🆕 Operating core — role instances (Role × Scope) this person holds
+  roleInstances          RoleInstance[]   @relation("UserRoleInstances")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -886,11 +895,150 @@ model Role {
   department     Department?  @relation(fields: [departmentId], references: [id])
   users          User[]
   kraTemplates   KRA[]
+  // 🆕 Operating core — this role, as a template
+  instances      RoleInstance[]
+  ownedAreas     OwnershipArea[] @relation("AreaOwnerRole")
+  boundaries     RoleBoundary[]
+  thresholds     Threshold[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   @@unique([title, organizationId])
   @@index([organizationId])
+}
+
+// ==========================================
+// MODULE: Operating core (Workwrk primitives)
+// Generic, tenant-agnostic role-definition backbone. Business terms
+// (e.g. "Dispatch Executive", "Vendor Pool 1") live in rows, never in
+// table or column names. tenant_id == organizationId in this schema.
+// ==========================================
+
+// A shard dimension a role instance owns — territory, pool, region,
+// shift, client, product line. Tenant configuration, not schema.
+model Scope {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  dimension      String // "territory" | "pool" | "region" | "shift" | "client" | ...
+  description    String?
+  parentId       String?
+  parent         Scope?         @relation("ScopeTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Scope[]        @relation("ScopeTree")
+  roleInstances  RoleInstance[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([organizationId, name, dimension])
+  @@index([organizationId])
+}
+
+// Role × Scope, held by a person. The cloneable instance ("Support Lead
+// — Region West"). Every metric/queue/dashboard hangs off this so
+// instances are comparable (Pool 1 vs Pool 2).
+model RoleInstance {
+  id             String                 @id @default(cuid())
+  organizationId String
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roleId         String
+  role           Role                   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  scopeId        String?
+  scope          Scope?                 @relation(fields: [scopeId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?                  @relation("UserRoleInstances", fields: [userId], references: [id], onDelete: SetNull)
+  name           String?
+  status         String                 @default("active")
+  overrides      RoleInstanceOverride[]
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@unique([roleId, scopeId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// One concept, one owner, one place: an area of responsibility and the
+// single role accountable for it. The basis of the ownership boundary.
+model OwnershipArea {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  ownerRoleId    String?
+  ownerRole      Role?          @relation("AreaOwnerRole", fields: [ownerRoleId], references: [id], onDelete: SetNull)
+  boundaries     RoleBoundary[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+// A role's explicit relation to an area it does NOT own. OWNS is derived
+// (role == area.ownerRole); stored rows carry CAN_REQUEST / CANNOT_TOUCH.
+// can-request is first-class: it routes a tracked request to the owner.
+model RoleBoundary {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roleId         String
+  role           Role             @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  areaId         String
+  area           OwnershipArea    @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  relation       BoundaryRelation @default(CAN_REQUEST)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([roleId, areaId])
+  @@index([organizationId])
+}
+
+enum BoundaryRelation {
+  OWNS
+  CAN_REQUEST
+  CANNOT_TOUCH
+}
+
+// A tunable value that drives automation — stored as a row, never a
+// constant. e.g. "unclaimed → nudge" = 45 (min). Automation reads these.
+model Threshold {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roleId            String?
+  role              Role?        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  label             String
+  trigger           String
+  value             Float
+  unit              String?
+  businessHoursOnly Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([roleId])
+}
+
+// Template/instance/override with provenance — an instance's divergence
+// from its role template: what changed and where it came from.
+model RoleInstanceOverride {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roleInstanceId String
+  roleInstance   RoleInstance @relation(fields: [roleInstanceId], references: [id], onDelete: Cascade)
+  targetType     String // "KRA" | "KPI" | "SOP" | "THRESHOLD"
+  targetId       String?
+  action         String // "ADD" | "REMOVE" | "MODIFY"
+  payload        Json?
+  source         String? // provenance: "manual" | "seed:role@v3"
+  createdById    String?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([roleInstanceId])
 }
 
 // ==========================================
@@ -978,6 +1126,12 @@ model KPI {
   targetValue    Float?
   targetLabel    String?
   lowerIsBetter  Boolean      @default(false)
+  // 🆕 Operating core — baseline→target, formula, and owned-vs-shared.
+  // OWNED = the role controls it (graded); SHARED = influences (reviewed).
+  ownership      KpiOwnership @default(OWNED)
+  formula        String?
+  baselineValue  Float?
+  baselineLabel  String?
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   kraId          String?
@@ -988,6 +1142,11 @@ model KPI {
 
   @@index([organizationId])
   @@index([kraId])
+}
+
+enum KpiOwnership {
+  OWNED
+  SHARED
 }
 
 enum KPIType {
@@ -5069,6 +5228,11 @@ model Item {
   parentItemId   String?
   parentItem     Item?        @relation("ItemSubtasks", fields: [parentItemId], references: [id], onDelete: Cascade)
   childItems     Item[]       @relation("ItemSubtasks")
+  // 🆕 Operating core — work-type tag drives the automation backlog.
+  // ENGINE = deterministic (automate) · ROUTINE = repeatable human
+  // (automate next) · JUDGMENT = real decision (keep human). One column
+  // now; the "most expensive ROUTINE work" report reads it later.
+  workType       WorkType?
   timeEntries    TimeEntry[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -5083,6 +5247,12 @@ model Item {
   @@index([itemType])
   @@index([itemTypeId])
   @@index([ownerId])
+}
+
+enum WorkType {
+  ENGINE
+  ROUTINE
+  JUDGMENT
 }
 
 // ==========================================

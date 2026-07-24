@@ -2,6 +2,58 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 
+// GET: the full role-definition bundle — the Block-B view of a role.
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+  const { id } = await params;
+  const orgId = getOrgId(session);
+
+  const role = await prisma.role.findFirst({
+    where: { id, organizationId: orgId },
+    include: {
+      department: { select: { id: true, name: true } },
+      kraTemplates: {
+        include: {
+          kpis: {
+            select: {
+              id: true, name: true, description: true, unit: true, frequency: true,
+              type: true, ownership: true, formula: true,
+              baselineValue: true, baselineLabel: true, targetValue: true, targetLabel: true, lowerIsBetter: true,
+            },
+          },
+          sops: { select: { id: true, title: true, status: true } },
+          _count: { select: { assignments: true } },
+        },
+        orderBy: { name: "asc" },
+      },
+      ownedAreas: { select: { id: true, name: true, description: true } },
+      boundaries: {
+        include: { area: { include: { ownerRole: { select: { id: true, title: true } } } } },
+      },
+      thresholds: { orderBy: { createdAt: "asc" } },
+      instances: {
+        include: {
+          scope: { select: { id: true, name: true, dimension: true } },
+          user: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } },
+        },
+        orderBy: { createdAt: "asc" },
+      },
+      users: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } },
+    },
+  });
+  if (!role) return jsonError("Role not found", 404);
+
+  // All ownership areas in the org, so the boundary editor can pick any.
+  const allAreas = await prisma.ownershipArea.findMany({
+    where: { organizationId: orgId },
+    include: { ownerRole: { select: { id: true, title: true } } },
+    orderBy: { name: "asc" },
+  });
+
+  return jsonSuccess({ role, allAreas });
+}
+
 // PUT: Edit role
 export async function PUT(
   req: NextRequest,

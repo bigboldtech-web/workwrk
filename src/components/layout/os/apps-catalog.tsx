@@ -866,7 +866,8 @@ function TeamsSidebar() {
       </ul>
       <SectionLabel>People</SectionLabel>
       <ul>
-        <NavItem href="/people" Icon={Users} label="Directory" />
+        <NavItem href="/people/roles" Icon={Briefcase} label="Roles" active={pathname.startsWith("/people/roles")} />
+        <NavItem href="/people" Icon={Users} label="Directory" active={pathname === "/people"} />
         <NavItem href="/organization" Icon={Building2} label="Org chart" />
         <NavItem href="/kra-kpi" Icon={Star} label="KRA & KPI" />
       </ul>

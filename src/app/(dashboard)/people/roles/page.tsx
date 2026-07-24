@@ -282,7 +282,7 @@ function RoleCard({ role: r }: { role: ApiRole }) {
   const isUnfilled = count === 0;
   const levelColor = LEVEL_COLORS[r.level ?? "EMPLOYEE"];
   return (
-    <article className={`rls__card${isUnfilled ? " is-unfilled" : ""}`} style={{ ["--card-c" as unknown as string]: levelColor }}>
+    <Link href={`/people/roles/${r.id}`} className={`rls__card${isUnfilled ? " is-unfilled" : ""}`} style={{ ["--card-c" as unknown as string]: levelColor, cursor: "pointer" }}>
       <header className="rls__card-head">
         <h3 className="rls__card-title">{r.title}</h3>
         <span className={`rls__card-count${isUnfilled ? " is-zero" : ""}`}>
@@ -307,7 +307,7 @@ function RoleCard({ role: r }: { role: ApiRole }) {
       {r.description && (
         <p className="rls__card-desc">{r.description.length > 140 ? r.description.slice(0, 140) + "…" : r.description}</p>
       )}
-    </article>
+    </Link>
   );
 }
 
