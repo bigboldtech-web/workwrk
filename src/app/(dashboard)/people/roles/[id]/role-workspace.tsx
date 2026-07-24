@@ -286,7 +286,7 @@ function KraCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) 
   const attachedIds = bundle.kras.map((k) => k.id);
   return (
     <Card title="KRAs" icon={Target} action={canEdit ? (
-      <div className="w-[180px]"><KraPicker kras={bundle.allKras.map((k) => ({ id: k.id, name: k.name, category: k.category ?? undefined }))} value={null} excludeIds={attachedIds} placeholder="Attach a KRA" onChange={(kraId) => { if (kraId) call("/api/kras", "PATCH", { id: kraId, roleId: bundle.role.id }); }} /></div>
+      <div className="w-[180px]"><KraPicker kras={bundle.allKras.map((k) => ({ id: k.id, name: k.name, category: k.category ?? undefined }))} value="" excludeIds={attachedIds} placeholder="Attach a KRA" onChange={(kraId) => { if (kraId) call("/api/kras", "PATCH", { id: kraId, roleId: bundle.role.id }); }} /></div>
     ) : undefined}>
       {bundle.kras.length === 0 ? (
         <p className="text-[12.5px] text-zinc-400 py-2">No KRAs on this role yet.</p>
