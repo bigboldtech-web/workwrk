@@ -268,12 +268,22 @@ function ClickSidebarBody() {
         </div>
       </div>
 
-      <CreateMenu
-        anchorRef={createButtonRef}
-        open={createOpen}
-        onClose={closeCreateMenu}
-        onCreateSpace={runAppNewAction}
-      />
+      {/* Per-app "+" menu when the app declares one (e.g. Teams); else the
+          global create menu. */}
+      {app.CreateMenu ? (
+        <app.CreateMenu
+          anchorRef={createButtonRef}
+          open={createOpen}
+          onClose={closeCreateMenu}
+        />
+      ) : (
+        <CreateMenu
+          anchorRef={createButtonRef}
+          open={createOpen}
+          onClose={closeCreateMenu}
+          onCreateSpace={runAppNewAction}
+        />
+      )}
 
       <div
         role="separator"

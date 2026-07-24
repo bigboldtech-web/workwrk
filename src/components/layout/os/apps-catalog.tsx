@@ -20,9 +20,11 @@ import {
   ShoppingBag, Workflow, ScrollText,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
+  LayoutDashboard, Target,
   type LucideIcon,
 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
+import { TeamsCreateMenu } from "./teams-create-menu";
 import { usePathname, useRouter } from "next/navigation";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewBoardDialog } from "./new-board-dialog";
@@ -62,6 +64,17 @@ export interface AppEntry {
    * listens for. Absent → button hidden.
    */
   newAction?: { label: string; href?: string; event?: string };
+  /**
+   * Optional per-app "+" create menu. When set, it REPLACES the global
+   * CreateMenu for this app so the "+" offers app-relevant creates (e.g.
+   * Teams → Invite person / New role / New KRA …) instead of the generic
+   * Task/List/Space/Doc menu.
+   */
+  CreateMenu?: React.ComponentType<{
+    anchorRef: React.RefObject<HTMLButtonElement | null>;
+    open: boolean;
+    onClose: () => void;
+  }>;
   /**
    * Minimum access tier required to see this app at all. Absent =
    * available to everyone (default).
@@ -854,22 +867,32 @@ function AiSidebar() {
 
 /* ───────────────────────── Teams sidebar ───────────────────────── */
 
+// Teams — a people-operation cockpit. Three buckets: who (People), what they
+// own & are measured on (Alignment), how they're doing (Performance), plus an
+// Overview landing. Every item has one clear job.
 function TeamsSidebar() {
   const pathname = usePathname() || "";
   return (
     <>
       <ul>
-        <NavItem href="/team/alignment" Icon={Users} label="Alignment" active={pathname === "/team/alignment"} />
-        <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Reviews" active={pathname === "/team/reviews"} />
-        <NavItem href="/team/kpi-reviews" Icon={Award} label="KPI approvals" active={pathname === "/team/kpi-reviews"} />
-        <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={pathname === "/team/rollup"} />
+        <NavItem href="/team" Icon={LayoutDashboard} label="Overview" active={pathname === "/team"} />
       </ul>
       <SectionLabel>People</SectionLabel>
       <ul>
-        <NavItem href="/people/roles" Icon={Briefcase} label="Roles" active={pathname.startsWith("/people/roles")} />
         <NavItem href="/people" Icon={Users} label="Directory" active={pathname === "/people"} />
-        <NavItem href="/organization" Icon={Building2} label="Org chart" />
-        <NavItem href="/kra-kpi" Icon={Star} label="KRA & KPI" />
+        <NavItem href="/organization" Icon={Building2} label="Org chart" active={pathname.startsWith("/organization")} />
+        <NavItem href="/people/roles" Icon={Briefcase} label="Roles" active={pathname.startsWith("/people/roles")} />
+      </ul>
+      <SectionLabel>Alignment</SectionLabel>
+      <ul>
+        <NavItem href="/kra-kpi" Icon={Star} label="KRAs & KPIs" active={pathname.startsWith("/kra-kpi")} />
+        <NavItem href="/team/alignment" Icon={Target} label="Alignment board" active={pathname === "/team/alignment"} />
+      </ul>
+      <SectionLabel>Performance</SectionLabel>
+      <ul>
+        <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Reviews" active={pathname === "/team/reviews"} />
+        <NavItem href="/team/kpi-reviews" Icon={Award} label="KPI approvals" active={pathname === "/team/kpi-reviews"} />
+        <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={pathname === "/team/rollup"} />
       </ul>
     </>
   );
@@ -991,9 +1014,10 @@ export const APPS: AppEntry[] = [
   { key: "ai", label: "AI", Icon: BloomMark, defaultHref: "/sidekick",
     matchPaths: ["/sidekick", "/agents"], Sidebar: AiSidebar,
     category: "Core", defaultPinned: true },
-  { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team/alignment",
+  { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team",
     matchPaths: ["/team", "/people", "/organization", "/kra-kpi"],
-    Sidebar: TeamsSidebar, category: "Core", defaultPinned: true },
+    Sidebar: TeamsSidebar, category: "Core", defaultPinned: true,
+    CreateMenu: TeamsCreateMenu },
   { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
     matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
     newAction: { label: "New doc", href: "/docs?new=1" } },
