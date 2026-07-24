@@ -31,12 +31,25 @@ import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KudosReactions } from "@/components/kudos/kudos-reactions";
 import { TagPicker } from "@/components/tags/tag-picker";
 import { ManageAlignmentDialog } from "./manage-alignment-dialog";
+import Link from "next/link";
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
+import { StatusChip } from "@/components/ui/chip";
+import { TeamStatTile, TeamAvatar, pctColor } from "@/components/team/ui";
 
 function getScoreColor(score: number) {
-  if (score >= 90) return "text-green-400";
-  if (score >= 70) return "text-[color:var(--accent-strong)]";
-  if (score >= 50) return "text-orange-400";
-  return "text-red-400";
+  if (score >= 90) return "text-emerald-600";
+  if (score >= 70) return "text-[#0073EA]";
+  if (score >= 50) return "text-amber-500";
+  return "text-red-500";
+}
+
+function statusColor(status: string): string {
+  const s = String(status).toUpperCase();
+  if (s === "ACTIVE") return "#16a34a";
+  if (s === "ON_LEAVE") return "#0073EA";
+  if (s === "PROBATION") return "#f59e0b";
+  if (s === "PIP" || s === "NOTICE_PERIOD") return "#dc2626";
+  return "#71717A";
 }
 
 function getStatusBadge(status: string) {
@@ -55,7 +68,7 @@ function getPriorityStyle(p: string) {
   switch (p) {
     case "P0": return "bg-red-500/20 text-red-400";
     case "P1": return "bg-orange-500/20 text-orange-400";
-    case "P2": return "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]";
+    case "P2": return "bg-[#0073EA]/10text-[#0073EA]";
     default: return "bg-slate-500/20 text-slate-400";
   }
 }
@@ -64,7 +77,7 @@ function getTaskStatusStyle(s: string) {
   switch (s) {
     case "COMPLETED": return "bg-green-500/20 text-green-400";
     case "IN_PROGRESS": return "bg-blue-500/20 text-blue-400";
-    case "IN_REVIEW": return "bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)]";
+    case "IN_REVIEW": return "bg-[#0073EA]/10text-[#0073EA]";
     default: return "bg-slate-500/20 text-slate-400";
   }
 }
@@ -78,9 +91,9 @@ function getProgressColor(pct: number) {
 }
 
 function getScoreBg(score: number) {
-  if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-violet-600";
-  if (score >= 50) return "bg-orange-500";
+  if (score >= 90) return "bg-emerald-500";
+  if (score >= 70) return "bg-[#0073EA]";
+  if (score >= 50) return "bg-amber-500";
   return "bg-red-500";
 }
 
@@ -152,11 +165,11 @@ function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | nu
       })}
       {(breakdown.kudosBonus as number) > 0 && (
         <div className="flex items-center gap-3">
-          <Heart size={12} className="text-pink-400 flex-shrink-0" />
+          <Heart size={12} className="text-rose-500 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-500">Kudos Bonus</span>
-              <span className="font-mono font-bold text-pink-400">+{breakdown.kudosBonus as number}</span>
+              <span className="font-mono font-bold text-rose-500">+{breakdown.kudosBonus as number}</span>
             </div>
           </div>
         </div>
@@ -174,11 +187,11 @@ const FREQ_LABELS: Record<string, string> = {
 };
 
 const FREQ_COLORS: Record<string, string> = {
-  DAILY: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
-  WEEKLY: "bg-blue-500/15 text-blue-400 border-blue-500/20",
-  MONTHLY: "bg-[rgba(212,255,46,0.1)] text-[color:var(--accent-strong)] border-[rgba(212,255,46,0.2)]",
-  QUARTERLY: "bg-amber-500/15 text-amber-400 border-amber-500/20",
-  ANNUALLY: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
+  DAILY: "bg-zinc-100 text-zinc-600 border-zinc-200",
+  WEEKLY: "bg-sky-500/10 text-sky-600 border-sky-500/20",
+  MONTHLY: "bg-[#0073EA]/10 text-[#0073EA] border-[#0073EA]/20",
+  QUARTERLY: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+  ANNUALLY: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
 };
 
 // ─── Local data shapes ──────────────────────────────────────────────
@@ -343,7 +356,7 @@ function KraAssignmentsTab({ userId, userName }: { userId: string; userName: str
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <Target size={15} className="text-[color:var(--accent-strong)] shrink-0" />
+                  <Target size={15} className="text-[#0073EA] shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold truncate">{a.kra?.name}</p>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -364,7 +377,7 @@ function KraAssignmentsTab({ userId, userName }: { userId: string; userName: str
                     </div>
                   )}
                   <div className="text-right">
-                    <p className="text-lg font-bold font-mono text-[color:var(--accent-strong)]">{a.weightage}%</p>
+                    <p className="text-lg font-bold font-mono text-[#0073EA]">{a.weightage}%</p>
                     <p className="text-[9px] text-zinc-500">weight</p>
                   </div>
                   {isExpanded ? <ChevronUp size={14} className="text-zinc-500" /> : <ChevronDown size={14} className="text-zinc-500" />}
@@ -487,6 +500,7 @@ export default function UserProfilePage() {
   const { isAdmin, isManager } = useRole();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [user, setUser] = useState<any>(null);
+  const [tab, setTab] = useState("kras");
   const [loading, setLoading] = useState(true);
   const { success: toastSuccess, error: toastError } = useToast();
 
@@ -678,96 +692,50 @@ export default function UserProfilePage() {
   const perf = user.performanceSummary;
   const initials = `${user.firstName[0]}${user.lastName[0]}`;
 
-  // Hero gradient derived from id hash (matches /people directory)
-  const heroGradients = [
-    "linear-gradient(135deg, var(--os-c-blue), var(--os-c-purple))",
-    "linear-gradient(135deg, var(--os-c-green), var(--os-c-teal))",
-    "linear-gradient(135deg, var(--os-c-pink), var(--os-c-purple))",
-    "linear-gradient(135deg, var(--os-c-indigo), var(--os-c-blue))",
-    "linear-gradient(135deg, var(--os-c-orange), var(--os-c-pink))",
-    "linear-gradient(135deg, var(--os-c-purple), var(--os-c-indigo))",
-    "linear-gradient(135deg, var(--os-c-teal), var(--os-c-green))",
-    "linear-gradient(135deg, var(--os-c-yellow), var(--os-c-orange))",
-  ];
-  let _h = 0;
-  const idStr = String(user.id ?? "");
-  for (let i = 0; i < idStr.length; i++) _h = (_h * 31 + idStr.charCodeAt(i)) >>> 0;
-  const heroGradient = heroGradients[_h % heroGradients.length];
-
   return (
-    <div className="space-y-3 animate-fade-in">
-      {/* Bespoke profile hero */}
-      <section className="prfh" style={{ ["--prfh-cover" as unknown as string]: heroGradient }}>
-        <div className="prfh__cover" aria-hidden="true">
-          <span className="prfh__cover-glow" />
+    <div className="px-6 py-4 space-y-4 max-w-[1100px]">
+      {/* Profile header — new design system, neutral */}
+      <div className="rounded-xl border border-zinc-200 bg-white p-5">
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-3">
+          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
+          <span className="text-zinc-300">/</span>
+          <Link href="/people" className="hover:text-zinc-900">Directory</Link>
+          <span className="text-zinc-300">/</span>
+          <span className="truncate">{user.firstName} {user.lastName}</span>
         </div>
-        <div className="prfh__body">
-          <div className="prfh__av-wrap">
-            <div className="prfh__av" style={{ background: heroGradient }}>
-              {user.avatar ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={user.avatar} alt="" />
-              ) : (
-                <span className="prfh__av-init">{initials}</span>
-              )}
-            </div>
-            <label className="prfh__av-upload" title={uploadingAvatar ? "Uploading…" : "Upload photo"}>
-              <span>{uploadingAvatar ? "…" : "Upload"}</span>
-              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} />
+        <div className="flex items-start gap-4">
+          <div className="relative shrink-0">
+            <TeamAvatar name={`${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.email || "?"} avatar={user.avatar} size={72} />
+            <label className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-white border border-zinc-200 shadow-sm inline-flex items-center justify-center cursor-pointer text-zinc-500 hover:text-zinc-800" title={uploadingAvatar ? "Uploading…" : "Upload photo"}>
+              {uploadingAvatar ? <span className="text-[9px]">…</span> : <Edit3 size={12} />}
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} className="hidden" />
             </label>
           </div>
-
-          <div className="prfh__main">
-            <div className="prfh__head-row">
-              <button type="button" className="prfh__back-btn" onClick={() => router.push("/people")}>
-                <ArrowLeft size={12} /> People
-              </button>
-              <button type="button" className="prfh__edit-btn" onClick={openEditDialog}>
-                <Edit3 size={12} /> Edit profile
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start gap-2">
+              <h1 className="text-xl font-semibold text-zinc-900 truncate">{user.firstName} {user.lastName}</h1>
+              <div className="flex-1" />
+              <button type="button" onClick={openEditDialog} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
+                <Edit3 size={13} /> Edit profile
               </button>
             </div>
-            <h1 className="prfh__name">{user.firstName} {user.lastName}</h1>
-            <div className="prfh__pills">
-              <span className={`prfh__status prfh__status--${(user.status as string).toLowerCase()}`}>
-                {user.status.replace(/_/g, " ")}
-              </span>
-              <span className="prfh__access">{user.accessLevel.replace(/_/g, " ")}</span>
+            <div className="flex items-center gap-2 mt-1.5">
+              <StatusChip color={statusColor(user.status)} label={String(user.status).replace(/_/g, " ")} />
+              <span className="text-[11px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{String(user.accessLevel).replace(/_/g, " ")}</span>
             </div>
-            <p className="prfh__role">{user.role?.title || "No role assigned"}</p>
-
-            <div className="prfh__contacts">
-              <a className="prfh__contact" href={`mailto:${user.email}`}>
-                <Mail size={12} /> <span>{user.email}</span>
-              </a>
-              {user.phone && (
-                <a className="prfh__contact" href={`tel:${user.phone}`}>
-                  <Phone size={12} /> <span>{user.phone}</span>
-                </a>
-              )}
-              {user.department && (
-                <span className="prfh__contact">
-                  <Building2 size={12} /> <span>{user.department.name}</span>
-                </span>
-              )}
-              {user.manager && (
-                <span className="prfh__contact">
-                  <Users size={12} /> <span>Reports to {user.manager.firstName} {user.manager.lastName}</span>
-                </span>
-              )}
+            <p className="text-[13px] text-zinc-600 mt-1.5">{user.role?.title || "No role assigned"}</p>
+            <div className="flex items-center gap-3 flex-wrap mt-2.5 text-[12px] text-zinc-500">
+              <a href={`mailto:${user.email}`} className="inline-flex items-center gap-1 hover:text-zinc-800"><Mail size={12} /> {user.email}</a>
+              {user.phone ? <a href={`tel:${user.phone}`} className="inline-flex items-center gap-1 hover:text-zinc-800"><Phone size={12} /> {user.phone}</a> : null}
+              {user.department ? <span className="inline-flex items-center gap-1"><Building2 size={12} /> {user.department.name}</span> : null}
+              {user.manager ? <span className="inline-flex items-center gap-1"><Users size={12} /> Reports to {user.manager.firstName} {user.manager.lastName}</span> : null}
             </div>
-
-            {/* Dimensional tags — cost center, business unit, region,
-                project. Manager+ can edit. */}
-            <div className="prfh__tags">
-              <TagPicker
-                entityType="USER"
-                entityId={user.id}
-                canEdit={isManager}
-              />
+            <div className="mt-2.5">
+              <TagPicker entityType="USER" entityId={user.id} canEdit={isManager} />
             </div>
           </div>
         </div>
-      </section>
+      </div>
 
       {/* Edit dialog hosted off-hero so the existing Dialog wiring still works */}
       <Card style={{ display: "none" }}>
@@ -857,7 +825,7 @@ export default function UserProfilePage() {
                         <SelectItem value="__none__">— No office —</SelectItem>
                         {offices.length === 0 ? (
                           <div className="px-2 py-3 text-xs text-zinc-500">
-                            No offices yet. Add one in <span className="text-[color:var(--accent-strong)]">Organization → Offices</span>.
+                            No offices yet. Add one in <span className="text-[#0073EA]">Organization → Offices</span>.
                           </div>
                         ) : (
                           offices.map((o) => (
@@ -889,11 +857,11 @@ export default function UserProfilePage() {
 
       {/* Composite Performance Score */}
       {perf.compositeScore != null && (
-        <Card className="border-[rgba(212,255,46,0.2)] bg-gradient-to-r from-[rgba(212,255,46,0.04)] to-transparent">
+        <Card className="border-zinc-200 bg-white">
           <CardContent className="p-6">
             <div className="flex items-start gap-6">
               <div className="text-center">
-                <Zap size={20} className="mx-auto text-[color:var(--accent-strong)] mb-1" />
+                <Zap size={20} className="mx-auto text-[#0073EA] mb-1" />
                 <p className={`text-4xl font-bold font-mono ${getScoreColor(perf.compositeScore)}`}>
                   {perf.compositeScore}
                 </p>
@@ -920,56 +888,41 @@ export default function UserProfilePage() {
         </Card>
       )}
 
-      {/* Performance Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4 text-center">
-            <Target size={20} className="mx-auto text-[color:var(--accent-strong)] mb-1" />
-            <p className={`text-2xl font-bold font-mono ${perf.avgKPI ? getScoreColor(perf.avgKPI) : "text-zinc-500"}`}>
-              {perf.avgKPI ?? "N/A"}
-            </p>
-            <p className="text-xs text-zinc-500">Avg KPI Score</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <Target size={20} className="mx-auto text-blue-400 mb-1" />
-            <p className="text-2xl font-bold font-mono">{perf.activeKRAs ?? 0}</p>
-            <p className="text-xs text-zinc-500">Active KRAs</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <Smile size={20} className="mx-auto text-green-400 mb-1" />
-            <p className="text-2xl font-bold font-mono">{perf.avgMood ?? "N/A"}</p>
-            <p className="text-xs text-zinc-500">Avg Mood</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <Star size={20} className="mx-auto text-orange-400 mb-1" />
-            <p className={`text-2xl font-bold font-mono ${perf.latestReviewScore ? getScoreColor(perf.latestReviewScore) : "text-zinc-500"}`}>
-              {perf.latestReviewScore ?? "N/A"}
-            </p>
-            <p className="text-xs text-zinc-500">Review Score</p>
-          </CardContent>
-        </Card>
+      {/* Performance summary — shared stat tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <TeamStatTile icon={Target} label="Avg KPI Score" value={perf.avgKPI ?? "N/A"} accent={perf.avgKPI ? pctColor(perf.avgKPI) : "#71717A"} />
+        <TeamStatTile icon={Target} label="Active KRAs" value={perf.activeKRAs ?? 0} accent="#6366F1" />
+        <TeamStatTile icon={Smile} label="Avg Mood" value={perf.avgMood ?? "N/A"} accent="#16a34a" />
+        <TeamStatTile icon={Star} label="Review Score" value={perf.latestReviewScore ?? "N/A"} accent={perf.latestReviewScore ? pctColor(perf.latestReviewScore) : "#71717A"} />
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="kras">
-        <TabsList>
-          <TabsTrigger value="kras">KRAs</TabsTrigger>
-          <TabsTrigger value="monthly-kpis">Monthly KPIs</TabsTrigger>
-          <TabsTrigger value="calendar">Work Calendar</TabsTrigger>
-          <TabsTrigger value="kpis">KPI History</TabsTrigger>
-          <TabsTrigger value="skills">Skills</TabsTrigger>
-          <TabsTrigger value="reviews">Reviews</TabsTrigger>
-          <TabsTrigger value="kudos">Kudos {user._count?.kudosReceived > 0 ? `(${user._count.kudosReceived})` : ""}</TabsTrigger>
-          <TabsTrigger value="checkins">Check-ins</TabsTrigger>
-          <TabsTrigger value="assets">Assets</TabsTrigger>
-          <TabsTrigger value="reports">Direct Reports</TabsTrigger>
-        </TabsList>
+      {/* Tabs — underline strip (new DS). Radix Root stays controlled so each
+          TabsContent still switches off `value`. */}
+      <Tabs value={tab} onValueChange={setTab}>
+        <ViewTabStrip className="overflow-x-auto">
+          {([
+            { k: "kras", label: "KRAs", Icon: Target, tile: "#a78b6c" },
+            { k: "monthly-kpis", label: "Monthly KPIs", Icon: TrendingUp, tile: "#16a34a" },
+            { k: "calendar", label: "Work Calendar", Icon: CalendarClock, tile: "#f59e0b" },
+            { k: "kpis", label: "KPI History", Icon: Clock, tile: "#0073EA" },
+            { k: "skills", label: "Skills", Icon: Zap, tile: "#6366F1" },
+            { k: "reviews", label: "Reviews", Icon: CheckSquare, tile: "#dc2626" },
+            { k: "kudos", label: "Kudos", Icon: Heart, tile: "#e11d48" },
+            { k: "checkins", label: "Check-ins", Icon: Smile, tile: "#16a34a" },
+            { k: "assets", label: "Assets", Icon: Package, tile: "#71717A" },
+            { k: "reports", label: "Direct Reports", Icon: Users, tile: "#0073EA" },
+          ] as const).map((t) => (
+            <ViewTab
+              key={t.k}
+              icon={t.Icon}
+              iconTileColor={t.tile}
+              label={t.label}
+              active={tab === t.k}
+              onClick={() => setTab(t.k)}
+              trailing={t.k === "kudos" && user._count?.kudosReceived > 0 ? <span className="text-[10px] text-zinc-400">{user._count.kudosReceived}</span> : undefined}
+            />
+          ))}
+        </ViewTabStrip>
 
         <TabsContent value="monthly-kpis" className="mt-4">
           <MonthlyKpiRecorder userId={id as string} />
@@ -995,7 +948,7 @@ export default function UserProfilePage() {
                       </span>
                     )}
                     {t.kra?.name && (
-                      <span className="text-[10px] text-[color:var(--accent-strong)]">{t.kra.name}</span>
+                      <span className="text-[10px] text-[#0073EA]">{t.kra.name}</span>
                     )}
                   </div>
                 </div>
@@ -1049,7 +1002,7 @@ export default function UserProfilePage() {
                     <p className="text-sm font-medium">{s.name}</p>
                     <span className="text-xs text-zinc-500">{s.selfRating}/10</span>
                   </div>
-                  <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-violet-600" />
+                  <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-[#0073EA]" />
                   {s.managerRating && (
                     <p className="text-[10px] text-zinc-500 mt-1">Manager rating: {s.managerRating}/10</p>
                   )}
@@ -1098,7 +1051,7 @@ export default function UserProfilePage() {
             user.kudosReceived.map((k: any) => (
               <div key={k.id} className="rounded-lg border border-zinc-200 bg-white p-4">
                 <div className="flex items-start gap-3">
-                  <Heart size={14} className="text-pink-400 mt-0.5 flex-shrink-0" />
+                  <Heart size={14} className="text-rose-500 mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-zinc-500">
                       From <span className="text-zinc-900 font-medium">{k.giver.firstName} {k.giver.lastName}</span>
@@ -1106,7 +1059,7 @@ export default function UserProfilePage() {
                     <p className="text-sm mt-1 italic text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
                     <div className="flex items-center gap-2 mt-2">
                       {k.companyValue && (
-                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-violet-500/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
+                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-violet-500/40 text-[#0073EA]">{k.companyValue}</Badge>
                       )}
                       <span className="text-[10px] text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</span>
                     </div>
@@ -1157,7 +1110,7 @@ export default function UserProfilePage() {
                   onClick={() => router.push(`/people/${r.id}`)}
                 >
                   <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-[rgba(212,255,46,0.12)] text-[color:var(--accent-strong)] text-sm">
+                    <AvatarFallback className="bg-[#0073EA]/10text-[#0073EA] text-sm">
                       {r.firstName[0]}{r.lastName[0]}
                     </AvatarFallback>
                   </Avatar>
