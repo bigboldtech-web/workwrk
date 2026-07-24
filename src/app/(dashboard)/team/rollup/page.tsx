@@ -18,8 +18,9 @@ import { resolveAccess, meets } from "@/lib/access";
 import Link from "next/link";
 import {
   ChartLine, BookOpenCheck, Users as UsersIcon, ChevronRight,
-  GitBranchPlus, ClipboardCheck, Target, CheckCircle2, Clock, AlertCircle,
+  GitBranchPlus, ClipboardCheck, Target, CheckCircle2, Clock, AlertCircle, BarChart3,
 } from "lucide-react";
+import { TeamStatTile, pctColor } from "@/components/team/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -44,114 +45,76 @@ export default async function TeamRollupPage() {
   });
 
   return (
-    <div className="px-8 py-6 max-w-[1280px]">
-      <header className="mb-6 flex items-end justify-between gap-6">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm text-zinc-500 mb-2">
-            <UsersIcon className="w-3.5 h-3.5" />
-            <span>Team</span>
-            <span>/</span>
-            <span>Director rollup</span>
-          </div>
-          <h1 className="text-2xl font-semibold">Director rollup</h1>
-          <p className="text-sm text-zinc-500 mt-1 max-w-[640px]">
-            Two levels of the tree below you — every sub-team's health, plus the ICs reporting to you directly.
-          </p>
+    <div className="flex flex-col h-full bg-white">
+      <div className="px-6 pt-4 pb-3">
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
+          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
+          <span className="text-zinc-300">/</span>
+          <span>Rollup</span>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/team/alignment" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50">
-            <UsersIcon className="w-3.5 h-3.5" /> Alignment
-          </Link>
-          <Link href="/team/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-zinc-200 hover:bg-zinc-50">
-            <ClipboardCheck className="w-3.5 h-3.5" /> Reviews
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
+            <BarChart3 className="h-5 w-5 text-[#0073EA]" />
+          </span>
+          <h1 className="text-base font-semibold text-zinc-900">Rollup</h1>
+          <span className="text-xs text-zinc-400 hidden sm:inline">two levels below you — every sub-team&rsquo;s health</span>
+          <div className="flex-1" />
+          <Link href="/team/alignment" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+            <Target className="w-3.5 h-3.5 text-zinc-400" /> Alignment
           </Link>
         </div>
-      </header>
-
-      {data.totals.aggregateReportCount === 0 ? (
-        <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center">
-          <UsersIcon className="w-8 h-8 mx-auto text-zinc-500 mb-3" />
-          <div className="text-base font-medium mb-1">No reports yet</div>
-          <p className="text-sm text-zinc-500 max-w-[420px] mx-auto">
-            The director rollup wakes up as soon as you have direct reports — managers or ICs.
-          </p>
-        </div>
-      ) : (
-        <>
-          <section className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <Stat Icon={GitBranchPlus} label="Sub-teams" value={data.totals.subTeamCount} />
-            <Stat Icon={UsersIcon} label="People in tree" value={data.totals.aggregateReportCount}
-              sub={`${data.totals.directIcCount} direct${data.totals.directIcCount === 1 ? "" : ""} · ${data.totals.aggregateReportCount - data.totals.directIcCount} via sub-teams`} />
-            <Stat Icon={ChartLine} label="Avg KPI compliance" value={`${data.totals.avgKpiCompliancePct}%`} tone={tone(data.totals.avgKpiCompliancePct)} />
-            <Stat Icon={BookOpenCheck} label="Avg SOP read-rate" value={`${data.totals.avgSopReadRatePct}%`} tone={tone(data.totals.avgSopReadRatePct)} />
-          </section>
-
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
-            <Stat
-              Icon={ClipboardCheck}
-              label="Weekly review submitted (this week)"
-              value={`${data.totals.weeklyReviewSubmittedPct}%`}
-              tone={tone(data.totals.weeklyReviewSubmittedPct)}
-              sub={`${Math.round((data.totals.weeklyReviewSubmittedPct / 100) * data.totals.aggregateReportCount)} of ${data.totals.aggregateReportCount} ICs`}
-            />
-            <Stat
-              Icon={CheckCircle2}
-              label="Weekly review approved (this week)"
-              value={`${data.totals.weeklyReviewApprovedPct}%`}
-              tone={tone(data.totals.weeklyReviewApprovedPct)}
-              sub={`${Math.round((data.totals.weeklyReviewApprovedPct / 100) * data.totals.aggregateReportCount)} of ${data.totals.aggregateReportCount} ICs`}
-            />
-          </section>
-
-          {data.subTeams.length > 0 ? (
-            <section className="mb-8">
-              <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Sub-teams</h2>
-              <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {data.subTeams.map((t) => (
-                  <li key={t.manager.id}><SubTeamCard t={t} /></li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-
-          {data.directIcs.length > 0 ? (
-            <section>
-              <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Direct ICs</h2>
-              <ul className="space-y-1.5">
-                {data.directIcs.map((ic) => (
-                  <li key={ic.id}><DirectIcRow ic={ic} /></li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-        </>
-      )}
-    </div>
-  );
-}
-
-function Stat({
-  Icon, label, value, sub, tone,
-}: {
-  Icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: string | number;
-  sub?: string;
-  tone?: "good" | "warn" | "bad";
-}) {
-  const valueColor =
-    tone === "bad" ? "text-red-600" :
-    tone === "warn" ? "text-amber-600" :
-    tone === "good" ? "text-emerald-600" :
-    undefined;
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
-      <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-        <Icon className="w-3.5 h-3.5" />
-        {label}
       </div>
-      <div className={`text-2xl font-semibold mt-1 ${valueColor ?? ""}`}>{value}</div>
-      {sub ? <div className="text-[11px] text-zinc-500 mt-0.5">{sub}</div> : null}
+
+      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1280px] space-y-6">
+        {data.totals.aggregateReportCount === 0 ? (
+          <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center">
+            <UsersIcon className="w-8 h-8 mx-auto text-zinc-400 mb-3" />
+            <div className="text-base font-medium mb-1 text-zinc-900">No reports yet</div>
+            <p className="text-sm text-zinc-500 max-w-[420px] mx-auto">
+              The director rollup wakes up as soon as you have direct reports — managers or ICs.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <TeamStatTile icon={GitBranchPlus} label="Sub-teams" value={data.totals.subTeamCount} accent="#6366F1" />
+              <TeamStatTile icon={UsersIcon} label="People in tree" value={data.totals.aggregateReportCount} accent="#0073EA"
+                sub={`${data.totals.directIcCount} direct · ${data.totals.aggregateReportCount - data.totals.directIcCount} via sub-teams`} />
+              <TeamStatTile icon={ChartLine} label="Avg KPI compliance" value={`${data.totals.avgKpiCompliancePct}%`} accent={pctColor(data.totals.avgKpiCompliancePct)} />
+              <TeamStatTile icon={BookOpenCheck} label="Avg SOP read-rate" value={`${data.totals.avgSopReadRatePct}%`} accent={pctColor(data.totals.avgSopReadRatePct)} />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <TeamStatTile icon={ClipboardCheck} label="Weekly review submitted" value={`${data.totals.weeklyReviewSubmittedPct}%`} accent={pctColor(data.totals.weeklyReviewSubmittedPct)}
+                sub={`${Math.round((data.totals.weeklyReviewSubmittedPct / 100) * data.totals.aggregateReportCount)} of ${data.totals.aggregateReportCount} ICs`} />
+              <TeamStatTile icon={CheckCircle2} label="Weekly review approved" value={`${data.totals.weeklyReviewApprovedPct}%`} accent={pctColor(data.totals.weeklyReviewApprovedPct)}
+                sub={`${Math.round((data.totals.weeklyReviewApprovedPct / 100) * data.totals.aggregateReportCount)} of ${data.totals.aggregateReportCount} ICs`} />
+            </div>
+
+            {data.subTeams.length > 0 ? (
+              <section>
+                <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Sub-teams</h2>
+                <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {data.subTeams.map((t) => (
+                    <li key={t.manager.id}><SubTeamCard t={t} /></li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {data.directIcs.length > 0 ? (
+              <section>
+                <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Direct ICs</h2>
+                <ul className="space-y-1.5">
+                  {data.directIcs.map((ic) => (
+                    <li key={ic.id}><DirectIcRow ic={ic} /></li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </>
+        )}
+      </div>
     </div>
   );
 }

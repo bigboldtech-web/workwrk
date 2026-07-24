@@ -25,7 +25,7 @@ const SECTIONS: { label: string; rows: Row[] }[] = [
     label: "Alignment",
     rows: [
       { label: "New KRA", description: "A key result area", icon: Target, href: "/kra-kpi?new=1", iconColor: "#a78b6c" },
-      { label: "New KPI", description: "A metric under a KRA", icon: Gauge, href: "/kra-kpi?newKpi=1", iconColor: "#16a34a" },
+      { label: "New KPI", description: "A metric under a KRA", icon: Gauge, href: "/kra-kpi", iconColor: "#16a34a" },
       { label: "New SOP", description: "A procedure attached to a role", icon: FileText, href: "/sops/new", iconColor: "#3b82f6" },
     ],
   },

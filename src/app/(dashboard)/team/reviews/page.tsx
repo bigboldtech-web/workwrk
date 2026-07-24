@@ -12,7 +12,8 @@ import { authOptions } from "@/lib/auth";
 import { resolveAccess, meets } from "@/lib/access";
 import { listReviewsForManager } from "@/lib/weekly-review";
 import { TeamReviewsClient } from "@/components/team/team-reviews-client";
-import { Users as UsersIcon } from "lucide-react";
+import Link from "next/link";
+import { ClipboardCheck } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -34,21 +35,24 @@ export default async function TeamReviewsPage() {
   ]);
 
   return (
-    <div className="px-8 py-6 max-w-[1100px]">
-      <header className="mb-6">
-        <div className="flex items-center gap-2 text-sm text-zinc-500 mb-2">
-          <UsersIcon className="w-3.5 h-3.5" />
-          <span>Team</span>
-          <span>/</span>
-          <span>Weekly reviews</span>
+    <div className="flex flex-col h-full bg-white">
+      <div className="px-6 pt-4 pb-3">
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
+          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
+          <span className="text-zinc-300">/</span>
+          <span>Reviews</span>
         </div>
-        <h1 className="text-2xl font-semibold">Weekly reviews</h1>
-        <p className="text-sm text-zinc-500 mt-1 max-w-[640px]">
-          Reviews submitted by your direct and dotted reports. Approve or request changes so the rollup stays current.
-        </p>
-      </header>
-
-      <TeamReviewsClient pending={pending} acted={acted} />
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#dc2626]/10 shrink-0">
+            <ClipboardCheck className="h-5 w-5 text-[#dc2626]" />
+          </span>
+          <h1 className="text-base font-semibold text-zinc-900">Reviews</h1>
+          <span className="text-xs text-zinc-400 hidden sm:inline">weekly reviews from your reports — approve or request changes</span>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1100px]">
+        <TeamReviewsClient pending={pending} acted={acted} />
+      </div>
     </div>
   );
 }

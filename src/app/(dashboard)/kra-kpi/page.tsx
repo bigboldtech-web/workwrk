@@ -7,7 +7,8 @@
  *  PATCH /api/kras
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Target, Plus, Search, ChevronRight, Hash, Briefcase,
@@ -66,6 +67,15 @@ export default function KraKpiPage() {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+  // The Teams "+" → New KRA routes here with ?new=1; open the dialog once.
+  const searchParams = useSearchParams();
+  const didAutoOpen = useRef(false);
+  useEffect(() => {
+    if (!didAutoOpen.current && searchParams.get("new") === "1") {
+      didAutoOpen.current = true;
+      setNewOpen(true);
+    }
+  }, [searchParams]);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 

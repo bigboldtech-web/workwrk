@@ -26,6 +26,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { TeamStatTile, TeamCard, TeamAvatar } from "@/components/team/ui";
 
 type ApiUser = {
   id: string;
@@ -154,136 +155,65 @@ export default function OrganizationPage() {
   const orgInitials = orgName.split(/\s+/).slice(0, 2).map((p) => p[0] ?? "").join("").toUpperCase() || "OR";
 
   return (
-    <>
-      <OsTitleBar
-        title="Organization"
-        Icon={Building2}
-        iconGradient={GRAD.purpleIndigo}
-        description={users === null
-          ? "Loading organization…"
-          : `${stats.people} people · ${stats.depts} department${stats.depts === 1 ? "" : "s"} · ${stats.offices} office${stats.offices === 1 ? "" : "s"}`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={Math.max(0, stats.people - 3)}
-        actions={
-          <div className="orgh__head-actions">
-            <Link href="/people" className="orgh__nav-link"><Users /> People</Link>
-            <Link href="/people/departments" className="orgh__nav-link"><Building2 /> Departments</Link>
-          </div>
-        }
-      />
+    <div className="flex flex-col h-full bg-white">
+      <div className="px-6 pt-4 pb-3">
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
+          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
+          <span className="text-zinc-300">/</span>
+          <span>Org chart</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#6366F1]/10 shrink-0">
+            <Building2 className="h-5 w-5 text-[#6366F1]" />
+          </span>
+          <h1 className="text-base font-semibold text-zinc-900">Org chart</h1>
+          <span className="text-xs text-zinc-400 hidden sm:inline">{orgName} — reporting hierarchy</span>
+          <div className="flex-1" />
+          <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+            <Users className="w-3.5 h-3.5 text-zinc-400" /> Directory
+          </Link>
+          <Link href="/settings" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+            <SettingsIcon className="w-3.5 h-3.5 text-zinc-400" /> Org settings
+          </Link>
+        </div>
+      </div>
 
-      <div className="orgh">
-        {/* Identity hero */}
-        <section className="orgh__hero" style={{ ["--hero-cover" as unknown as string]: heroGrad }}>
-          <div className="orgh__hero-cover" aria-hidden="true">
-            <span className="orgh__hero-glow" />
-          </div>
-          <div className="orgh__hero-body">
-            <div className="orgh__hero-logo" style={{ background: heroGrad }}>
-              {org?.logoUrl ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={org.logoUrl} alt="" />
-              ) : (
-                <span>{orgInitials}</span>
-              )}
-            </div>
-            <div className="orgh__hero-info">
-              <div className="orgh__hero-meta">
-                {org?.plan && <span className="orgh__hero-plan">{org.plan}</span>}
-                {org?.industry && <span className="orgh__hero-industry">{org.industry}</span>}
-              </div>
-              <h1 className="orgh__hero-name">{orgName}</h1>
-              {org?.legalName && org.legalName !== orgName && (
-                <div className="orgh__hero-legal">Legal: {org.legalName}</div>
-              )}
-              <div className="orgh__hero-stats">
-                <span><Users /> {stats.people} member{stats.people === 1 ? "" : "s"}</span>
-                {stats.hq && <span><MapPin /> HQ: {stats.hq}</span>}
-                {stats.topLayer > 0 && <span><Network /> {stats.topLayer} at top</span>}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* KPIs */}
-        <div className="orgh__kpis">
-          <KpiTile accent="var(--os-c-blue)"   Icon={Users}     label="People"      value={`${stats.people}`}  sub={`${stats.withManager} reporting`} />
-          <KpiTile accent="var(--os-c-purple)" Icon={Building2} label="Departments" value={`${stats.depts}`}   sub="org units" />
-          <KpiTile accent="var(--os-c-orange)" Icon={MapPin}    label="Offices"     value={`${stats.offices}`} sub={stats.hq ? `HQ: ${stats.hq}` : "no HQ set"} />
-          <KpiTile accent="var(--os-c-green)"  Icon={Briefcase} label="Roles"       value={`${stats.roles}`}   sub="job titles" />
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1100px]">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <TeamStatTile icon={Users} label="People" value={stats.people} accent="#0073EA" sub={`${stats.withManager} reporting`} />
+          <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#6366F1" sub="org units" />
+          <TeamStatTile icon={MapPin} label="Offices" value={stats.offices} accent="#f59e0b" sub={stats.hq ? `HQ: ${stats.hq}` : "no HQ set"} />
+          <TeamStatTile icon={Briefcase} label="Roles" value={stats.roles} accent="#16a34a" sub="job titles" />
         </div>
 
-        {/* Launchpad */}
-        <section className="orgh__section">
-          <header className="orgh__section-head">
-            <h2>Settings</h2>
-            <span className="orgh__section-sub">Configure how your organization runs</span>
-          </header>
-          <div className="orgh__launch">
-            <LaunchTile href="/organization?tab=profile" Icon={Building2} gradient={GRAD.bluePurple}    title="Company profile"    sub="name, plan, industry" />
-            <LaunchTile href="/organization?tab=branding" Icon={Palette}    gradient={GRAD.pinkPurple}    title="Branding"          sub="logo, colors, identity" />
-            <LaunchTile href="/people/departments" Icon={Network}    gradient={GRAD.purpleIndigo}  title="Departments"        sub={`${stats.depts} units`} />
-            <LaunchTile href="/people/roles" Icon={Briefcase}  gradient={GRAD.greenTeal}     title="Roles & levels"    sub={`${stats.roles} job titles`} />
-            <LaunchTile href="/organization?tab=offices" Icon={MapPin}     gradient={GRAD.orangePink}    title="Offices"           sub={`${stats.offices} location${stats.offices === 1 ? "" : "s"}`} />
-            <LaunchTile href="/organization?tab=sso" Icon={Shield}     gradient={GRAD.indigoBlue}    title="SSO & domains"     sub="auth, SCIM, audit" />
-            <LaunchTile href="/organization?tab=billing" Icon={CreditCard} gradient={GRAD.yellowOrange}  title="Billing & plan"    sub="invoices, seats" />
-            <LaunchTile href="/organization?tab=audit"   Icon={FileText}   gradient={GRAD.tealGreen}     title="Audit log"         sub="security events" />
-          </div>
-        </section>
-
-        {/* Hierarchy preview */}
         {loadError ? (
-          <OsEmptyView Icon={Network} iconGradient={GRAD.redPink} title="Couldn't load org chart" subtitle={`API error: ${loadError}.`} cta="Retry" />
+          <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center text-sm text-zinc-500">Couldn&rsquo;t load org chart — {loadError}</div>
         ) : users === null ? (
-          <div className="orgh__loading">Loading hierarchy…</div>
-        ) : stats.people > 0 && tree.length > 0 ? (
-          <section className="orgh__section">
-            <header className="orgh__section-head">
-              <h2>Reporting hierarchy</h2>
-              <span className="orgh__section-sub">{stats.topLayer} at the top · {stats.people} total</span>
-              <Link href="/people" className="orgh__section-link">All people <ArrowRight /></Link>
-            </header>
-            <div className="orgh__tree">
-              {tree.slice(0, 5).map((node) => (
+          <div className="text-sm text-zinc-400 py-8 text-center">Loading hierarchy…</div>
+        ) : tree.length > 0 ? (
+          <TeamCard
+            title="Reporting hierarchy"
+            subtitle={`${stats.topLayer} at the top · ${stats.people} total`}
+            action={<Link href="/people" className="inline-flex items-center gap-1 text-[12px] text-[var(--os-brand)] hover:underline">All people <ArrowRight className="w-3 h-3" /></Link>}
+          >
+            <div className="space-y-0.5">
+              {tree.slice(0, 8).map((node) => (
                 <TreeNodeView key={node.user.id} node={node} depth={0} maxDepth={2} collapsed={collapsedNodes} toggle={toggleNode} />
               ))}
-              {tree.length > 5 && (
-                <div className="orgh__tree-more">
-                  <Link href="/people">+ {tree.length - 5} more top-level → see all people</Link>
+              {tree.length > 8 ? (
+                <div className="pt-1.5">
+                  <Link href="/people" className="text-[12px] text-zinc-500 hover:text-zinc-800">+ {tree.length - 8} more top-level → see all people</Link>
                 </div>
-              )}
+              ) : null}
             </div>
-          </section>
-        ) : null}
-
-        {/* Quick links */}
-        <section className="orgh__section">
-          <header className="orgh__section-head">
-            <h2>Related areas</h2>
-          </header>
-          <div className="orgh__related">
-            <Link href="/people/skills" className="orgh__related-link">
-              <GraduationCap /> <span>Skills matrix</span>
-            </Link>
-            <Link href="/people" className="orgh__related-link">
-              <Users /> <span>People directory</span>
-            </Link>
-            <Link href="/people/roles" className="orgh__related-link">
-              <Briefcase /> <span>Role library</span>
-            </Link>
-            <Link href="/organization?tab=settings" className="orgh__related-link">
-              <SettingsIcon /> <span>Workspace settings</span>
-            </Link>
-            <Link href="/organization?tab=domains" className="orgh__related-link">
-              <Globe /> <span>Domains</span>
-            </Link>
-            <Link href="/organization?tab=ai" className="orgh__related-link">
-              <Sparkles /> <span>AI profile</span>
-            </Link>
+          </TeamCard>
+        ) : (
+          <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center text-sm text-zinc-500">
+            No hierarchy yet — set reporting managers in <Link href="/settings/members" className="text-[var(--os-brand)] hover:underline">Members</Link>.
           </div>
-        </section>
+        )}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -299,77 +229,36 @@ function TreeNodeView({
   const id = node.user.id;
   const isCollapsed = collapsed.has(id) || depth >= maxDepth;
   const hasReports = node.reports.length > 0;
-  const fullName = [node.user.firstName, node.user.lastName].filter(Boolean).join(" ") || "Unknown";
+  const name = [node.user.firstName, node.user.lastName].filter(Boolean).join(" ") || "Unknown";
   return (
-    <div className="orgh__node">
-      <div
-        className={`orgh__card${hasReports ? " has-reports" : ""}`}
-        style={{ ["--depth" as unknown as string]: `${depth}` }}
-        onClick={() => hasReports && toggle(id)}
-      >
+    <div>
+      <div className="flex items-center gap-1 rounded-lg hover:bg-zinc-50 pr-2" style={{ paddingLeft: depth * 20 }}>
         <button
           type="button"
-          className={`orgh__chev${!hasReports ? " is-leaf" : ""}${isCollapsed ? " is-collapsed" : ""}`}
+          onClick={() => hasReports && toggle(id)}
+          className="h-6 w-6 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 shrink-0"
           aria-label={isCollapsed ? "Expand" : "Collapse"}
-          onClick={(e) => { e.stopPropagation(); if (hasReports) toggle(id); }}
         >
-          {hasReports ? <ChevronDown /> : <span className="orgh__chev-dot" />}
+          {hasReports ? (isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />) : <span className="w-1.5 h-1.5 rounded-full bg-zinc-200" />}
         </button>
-        <Link href={`/people/${id}`} className="orgh__card-link" onClick={(e) => e.stopPropagation()}>
-          <span className="orgh__card-av" style={{ background: avColor(id) }}>
-            {initials(node.user.firstName, node.user.lastName)}
-          </span>
-          <div className="orgh__card-info">
-            <div className="orgh__card-name">{fullName}</div>
-            <div className="orgh__card-meta">
-              {node.user.role?.title ?? "—"}
-              {node.user.department?.name && (
-                <span className="orgh__card-dept">· {node.user.department.name}</span>
-              )}
+        <Link href={`/people/${id}`} className="flex items-center gap-2.5 flex-1 min-w-0 py-1.5">
+          <TeamAvatar name={name} size={30} />
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-zinc-900 truncate">{name}</div>
+            <div className="text-[11px] text-zinc-500 truncate">
+              {node.user.role?.title ?? "—"}{node.user.department?.name ? ` · ${node.user.department.name}` : ""}
             </div>
           </div>
         </Link>
-        {hasReports && (
-          <span className="orgh__card-reports">
-            {node.reports.length} report{node.reports.length === 1 ? "" : "s"}
-            {isCollapsed ? <ChevronRight /> : <ChevronDown />}
-          </span>
-        )}
+        {hasReports ? <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{node.reports.length}</span> : null}
       </div>
-      {hasReports && !isCollapsed && (
-        <div className="orgh__children">
+      {hasReports && !isCollapsed ? (
+        <div>
           {node.reports.map((r) => (
             <TreeNodeView key={r.user.id} node={r} depth={depth + 1} maxDepth={maxDepth} collapsed={collapsed} toggle={toggle} />
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-function LaunchTile({ href, Icon, gradient, title, sub }: { href: string; Icon: typeof Building2; gradient: string; title: string; sub: string }) {
-  return (
-    <Link href={href} className="orgh__launch-card">
-      <div className="orgh__launch-icon" style={{ background: gradient }}><Icon /></div>
-      <div className="orgh__launch-info">
-        <span className="orgh__launch-title">{title}</span>
-        <span className="orgh__launch-sub">{sub}</span>
-      </div>
-      <ChevronRight className="orgh__launch-arrow" />
-    </Link>
-  );
-}
-
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Building2; label: string; value: string; sub: string }) {
-  return (
-    <div className="orgh__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="orgh__kpi-accent" aria-hidden="true" />
-      <div className="orgh__kpi-row">
-        <div className="orgh__kpi-icon"><Icon /></div>
-        <div className="orgh__kpi-label">{label}</div>
-      </div>
-      <div className="orgh__kpi-value">{value}</div>
-      <div className="orgh__kpi-sub">{sub}</div>
+      ) : null}
     </div>
   );
 }

@@ -7,7 +7,8 @@
  *  PATCH /api/reviews             { id, status?, ... }
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Award, Plus, Search, Calendar as CalendarIcon, CheckCircle2,
@@ -78,6 +79,15 @@ export default function ReviewsPage() {
   const [statusFilter, setStatusFilter] = useState<Set<CycleStatus>>(new Set());
   const [newOpen, setNewOpen] = useState(false);
   const [now] = useState(() => new Date());
+  // The Teams "+" → Start review cycle routes here with ?new=1.
+  const searchParams = useSearchParams();
+  const didAutoOpen = useRef(false);
+  useEffect(() => {
+    if (!didAutoOpen.current && searchParams.get("new") === "1") {
+      didAutoOpen.current = true;
+      setNewOpen(true);
+    }
+  }, [searchParams]);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 

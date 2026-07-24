@@ -8,7 +8,8 @@ import { authOptions } from "@/lib/auth";
 import { resolveAccess, meets } from "@/lib/access";
 import { listKpiReviewsForManager } from "@/lib/kpi-record";
 import { KpiReviewsClient } from "@/components/team/kpi-reviews-client";
-import { Users as UsersIcon } from "lucide-react";
+import Link from "next/link";
+import { Award } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -30,22 +31,24 @@ export default async function TeamKpiReviewsPage() {
   ]);
 
   return (
-    <div className="px-8 py-6 max-w-[1100px]">
-      <header className="mb-6">
-        <div className="flex items-center gap-2 text-sm text-zinc-500 mb-2">
-          <UsersIcon className="w-3.5 h-3.5" />
-          <span>Team</span>
-          <span>/</span>
+    <div className="flex flex-col h-full bg-white">
+      <div className="px-6 pt-4 pb-3">
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
+          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
+          <span className="text-zinc-300">/</span>
           <span>KPI approvals</span>
         </div>
-        <h1 className="text-2xl font-semibold">KPI approvals</h1>
-        <p className="text-sm text-zinc-500 mt-1 max-w-[640px]">
-          KPI scores submitted by your direct and dotted reports. Approve them or send them back for
-          changes — sent-back scores re-open for the report to resubmit.
-        </p>
-      </header>
-
-      <KpiReviewsClient pending={pending} acted={acted} />
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#f59e0b]/10 shrink-0">
+            <Award className="h-5 w-5 text-[#f59e0b]" />
+          </span>
+          <h1 className="text-base font-semibold text-zinc-900">KPI approvals</h1>
+          <span className="text-xs text-zinc-400 hidden sm:inline">sign off on reported KPI scores, or send back for changes</span>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1100px]">
+        <KpiReviewsClient pending={pending} acted={acted} />
+      </div>
     </div>
   );
 }

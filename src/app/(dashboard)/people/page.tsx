@@ -23,7 +23,7 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { useOsToast } from "@/components/layout/os/toast";
+import { TeamStatTile, TeamAvatar } from "@/components/team/ui";
 
 type ApiUser = {
   id: string;
@@ -92,7 +92,6 @@ export default function PeopleDirectoryPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
@@ -166,134 +165,109 @@ export default function PeopleDirectoryPage() {
   }, [users, depts.length]);
 
   return (
-    <>
-      <OsTitleBar
-        title="People"
-        Icon={Users}
-        iconGradient={GRAD.bluePurple}
-        description={users === null
-          ? "Loading directory…"
-          : `${stats.total} teammate${stats.total === 1 ? "" : "s"} · ${stats.depts} department${stats.depts === 1 ? "" : "s"}${stats.onLeave > 0 ? ` · ${stats.onLeave} on leave` : ""}`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={Math.max(0, stats.total - 3)}
-        actions={
-          <div className="ppl__head-actions">
-            <Link href="/people/departments" className="ppl__nav-link"><Network /> Org chart</Link>
-            <Link href="/people/roles" className="ppl__nav-link"><Briefcase /> Roles</Link>
-            <Link href="/people/skills" className="ppl__nav-link"><GraduationCap /> Skills</Link>
-            <button type="button" className="ppl__btn-primary" onClick={() => toast("Invite people via Workspace settings.")}>
-              <UserPlus /> Invite
-            </button>
-          </div>
-        }
-      />
+    <div className="flex flex-col h-full bg-white">
+      <div className="px-6 pt-4 pb-3">
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
+          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
+          <span className="text-zinc-300">/</span>
+          <span>Directory</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
+            <Users className="h-5 w-5 text-[#0073EA]" />
+          </span>
+          <h1 className="text-base font-semibold text-zinc-900">Directory</h1>
+          <span className="text-xs text-zinc-400 hidden sm:inline">{users === null ? "loading…" : `${stats.total} people · ${stats.depts} departments`}</span>
+          <div className="flex-1" />
+          <Link href="/organization" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+            <Network className="w-3.5 h-3.5 text-zinc-400" /> Org chart
+          </Link>
+          <Link href="/people/roles" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+            <Briefcase className="w-3.5 h-3.5 text-zinc-400" /> Roles
+          </Link>
+        </div>
+      </div>
 
-      <div className="ppl">
-        {/* KPIs */}
-        <div className="ppl__kpis">
-          <KpiTile accent="var(--os-c-blue)"   Icon={Users}     label="Headcount"   value={`${stats.total}`}     sub="all active teammates" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Building2} label="Departments" value={`${stats.depts}`}     sub="org units" />
-          <KpiTile accent="var(--os-c-orange)" Icon={ArrowLeft} label="On leave"    value={`${stats.onLeave}`}   sub={stats.onLeave > 0 ? "back when noted" : "everyone here"} />
-          <KpiTile accent="var(--os-c-green)"  Icon={Sparkles}  label="New (90d)"   value={`${stats.newHires}`}  sub="recent joiners" />
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1280px]">
+        {/* Stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <TeamStatTile icon={Users} label="Headcount" value={stats.total} accent="#0073EA" sub="active teammates" />
+          <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#6366F1" sub="org units" />
+          <TeamStatTile icon={ArrowLeft} label="On leave" value={stats.onLeave} accent="#f59e0b" sub={stats.onLeave > 0 ? "back when noted" : "everyone here"} />
+          <TeamStatTile icon={Sparkles} label="New (90d)" value={stats.newHires} accent="#16a34a" sub="recent joiners" />
         </div>
 
         {/* Toolbar */}
-        <div className="ppl__toolbar">
-          <div className="ppl__search">
-            <Search />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Find anyone by name, role, dept, email…"
-              aria-label="Search people"
-            />
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 flex-1 min-w-[220px]">
+            <Search className="w-3.5 h-3.5 text-zinc-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find anyone by name, role, dept, email…" aria-label="Search people" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
           </div>
-          <div className="ppl__tabs">
-            <button type="button" className={filter === "all" ? "is-active" : ""} onClick={() => setFilter("all")}>All <span>{stats.total}</span></button>
-            <button type="button" className={filter === "active" ? "is-active" : ""} onClick={() => setFilter("active")}>Active</button>
-            <button type="button" className={`${filter === "on-leave" ? "is-active" : ""} ${stats.onLeave > 0 ? "is-warn" : ""}`} onClick={() => setFilter("on-leave")}>On leave <span>{stats.onLeave}</span></button>
-            <button type="button" className={filter === "new" ? "is-active" : ""} onClick={() => setFilter("new")}>New <span>{stats.newHires}</span></button>
+          <div className="inline-flex items-center gap-1">
+            {([["all", "All"], ["active", "Active"], ["on-leave", "On leave"], ["new", "New"]] as const).map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setFilter(k)} className={`h-8 px-2.5 rounded-md text-[12.5px] ${filter === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>{label}</button>
+            ))}
           </div>
-          <div className="ppl__sort">
-            <span>Sort</span>
-            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="ppl__sort-select">
-              <option value="name">A–Z</option>
-              <option value="recent">Recently joined</option>
-              <option value="tenure">Longest tenure</option>
-              <option value="reports">Most reports</option>
-            </select>
-            <ChevronDown />
-          </div>
+          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 outline-none">
+            <option value="name">A–Z</option>
+            <option value="recent">Recently joined</option>
+            <option value="tenure">Longest tenure</option>
+            <option value="reports">Most reports</option>
+          </select>
         </div>
 
         {/* Department chips */}
-        {depts.length > 0 && (
-          <div className="ppl__depts">
-            <button
-              type="button"
-              className={`ppl__dept${activeDept === null ? " is-active" : ""}`}
-              onClick={() => setActiveDept(null)}
-            >
-              <Hash /> All departments <span className="ppl__dept-count">{stats.total}</span>
+        {depts.length > 0 ? (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button type="button" onClick={() => setActiveDept(null)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[12px] border ${activeDept === null ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
+              All <span className="opacity-60">{stats.total}</span>
             </button>
             {depts.map((d) => (
-              <button
-                key={d.id}
-                type="button"
-                className={`ppl__dept${activeDept === d.id ? " is-active" : ""}`}
-                style={{ ["--dept-c" as unknown as string]: d.color }}
-                onClick={() => setActiveDept(d.id)}
-              >
-                <span className="ppl__dept-dot" />
+              <button key={d.id} type="button" onClick={() => setActiveDept(d.id)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[12px] border ${activeDept === d.id ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
+                <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
                 {d.name}
-                <span className="ppl__dept-count">{d.count}</span>
+                <span className="opacity-60">{d.count}</span>
               </button>
             ))}
           </div>
-        )}
+        ) : null}
 
         {/* Body */}
         {loadError ? (
-          <OsEmptyView Icon={Users} iconGradient={GRAD.redPink} title="Couldn't load people" subtitle={`API error: ${loadError}.`} cta="Retry" />
+          <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center text-sm text-zinc-500">Couldn&rsquo;t load people — {loadError}</div>
         ) : users === null ? (
-          <div className="ppl__loading">Loading directory…</div>
+          <div className="text-sm text-zinc-400 py-8 text-center">Loading directory…</div>
         ) : stats.total === 0 ? (
-          <OsEmptyView
-            Icon={UserPlus}
-            iconGradient={GRAD.bluePurple}
-            title="No teammates yet"
-            subtitle="Invite people from Workspace settings or HR onboarding."
-            cta="Invite"
-          />
+          <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center">
+            <div className="text-base font-medium text-zinc-900 mb-1">No teammates yet</div>
+            <p className="text-sm text-zinc-500">Invite people from Workspace settings or HR onboarding.</p>
+          </div>
         ) : filtered.length === 0 ? (
-          <div className="ppl__empty">
-            <Search />
-            <div>No one matches these filters.</div>
-            <button type="button" className="ppl__empty-reset" onClick={() => { setActiveDept(null); setFilter("all"); setSearch(""); }}>Clear filters</button>
+          <div className="border border-zinc-200 rounded-xl px-6 py-10 text-center text-sm text-zinc-500">
+            No one matches these filters.
+            <button type="button" className="text-[var(--os-brand)] hover:underline ml-1.5" onClick={() => { setActiveDept(null); setFilter("all"); setSearch(""); }}>Clear</button>
           </div>
         ) : activeDept ? (
-          // Single dept selected — flat grid
-          <div className="ppl__grid">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {flatSorted.map((u) => <PersonCard key={u.id} user={u} />)}
           </div>
         ) : (
-          // Grouped by department
           grouped.map((g) => (
-            <section key={g.name} className="ppl__group" style={{ ["--g-c" as unknown as string]: g.color }}>
-              <header className="ppl__group-head">
-                <span className="ppl__group-dot" />
-                <h2 className="ppl__group-title">{g.name}</h2>
-                <span className="ppl__group-count">{g.people.length}</span>
-                <span className="ppl__group-line" />
-              </header>
-              <div className="ppl__grid">
+            <section key={g.name}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 rounded-full" style={{ background: g.color }} />
+                <h2 className="text-xs uppercase tracking-wide text-zinc-500 font-semibold">{g.name}</h2>
+                <span className="text-[11px] text-zinc-400">{g.people.length}</span>
+                <span className="flex-1 h-px bg-zinc-100" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {g.people.map((u) => <PersonCard key={u.id} user={u} />)}
               </div>
             </section>
           ))
         )}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -314,74 +288,35 @@ function sortFor(sortKey: SortKey) {
 }
 
 function PersonCard({ user: u }: { user: ApiUser }) {
-  const av = avGradient(u.id);
-  const initials_ = initials(u.firstName, u.lastName);
   const name = fullName(u);
-  const tone = tenureTone(u.joinDate);
   const onLeave = u.status === "ON_LEAVE";
   const isNew = u.joinDate && (Date.now() - new Date(u.joinDate).getTime()) < 90 * MS_DAY;
   const reports = u._count?.directReports ?? 0;
 
   return (
-    <Link href={`/people/${u.id}`} className={`ppl__card${onLeave ? " is-leave" : ""}`}>
-      <div className="ppl__card-cover" style={{ background: av }} aria-hidden="true">
-        <span className="ppl__card-init">{initials_}</span>
-        {onLeave && <span className="ppl__card-leave">On leave</span>}
-        {isNew && !onLeave && <span className="ppl__card-new">New</span>}
-      </div>
-
-      <div className="ppl__card-body">
-        <div className="ppl__card-name">{name}</div>
-        {u.role?.title && <div className="ppl__card-role">{u.role.title}</div>}
-
-        <div className="ppl__card-tags">
-          {u.department?.name && (
-            <span className="ppl__card-dept" style={{ ["--dept-c" as unknown as string]: deptColor(u.department.name) }}>
-              {u.department.name}
-            </span>
-          )}
-          {u.office?.city && (
-            <span className="ppl__card-loc">
-              <MapPin /> {u.office.city}
-            </span>
-          )}
-        </div>
-
-        {u.email && (
-          <a href={`mailto:${u.email}`} className="ppl__card-email" onClick={(e) => e.stopPropagation()}>
-            <Mail /> <span>{u.email}</span>
-          </a>
-        )}
-
-        {u.manager && (
-          <div className="ppl__card-mgr">
-            <Briefcase /> Reports to {[u.manager.firstName, u.manager.lastName].filter(Boolean).join(" ") || "Manager"}
+    <Link href={`/people/${u.id}`} className="block rounded-xl border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition">
+      <div className="flex items-center gap-3">
+        <TeamAvatar name={name} avatar={u.avatar} size={40} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] font-medium text-zinc-900 truncate flex items-center gap-1.5">
+            <span className="truncate">{name}</span>
+            {onLeave ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 shrink-0">On leave</span> : isNew ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 shrink-0">New</span> : null}
           </div>
-        )}
+          {u.role?.title ? <div className="text-[12px] text-zinc-500 truncate">{u.role.title}</div> : null}
+        </div>
       </div>
-
-      <div className="ppl__card-foot">
-        <span className={`ppl__card-tenure ppl__card-tenure--${tone}`}>{tenure(u.joinDate)}</span>
-        {reports > 0 && (
-          <span className="ppl__card-reports">
-            <Users /> {reports} report{reports === 1 ? "" : "s"}
-          </span>
-        )}
+      <div className="mt-2.5 flex items-center gap-1.5 flex-wrap text-[11px]">
+        {u.department?.name ? (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded" style={{ background: `${deptColor(u.department.name)}1a`, color: deptColor(u.department.name) }}>{u.department.name}</span>
+        ) : null}
+        {u.office?.city ? <span className="inline-flex items-center gap-1 text-zinc-500"><MapPin className="w-3 h-3" />{u.office.city}</span> : null}
+        <span className="text-zinc-400 tabular-nums ml-auto">{tenure(u.joinDate)}{reports > 0 ? ` · ${reports} report${reports === 1 ? "" : "s"}` : ""}</span>
       </div>
+      {u.manager ? (
+        <div className="mt-1.5 text-[11px] text-zinc-400 truncate flex items-center gap-1">
+          <Briefcase className="w-3 h-3 shrink-0" /> Reports to {[u.manager.firstName, u.manager.lastName].filter(Boolean).join(" ") || "Manager"}
+        </div>
+      ) : null}
     </Link>
-  );
-}
-
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Users; label: string; value: string; sub: string }) {
-  return (
-    <div className="ppl__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="ppl__kpi-accent" aria-hidden="true" />
-      <div className="ppl__kpi-row">
-        <div className="ppl__kpi-icon"><Icon /></div>
-        <div className="ppl__kpi-label">{label}</div>
-      </div>
-      <div className="ppl__kpi-value">{value}</div>
-      <div className="ppl__kpi-sub">{sub}</div>
-    </div>
   );
 }

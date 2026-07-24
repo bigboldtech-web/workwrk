@@ -13,7 +13,8 @@
  *   Cards: title + level chip + dept + headcount badge (orange when 0).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Briefcase, Plus, Users, Search, ArrowLeft, Building2, UserX,
@@ -101,6 +102,17 @@ export default function RolesPage() {
       void load();
     } catch { toast("Couldn't create role"); }
   }
+
+  // The Teams "+" → New role routes here with ?new=1; fire quickAdd once.
+  const searchParams = useSearchParams();
+  const didAutoAdd = useRef(false);
+  useEffect(() => {
+    if (!didAutoAdd.current && searchParams.get("new") === "1") {
+      didAutoAdd.current = true;
+      void quickAdd();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // ─── Filter + group ──────────────────────────────────────
   const filtered = useMemo(() => {
