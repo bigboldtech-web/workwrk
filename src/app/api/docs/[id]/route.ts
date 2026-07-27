@@ -179,6 +179,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   return NextResponse.json({ doc, version: nextVersion });
 }
 
+// PATCH is an alias of PUT. Some clients (the topbar Notepad quick-tool) issue
+// PATCH for partial title/content updates; without this export Next returns 405
+// and the write is silently lost. PUT already handles partial bodies
+// (title ?? existing, content ?? existing), so delegating is correct + safe.
+export const PATCH = PUT;
+
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;

@@ -342,6 +342,20 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           setLegacy((c as { html: string }).html);
           setBnDoc(null);
           setBlocks(null);
+        } else if (c && (c as { type?: string }).type === "doc" && Array.isArray((c as { content?: unknown[] }).content)) {
+          // TipTap shape (authored by the Notepad quick-tool / other surfaces).
+          // Without this branch it fell through to the empty else and the first
+          // autosave CLOBBERED the real content. Render its text via the html
+          // seed path so it shows; the next save rewrites it in v2 shape.
+          const paras = ((c as { content: Array<{ content?: Array<{ text?: string }> }> }).content) ?? [];
+          const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const html = paras
+            .map((p) => (p.content ?? []).map((n) => n.text ?? "").join(""))
+            .map((t) => `<p>${esc(t)}</p>`)
+            .join("");
+          setLegacy(html || "<p></p>");
+          setBnDoc(null);
+          setBlocks(null);
         } else {
           setBnDoc(null);
           setBlocks([]);
@@ -365,6 +379,21 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     null | { bnDoc: PartialBlock[] | null; blocks: Block[]; meta: DocMeta; excerpt?: string }
   >(null);
 
+  // Live refs so a title-triggered or debounced save always persists the LATEST
+  // title + content regardless of stale closures. Title now flows through the
+  // single persist() writer (below) so title + body can never fire two
+  // concurrent PUTs that 409 each other against the same knownUpdatedAt.
+  const titleRef = useRef(title);
+  const bnDocRef = useRef(bnDoc);
+  const blocksRef = useRef(blocks);
+  const metaRef = useRef(meta);
+  useEffect(() => {
+    titleRef.current = title;
+    bnDocRef.current = bnDoc;
+    blocksRef.current = blocks;
+    metaRef.current = meta;
+  });
+
   // Persist accepts the full editor state: BlockNote doc (source of truth),
   // legacy mirror (for chrome + legacy readers), and the doc meta.
   const persist = useCallback(async (
@@ -372,6 +401,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     nextBlocks: Block[],
     nextMeta: DocMeta,
     nextExcerpt?: string,
+    attempt = 0,
   ) => {
     if (saveInFlightRef.current) {
       pendingPersistRef.current = { bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta, excerpt: nextExcerpt };
@@ -392,38 +422,52 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       };
       const res = await fetch(`/api/docs/${docId}`, {
         method: "PUT",
-        // Let the save complete even if the tab is closing / navigating away —
-        // otherwise the browser can abort an in-flight save-on-nav and lose it.
+        // keepalive lets a save-on-nav complete across the unload. If the body
+        // exceeds the 64KB keepalive cap the fetch rejects → caught below →
+        // retried WITHOUT keepalive, so large docs still save.
         keepalive: true,
-        headers: {
-          "Content-Type": "application/json",
-          // Conflict-detection precondition — server returns 409 when the
-          // doc's current updatedAt differs from what we last observed.
-          ...(lastUpdatedAtRef.current ? { "If-Unmodified-Since": lastUpdatedAtRef.current } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: title.trim() || "Untitled note",
+          title: titleRef.current.trim() || "Untitled note",
           content,
           excerpt: text || null,
           knownUpdatedAt: lastUpdatedAtRef.current,
         }),
       });
       if (res.status === 409) {
+        // Recover instead of dropping the edit: re-sync to the server's current
+        // version, then re-save our content once. Only a still-conflicting
+        // retry surfaces the banner (a genuine concurrent peer edit).
+        if (attempt < 1) {
+          try {
+            const fresh = await fetch(`/api/docs/${docId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+            const live = fresh?.doc?.updatedAt ?? fresh?.updatedAt ?? null;
+            if (live) lastUpdatedAtRef.current = live;
+          } catch { /* ignore */ }
+          setTimeout(() => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, attempt + 1); }, 150);
+          return;
+        }
         setConflict(true);
         return;
       }
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json().catch(() => null);
-      // Track the new server-side updatedAt so the next PUT can prove
-      // the local view is still in sync.
       if (data?.doc?.updatedAt) lastUpdatedAtRef.current = data.doc.updatedAt;
-      // Keep the sidebar's copy of this doc's name live without a reload.
-      const savedTitle = title.trim() || "Untitled note";
+      const savedTitle = titleRef.current.trim() || "Untitled note";
       if (savedTitle !== lastSyncedTitleRef.current) {
         lastSyncedTitleRef.current = savedTitle;
         refreshSidebar();
       }
-    } catch { toast("Couldn't save"); }
+    } catch {
+      // Network failure or a >64KB keepalive rejection — retry with backoff
+      // (dropping keepalive won't matter for in-editor autosaves) so a
+      // transient failure never silently loses the edit. Mandate: never drop.
+      if (attempt < 3) {
+        setTimeout(() => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, attempt + 1); }, 800 * Math.pow(2, attempt));
+      } else {
+        toast("Couldn't save — check your connection and keep this tab open");
+      }
+    }
     finally {
       saveInFlightRef.current = false;
       // Drain a coalesced pending save with the now-fresh updatedAt.
@@ -431,7 +475,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       pendingPersistRef.current = null;
       if (queued) void persist(queued.bnDoc, queued.blocks, queued.meta, queued.excerpt);
     }
-  }, [docId, title, toast]);
+  }, [docId, toast]);
 
   // Called by BlockNoteCanvas on every (debounced) edit. We update both the
   // BN source of truth and the derived legacy mirror, then persist.
@@ -467,28 +511,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
   function saveTitle(next: string) {
     setTitle(next);
+    titleRef.current = next; // so the coalesced persist() below sends the fresh title
     if (titleTimer.current) clearTimeout(titleTimer.current);
-    titleTimer.current = setTimeout(async () => {
-      try {
-        // Title saves must participate in the same optimistic-concurrency
-        // protocol as content saves. Without this coordination, a title
-        // PUT bumps the server's updatedAt while lastUpdatedAtRef stays
-        // pinned — the next content save then trips 409 against itself.
-        const res = await fetch(`/api/docs/${docId}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: next.trim() || "Untitled note",
-            knownUpdatedAt: lastUpdatedAtRef.current,
-          }),
-        });
-        if (res.status === 409) {
-          setConflict(true);
-          return;
-        }
-        if (!res.ok) return;
-        const data = await res.json().catch(() => null);
-        if (data?.doc?.updatedAt) lastUpdatedAtRef.current = data.doc.updatedAt;
-      } catch { /* ignore */ }
+    // Route the title save through the SAME persist() writer as the body, so
+    // the two can never issue concurrent PUTs racing the same knownUpdatedAt
+    // (the old independent title PUT is what silently 409-dropped note bodies).
+    titleTimer.current = setTimeout(() => {
+      void persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current);
     }, 700);
   }
 

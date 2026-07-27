@@ -448,6 +448,21 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
     onChangeRef.current(bnDoc as unknown as BnDocJSON, mirror, plainText);
   }, [editor]);
 
+  // Hard refresh (Cmd+R), tab close, and tab-switch do NOT run React unmount
+  // cleanup, so a pending debounced save would be lost. Flush it on pagehide +
+  // when the tab is hidden. The parent PUT uses keepalive so it completes
+  // across the unload. (Matches the notepad + whiteboard editors.)
+  useEffect(() => {
+    const onPageHide = () => { if (saveTimer.current) flushSave(); };
+    const onVisibility = () => { if (document.visibilityState === "hidden" && saveTimer.current) flushSave(); };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [flushSave]);
+
   // Slash → "Page": save the inline link now, then jump into the new page.
   const onPageCreated = useCallback((childId: string) => {
     flushSave();

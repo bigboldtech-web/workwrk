@@ -20,5 +20,8 @@ export default function DocPage({ params }: { params: Promise<{ id: string }> })
   if (peek && peek !== id) {
     return <DocSplitView primaryId={id} peekId={peek} />;
   }
-  return <BlockDocEditor docId={id} />;
+  // key={id} forces a fresh editor instance per note. Without it, navigating
+  // between notes reuses one instance whose stale bnDoc/title/lastUpdatedAtRef
+  // could be autosaved onto the newly-opened note — clobbering its content.
+  return <BlockDocEditor key={id} docId={id} />;
 }

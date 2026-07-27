@@ -100,7 +100,7 @@ export function DocSplitView({ primaryId, peekId }: Props) {
   return (
     <div className="bdoc-split" ref={containerRef}>
       <div className="bdoc-split__pane" style={{ width: leftPct }}>
-        <BlockDocEditor docId={primaryId} />
+        <BlockDocEditor key={primaryId} docId={primaryId} />
       </div>
 
       <div
@@ -134,7 +134,7 @@ export function DocSplitView({ primaryId, peekId }: Props) {
             <X />
           </button>
         </div>
-        <BlockDocEditor docId={peekId} pane="peek" />
+        <BlockDocEditor key={peekId} docId={peekId} pane="peek" />
       </div>
     </div>
   );

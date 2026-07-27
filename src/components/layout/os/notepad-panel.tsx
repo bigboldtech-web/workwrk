@@ -43,6 +43,20 @@ export function NotepadPanel() {
   // window can still flush it (with keepalive) instead of dropping the edit.
   const pendingRef = useRef<{ id: string; body: string } | null>(null);
 
+  // Immediately persist the pending save (if any) and cancel its debounce
+  // timer. MUST be called before switching notes / closing the panel — a
+  // single shared timer means an un-flushed note A save would otherwise be
+  // clobbered when note B arms the timer, silently losing note A's edit.
+  const flushPending = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const p = pendingRef.current;
+    if (!p) return;
+    pendingRef.current = null;
+    void fetch(`/api/docs/${p.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, keepalive: true, body: p.body,
+    }).catch(() => {});
+  }, []);
+
   const loadList = useCallback(() => {
     fetch("/api/docs?standaloneOnly=1")
       .then((r) => (r.ok ? r.json() : null))
@@ -63,6 +77,7 @@ export function NotepadPanel() {
   }, [loadList]);
 
   async function openNote(id: string) {
+    flushPending(); // persist the note we're leaving before loading another
     setActiveId(id);
     setText("");
     const res = await fetch(`/api/docs/${id}`);
@@ -70,6 +85,7 @@ export function NotepadPanel() {
   }
 
   async function newNote() {
+    flushPending();
     const res = await fetch("/api/docs", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Untitled note", content: textToContent("") }),
@@ -97,38 +113,33 @@ export function NotepadPanel() {
   // Flush any pending note save when the tab is hidden/closing, so a quick note
   // typed and then navigated away from within the debounce window isn't lost.
   useEffect(() => {
-    const flush = () => {
-      const p = pendingRef.current;
-      if (!p) return;
-      pendingRef.current = null;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      fetch(`/api/docs/${p.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, keepalive: true, body: p.body,
-      }).catch(() => {});
-    };
-    window.addEventListener("pagehide", flush);
-    window.addEventListener("visibilitychange", flush);
+    const onHide = () => { if (document.visibilityState === "hidden") flushPending(); };
+    window.addEventListener("pagehide", flushPending);
+    document.addEventListener("visibilitychange", onHide);
     return () => {
-      window.removeEventListener("pagehide", flush);
-      window.removeEventListener("visibilitychange", flush);
+      window.removeEventListener("pagehide", flushPending);
+      document.removeEventListener("visibilitychange", onHide);
     };
-  }, []);
+  }, [flushPending]);
+
+  // Closing the panel must also persist the in-flight edit.
+  const closePanel = useCallback(() => { flushPending(); setOpen(false); }, [flushPending]);
 
   if (!open) return null;
 
   return (
     <>
-      <div className="fixed inset-0 z-[90] bg-black/20" onClick={() => setOpen(false)} aria-hidden />
+      <div className="fixed inset-0 z-[90] bg-black/20" onClick={closePanel} aria-hidden />
       <aside className="fixed top-0 right-0 z-[91] h-screen w-[380px] max-w-[92vw] bg-white dark:bg-[#14171D] border-l border-zinc-200 dark:border-[#2A2F38] shadow-2xl flex flex-col">
         <div className="flex items-center gap-2 px-3 h-12 border-b border-zinc-200 dark:border-[#2A2F38] shrink-0" style={{ background: "#FBE9AE" }}>
           {activeId ? (
-            <button type="button" onClick={() => { setActiveId(null); loadList(); }} className="w-7 h-7 rounded-full hover:bg-black/5 flex items-center justify-center text-zinc-700" aria-label="Back">
+            <button type="button" onClick={() => { flushPending(); setActiveId(null); loadList(); }} className="w-7 h-7 rounded-full hover:bg-black/5 flex items-center justify-center text-zinc-700" aria-label="Back">
               <ChevronLeft className="w-4 h-4" />
             </button>
           ) : null}
           <div className="text-[14px] font-semibold text-zinc-900 flex-1">Notepad</div>
           {saving ? <span className="text-[11px] text-zinc-600">Saving…</span> : null}
-          <button type="button" onClick={() => setOpen(false)} className="w-7 h-7 rounded-full hover:bg-black/5 flex items-center justify-center text-zinc-700" aria-label="Close">
+          <button type="button" onClick={closePanel} className="w-7 h-7 rounded-full hover:bg-black/5 flex items-center justify-center text-zinc-700" aria-label="Close">
             <X className="w-4 h-4" />
           </button>
         </div>
