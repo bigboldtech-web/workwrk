@@ -422,10 +422,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       };
       const res = await fetch(`/api/docs/${docId}`, {
         method: "PUT",
-        // keepalive lets a save-on-nav complete across the unload. If the body
-        // exceeds the 64KB keepalive cap the fetch rejects → caught below →
-        // retried WITHOUT keepalive, so large docs still save.
-        keepalive: true,
+        // keepalive (first attempt only) lets a save-on-nav complete across the
+        // unload. If the body exceeds the 64KB keepalive cap the fetch rejects →
+        // caught below → retried WITHOUT keepalive (attempt>0), so large pasted
+        // notes still save.
+        keepalive: attempt === 0,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: titleRef.current.trim() || "Untitled note",

@@ -377,6 +377,14 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
   // very first real save (sending the load-time updatedAt against a
   // doc the prior emit already bumped). Skip the first fire.
   const initialEmitConsumedRef = useRef(false);
+  // Snapshot of the document as mounted, captured on the first render BEFORE any
+  // onChange can fire. The initial "load echo" emit has a document identical to
+  // this; a real first edit (e.g. a paste) does NOT — so we skip only the echo
+  // and never swallow the user's first change.
+  const initialDocJsonRef = useRef<string | null>(null);
+  if (initialDocJsonRef.current === null) {
+    try { initialDocJsonRef.current = JSON.stringify(editor.document); } catch { initialDocJsonRef.current = ""; }
+  }
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onHtmlChangeRef = useRef(onHtmlChange);
@@ -401,7 +409,13 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
   const emit = useCallback(() => {
     if (!initialEmitConsumedRef.current) {
       initialEmitConsumedRef.current = true;
-      return;
+      // Skip ONLY the genuine load-echo (document unchanged from mount). If the
+      // very first onChange is a real edit — a fresh note where BlockNote fires
+      // no absorption echo, so the user's paste is the first emit — fall through
+      // and save it. Swallowing it here is what lost pasted content.
+      let curJson = "";
+      try { curJson = JSON.stringify(editor.document); } catch { /* keep empty */ }
+      if (curJson && curJson === initialDocJsonRef.current) return;
     }
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
