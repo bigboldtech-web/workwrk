@@ -16,13 +16,14 @@ import { refreshSidebar, onSidebarRefresh } from "./sidebar-refresh";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen, Loader2,
   Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, ListChecks,
-  BarChart3, ClipboardCheck, Download, Files,
+  BarChart3, ClipboardCheck, Download, Files, MoreHorizontal,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceMoreTrigger } from "./space-more-menu";
 import { SpaceCreateTrigger } from "./space-create-popover";
 import { BoardMoreTrigger } from "./board-more-menu";
 import { FolderMoreTrigger } from "./folder-more-menu";
+import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { TableMoreTrigger } from "./table-more-menu";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuList, MenuItem, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
@@ -622,13 +623,15 @@ function TableTreeRow({
   );
 }
 
-function DocTreeRow({ doc }: { doc: DocChild }) {
+function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void }) {
   const router = useRouter();
+  const noteMenu = useNoteMenu();
   return (
     <li className="group/docrow relative">
       <div
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "doc", id: doc.id })}
+        onContextMenu={(e) => noteMenu.open(e, { id: doc.id, title: doc.title })}
         className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
       >
         <button
@@ -641,8 +644,25 @@ function DocTreeRow({ doc }: { doc: DocChild }) {
         </button>
         <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/docrow:opacity-100 transition-opacity">
           <SidebarQuickStar kind="doc" id={doc.id} />
+          <button
+            type="button"
+            aria-label="Note actions"
+            onClick={(e) => { e.stopPropagation(); noteMenu.open(e, { id: doc.id, title: doc.title }); }}
+            className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
         </span>
       </div>
+      {noteMenu.menu ? (
+        <NoteActionMenu
+          target={noteMenu.menu.target}
+          x={noteMenu.menu.x}
+          y={noteMenu.menu.y}
+          onClose={noteMenu.close}
+          onChanged={() => { noteMenu.close(); onChanged?.(); refreshSidebar(); router.refresh(); }}
+        />
+      ) : null}
     </li>
   );
 }

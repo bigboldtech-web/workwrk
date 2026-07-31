@@ -343,19 +343,20 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           setBnDoc(null);
           setBlocks(null);
         } else if (c && (c as { type?: string }).type === "doc" && Array.isArray((c as { content?: unknown[] }).content)) {
-          // TipTap shape (authored by the Notepad quick-tool / other surfaces).
-          // Without this branch it fell through to the empty else and the first
-          // autosave CLOBBERED the real content. Render its text via the html
-          // seed path so it shows; the next save rewrites it in v2 shape.
+          // TipTap shape (authored by the Notepad quick-tool / new-note create).
+          // Convert its paragraphs straight to legacy blocks so the canvas
+          // renders them normally (via legacyBlocksToBN) — NOT the "old
+          // rich-text format / Convert to blocks" banner, which was wrongly
+          // firing on every note. The next save rewrites it in v2 shape.
           const paras = ((c as { content: Array<{ content?: Array<{ text?: string }> }> }).content) ?? [];
-          const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          const html = paras
-            .map((p) => (p.content ?? []).map((n) => n.text ?? "").join(""))
-            .map((t) => `<p>${esc(t)}</p>`)
-            .join("");
-          setLegacy(html || "<p></p>");
+          const converted: Block[] = paras.map((p) => ({
+            id: Math.random().toString(36).slice(2, 10),
+            kind: "paragraph",
+            text: (p.content ?? []).map((n) => n.text ?? "").join(""),
+          }));
           setBnDoc(null);
-          setBlocks(null);
+          setBlocks(converted.length ? converted : []);
+          setLegacy(null);
         } else {
           setBnDoc(null);
           setBlocks([]);
