@@ -31,6 +31,10 @@ export function useAnchorPos(
       const el = ref.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
+      // Anchor is momentarily hidden (e.g. a card's date chip is display:none
+      // while the card isn't hovered, but the popover is open) — a zero rect
+      // would fling the popover to the corner, so keep the last good position.
+      if (r.width === 0 && r.height === 0) return;
       // Keep the menu on-screen: flip left if it would run past the right edge.
       let left = r.left;
       if (left + width > window.innerWidth - 8) {

@@ -210,7 +210,7 @@ export function DatePlanner({
       ref={btnRef}
       type="button"
       disabled={!canEdit}
-      onClick={() => canEdit && setOpen((v) => !v)}
+      onClick={(e) => { e.stopPropagation(); if (canEdit) setOpen((v) => !v); }}
       className={`inline-flex items-center gap-1 rounded font-medium disabled:cursor-default ${
         due
           ? `px-1.5 py-0.5 text-[10.5px] ${overdue ? "bg-red-50 text-red-600" : "bg-zinc-100 text-zinc-600"}`
@@ -227,7 +227,7 @@ export function DatePlanner({
     <button
       ref={btnRef}
       type="button"
-      onClick={() => canEdit && setOpen((v) => !v)}
+      onClick={(e) => { e.stopPropagation(); if (canEdit) setOpen((v) => !v); }}
       disabled={!canEdit}
       className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-60 max-w-full"
     >
@@ -248,6 +248,11 @@ export function DatePlanner({
               ref={panelRef}
               style={{ position: "fixed", top: pos.top, left: pos.left, width: 360, maxHeight: "78vh" }}
               className="z-[120] rounded-xl bg-white border border-zinc-200 shadow-2xl overflow-hidden flex flex-col"
+              // Keep popover interactions from bubbling (React tree) to the row /
+              // card that hosts this planner — otherwise a click here can trigger
+              // the ancestor's open/select handlers.
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               {/* Tab strip */}
               <div className="flex items-stretch border-b border-zinc-100 shrink-0">
