@@ -67,7 +67,8 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
     let cancelled = false;
     setLoading(true);
     void (async () => {
-      const res = await fetch(`/api/whiteboards/${whiteboardId}`);
+      // no-store: don't let a cached response show a stale scene on re-open.
+      const res = await fetch(`/api/whiteboards/${whiteboardId}`, { cache: "no-store" });
       if (cancelled) return;
       if (res.ok) {
         const data = await res.json();
@@ -93,14 +94,20 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
     return () => { cancelled = true; };
   }, [whiteboardId, picking, list]);
 
-  const flushSave = useCallback(async () => {
+  // keepalive only on the page-unload path, and only under the browser's ~64KB
+  // keepalive cap — routine autosaves send a normal (uncapped) request so large
+  // scenes always persist.
+  const flushSave = useCallback(async (opts?: { keepalive?: boolean }) => {
     if (!whiteboardId || !dirtyRef.current || !pendingSceneRef.current) return;
+    const payload = JSON.stringify({ scene: pendingSceneRef.current });
+    const useKeepalive = !!opts?.keepalive && payload.length < 60000;
     setSaving(true);
     try {
       const res = await fetch(`/api/whiteboards/${whiteboardId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ scene: pendingSceneRef.current }),
+        body: payload,
+        keepalive: useKeepalive,
       });
       if (res.ok) dirtyRef.current = false;
     } finally {
@@ -120,12 +127,20 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
     saveTimerRef.current = setTimeout(() => { void flushSave(); }, AUTOSAVE_DEBOUNCE_MS);
   }, [canEdit, flushSave]);
 
-  // Flush on unmount / tab close so edits aren't lost when switching tabs.
+  // Flush on unmount / tab close / hide so edits aren't lost. beforeunload +
+  // pagehide + hidden visibilitychange use keepalive; the unmount cleanup (tab
+  // switch inside the app) uses a normal request that completes after unmount.
   useEffect(() => {
-    const onBeforeUnload = () => { void flushSave(); };
+    const onBeforeUnload = () => { if (dirtyRef.current) void flushSave({ keepalive: true }); };
+    const onPageHide = () => { if (dirtyRef.current) void flushSave({ keepalive: true }); };
+    const onVisibility = () => { if (document.visibilityState === "hidden" && dirtyRef.current) void flushSave({ keepalive: true }); };
     window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibility);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       void flushSave();
     };

@@ -72,7 +72,9 @@ export default function WhiteboardCanvasPage() {
     if (!params?.id) return;
     let cancelled = false;
     (async () => {
-      const res = await fetch(`/api/whiteboards/${params.id}`);
+      // no-store: never let the browser HTTP cache serve a stale scene on
+      // re-open (that alone would show the "old design" after an edit).
+      const res = await fetch(`/api/whiteboards/${params.id}`, { cache: "no-store" });
       if (cancelled) return;
       if (res.ok) {
         const data = await res.json();
@@ -86,17 +88,23 @@ export default function WhiteboardCanvasPage() {
     return () => { cancelled = true; };
   }, [params?.id, router]);
 
-  const flushSave = useCallback(async () => {
+  // opts.keepalive: only the real page-unload path (pagehide/beforeunload) asks
+  // for it. The browser rejects a keepalive body over ~64KB, so a whiteboard
+  // with more than a trivial design would NEVER save if every autosave used it
+  // (the "added more and it stopped saving" bug). Routine autosaves therefore
+  // send a normal request (no size cap); keepalive is used only on unload and
+  // only when the payload actually fits under the cap.
+  const flushSave = useCallback(async (opts?: { keepalive?: boolean }) => {
     if (!params?.id || !dirtyRef.current || !pendingSceneRef.current) return;
+    const payload = JSON.stringify({ scene: pendingSceneRef.current });
+    const useKeepalive = !!opts?.keepalive && payload.length < 60000;
     setSaving(true);
     try {
       const res = await fetch(`/api/whiteboards/${params.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scene: pendingSceneRef.current }),
-        // Let the request finish even if the tab is closing/navigating away —
-        // otherwise the browser aborts an in-flight save-on-close.
-        keepalive: true,
+        body: payload,
+        keepalive: useKeepalive,
       });
       if (res.ok) {
         dirtyRef.current = false;
@@ -162,20 +170,29 @@ export default function WhiteboardCanvasPage() {
     return () => clearInterval(iv);
   }, [flushSave]);
 
-  // Save on tab close / unmount
+  // Save on tab close / hide / unmount. beforeunload + pagehide + a hidden
+  // visibilitychange all flush with keepalive (the only safe use of it). The
+  // unmount cleanup (SPA navigation via Back) uses a normal request, which runs
+  // to completion after the component is gone — no 64KB cap for that path.
   useEffect(() => {
     function onBeforeUnload(e: BeforeUnloadEvent) {
       if (dirtyRef.current) {
-        flushSave();
+        void flushSave({ keepalive: true });
         e.preventDefault();
         e.returnValue = "";
       }
     }
+    function onPageHide() { if (dirtyRef.current) void flushSave({ keepalive: true }); }
+    function onVisibility() { if (document.visibilityState === "hidden" && dirtyRef.current) void flushSave({ keepalive: true }); }
     window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibility);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      flushSave();
+      void flushSave();
     };
   }, [flushSave]);
 
