@@ -19,6 +19,7 @@ import Link from "next/link";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { BoardItemDetail, type DetailPatch, type ItemModuleGating } from "./board-item-detail";
+import { ItemThread } from "./item-thread";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardItemDrawerProps {
@@ -214,20 +215,31 @@ export function BoardItemDrawer({
             {loading || !item ? (
               <div className="flex-1 px-5 py-6 text-sm text-zinc-500">Loading…</div>
             ) : (
-              <div className="flex-1 overflow-y-auto px-8 py-6">
-                <div className="max-w-[760px] mx-auto">
-                  <BoardItemDetail
-                    item={item}
-                    canEdit={canEdit}
-                    currentUserId={currentUserId}
-                    customFields={customFields}
-                    statusOptions={statusOptions}
-                    onPatch={patch}
-                    layout="drawer"
-                    onOpenItem={onOpenItem}
-                    moduleGating={moduleGating}
-                  />
+              <div className="flex-1 flex min-h-0">
+                {/* Main column */}
+                <div className="flex-1 overflow-y-auto px-8 py-6 min-w-0">
+                  <div className="max-w-[760px] mx-auto">
+                    <BoardItemDetail
+                      item={item}
+                      canEdit={canEdit}
+                      currentUserId={currentUserId}
+                      customFields={customFields}
+                      statusOptions={statusOptions}
+                      onPatch={patch}
+                      layout="drawer"
+                      onOpenItem={onOpenItem}
+                      moduleGating={moduleGating}
+                      hideActivity
+                    />
+                  </div>
                 </div>
+                {/* Activity rail (ClickUp) — comments + activity pinned right. */}
+                <aside className="flex w-[360px] shrink-0 border-l border-zinc-200 flex-col min-h-0">
+                  <div className="h-11 px-4 flex items-center border-b border-zinc-100 text-[13px] font-semibold text-zinc-800">Activity</div>
+                  <div className="flex-1 overflow-y-auto px-4 py-3">
+                    <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statusOptions} />
+                  </div>
+                </aside>
               </div>
             )}
           </div>

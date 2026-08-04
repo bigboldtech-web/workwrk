@@ -53,6 +53,9 @@ interface BoardItemDetailProps {
   /** Space-module gating — hides Priority / Tags / custom fields / TimeTracker
    *  when their module is off. Absent = all shown (legacy / non-board context). */
   moduleGating?: ItemModuleGating;
+  /** Drawer hosts the Comments/Activity thread in its right rail — suppress the
+   *  inline copy so it isn't rendered twice. */
+  hideActivity?: boolean;
 }
 
 function isEmptyValue(v: unknown): boolean {
@@ -72,6 +75,7 @@ export function BoardItemDetail({
   layout = "drawer",
   onOpenItem,
   moduleGating,
+  hideActivity = false,
 }: BoardItemDetailProps) {
   // Absent gating (legacy / non-board context) = everything shown.
   const priorityOn = moduleGating ? moduleGating.priority : true;
@@ -119,17 +123,20 @@ export function BoardItemDetail({
 
   return (
     <div className={`space-y-5 ${pageWide ? "max-w-[760px]" : ""}`}>
-      <TitleField item={item} canEdit={canEdit} onSave={(t) => onPatch({ title: t })} />
+      {/* Type pill (ClickUp top-left) + title */}
+      <div className="space-y-2">
+        <div className="inline-flex items-center h-7 px-2 rounded-md border border-zinc-200">
+          <ItemTypePicker value={item.itemTypeId ?? null} canEdit={canEdit} onChange={(id) => onPatch({ itemTypeId: id })} />
+        </div>
+        <TitleField item={item} canEdit={canEdit} onSave={(t) => onPatch({ title: t })} />
+      </div>
 
       {/* Core field grid */}
       <div className="space-y-3">
         <Row label="Status">
           <StatusPicker value={item.status} statuses={statusOptions} canEdit={canEdit} onChange={(v) => onPatch({ status: v })} />
         </Row>
-        <Row label="Type">
-          <ItemTypePicker value={item.itemTypeId ?? null} canEdit={canEdit} onChange={(id) => onPatch({ itemTypeId: id })} />
-        </Row>
-        <Row label="Owner">
+        <Row label="Assignees">
           <AssigneePicker
             value={item.owner ? { ...item.owner, email: null } : null}
             canEdit={canEdit}
@@ -252,8 +259,10 @@ export function BoardItemDetail({
         <TimeTracker entityType="BOARD_ITEM" entityId={item.id} canEdit={canEdit} />
       ) : null}
 
-      {/* Comments + Activity */}
-      <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statusOptions} />
+      {/* Comments + Activity — hidden inline when the drawer hosts it in the rail. */}
+      {!hideActivity ? (
+        <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statusOptions} />
+      ) : null}
     </div>
   );
 }
